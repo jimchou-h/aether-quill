@@ -5,17 +5,17 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/projects'
+      redirect: '/projects',
     },
     {
       path: '/login',
       name: 'login',
-      component: () => import('../pages/Login.vue')
+      component: () => import('../pages/Login.vue'),
     },
     {
       path: '/projects',
       name: 'projects',
-      component: () => import('../pages/Projects.vue')
+      component: () => import('../pages/Projects.vue'),
     },
     {
       path: '/projects/:id',
@@ -24,26 +24,26 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: (to) => ({ name: 'workbench', params: { id: to.params.id } })
+          redirect: (to) => ({ name: 'workbench', params: { id: to.params.id } }),
         },
         {
           path: 'workbench',
           name: 'workbench',
-          component: () => import('../pages/Workbench.vue')
+          component: () => import('../pages/Workbench.vue'),
         },
         {
           path: 'knowledge',
           name: 'knowledge',
-          component: () => import('../pages/Knowledge.vue')
+          component: () => import('../pages/Knowledge.vue'),
         },
         {
           path: 'settings',
           name: 'settings',
-          component: () => import('../pages/Settings.vue')
-        }
-      ]
-    }
-  ]
+          component: () => import('../pages/Settings.vue'),
+        },
+      ],
+    },
+  ],
 });
 
 export default router;
