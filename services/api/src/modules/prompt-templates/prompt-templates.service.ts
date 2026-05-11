@@ -1,0 +1,294 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { ProjectsService } from '../projects/projects.service';
+import {
+  TemplateRecord,
+  TemplateVersion,
+  PublishResult,
+  TemplateCategory,
+} from './prompt-templates.entity';
+
+interface PersistedTemplateState {
+  templates: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+    category: TemplateCategory;
+    content: string;
+    version: number;
+    isPublished: boolean;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  versions: Record<
+    string,
+    Array<{
+      version: number;
+      content: string;
+      createdAt: string;
+      isPublished: boolean;
+    }>
+  >;
+}
+
+interface RestoredTemplateState {
+  templates: TemplateRecord[];
+  versions: Record<string, TemplateVersion[]>;
+}
+
+const DEFAULT_TEMPLATES: Array<{ name: string; category: TemplateCategory; content: string }> = [
+  {
+    name: '系统默认模板',
+    category: 'system',
+    content: '你是一位专业的小说写作助手。请帮助用户进行小说创作，保持逻辑连贯和设定一致性。',
+  },
+  {
+    name: '章节写作模板',
+    category: 'chapter',
+    content:
+      '请根据以下项目上下文撰写第{chapterNo}章。\n\n写作目标：{goal}\n叙事视角：{pov}\n系统提示：{systemPrompt}\n人物设定：{personaProfile}\n\n大纲总结：{outlineSummary}\n\n近期章节摘要：{chapterSummaries}\n\n要求：\n1. 保持与前面章节的情节连贯\n2. 人物行为符合设定\n3. {targetWords}字左右',
+  },
+  {
+    name: '人物模板-基础版',
+    category: 'persona',
+    content: '角色身份：\n角色语气：\n角色禁忌：\n角色关系：',
+  },
+];
+
+@Injectable()
+export class PromptTemplatesService {
+  private readonly storagePath = join(resolve(process.cwd()), 'data', 'prompt-templates.json');
+
+  private readonly templates: TemplateRecord[] = [];
+  private readonly versions = new Map<string, TemplateVersion[]>();
+
+  constructor(private readonly projectsService: ProjectsService) {
+    const restored = this.restoreStateFromDisk();
+    if (restored) {
+      this.templates.splice(0, this.templates.length, ...restored.templates);
+      this.hydrateMap(this.versions, restored.versions);
+    }
+  }
+
+  findByProject(projectId: string): TemplateRecord[] {
+    this.projectsService.findOne(projectId);
+    return this.templates.filter((t) => t.projectId === projectId);
+  }
+
+  findById(projectId: string, templateId: string): TemplateRecord {
+    this.projectsService.findOne(projectId);
+    const tmpl = this.templates.find((t) => t.id === templateId && t.projectId === projectId);
+    if (!tmpl) {
+      throw new NotFoundException(`未找到模板: ${templateId}`);
+    }
+    return tmpl;
+  }
+
+  create(
+    projectId: string,
+    payload: { name: string; category: TemplateCategory; content: string }
+  ): TemplateRecord {
+    this.projectsService.findOne(projectId);
+
+    const name = payload.name?.trim();
+    const content = payload.content?.trim();
+    if (!name) throw new BadRequestException('name 不能为空');
+    if (!content) throw new BadRequestException('content 不能为空');
+
+    const now = new Date();
+    const tmpl: TemplateRecord = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      projectId,
+      name,
+      category: payload.category || 'custom',
+      content,
+      version: 1,
+      isPublished: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.templates.push(tmpl);
+    this.versions.set(tmpl.id, [
+      {
+        version: 1,
+        content,
+        createdAt: now,
+        isPublished: false,
+      },
+    ]);
+    this.persistState();
+    return tmpl;
+  }
+
+  initDefaults(projectId: string): TemplateRecord[] {
+    const created: TemplateRecord[] = [];
+    for (const def of DEFAULT_TEMPLATES) {
+      const existing = this.templates.find(
+        (t) => t.projectId === projectId && t.category === def.category && t.name === def.name
+      );
+      if (!existing) {
+        created.push(this.create(projectId, def));
+      }
+    }
+    return created;
+  }
+
+  update(
+    projectId: string,
+    templateId: string,
+    payload: { name?: string; content?: string }
+  ): TemplateRecord {
+    const tmpl = this.findById(projectId, templateId);
+
+    const now = new Date();
+    if (payload.name !== undefined) tmpl.name = payload.name.trim() || tmpl.name;
+    if (payload.content !== undefined) tmpl.content = payload.content;
+
+    tmpl.version += 1;
+    tmpl.isPublished = false;
+    tmpl.updatedAt = now;
+
+    const tmplVersions = this.versions.get(templateId) || [];
+    tmplVersions.push({
+      version: tmpl.version,
+      content: tmpl.content,
+      createdAt: now,
+      isPublished: false,
+    });
+    this.versions.set(templateId, tmplVersions);
+
+    this.persistState();
+    return tmpl;
+  }
+
+  publish(projectId: string, templateId: string): PublishResult {
+    const tmpl = this.findById(projectId, templateId);
+    const tmplVersions = this.versions.get(templateId) || [];
+
+    for (const v of tmplVersions) {
+      v.isPublished = false;
+    }
+
+    const currentVersion = tmplVersions.find((v) => v.version === tmpl.version);
+    if (currentVersion) {
+      currentVersion.isPublished = true;
+    }
+
+    tmpl.isPublished = true;
+    tmpl.updatedAt = new Date();
+    this.persistState();
+
+    return {
+      configId: templateId,
+      version: tmpl.version,
+      publishedAt: tmpl.updatedAt.toISOString(),
+    };
+  }
+
+  rollback(projectId: string, templateId: string, targetVersion?: number): TemplateRecord {
+    const tmpl = this.findById(projectId, templateId);
+    const tmplVersions = this.versions.get(templateId) || [];
+
+    if (tmplVersions.length < 2) {
+      throw new BadRequestException('没有可供回滚的上一版本');
+    }
+
+    const target = targetVersion
+      ? tmplVersions.find((v) => v.version === targetVersion)
+      : [...tmplVersions].reverse().find((v) => v.version < tmpl.version);
+
+    if (!target) {
+      throw new BadRequestException('未找到目标回滚版本');
+    }
+
+    const now = new Date();
+    tmpl.content = target.content;
+    tmpl.version += 1;
+    tmpl.isPublished = false;
+    tmpl.updatedAt = now;
+
+    tmplVersions.push({
+      version: tmpl.version,
+      content: target.content,
+      createdAt: now,
+      isPublished: false,
+    });
+    this.versions.set(templateId, tmplVersions);
+
+    this.persistState();
+    return tmpl;
+  }
+
+  getVersions(projectId: string, templateId: string): TemplateVersion[] {
+    this.findById(projectId, templateId);
+    return this.versions.get(templateId) || [];
+  }
+
+  remove(projectId: string, templateId: string): void {
+    this.findById(projectId, templateId);
+    const index = this.templates.findIndex((t) => t.id === templateId);
+    if (index !== -1) {
+      this.templates.splice(index, 1);
+      this.versions.delete(templateId);
+      this.persistState();
+    }
+  }
+
+  private persistState() {
+    const payload: PersistedTemplateState = {
+      templates: this.templates.map((t) => ({
+        ...t,
+        createdAt: t.createdAt.toISOString(),
+        updatedAt: t.updatedAt.toISOString(),
+      })),
+      versions: {},
+    };
+
+    for (const [tmplId, tmplVersions] of this.versions.entries()) {
+      payload.versions[tmplId] = tmplVersions.map((v) => ({
+        ...v,
+        createdAt: v.createdAt.toISOString(),
+      }));
+    }
+
+    const targetDir = dirname(this.storagePath);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+  }
+
+  private restoreStateFromDisk(): RestoredTemplateState | null {
+    if (!existsSync(this.storagePath)) return null;
+    try {
+      const raw = readFileSync(this.storagePath, 'utf8');
+      const parsed = JSON.parse(raw) as PersistedTemplateState;
+      return {
+        templates: (parsed.templates || []).map((t) => ({
+          ...t,
+          createdAt: new Date(t.createdAt),
+          updatedAt: new Date(t.updatedAt),
+        })),
+        versions: Object.fromEntries(
+          Object.entries(parsed.versions || {}).map(([id, versions]) => [
+            id,
+            (versions || []).map((v) => ({
+              ...v,
+              createdAt: new Date(v.createdAt),
+            })),
+          ])
+        ),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private hydrateMap<T>(target: Map<string, T>, source: Record<string, T>) {
+    for (const [key, value] of Object.entries(source)) {
+      target.set(key, value);
+    }
+  }
+}
