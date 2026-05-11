@@ -463,6 +463,19 @@ export const apiClient = {
     },
   },
 
+  // Prompt Templates API (for version history)
+  async listPromptTemplates(projectId: string) {
+    const response = await http.get(`/api/projects/${projectId}/prompt-templates`);
+    return response.data;
+  },
+
+  async getTemplateVersions(projectId: string, templateId: string) {
+    const response = await http.get(
+      `/api/projects/${projectId}/prompt-templates/${templateId}/versions`
+    );
+    return response.data;
+  },
+
   // SSE streaming generation for writing workbench
   async generateDraftSSE(
     projectId: string,
@@ -684,4 +697,23 @@ export interface ProjectExportBundle {
     chapterCount: number;
     chapters: Array<{ chapterNo: number; title: string; summary: string; updatedAt: string }>;
   };
+}
+
+export interface PromptTemplateItem {
+  id: string;
+  projectId: string;
+  name: string;
+  category: string;
+  content: string;
+  version: number;
+  isPublished: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromptConfigVersionItem {
+  version: number;
+  content: string;
+  createdAt: string;
+  isPublished: boolean;
 }
