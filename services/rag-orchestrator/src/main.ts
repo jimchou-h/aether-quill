@@ -1,9 +1,16 @@
 import express from 'express';
+import { VectorStore } from './retrieval/vector-store';
+import { Reranker } from './retrieval/reranker';
+import { ChunkWithEmbedding } from './retrieval/types';
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
+
+const vectorStore = new VectorStore(API_BASE_URL);
+const reranker = new Reranker();
 
 interface ContextChapter {
   chapterNo: number;
@@ -48,11 +55,11 @@ function keywordScore(query: string, text: string) {
   return words.reduce((score, word) => score + (loweredText.includes(word) ? 1 : 0), 0);
 }
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'rag-orchestrator', timestamp: new Date().toISOString() });
 });
 
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.json({ message: 'RAG Orchestrator Service', version: '1.0.0' });
 });
 
@@ -85,46 +92,113 @@ app.post('/api/projects/:projectId/context', (req, res) => {
 });
 
 app.post('/api/retrieve', async (req, res) => {
-  const { query, projectId, topK = 30 } = req.body;
-  const context = getOrCreateContext(projectId);
-  const ranked = context.chapters
-    .map((chapter) => ({
-      ...chapter,
-      score: keywordScore(query || '', `${chapter.title} ${chapter.summary}`),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
+  const { query, projectId, topK = 30, minScore = 0 } = req.body;
 
-  res.json({
-    chunks: ranked,
-    query,
-    projectId,
-    topK,
-    message: 'Retrieval completed',
-  });
+  if (!query || !projectId) {
+    return res.status(400).json({ error: 'query and projectId are required' });
+  }
+
+  try {
+    const chunks = await vectorStore.retrieve({ query, projectId, topK, minScore });
+
+    res.json({
+      chunks,
+      query,
+      projectId,
+      topK,
+      totalRetrieved: chunks.length,
+    });
+  } catch (error) {
+    console.error('Retrieval failed:', error);
+    const context = getOrCreateContext(projectId);
+    const ranked = context.chapters
+      .map((chapter) => ({
+        ...chapter,
+        score: keywordScore(query, `${chapter.title} ${chapter.summary}`),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
+
+    res.json({
+      chunks: ranked,
+      query,
+      projectId,
+      topK,
+      totalRetrieved: ranked.length,
+      fallback: true,
+    });
+  }
 });
 
 app.post('/api/rerank', async (req, res) => {
-  const { chunks, query, topN = 10 } = req.body;
-  const rerankedChunks = (chunks || [])
-    .map((chunk: { title?: string; summary?: string; score?: number }) => ({
-      ...chunk,
-      rerankScore:
-        (chunk.score || 0) +
-        keywordScore(query || '', `${chunk.title || ''} ${chunk.summary || ''}`),
-    }))
-    .sort(
-      (a: { rerankScore?: number }, b: { rerankScore?: number }) =>
-        (b.rerankScore || 0) - (a.rerankScore || 0)
-    )
-    .slice(0, topN);
+  const { query, chunks, topN = 10 } = req.body;
+
+  if (!query || !chunks) {
+    return res.status(400).json({ error: 'query and chunks are required' });
+  }
+
+  const typedChunks: ChunkWithEmbedding[] = chunks.map((c: Partial<ChunkWithEmbedding>) => ({
+    id: c.id || '',
+    documentId: c.documentId || '',
+    content: c.content || '',
+    embedding: c.embedding || [],
+    metadata: c.metadata || {},
+    score: c.score,
+  }));
+
+  const rerankedChunks = reranker.rerank(query, typedChunks, topN);
 
   res.json({
     rerankedChunks,
     query,
     topN,
-    message: 'Rerank completed',
   });
+});
+
+app.post('/api/search', async (req, res) => {
+  const { query, projectId, topK = 30, topN = 10, minScore = 0 } = req.body;
+
+  if (!query || !projectId) {
+    return res.status(400).json({ error: 'query and projectId are required' });
+  }
+
+  try {
+    const retrieved = await vectorStore.retrieve({ query, projectId, topK, minScore });
+    const reranked = reranker.rerank(query, retrieved, topN);
+
+    res.json({
+      results: reranked,
+      query,
+      projectId,
+      topK,
+      topN,
+      totalRetrieved: retrieved.length,
+    });
+  } catch (error) {
+    console.error('Search failed:', error);
+    const context = getOrCreateContext(projectId);
+    const ranked = context.chapters
+      .map((chapter) => ({
+        id: `chapter-${chapter.chapterNo}`,
+        documentId: projectId,
+        content: `${chapter.title}\n${chapter.summary}`,
+        embedding: [] as number[],
+        metadata: { chapterNo: chapter.chapterNo, title: chapter.title },
+        score: keywordScore(query, `${chapter.title} ${chapter.summary}`),
+      }))
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .slice(0, topN);
+
+    res.json({
+      results: ranked,
+      query,
+      projectId,
+      topK,
+      topN,
+      totalRetrieved: ranked.length,
+      fallback: true,
+    });
+  }
 });
 
 app.post('/api/generate', async (req, res) => {
@@ -157,7 +231,7 @@ app.post('/api/generate', async (req, res) => {
       `系统提示：${context.systemPromptText}`,
       `人物设定：${context.personaProfile}`,
       '',
-      `章节正文示例：角色在冲突现场做出关键抉择，并留下下一章悬念。`,
+      '章节正文示例：角色在冲突现场做出关键抉择，并留下下一章悬念。',
     ].join('\n'),
     reasoningBrief:
       '使用项目上下文完成 multi-project 编排：systemPrompt + persona + outline + chapter summaries。',
@@ -171,4 +245,5 @@ app.post('/api/generate', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`RAG Orchestrator service running on http://localhost:${PORT}`);
+  console.log(`API Base URL: ${API_BASE_URL}`);
 });
