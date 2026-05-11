@@ -1,29 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { apiClient, type WriteResult } from '../services/api';
+import { apiClient } from '../services/api';
+import { useGenerationStore } from '../stores/generation';
+import { useEditorStore } from '../stores/editor';
+import KnowledgePanel from '../components/workbench/KnowledgePanel.vue';
+import PromptConsole from '../components/workbench/PromptConsole.vue';
+import GenerationPreview from '../components/workbench/GenerationPreview.vue';
+import ConsistencyAlert from '../components/workbench/ConsistencyAlert.vue';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
 
-const loading = shallowRef(false);
-const generating = shallowRef(false);
-const errorMessage = shallowRef('');
-const message = shallowRef('');
+const generationStore = useGenerationStore();
+const editorStore = useEditorStore();
 
-const projectName = shallowRef('');
-const activePersonaName = shallowRef('');
-const chapterCount = shallowRef(0);
-const outlineReady = shallowRef(false);
+const loading = ref(false);
+const errorMessage = ref('');
 
-const chapterNo = shallowRef(1);
-const goal = shallowRef('');
-const pov = shallowRef('第三人称有限视角');
-const mustIncludeText = shallowRef('');
-const avoidText = shallowRef('');
-const targetWords = shallowRef(3000);
+const projectName = ref('');
+const activePersonaName = ref('');
+const chapterCount = ref(0);
+const outlineReady = ref(false);
+const outlineSummary = ref('');
 
-const result = ref<WriteResult | null>(null);
+const promptConsoleRef = ref<InstanceType<typeof PromptConsole> | null>(null);
 
 async function loadWorkspace() {
   loading.value = true;
@@ -33,10 +34,12 @@ async function loadWorkspace() {
     projectName.value = workspace.project.name;
     chapterCount.value = workspace.knowledge.chapters.length;
     outlineReady.value = Boolean(workspace.knowledge.outlineSummary.trim());
+    outlineSummary.value = workspace.knowledge.outlineSummary;
     activePersonaName.value =
       workspace.personas.find(
         (item: { id: string; name: string }) => item.id === workspace.settings.activePersonaId
       )?.name || '未指定';
+    editorStore.setChapters(workspace.knowledge.chapters);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载工作台失败';
   } finally {
@@ -44,38 +47,37 @@ async function loadWorkspace() {
   }
 }
 
-function parseMultiLine(text: string) {
-  return text
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean);
+async function handleGenerate(task: {
+  chapterNo: number;
+  goal: string;
+  pov: string;
+  mustInclude: string[];
+  avoid: string[];
+  targetWords: number;
+}) {
+  errorMessage.value = '';
+  await generationStore.generate(projectId.value, task);
+  if (generationStore.isDone) {
+    await loadWorkspace();
+  }
 }
 
-async function handleGenerate() {
-  if (!goal.value.trim()) {
-    errorMessage.value = '请填写本章目标';
-    return;
-  }
+async function handleAcceptDraft() {
+  const chNo = generationStore.chapterNo;
+  await generationStore.acceptDraft(projectId.value, chNo);
+  editorStore.addOrUpdateChapter({
+    chapterNo: chNo,
+    title: `第${chNo}章`,
+    content: generationStore.draftText,
+    summary: '',
+    updatedAt: new Date().toISOString(),
+  });
+  promptConsoleRef.value?.resetForm();
+  await loadWorkspace();
+}
 
-  generating.value = true;
-  errorMessage.value = '';
-  message.value = '';
-  try {
-    result.value = await apiClient.writeChapter(projectId.value, {
-      chapterNo: Number(chapterNo.value),
-      goal: goal.value.trim(),
-      pov: pov.value.trim(),
-      mustInclude: parseMultiLine(mustIncludeText.value),
-      avoid: parseMultiLine(avoidText.value),
-      targetWords: Number(targetWords.value),
-    });
-    await loadWorkspace();
-    message.value = '草稿生成完成，并已自动更新章节/设定摘要';
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '生成失败';
-  } finally {
-    generating.value = false;
-  }
+async function handleRegenerate() {
+  generationStore.reset();
 }
 
 onMounted(() => {
@@ -85,109 +87,59 @@ onMounted(() => {
 
 <template>
   <div class="workbench-page">
-    <h2 class="page-title">写作工作台</h2>
-    <p class="page-subtitle">在当前项目下生成章节草稿，系统会自动加载该项目的设定与知识。</p>
+    <div class="workbench-header">
+      <h2 class="page-title">写作工作台</h2>
+      <p class="page-subtitle">在当前项目下生成章节草稿，系统会自动加载该项目的设定与知识。</p>
+    </div>
 
-    <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
-    <p v-if="message" class="message message-ok">{{ message }}</p>
-    <p v-if="loading" class="message">正在加载工作台...</p>
+    <div v-if="loading" class="message">正在加载工作台...</div>
+    <div v-if="errorMessage" class="message message-error">{{ errorMessage }}</div>
 
-    <section class="panel">
-      <h3 class="panel-title">项目上下文</h3>
-      <p class="meta-text">项目：{{ projectName || '-' }}</p>
-      <p class="meta-text">已录入章节：{{ chapterCount }}</p>
-      <p class="meta-text">大纲状态：{{ outlineReady ? '已配置' : '未配置' }}</p>
-      <p class="meta-text">当前人物设定：{{ activePersonaName }}</p>
-    </section>
-
-    <section class="panel">
-      <h3 class="panel-title">生成参数</h3>
-      <div class="form-grid">
-        <label class="field-label">
-          章节号
-          <input v-model.number="chapterNo" type="number" min="1" class="field-input" />
-        </label>
-        <label class="field-label">
-          目标字数
-          <input
-            v-model.number="targetWords"
-            type="number"
-            min="200"
-            step="100"
-            class="field-input"
+    <template v-if="!loading">
+      <div class="workbench-layout">
+        <div class="workbench-sidebar">
+          <KnowledgePanel
+            :project-name="projectName"
+            :chapter-count="chapterCount"
+            :outline-ready="outlineReady"
+            :active-persona-name="activePersonaName"
+            :outline-summary="outlineSummary"
           />
-        </label>
+        </div>
+
+        <div class="workbench-main">
+          <PromptConsole
+            ref="promptConsoleRef"
+            :generating="generationStore.isStreaming"
+            @generate="handleGenerate"
+          />
+
+          <ConsistencyAlert :notes="generationStore.consistencyNotes" />
+
+          <GenerationPreview
+            :draft-text="generationStore.draftText"
+            :citations="generationStore.citations"
+            :consistency-notes="generationStore.consistencyNotes"
+            :is-streaming="generationStore.isStreaming"
+            :is-done="generationStore.isDone"
+            @accept="handleAcceptDraft"
+            @regenerate="handleRegenerate"
+          />
+        </div>
       </div>
-
-      <label class="field-label">
-        本章目标
-        <textarea
-          v-model="goal"
-          class="field-textarea"
-          placeholder="例如：主角在旧港口与导师对峙并拿到怀表线索"
-        />
-      </label>
-
-      <label class="field-label">
-        叙事视角（POV）
-        <input v-model="pov" class="field-input" type="text" placeholder="例如：女主第一人称" />
-      </label>
-
-      <div class="form-grid">
-        <label class="field-label">
-          必须包含（每行一条）
-          <textarea
-            v-model="mustIncludeText"
-            class="field-textarea"
-            placeholder="旧港口&#10;怀表线索&#10;雨夜追逐"
-          />
-        </label>
-        <label class="field-label">
-          禁止内容（每行一条）
-          <textarea
-            v-model="avoidText"
-            class="field-textarea"
-            placeholder="直接揭露终极反派&#10;角色性格突变"
-          />
-        </label>
-      </div>
-
-      <button class="primary-button" :disabled="generating" @click="handleGenerate">
-        {{ generating ? '生成中...' : '生成章节草稿' }}
-      </button>
-    </section>
-
-    <section v-if="result" class="panel">
-      <h3 class="panel-title">生成结果</h3>
-      <p class="meta-text">{{ result.reasoningBrief }}</p>
-      <p class="meta-text">自动回写：{{ result.autoUpdates.updateLine }}</p>
-      <pre class="draft-output">{{ result.draftText }}</pre>
-
-      <h4 class="sub-title">引用证据</h4>
-      <ul class="list">
-        <li
-          v-for="citation in result.citations"
-          :key="`${citation.sourceType}-${citation.sourceId}`"
-        >
-          [{{ citation.sourceType }}] {{ citation.sourceId }}：{{ citation.snippet }}
-        </li>
-      </ul>
-
-      <h4 class="sub-title">一致性提示</h4>
-      <ul class="list">
-        <li v-for="(note, index) in result.consistencyNotes" :key="`${note.level}-${index}`">
-          {{ note.level }}：{{ note.message }}
-        </li>
-      </ul>
-    </section>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .workbench-page {
-  max-width: 980px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 1rem;
+}
+
+.workbench-header {
+  margin-bottom: 1rem;
 }
 
 .page-title {
@@ -196,94 +148,41 @@ onMounted(() => {
 
 .page-subtitle {
   color: #666;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
-.panel {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  background: #fff;
-}
-
-.panel-title {
-  margin-bottom: 0.7rem;
-}
-
-.sub-title {
-  margin-top: 0.85rem;
-  margin-bottom: 0.35rem;
-}
-
-.form-grid {
+.workbench-layout {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 280px 1fr;
+  gap: 1rem;
+  align-items: start;
 }
 
-.field-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 0.75rem;
-  font-weight: 600;
+.workbench-sidebar {
+  position: sticky;
+  top: 72px;
 }
 
-.field-input,
-.field-textarea {
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 0.5rem 0.6rem;
-  font-size: 0.95rem;
-}
-
-.field-textarea {
-  min-height: 100px;
-  resize: vertical;
-}
-
-.primary-button {
-  border: none;
-  background: #1d4ed8;
-  color: #fff;
-  border-radius: 6px;
-  padding: 0.52rem 0.9rem;
-  cursor: pointer;
-}
-
-.primary-button:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.draft-output {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 0.8rem;
-  background: #f8fafc;
-  white-space: pre-wrap;
-  line-height: 1.7;
-}
-
-.meta-text {
-  color: #4b5563;
-  margin-bottom: 0.25rem;
-}
-
-.list {
-  padding-left: 1.2rem;
+.workbench-main {
+  min-width: 0;
 }
 
 .message {
   margin-bottom: 0.75rem;
-}
-
-.message-ok {
-  color: #027a48;
+  color: #6b7280;
 }
 
 .message-error {
   color: #b42318;
+}
+
+@media (max-width: 768px) {
+  .workbench-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-sidebar {
+    position: static;
+  }
 }
 </style>

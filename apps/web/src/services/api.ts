@@ -30,6 +30,52 @@ type ResponseData<T extends keyof paths, M extends PathMethod<T>> = paths[T][M] 
     ? R
     : unknown;
 
+// SSE event types for generation streaming
+export interface SseStartEvent {
+  event: 'start';
+  traceId: string;
+  chapterNo: number;
+}
+
+export interface SseContentEvent {
+  event: 'content';
+  data: string;
+  traceId: string;
+}
+
+export interface CitationItem {
+  sourceType: string;
+  sourceId: string;
+  snippet: string;
+}
+
+export interface ConsistencyNote {
+  level: 'info' | 'warning' | 'block';
+  message: string;
+}
+
+export interface SseEndEvent {
+  event: 'end';
+  traceId: string;
+  citations: CitationItem[];
+  consistencyNotes: ConsistencyNote[];
+}
+
+export interface SseErrorEvent {
+  event: 'error';
+  data: string;
+  traceId: string;
+}
+
+export type SseEvent = SseStartEvent | SseContentEvent | SseEndEvent | SseErrorEvent;
+
+export interface SseCallbacks {
+  onStart?: (traceId: string, chapterNo: number) => void;
+  onContent?: (text: string) => void;
+  onEnd?: (traceId: string, citations: CitationItem[], consistencyNotes: ConsistencyNote[]) => void;
+  onError?: (error: string) => void;
+}
+
 // Create axios instance
 const http: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
@@ -415,6 +461,81 @@ export const apiClient = {
       );
       return response.data;
     },
+  },
+
+  // SSE streaming generation for writing workbench
+  async generateDraftSSE(
+    projectId: string,
+    task: {
+      chapterNo: number;
+      goal: string;
+      pov: string;
+      mustInclude: string[];
+      avoid: string[];
+      targetWords: number;
+    },
+    citations: CitationItem[],
+    callbacks: SseCallbacks
+  ): Promise<void> {
+    const token = localStorage.getItem('token');
+    const baseURL = http.defaults.baseURL || 'http://localhost:3000';
+
+    const response = await fetch(`${baseURL}/api/generate/draft`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ projectId, task, citations }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `Generation failed: ${response.statusText}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let reading = true;
+
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data: SseEvent = JSON.parse(line.slice(6));
+            switch (data.event) {
+              case 'start':
+                callbacks.onStart?.(data.traceId, data.chapterNo);
+                break;
+              case 'content':
+                callbacks.onContent?.(data.data.replace(/\\n/g, '\n'));
+                break;
+              case 'end':
+                callbacks.onEnd?.(data.traceId, data.citations, data.consistencyNotes);
+                reading = false;
+                break;
+              case 'error':
+                callbacks.onError?.(data.data);
+                reading = false;
+                break;
+            }
+          } catch {
+            // skip malformed SSE lines
+          }
+        }
+      }
+    }
   },
 
   // Document helper methods
