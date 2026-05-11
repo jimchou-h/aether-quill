@@ -9,6 +9,7 @@
     "start:prod": "node dist/main",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",
     "@nestjs/schematics": "^10.0.0",
+    "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }
 }

@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { Queue, Worker, Job as BullJob } from 'bullmq';
 import IORedis from 'ioredis';
 import { IngestionJobData, JobRecord } from '../jobs/types';
@@ -13,9 +14,11 @@ export class QueueService {
   private readonly ingestionQueue: Queue;
   private readonly ingestionWorker: Worker;
   private readonly processor: IngestionProcessor;
+  private readonly apiBaseUrl: string;
   private readonly jobStore: Map<string, JobRecord> = new Map();
 
   constructor(options: QueueServiceOptions) {
+    this.apiBaseUrl = options.apiBaseUrl;
     this.connection = new IORedis(options.redisUrl, { maxRetriesPerRequest: null });
     this.processor = new IngestionProcessor({ apiBaseUrl: options.apiBaseUrl });
 
@@ -117,15 +120,31 @@ export class QueueService {
     };
 
     if (data.targetType === 'document') {
-      const result = await this.processor.processDocument(data.targetId, (progress) => {
-        void updateProgress(progress);
-      });
+      try {
+        const result = await this.processor.processDocument(data.targetId, (progress) => {
+          void updateProgress(progress);
+        });
 
-      return {
-        documentId: result.documentId,
-        chunkCount: result.chunks.length,
-        status: 'completed',
-      } as Record<string, unknown>;
+        await axios.put(`${this.apiBaseUrl}/api/documents/${data.targetId}/index-result`, {
+          status: 'completed',
+          chunks: result.chunks,
+        });
+
+        return {
+          documentId: result.documentId,
+          chunkCount: result.chunks.length,
+          status: 'completed',
+        } as Record<string, unknown>;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '索引失败';
+        await axios
+          .put(`${this.apiBaseUrl}/api/documents/${data.targetId}/index-result`, {
+            status: 'failed',
+            errorMessage,
+          })
+          .catch(() => undefined);
+        throw error;
+      }
     }
 
     if (data.targetType === 'project') {

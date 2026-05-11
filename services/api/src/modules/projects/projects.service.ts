@@ -1,10 +1,19 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import axios from 'axios';
+import { buildFallbackChapterSummary, type ChapterSummarySource } from './chapter-summary.util';
 
 type PersonaStatus = 'draft' | 'published';
 type IndexMode = 'full' | 'incremental';
 type IndexJobStatus = 'processing' | 'completed' | 'failed';
+type SummaryJobStatus = 'processing' | 'completed' | 'failed';
+type SummaryJobScope = 'single' | 'batch';
 
 export interface ProjectRecord {
   id: string;
@@ -43,6 +52,8 @@ export interface ChapterRecord {
   title: string;
   content: string;
   summary: string;
+  summarySource?: ChapterSummarySource;
+  summaryUpdatedAt?: Date;
   updatedAt: Date;
 }
 
@@ -65,6 +76,27 @@ export interface IndexJobRecord {
   errorMessage: string | null;
 }
 
+export interface ChapterSummaryResult {
+  chapterNo: number;
+  summary: string;
+  summarySource: ChapterSummarySource;
+}
+
+export interface SummaryJobRecord {
+  id: string;
+  projectId: string;
+  scope: SummaryJobScope;
+  chapterNo: number | null;
+  status: SummaryJobStatus;
+  totalChapters: number;
+  processedChapters: number;
+  chapterNos: number[];
+  summaries: ChapterSummaryResult[];
+  createdAt: Date;
+  completedAt: Date | null;
+  errorMessage: string | null;
+}
+
 interface WriteTaskInput {
   chapterNo: number;
   goal: string;
@@ -80,6 +112,7 @@ export interface WorkspaceSnapshot {
   personas: PersonaRecord[];
   knowledge: KnowledgeRecord;
   latestIndexJob: IndexJobRecord | null;
+  latestSummaryJob: SummaryJobRecord | null;
 }
 
 export interface ProjectExportBundle {
@@ -114,7 +147,12 @@ interface PersistedProjectState {
     string,
     {
       outlineSummary: string;
-      chapters: Array<Omit<ChapterRecord, 'updatedAt'> & { updatedAt: string }>;
+      chapters: Array<
+        Omit<ChapterRecord, 'updatedAt' | 'summaryUpdatedAt'> & {
+          updatedAt: string;
+          summaryUpdatedAt?: string;
+        }
+      >;
       indexVersion: number;
       lastIndexedAt: string | null;
     }
@@ -128,27 +166,40 @@ interface PersistedProjectState {
       }
     >
   >;
+  summarizeJobs: Record<
+    string,
+    Array<
+      Omit<SummaryJobRecord, 'createdAt' | 'completedAt'> & {
+        createdAt: string;
+        completedAt: string | null;
+      }
+    >
+  >;
 }
 
 @Injectable()
 export class ProjectsService {
   private readonly storagePath = join(resolve(process.cwd()), 'data', 'project-workspaces.json');
+  private readonly reservedProjectRouteNames = new Set([
+    'workbench',
+    'knowledge',
+    'settings',
+    'documents',
+    'chapters',
+    'members',
+    'workspace',
+    'export',
+    'write',
+  ]);
 
-  private readonly projects: ProjectRecord[] = [
-    {
-      id: '1',
-      name: '示例项目',
-      description: '这是一个示例小说项目',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  ];
+  private readonly projects: ProjectRecord[] = [];
 
   private readonly members: ProjectMember[] = [];
   private readonly settingsStore = new Map<string, ProjectSettings>();
   private readonly personasStore = new Map<string, PersonaRecord[]>();
   private readonly knowledgeStore = new Map<string, KnowledgeRecord>();
   private readonly indexJobsStore = new Map<string, IndexJobRecord[]>();
+  private readonly summarizeJobsStore = new Map<string, SummaryJobRecord[]>();
 
   constructor() {
     const restored = this.restoreStateFromDisk();
@@ -159,6 +210,7 @@ export class ProjectsService {
       this.hydrateMap(this.personasStore, restored.personas);
       this.hydrateMap(this.knowledgeStore, restored.knowledge);
       this.hydrateMap(this.indexJobsStore, restored.indexJobs);
+      this.hydrateMap(this.summarizeJobsStore, restored.summarizeJobs);
     }
 
     for (const project of this.projects) {
@@ -166,12 +218,6 @@ export class ProjectsService {
     }
 
     if (!restored) {
-      this.members.push({
-        userId: '1',
-        projectId: '1',
-        role: 'owner',
-        createdAt: new Date(),
-      });
       this.persistState();
     }
   }
@@ -185,6 +231,7 @@ export class ProjectsService {
   }
 
   findOne(id: string, userId?: string) {
+    this.assertProjectId(id);
     if (userId) {
       this.checkAccess(id, userId);
     }
@@ -225,8 +272,9 @@ export class ProjectsService {
     const personas = this.getPersonas(id);
     const knowledge = this.getKnowledge(id);
     const latestIndexJob = this.getLatestIndexJob(id);
+    const latestSummaryJob = this.getLatestSummaryJob(id);
 
-    return { project, settings, personas, knowledge, latestIndexJob };
+    return { project, settings, personas, knowledge, latestIndexJob, latestSummaryJob };
   }
 
   getExportBundle(projectId: string, userId?: string): ProjectExportBundle {
@@ -413,7 +461,7 @@ export class ProjectsService {
       throw new BadRequestException('chapterNo 必须为正整数');
     }
 
-    const nextSummary = this.buildSummary(payload.content);
+    const nextSummary = buildFallbackChapterSummary(payload.content);
     const now = new Date();
     const existing = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
 
@@ -421,6 +469,8 @@ export class ProjectsService {
       existing.title = payload.title.trim();
       existing.content = payload.content;
       existing.summary = nextSummary;
+      existing.summarySource = 'fallback';
+      existing.summaryUpdatedAt = now;
       existing.updatedAt = now;
       this.persistState();
       return existing;
@@ -431,6 +481,8 @@ export class ProjectsService {
       title: payload.title.trim(),
       content: payload.content,
       summary: nextSummary,
+      summarySource: 'fallback',
+      summaryUpdatedAt: now,
       updatedAt: now,
     };
 
@@ -466,7 +518,9 @@ export class ProjectsService {
 
     try {
       for (const chapter of knowledge.chapters) {
-        chapter.summary = this.buildSummary(chapter.content);
+        chapter.summary = buildFallbackChapterSummary(chapter.content);
+        chapter.summarySource = 'fallback';
+        chapter.summaryUpdatedAt = new Date();
         job.processedChapters += 1;
       }
       knowledge.indexVersion += 1;
@@ -498,7 +552,92 @@ export class ProjectsService {
     return job;
   }
 
-  writeChapter(projectId: string, payload: Partial<WriteTaskInput>, userId?: string) {
+  async createSingleChapterSummaryJob(projectId: string, chapterNo: number, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = Number(chapterNo);
+    if (!Number.isFinite(normalizedChapterNo) || normalizedChapterNo <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到章节: ${normalizedChapterNo}`);
+    }
+
+    if (!chapter.content.trim()) {
+      throw new BadRequestException('章节正文为空，无法生成摘要');
+    }
+
+    const job = this.createSummaryJobRecord(
+      projectId,
+      'single',
+      [normalizedChapterNo],
+      normalizedChapterNo
+    );
+    return this.runSummaryJob(projectId, job, [chapter]);
+  }
+
+  async createBatchChapterSummaryJob(
+    projectId: string,
+    payload: { chapterNos?: number[] } = {},
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const requestedChapterNos = Array.isArray(payload.chapterNos)
+      ? payload.chapterNos
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item) && item > 0)
+      : knowledge.chapters.map((item) => item.chapterNo);
+
+    if (requestedChapterNos.length === 0) {
+      throw new BadRequestException('没有可生成摘要的章节');
+    }
+
+    const chapters = requestedChapterNos
+      .map((chapterNo) => knowledge.chapters.find((item) => item.chapterNo === chapterNo))
+      .filter((chapter): chapter is ChapterRecord => Boolean(chapter));
+
+    if (chapters.length === 0) {
+      throw new NotFoundException('未找到可生成摘要的章节');
+    }
+
+    const job = this.createSummaryJobRecord(
+      projectId,
+      'batch',
+      chapters.map((chapter) => chapter.chapterNo),
+      null
+    );
+    return this.runSummaryJob(projectId, job, chapters);
+  }
+
+  getSummaryJob(projectId: string, jobId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const jobs = this.summarizeJobsStore.get(projectId)!;
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) {
+      throw new NotFoundException(`未找到摘要任务: ${jobId}`);
+    }
+    return job;
+  }
+
+  async writeChapter(projectId: string, payload: Partial<WriteTaskInput>, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -519,8 +658,6 @@ export class ProjectsService {
       personas.find((item) => item.status === 'published') ||
       null;
 
-    const mustInclude = payload.mustInclude ?? [];
-    const avoid = payload.avoid ?? [];
     const latestChapters = knowledge.chapters.slice(-3);
 
     const citations = [
@@ -560,18 +697,14 @@ export class ProjectsService {
       });
     }
 
-    const draftText = [
-      `第${chapterNo}章（草稿）`,
-      '',
-      `【写作目标】${payload.goal?.trim() || '延续主线并推动人物关系'}`,
-      `【叙事视角】${payload.pov?.trim() || '第三人称有限视角'}`,
-      `【系统提示】${settings.systemPromptText}`,
-      activePersona ? `【人物设定】${activePersona.profile}` : '【人物设定】未配置',
-      mustInclude.length > 0 ? `【必须包含】${mustInclude.join('；')}` : '【必须包含】无',
-      avoid.length > 0 ? `【避免内容】${avoid.join('；')}` : '【避免内容】无',
-      '',
-      '海风掠过港口的铁链，角色在旧线索与新怀疑之间做出选择。冲突在对话中升级，章节结尾留下明确悬念，推动下一章进入更高风险阶段。',
-    ].join('\n');
+    const draftText = await this.generateDraftThroughOrchestrator(
+      projectId,
+      chapterNo,
+      payload,
+      settings,
+      personas,
+      knowledge
+    );
 
     const autoUpdates = this.applyPostWriteUpdates(
       projectId,
@@ -639,6 +772,7 @@ export class ProjectsService {
   }
 
   checkAccess(projectId: string, userId: string, allowedRoles?: ('owner' | 'editor' | 'viewer')[]) {
+    this.assertProjectId(projectId);
     const member = this.members.find((m) => m.projectId === projectId && m.userId === userId);
     if (!member) {
       throw new NotFoundException(`用户无权访问项目: ${projectId}`);
@@ -656,6 +790,11 @@ export class ProjectsService {
     return this.indexJobsStore.get(projectId)![0] || null;
   }
 
+  private getLatestSummaryJob(projectId: string) {
+    this.ensureProjectState(projectId);
+    return this.summarizeJobsStore.get(projectId)![0] || null;
+  }
+
   private persistState() {
     const payload: PersistedProjectState = {
       projects: this.projects.map((project) => ({
@@ -671,6 +810,7 @@ export class ProjectsService {
       personas: {},
       knowledge: {},
       indexJobs: {},
+      summarizeJobs: {},
     };
 
     for (const [projectId, settings] of this.settingsStore.entries()) {
@@ -694,6 +834,9 @@ export class ProjectsService {
         chapters: knowledge.chapters.map((chapter) => ({
           ...chapter,
           updatedAt: chapter.updatedAt.toISOString(),
+          summaryUpdatedAt: chapter.summaryUpdatedAt
+            ? chapter.summaryUpdatedAt.toISOString()
+            : undefined,
         })),
         indexVersion: knowledge.indexVersion,
         lastIndexedAt: knowledge.lastIndexedAt ? knowledge.lastIndexedAt.toISOString() : null,
@@ -702,6 +845,14 @@ export class ProjectsService {
 
     for (const [projectId, jobs] of this.indexJobsStore.entries()) {
       payload.indexJobs[projectId] = jobs.map((job) => ({
+        ...job,
+        createdAt: job.createdAt.toISOString(),
+        completedAt: job.completedAt ? job.completedAt.toISOString() : null,
+      }));
+    }
+
+    for (const [projectId, jobs] of this.summarizeJobsStore.entries()) {
+      payload.summarizeJobs[projectId] = jobs.map((job) => ({
         ...job,
         createdAt: job.createdAt.toISOString(),
         completedAt: job.completedAt ? job.completedAt.toISOString() : null,
@@ -722,6 +873,7 @@ export class ProjectsService {
     personas: Record<string, PersonaRecord[]>;
     knowledge: Record<string, KnowledgeRecord>;
     indexJobs: Record<string, IndexJobRecord[]>;
+    summarizeJobs: Record<string, SummaryJobRecord[]>;
   } | null {
     if (!existsSync(this.storagePath)) {
       return null;
@@ -768,6 +920,9 @@ export class ProjectsService {
               chapters: (knowledge.chapters || []).map((chapter) => ({
                 ...chapter,
                 updatedAt: new Date(chapter.updatedAt),
+                summaryUpdatedAt: chapter.summaryUpdatedAt
+                  ? new Date(chapter.summaryUpdatedAt)
+                  : undefined,
               })),
               indexVersion: knowledge.indexVersion,
               lastIndexedAt: knowledge.lastIndexedAt ? new Date(knowledge.lastIndexedAt) : null,
@@ -776,6 +931,16 @@ export class ProjectsService {
         ),
         indexJobs: Object.fromEntries(
           Object.entries(parsed.indexJobs || {}).map(([projectId, jobs]) => [
+            projectId,
+            (jobs || []).map((job) => ({
+              ...job,
+              createdAt: new Date(job.createdAt),
+              completedAt: job.completedAt ? new Date(job.completedAt) : null,
+            })),
+          ])
+        ),
+        summarizeJobs: Object.fromEntries(
+          Object.entries(parsed.summarizeJobs || {}).map(([projectId, jobs]) => [
             projectId,
             (jobs || []).map((job) => ({
               ...job,
@@ -847,12 +1012,94 @@ export class ProjectsService {
     };
   }
 
-  private buildSummary(content: string) {
-    const compact = content.replace(/\s+/g, ' ').trim();
-    if (!compact) {
-      return '暂无摘要（章节内容为空）';
+  private createSummaryJobRecord(
+    projectId: string,
+    scope: SummaryJobScope,
+    chapterNos: number[],
+    chapterNo: number | null
+  ) {
+    const job: SummaryJobRecord = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      projectId,
+      scope,
+      chapterNo,
+      status: 'processing',
+      totalChapters: chapterNos.length,
+      processedChapters: 0,
+      chapterNos,
+      summaries: [],
+      createdAt: new Date(),
+      completedAt: null,
+      errorMessage: null,
+    };
+
+    const jobs = this.summarizeJobsStore.get(projectId)!;
+    jobs.unshift(job);
+    this.persistState();
+    return job;
+  }
+
+  private async runSummaryJob(projectId: string, job: SummaryJobRecord, chapters: ChapterRecord[]) {
+    const knowledge = this.knowledgeStore.get(projectId)!;
+
+    try {
+      for (const chapter of chapters) {
+        const result = await this.summarizeChapterContent(chapter);
+        chapter.summary = result.summary;
+        chapter.summarySource = result.summarySource;
+        chapter.summaryUpdatedAt = new Date();
+        chapter.updatedAt = new Date();
+        job.summaries.push({
+          chapterNo: chapter.chapterNo,
+          summary: result.summary,
+          summarySource: result.summarySource,
+        });
+        job.processedChapters += 1;
+      }
+
+      knowledge.indexVersion += 1;
+      knowledge.lastIndexedAt = new Date();
+      job.status = 'completed';
+      job.completedAt = new Date();
+    } catch (error) {
+      job.status = 'failed';
+      job.errorMessage = error instanceof Error ? error.message : '摘要生成失败';
+      job.completedAt = new Date();
     }
-    return compact.length > 160 ? `${compact.slice(0, 160)}...` : compact;
+
+    this.persistState();
+    return job;
+  }
+
+  private async summarizeChapterContent(chapter: ChapterRecord): Promise<ChapterSummaryResult> {
+    try {
+      const response = await axios.post<{ summary?: string }>(
+        `${this.getRagOrchestratorUrl()}/api/summarize`,
+        {
+          chapterNo: chapter.chapterNo,
+          title: chapter.title,
+          content: chapter.content,
+        },
+        { timeout: 90000 }
+      );
+
+      const summary = String(response.data?.summary || '').trim();
+      if (summary) {
+        return {
+          chapterNo: chapter.chapterNo,
+          summary,
+          summarySource: 'llm',
+        };
+      }
+    } catch {
+      // fall through to rule-based summary
+    }
+
+    return {
+      chapterNo: chapter.chapterNo,
+      summary: buildFallbackChapterSummary(chapter.content),
+      summarySource: 'fallback',
+    };
   }
 
   private ensureProjectState(projectId: string) {
@@ -880,13 +1127,108 @@ export class ProjectsService {
     if (!this.indexJobsStore.has(projectId)) {
       this.indexJobsStore.set(projectId, []);
     }
+
+    if (!this.summarizeJobsStore.has(projectId)) {
+      this.summarizeJobsStore.set(projectId, []);
+    }
   }
 
   private getProjectOrThrow(projectId: string) {
+    this.assertProjectId(projectId);
     const project = this.projects.find((item) => item.id === projectId);
     if (!project) {
       throw new NotFoundException(`未找到项目: ${projectId}`);
     }
     return project;
+  }
+
+  private getRagOrchestratorUrl() {
+    return process.env.RAG_ORCHESTRATOR_URL || 'http://localhost:3001';
+  }
+
+  private async syncProjectContextToOrchestrator(
+    projectId: string,
+    settings: ProjectSettings,
+    personas: PersonaRecord[],
+    knowledge: KnowledgeRecord
+  ) {
+    const activePersona =
+      personas.find((item) => item.id === settings.activePersonaId) ||
+      personas.find((item) => item.status === 'published') ||
+      null;
+
+    await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
+      systemPromptText: settings.systemPromptText,
+      personaProfile: activePersona
+        ? `${activePersona.name}\n${activePersona.profile}\n语气：${activePersona.tone}`
+        : '未配置人物设定',
+      outlineSummary: knowledge.outlineSummary,
+      chapters: knowledge.chapters.map((chapter) => ({
+        chapterNo: chapter.chapterNo,
+        title: chapter.title,
+        summary: chapter.summary || chapter.content.slice(0, 160),
+      })),
+    });
+  }
+
+  private async generateDraftThroughOrchestrator(
+    projectId: string,
+    chapterNo: number,
+    payload: Partial<WriteTaskInput>,
+    settings: ProjectSettings,
+    personas: PersonaRecord[],
+    knowledge: KnowledgeRecord
+  ) {
+    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+
+    const goal = payload.goal?.trim() || '推进主线并保持人物一致性';
+    const pov = payload.pov?.trim() || '第三人称';
+    const mustInclude = payload.mustInclude ?? [];
+    const avoid = payload.avoid ?? [];
+    const prompt = [
+      `请撰写第${chapterNo}章小说正文。`,
+      `写作目标：${goal}`,
+      `叙事视角：${pov}`,
+      mustInclude.length > 0 ? `必须包含：${mustInclude.join('；')}` : '',
+      avoid.length > 0 ? `避免内容：${avoid.join('；')}` : '',
+      `目标字数约 ${Number(payload.targetWords || 2500)} 字。`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      const { data } = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
+        projectId,
+        prompt,
+        useSSE: false,
+        context: { task: payload },
+      });
+
+      if (!data?.content || typeof data.content !== 'string') {
+        throw new BadGatewayException('生成服务未返回章节正文');
+      }
+
+      return data.content;
+    } catch (error) {
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : '调用生成服务失败';
+      throw new BadGatewayException(message);
+    }
+  }
+
+  private assertProjectId(projectId: string) {
+    const normalizedId = projectId.trim().toLowerCase();
+    if (!normalizedId) {
+      throw new BadRequestException('projectId 不能为空');
+    }
+
+    if (this.reservedProjectRouteNames.has(normalizedId)) {
+      throw new BadRequestException(
+        `projectId 无效: ${projectId}。该值是前端页面路由名，不是项目 ID。请先调用 GET /api/projects 获取真实项目 ID。`
+      );
+    }
   }
 }

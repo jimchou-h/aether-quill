@@ -285,6 +285,31 @@ curl http://localhost:3001/api/observability/metrics
 curl http://localhost:3001/api/observability/traces/<trace-id>
 ```
 
+### Q：为什么 `http://localhost:3000/api/projects/workbench` 会报错？
+
+`workbench` 是前端页面路由（`/projects/:id/workbench`）的一部分，不是后端项目 ID。  
+调用后端 API 时，必须先拿到真实 `projectId`，再拼接到接口中。
+
+```bash
+# 1) 登录拿 token（示例账号）
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"demo@aetherquill.local\",\"password\":\"demo123\"}"
+
+# 2) 查询项目列表，拿到项目 id（例如 1715403000000）
+curl http://localhost:3000/api/projects \
+  -H "Authorization: Bearer <token>"
+
+# 3) 用真实项目 id 调用工作台/文档相关 API
+curl http://localhost:3000/api/projects/1715403000000/workspace \
+  -H "Authorization: Bearer <token>"
+
+curl http://localhost:3000/api/projects/1715403000000/documents \
+  -H "Authorization: Bearer <token>"
+```
+
+如果你传入了 `workbench/knowledge/settings` 这类页面路由名，后端会返回 400 并提示你先获取真实项目 ID。
+
 ---
 
 ## 开源协议

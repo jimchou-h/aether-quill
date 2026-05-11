@@ -9,6 +9,7 @@ import {
   DocumentVersion,
   ReindexResult,
   IndexStatus,
+  CommitIndexResultInput,
 } from './documents.entity';
 
 interface PersistedDocumentState {
@@ -203,6 +204,35 @@ export class DocumentsService {
   getVersions(documentId: string): DocumentVersion[] {
     this.findById(documentId);
     return this.versions.get(documentId) || [];
+  }
+
+  commitIndexResult(documentId: string, payload: CommitIndexResultInput): DocumentRecord {
+    const doc = this.findById(documentId);
+    const now = new Date();
+
+    if (payload.status === 'failed') {
+      doc.indexStatus = 'failed';
+      doc.updatedAt = now;
+      this.persistState();
+      return doc;
+    }
+
+    const chunks = (payload.chunks || []).map((chunk) => ({
+      id: chunk.id,
+      documentId,
+      content: chunk.content,
+      metadata: {
+        ...(chunk.metadata || {}),
+        ...(chunk.embedding ? { embedding: chunk.embedding } : {}),
+      },
+      createdAt: now,
+    }));
+
+    this.chunks.set(documentId, chunks);
+    doc.indexStatus = 'completed';
+    doc.updatedAt = now;
+    this.persistState();
+    return doc;
   }
 
   private generateChunks(doc: DocumentRecord): ChunkRecord[] {

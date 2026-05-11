@@ -1,7 +1,15 @@
+import { loadEnv } from './config/load-env';
 import express from 'express';
+
+loadEnv();
 import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
+import {
+  buildRetrievalQuery,
+  DraftCitation,
+  retrieveKnowledgeForDraft,
+} from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
 import { ConsistencyChecker } from './consistency';
 import {
@@ -119,6 +127,34 @@ app.get('/api/projects/:projectId/context', (req, res) => {
   const projectId = req.params.projectId;
   const context = getOrCreateContext(projectId);
   res.json(context);
+});
+
+app.post('/api/summarize', async (req, res) => {
+  const chapterNo = Number(req.body?.chapterNo || 0);
+  const title = String(req.body?.title || '').trim();
+  const content = String(req.body?.content || '');
+
+  if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+    res.status(400).json({ message: 'chapterNo 必须为正整数' });
+    return;
+  }
+
+  if (!content.trim()) {
+    res.status(400).json({ message: 'content 不能为空' });
+    return;
+  }
+
+  try {
+    const summary = await generationService.summarizeChapterContent({
+      chapterNo,
+      title,
+      content,
+    });
+    res.json({ summary });
+  } catch (error) {
+    console.error('Chapter summarize failed:', error);
+    res.status(502).json({ message: '章节摘要生成失败' });
+  }
 });
 
 app.post('/api/projects/:projectId/context', (req, res) => {
@@ -366,6 +402,7 @@ app.get('/api/projects/:projectId/generation-stats', (req, res) => {
 });
 
 app.post('/api/generate/draft', async (req, res) => {
+  console.log('generate/draft', req.body);
   const { projectId, task = {}, citations = [] } = req.body;
 
   const requestTraceId =
@@ -374,9 +411,30 @@ app.post('/api/generate/draft', async (req, res) => {
 
   const context = getOrCreateContext(projectId);
   const chapterNo = Number(task.chapterNo || 1);
-  const generationContext = getGenerationContext(projectId, task);
   const goal = task.goal || '推进主线并保持人物一致性';
   const pov = task.pov || '第三人称';
+
+  const retrievalQuery = buildRetrievalQuery(task, context);
+  let resolvedCitations: DraftCitation[] = Array.isArray(citations) ? [...citations] : [];
+  let retrievedEvidence = '';
+
+  try {
+    const retrieval = await retrieveKnowledgeForDraft(
+      vectorStore,
+      reranker,
+      projectId,
+      retrievalQuery
+    );
+    retrievedEvidence = retrieval.evidenceText;
+    if (resolvedCitations.length === 0) {
+      resolvedCitations = retrieval.citations;
+    }
+  } catch (error) {
+    console.error('Knowledge retrieval failed:', error);
+  }
+
+  const generationContext = getGenerationContext(projectId, task);
+  generationContext.retrievedEvidence = retrievedEvidence;
 
   const prompt = `请根据以下项目上下文撰写第${chapterNo}章。
 
@@ -398,12 +456,20 @@ app.post('/api/generate/draft', async (req, res) => {
     chapterNo,
     task,
   });
-
+  console.log({
+    prompt,
+    projectId,
+    systemPrompt: context.systemPromptText,
+    retrievalQuery,
+    retrievedEvidence,
+    context: { task, citations: resolvedCitations },
+    useSSE: true,
+  });
   const trace = await generationService.createTrace({
     prompt,
     projectId,
     systemPrompt: context.systemPromptText,
-    context: { task, citations },
+    context: { task, citations: resolvedCitations, retrievalQuery },
     useSSE: true,
   });
 
@@ -489,7 +555,7 @@ app.post('/api/generate/draft', async (req, res) => {
       `data: ${JSON.stringify({
         event: 'end',
         traceId: trace.id,
-        citations,
+        citations: resolvedCitations,
         consistencyNotes,
       })}\n\n`
     );
@@ -505,8 +571,16 @@ app.post('/api/generate/draft', async (req, res) => {
 });
 
 app.listen(PORT, () => {
+  const providerKey =
+    process.env.PROVIDER_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    process.env.SILICONFLOW_API_KEY ||
+    '';
+  const providerMode = providerKey ? 'live' : 'unconfigured';
+
   logger.info(`RAG Orchestrator service running on http://localhost:${PORT}`, { port: PORT });
   logger.info(`API Base URL: ${API_BASE_URL}`, { apiBaseUrl: API_BASE_URL });
+  logger.info(`Generation provider mode: ${providerMode}`, { providerMode });
 });
 
 app.use(observabilityErrorHandler);
