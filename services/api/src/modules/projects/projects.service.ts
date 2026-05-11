@@ -14,6 +14,13 @@ export interface ProjectRecord {
   updatedAt: Date;
 }
 
+export interface ProjectMember {
+  userId: string;
+  projectId: string;
+  role: 'owner' | 'editor' | 'viewer';
+  createdAt: Date;
+}
+
 export interface ProjectSettings {
   systemPromptText: string;
   activePersonaId: string | null;
@@ -94,6 +101,7 @@ interface PersistedProjectState {
   projects: Array<
     Omit<ProjectRecord, 'createdAt' | 'updatedAt'> & { createdAt: string; updatedAt: string }
   >;
+  members: Array<Omit<ProjectMember, 'createdAt'> & { createdAt: string }>;
   settings: Record<
     string,
     { systemPromptText: string; activePersonaId: string | null; updatedAt: string }
@@ -136,6 +144,7 @@ export class ProjectsService {
     },
   ];
 
+  private readonly members: ProjectMember[] = [];
   private readonly settingsStore = new Map<string, ProjectSettings>();
   private readonly personasStore = new Map<string, PersonaRecord[]>();
   private readonly knowledgeStore = new Map<string, KnowledgeRecord>();
@@ -145,6 +154,7 @@ export class ProjectsService {
     const restored = this.restoreStateFromDisk();
     if (restored) {
       this.projects.splice(0, this.projects.length, ...restored.projects);
+      this.members.splice(0, this.members.length, ...restored.members);
       this.hydrateMap(this.settingsStore, restored.settings);
       this.hydrateMap(this.personasStore, restored.personas);
       this.hydrateMap(this.knowledgeStore, restored.knowledge);
@@ -156,19 +166,34 @@ export class ProjectsService {
     }
 
     if (!restored) {
+      this.members.push({
+        userId: '1',
+        projectId: '1',
+        role: 'owner',
+        createdAt: new Date(),
+      });
       this.persistState();
     }
   }
 
-  findAll() {
-    return this.projects;
+  findAll(userId?: string) {
+    if (!userId) {
+      return this.projects;
+    }
+    const userProjectIds = this.members
+      .filter((m) => m.userId === userId)
+      .map((m) => m.projectId);
+    return this.projects.filter((p) => userProjectIds.includes(p.id));
   }
 
-  findOne(id: string) {
+  findOne(id: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(id, userId);
+    }
     return this.getProjectOrThrow(id);
   }
 
-  create(data: Partial<ProjectRecord>) {
+  create(data: Partial<ProjectRecord>, userId?: string) {
     const now = new Date();
     const project: ProjectRecord = {
       id: String(Date.now()),
@@ -179,11 +204,24 @@ export class ProjectsService {
     };
     this.projects.push(project);
     this.ensureProjectState(project.id);
+    
+    if (userId) {
+      this.members.push({
+        userId,
+        projectId: project.id,
+        role: 'owner',
+        createdAt: now,
+      });
+    }
+    
     this.persistState();
     return project;
   }
 
-  getWorkspace(id: string): WorkspaceSnapshot {
+  getWorkspace(id: string, userId?: string): WorkspaceSnapshot {
+    if (userId) {
+      this.checkAccess(id, userId);
+    }
     const project = this.getProjectOrThrow(id);
     const settings = this.getSettings(id);
     const personas = this.getPersonas(id);
@@ -193,7 +231,10 @@ export class ProjectsService {
     return { project, settings, personas, knowledge, latestIndexJob };
   }
 
-  getExportBundle(projectId: string): ProjectExportBundle {
+  getExportBundle(projectId: string, userId?: string): ProjectExportBundle {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
     const project = this.getProjectOrThrow(projectId);
     const settings = this.getSettings(projectId);
     const personas = this.getPersonas(projectId);
@@ -220,7 +261,10 @@ export class ProjectsService {
     };
   }
 
-  getSettings(projectId: string) {
+  getSettings(projectId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
     return this.settingsStore.get(projectId)!;
@@ -228,8 +272,12 @@ export class ProjectsService {
 
   updateSettings(
     projectId: string,
-    payload: { systemPromptText?: string; activePersonaId?: string | null }
+    payload: { systemPromptText?: string; activePersonaId?: string | null },
+    userId?: string
   ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -258,7 +306,10 @@ export class ProjectsService {
     return settings;
   }
 
-  getPersonas(projectId: string) {
+  getPersonas(projectId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
     return this.personasStore.get(projectId)!;
@@ -266,8 +317,12 @@ export class ProjectsService {
 
   createPersona(
     projectId: string,
-    payload: { name: string; profile: string; tone?: string; constraints?: string[] }
+    payload: { name: string; profile: string; tone?: string; constraints?: string[] },
+    userId?: string
   ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -294,7 +349,10 @@ export class ProjectsService {
     return persona;
   }
 
-  publishPersona(projectId: string, personaId: string) {
+  publishPersona(projectId: string, personaId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -317,13 +375,19 @@ export class ProjectsService {
     return persona;
   }
 
-  getKnowledge(projectId: string) {
+  getKnowledge(projectId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
     return this.knowledgeStore.get(projectId)!;
   }
 
-  updateOutline(projectId: string, payload: { outlineSummary: string }) {
+  updateOutline(projectId: string, payload: { outlineSummary: string }, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -333,7 +397,10 @@ export class ProjectsService {
     return knowledge;
   }
 
-  upsertChapter(projectId: string, payload: { chapterNo: number; title: string; content: string }) {
+  upsertChapter(projectId: string, payload: { chapterNo: number; title: string; content: string }, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -371,7 +438,10 @@ export class ProjectsService {
     return chapter;
   }
 
-  createIndexJob(projectId: string, payload: { mode?: IndexMode }) {
+  createIndexJob(projectId: string, payload: { mode?: IndexMode }, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -411,7 +481,10 @@ export class ProjectsService {
     return job;
   }
 
-  getIndexJob(projectId: string, jobId: string) {
+  getIndexJob(projectId: string, jobId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -423,7 +496,10 @@ export class ProjectsService {
     return job;
   }
 
-  writeChapter(projectId: string, payload: Partial<WriteTaskInput>) {
+  writeChapter(projectId: string, payload: Partial<WriteTaskInput>, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
 
@@ -521,6 +597,58 @@ export class ProjectsService {
     };
   }
 
+  addMember(projectId: string, userId: string, role: 'editor' | 'viewer') {
+    this.checkAccess(projectId, userId, ['owner']);
+    
+    const existing = this.members.find((m) => m.projectId === projectId && m.userId === userId);
+    if (existing) {
+      existing.role = role;
+      existing.createdAt = new Date();
+    } else {
+      this.members.push({
+        userId,
+        projectId,
+        role,
+        createdAt: new Date(),
+      });
+    }
+    
+    this.persistState();
+    return this.members.filter((m) => m.projectId === projectId);
+  }
+
+  removeMember(projectId: string, userId: string, currentUserId: string) {
+    this.checkAccess(projectId, currentUserId, ['owner']);
+    
+    const index = this.members.findIndex((m) => m.projectId === projectId && m.userId === userId);
+    if (index !== -1) {
+      this.members.splice(index, 1);
+      this.persistState();
+    }
+    
+    return this.members.filter((m) => m.projectId === projectId);
+  }
+
+  getMembers(projectId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    return this.members.filter((m) => m.projectId === projectId);
+  }
+
+  checkAccess(projectId: string, userId: string, allowedRoles?: ('owner' | 'editor' | 'viewer')[]) {
+    const member = this.members.find((m) => m.projectId === projectId && m.userId === userId);
+    if (!member) {
+      throw new NotFoundException(`用户无权访问项目: ${projectId}`);
+    }
+    
+    if (allowedRoles && !allowedRoles.includes(member.role)) {
+      throw new NotFoundException(`用户权限不足，需要: ${allowedRoles.join('或')}`);
+    }
+    
+    return member;
+  }
+
   private getLatestIndexJob(projectId: string) {
     this.ensureProjectState(projectId);
     return this.indexJobsStore.get(projectId)![0] || null;
@@ -532,6 +660,10 @@ export class ProjectsService {
         ...project,
         createdAt: project.createdAt.toISOString(),
         updatedAt: project.updatedAt.toISOString(),
+      })),
+      members: this.members.map((member) => ({
+        ...member,
+        createdAt: member.createdAt.toISOString(),
       })),
       settings: {},
       personas: {},
@@ -583,6 +715,7 @@ export class ProjectsService {
 
   private restoreStateFromDisk(): {
     projects: ProjectRecord[];
+    members: ProjectMember[];
     settings: Record<string, ProjectSettings>;
     personas: Record<string, PersonaRecord[]>;
     knowledge: Record<string, KnowledgeRecord>;
@@ -600,6 +733,10 @@ export class ProjectsService {
           ...project,
           createdAt: new Date(project.createdAt),
           updatedAt: new Date(project.updatedAt),
+        })),
+        members: (parsed.members || []).map((member) => ({
+          ...member,
+          createdAt: new Date(member.createdAt),
         })),
         settings: Object.fromEntries(
           Object.entries(parsed.settings || {}).map(([projectId, value]) => [
