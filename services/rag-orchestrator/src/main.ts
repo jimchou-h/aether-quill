@@ -3,6 +3,7 @@ import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
 import { GenerationService, GenerationContext } from './generation/generation.service';
+import { ConsistencyChecker } from './consistency';
 
 const app = express();
 app.use(express.json());
@@ -13,6 +14,7 @@ const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
 const vectorStore = new VectorStore(API_BASE_URL);
 const reranker = new Reranker();
 const generationService = new GenerationService();
+const consistencyChecker = new ConsistencyChecker();
 
 interface ContextChapter {
   chapterNo: number;
@@ -221,6 +223,22 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
+app.post('/api/consistency/check', (req, res) => {
+  const { text, context: consistencyCtx } = req.body;
+
+  if (!text) {
+    return res.status(400).json({ error: 'text is required' });
+  }
+
+  try {
+    const report = consistencyChecker.check(text, consistencyCtx || {});
+    res.json(report);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Consistency check failed';
+    res.status(500).json({ error: errorMsg });
+  }
+});
+
 app.post('/api/generate', async (req, res) => {
   const { projectId, prompt, useSSE = true, context: extraContext } = req.body;
 
@@ -349,6 +367,8 @@ app.post('/api/generate/draft', async (req, res) => {
     useSSE: true,
   });
 
+  let fullDraftText = '';
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -360,10 +380,51 @@ app.post('/api/generate/draft', async (req, res) => {
 
   try {
     for await (const chunk of generationService.generateStream(trace, generationContext)) {
+      fullDraftText += chunk;
       const escaped = chunk.replace(/\n/g, '\\n');
       res.write(
         `data: ${JSON.stringify({ event: 'content', data: escaped, traceId: trace.id })}\n\n`
       );
+    }
+
+    let consistencyNotes: Array<{ level: string; message: string }> = [];
+
+    if (fullDraftText.trim()) {
+      const character = context.personaProfile
+        ? {
+            name: (task.personaName as string) || '角色',
+            profile: context.personaProfile,
+          }
+        : undefined;
+
+      const report = consistencyChecker.check(fullDraftText, {
+        characters: character
+          ? [
+              {
+                name: character.name,
+                identity: character.profile.split('\n')[0] || undefined,
+                traits: character.profile.split('\n').filter((l: string) => l.trim()),
+              },
+            ]
+          : undefined,
+        worldRules: [
+          {
+            domain: '叙事视角',
+            rule: pov as string,
+          },
+        ],
+      });
+
+      consistencyNotes = report.results.map((r) => ({
+        level: r.level === 'block' ? 'block' : r.level === 'warn' ? 'warning' : 'info',
+        message: r.message,
+      }));
+    }
+
+    if (consistencyNotes.length === 0) {
+      consistencyNotes = context.outlineSummary
+        ? [{ level: 'info', message: '已加载项目大纲与章节摘要，未检测到设定冲突。' }]
+        : [{ level: 'warning', message: '未检测到大纲总结，请补充后再生成。' }];
     }
 
     res.write(
@@ -371,9 +432,7 @@ app.post('/api/generate/draft', async (req, res) => {
         event: 'end',
         traceId: trace.id,
         citations,
-        consistencyNotes: context.outlineSummary
-          ? [{ level: 'info', message: '已加载项目大纲与章节摘要。' }]
-          : [{ level: 'warning', message: '未检测到大纲总结，请补充后再生成。' }],
+        consistencyNotes,
       })}\n\n`
     );
     res.end();

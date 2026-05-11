@@ -23,6 +23,8 @@ tags:
     description: Content generation and drafts
   - name: PromptConfig
     description: Prompt configuration and templates
+  - name: Consistency
+    description: Consistency checking for generated content
 
 paths:
   /api/auth/login:
@@ -53,6 +55,8 @@ paths:
     $ref: './paths/projects/prompt-config-publish.yaml'
   /api/projects/{id}/prompt-config/rollback:
     $ref: './paths/projects/prompt-config-rollback.yaml'
+  /api/consistency/check:
+    $ref: './paths/consistency/check.yaml'
 
 components:
   securitySchemes:
