@@ -21,6 +21,8 @@ pnpm dev
 
 - `GET /` - 服务信息
 - `GET /health` - 健康检查
-- `POST /api/retrieve` - 向量检索
-- `POST /api/rerank` - 重排
-- `POST /api/generate` - 生成编排
+- `GET /api/projects/:projectId/context` - 获取项目上下文快照
+- `POST /api/projects/:projectId/context` - 更新项目上下文（systemPrompt / persona / outline / chapters）
+- `POST /api/retrieve` - 按 `projectId` 检索章节摘要
+- `POST /api/rerank` - 对检索结果进行重排
+- `POST /api/generate` - 基于项目上下文生成章节草稿

@@ -2,8 +2,8 @@
 // 项目配置管理
 
 export interface AppConfig {
-  env: 'development' | 'staging' | 'production',
-  port: number,
+  env: 'development' | 'staging' | 'production';
+  port: number;
 }
 
 export const config: AppConfig = {
