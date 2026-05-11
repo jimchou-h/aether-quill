@@ -177,6 +177,9 @@ importers:
 
   services/rag-orchestrator:
     dependencies:
+      axios:
+        specifier: ^1.7.0
+        version: 1.16.0
       express:
         specifier: ^5.2.1
         version: 5.2.1
