@@ -20,6 +20,9 @@ importers:
       '@typescript-eslint/parser':
         specifier: ^7.0.0
         version: 7.18.0(eslint@8.57.1)(typescript@5.9.3)
+      axios:
+        specifier: ^1.6.0
+        version: 1.16.0
       eslint:
         specifier: ^8.56.0
         version: 8.57.1
@@ -80,6 +83,19 @@ importers:
         version: 2.2.12(typescript@5.9.3)
 
   packages/config:
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
+  packages/model-providers:
+    dependencies:
+      '@aether-quill/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+      axios:
+        specifier: ^1.6.0
+        version: 1.16.0
     devDependencies:
       typescript:
         specifier: ^5.4.0
