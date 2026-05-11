@@ -2,21 +2,24 @@
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import { useRoute } from 'vue-router';
 import { apiClient, type PersonaItem, type ProjectSettings } from '../services/api';
+import { usePromptConfigStore } from '../stores/promptConfig';
+import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
+import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
 
+const promptConfigStore = usePromptConfigStore();
+
 const settings = ref<ProjectSettings | null>(null);
 const personas = ref<PersonaItem[]>([]);
 const loading = shallowRef(false);
-const savingSettings = shallowRef(false);
 const creatingPersona = shallowRef(false);
 const exportingBundle = shallowRef(false);
 const message = shallowRef('');
 const errorMessage = shallowRef('');
 const projectName = shallowRef('project');
 
-const systemPromptText = shallowRef('');
 const activePersonaId = shallowRef<string | null>(null);
 
 const personaName = shallowRef('');
@@ -35,9 +38,10 @@ async function loadData() {
     const workspace = await apiClient.getWorkspace(projectId.value);
     settings.value = workspace.settings;
     personas.value = workspace.personas;
-    systemPromptText.value = workspace.settings.systemPromptText;
     activePersonaId.value = workspace.settings.activePersonaId;
     projectName.value = workspace.project.name || 'project';
+
+    await promptConfigStore.loadConfig(projectId.value);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载设置失败';
   } finally {
@@ -72,24 +76,6 @@ async function handleExportBundle() {
     errorMessage.value = error instanceof Error ? error.message : '导出失败';
   } finally {
     exportingBundle.value = false;
-  }
-}
-
-async function handleSaveSettings() {
-  savingSettings.value = true;
-  errorMessage.value = '';
-  message.value = '';
-  try {
-    const nextSettings = await apiClient.updateSettings(projectId.value, {
-      systemPromptText: systemPromptText.value,
-      activePersonaId: activePersonaId.value,
-    });
-    settings.value = nextSettings;
-    message.value = '项目设置已保存';
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '保存设置失败';
-  } finally {
-    savingSettings.value = false;
   }
 }
 
@@ -147,36 +133,18 @@ onMounted(() => {
     <h2 class="page-title">项目设置</h2>
     <p class="page-subtitle">维护系统提示词与人物设定版本，确保每个项目独立生效。</p>
 
-    <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
-    <p v-if="message" class="message message-ok">{{ message }}</p>
+    <p v-if="errorMessage || promptConfigStore.errorMessage" class="message message-error">
+      {{ errorMessage || promptConfigStore.errorMessage }}
+    </p>
+    <p v-if="message || promptConfigStore.message" class="message message-ok">
+      {{ message || promptConfigStore.message }}
+    </p>
     <p v-if="loading" class="message">正在加载设置...</p>
 
-    <template v-if="settings">
-      <section class="panel">
-        <h3 class="panel-title">系统提示词（systemPromptText）</h3>
-        <textarea
-          v-model="systemPromptText"
-          class="field-textarea"
-          placeholder="设置该项目的全局写作约束和风格指导"
-        />
+    <template v-if="!loading">
+      <SystemPromptEditor :project-id="projectId" />
 
-        <label class="field-label" for="active-persona">
-          当前生效人物设定
-          <select id="active-persona" v-model="activePersonaId" class="field-select">
-            <option :value="null">不指定（使用默认风格）</option>
-            <option v-for="persona in personas" :key="persona.id" :value="persona.id">
-              {{ persona.name }}（{{ persona.status }}）
-            </option>
-          </select>
-        </label>
-
-        <button class="primary-button" :disabled="savingSettings" @click="handleSaveSettings">
-          {{ savingSettings ? '保存中...' : '保存设置' }}
-        </button>
-        <button class="secondary-button" :disabled="exportingBundle" @click="handleExportBundle">
-          {{ exportingBundle ? '导出中...' : '下载总结与设定(JSON)' }}
-        </button>
-      </section>
+      <PromptVersionHistory :project-id="projectId" />
 
       <section class="panel">
         <h3 class="panel-title">创建人物设定</h3>
@@ -238,6 +206,12 @@ onMounted(() => {
           </article>
         </div>
       </section>
+
+      <section class="panel export-panel">
+        <button class="secondary-button" :disabled="exportingBundle" @click="handleExportBundle">
+          {{ exportingBundle ? '导出中...' : '下载总结与设定(JSON)' }}
+        </button>
+      </section>
     </template>
   </div>
 </template>
@@ -297,57 +271,37 @@ onMounted(() => {
   border-radius: 6px;
   padding: 0.48rem 0.85rem;
   cursor: pointer;
+  font-size: 0.9rem;
 }
 
 .primary-button {
-  border: none;
   background: #1d4ed8;
   color: #fff;
+  border: none;
 }
 
-.secondary-button {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  margin-left: 0.5rem;
+.primary-button:hover {
+  background: #2563eb;
 }
 
-.primary-button:disabled,
-.secondary-button:disabled {
-  opacity: 0.6;
+.primary-button:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.persona-list {
-  display: grid;
-  gap: 0.7rem;
+.secondary-button {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
 }
 
-.persona-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 0.75rem;
-  background: #fafafa;
+.secondary-button:hover {
+  background: #e5e7eb;
 }
 
-.persona-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.35rem;
-}
-
-.persona-status {
-  font-size: 0.85rem;
-  color: #475467;
-}
-
-.persona-profile {
-  margin-bottom: 0.35rem;
-}
-
-.meta-text {
-  color: #4b5563;
-  margin-bottom: 0.35rem;
+.secondary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .message {
@@ -360,5 +314,55 @@ onMounted(() => {
 
 .message-error {
   color: #b42318;
+}
+
+.meta-text {
+  color: #4b5563;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.persona-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.persona-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.persona-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.persona-name {
+  font-size: 0.95rem;
+}
+
+.persona-status {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 500;
+}
+
+.persona-profile {
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin-bottom: 0.25rem;
+  line-height: 1.4;
+}
+
+.export-panel {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>
