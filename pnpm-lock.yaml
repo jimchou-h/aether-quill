@@ -177,6 +177,9 @@ importers:
 
   services/rag-orchestrator:
     dependencies:
+      '@aether-quill/model-providers':
+        specifier: workspace:*
+        version: link:../../packages/model-providers
       axios:
         specifier: ^1.7.0
         version: 1.16.0
