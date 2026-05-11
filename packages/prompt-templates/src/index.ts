@@ -2,3 +2,4 @@
 // Prompt 模板管理
 
 export * from './templates';
+export * from './config-manager';
