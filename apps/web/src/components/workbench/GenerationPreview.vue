@@ -1,16 +1,29 @@
 <script setup lang="ts">
 import type { CitationItem, ConsistencyNote } from '../../services/api';
 
+/**
+ * 生成预览组件属性定义
+ */
 defineProps<{
+  /** 草稿文本 */
   draftText: string;
+  /** 引用证据列表 */
   citations: CitationItem[];
+  /** 一致性提示列表 */
   consistencyNotes: ConsistencyNote[];
+  /** 是否正在生成 */
   isStreaming: boolean;
+  /** 是否生成完成 */
   isDone: boolean;
 }>();
 
+/**
+ * 组件事件定义
+ */
 const emit = defineEmits<{
+  /** 接受草稿 */
   accept: [];
+  /** 重新生成 */
   regenerate: [];
 }>();
 </script>

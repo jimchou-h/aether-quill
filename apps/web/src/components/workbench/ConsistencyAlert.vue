@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import type { ConsistencyNote } from '../../services/api';
 
+/**
+ * 一致性提示组件属性定义
+ */
 defineProps<{
+  /** 一致性提示列表 */
   notes: ConsistencyNote[];
 }>();
 </script>

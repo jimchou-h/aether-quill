@@ -2,32 +2,60 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { apiClient, type PromptTemplateItem, type PromptConfigVersionItem } from '../services/api';
 
+/**
+ * 配置状态枚举
+ * @typedef {'draft' | 'published' | 'loading' | 'error'} ConfigStatus
+ */
 export type ConfigStatus = 'draft' | 'published' | 'loading' | 'error';
 
+/**
+ * 提示词配置状态管理 Store
+ * 用于管理系统提示词的草稿、版本和发布状态
+ */
 export const usePromptConfigStore = defineStore('promptConfig', () => {
+  /** 系统模板ID */
   const systemTemplateId = ref('');
+  /** 草稿文本 */
   const draftText = ref('');
+  /** 当前版本号 */
   const currentVersion = ref(0);
+  /** 是否已发布 */
   const isPublished = ref(false);
+  /** 版本列表 */
   const versions = ref<PromptConfigVersionItem[]>([]);
+  /** 配置状态 */
   const status = ref<ConfigStatus>('loading');
+  /** 是否正在保存 */
   const saving = ref(false);
+  /** 是否正在发布 */
   const publishing = ref(false);
+  /** 是否正在回滚 */
   const rollingBack = ref(false);
+  /** 成功消息 */
   const message = ref('');
+  /** 错误消息 */
   const errorMessage = ref('');
 
+  /** 是否有草稿内容 */
   const hasDraft = computed(() => draftText.value.length > 0);
+  /** 是否有多个版本 */
   const hasVersions = computed(() => versions.value.length > 1);
+  /** 当前发布的版本 */
   const publishedVersion = computed(() => versions.value.find((v) => v.isPublished) || null);
+  /** 当前版本信息 */
   const currentVersionInfo = computed(
     () => versions.value.find((v) => v.version === currentVersion.value) || null
   );
+  /** 草稿是否已修改 */
   const isDraftModified = computed(() => {
     const lastVersion = versions.value[versions.value.length - 1];
     return lastVersion ? draftText.value !== lastVersion.content : true;
   });
 
+  /**
+   * 加载提示词配置
+   * @param {string} projectId - 项目ID
+   */
   async function loadConfig(projectId: string) {
     status.value = 'loading';
     errorMessage.value = '';
@@ -55,6 +83,10 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     }
   }
 
+  /**
+   * 加载版本历史
+   * @param {string} projectId - 项目ID
+   */
   async function loadVersions(projectId: string) {
     if (!systemTemplateId.value) return;
     try {
@@ -68,6 +100,10 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     }
   }
 
+  /**
+   * 保存草稿
+   * @param {string} projectId - 项目ID
+   */
   async function saveDraft(projectId: string) {
     saving.value = true;
     errorMessage.value = '';
@@ -94,6 +130,10 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     }
   }
 
+  /**
+   * 发布配置
+   * @param {string} projectId - 项目ID
+   */
   async function publish(projectId: string) {
     publishing.value = true;
     errorMessage.value = '';
@@ -113,6 +153,11 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     }
   }
 
+  /**
+   * 回滚到指定版本
+   * @param {string} projectId - 项目ID
+   * @param {number} targetVersion - 目标版本号
+   */
   async function rollback(projectId: string, targetVersion: number) {
     rollingBack.value = true;
     errorMessage.value = '';
@@ -128,6 +173,9 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     }
   }
 
+  /**
+   * 清除消息提示
+   */
   function clearMessages() {
     message.value = '';
     errorMessage.value = '';

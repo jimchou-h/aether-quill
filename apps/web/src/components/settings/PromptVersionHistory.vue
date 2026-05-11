@@ -1,9 +1,22 @@
 <script setup lang="ts">
 import { usePromptConfigStore } from '../../stores/promptConfig';
 
+/** 提示词配置状态管理 */
 const store = usePromptConfigStore();
-const props = defineProps<{ projectId: string }>();
 
+/**
+ * 组件属性定义
+ */
+const props = defineProps<{
+  /** 项目ID */
+  projectId: string;
+}>();
+
+/**
+ * 格式化ISO时间字符串
+ * @param {string} iso - ISO时间字符串
+ * @returns {string} 格式化后的时间
+ */
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -19,6 +32,10 @@ function formatTime(iso: string): string {
   }
 }
 
+/**
+ * 处理回滚到指定版本
+ * @param {number} version - 目标版本号
+ */
 function handleRollbackTo(version: number) {
   if (window.confirm(`确定回滚到版本 v${version}？当前未发布内容将被覆盖。`)) {
     store.rollback(props.projectId, version);

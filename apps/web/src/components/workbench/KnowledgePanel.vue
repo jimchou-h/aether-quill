@@ -1,9 +1,17 @@
 <script setup lang="ts">
+/**
+ * 知识库面板组件属性定义
+ */
 defineProps<{
+  /** 项目名称 */
   projectName: string;
+  /** 章节数量 */
   chapterCount: number;
+  /** 大纲是否已配置 */
   outlineReady: boolean;
+  /** 当前人物设定名称 */
   activePersonaName: string;
+  /** 大纲摘要 */
   outlineSummary: string;
 }>();
 </script>

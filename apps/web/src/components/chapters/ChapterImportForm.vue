@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 
+/**
+ * 章节导入表单组件属性定义
+ */
 const props = defineProps<{
+  /** 是否正在提交 */
   submitting: boolean;
 }>();
 
+/**
+ * 组件事件定义
+ */
 const emit = defineEmits<{
+  /** 提交章节数据 */
   submit: [
     payload: {
       chapterNo: number;
@@ -15,29 +23,40 @@ const emit = defineEmits<{
   ];
 }>();
 
+/** 章节号 */
 const chapterNo = ref(1);
+/** 章节标题 */
 const title = ref('');
+/** 章节内容 */
 const content = ref('');
+/** 本地错误消息 */
 const localError = ref('');
 
+/**
+ * 处理表单提交
+ */
 function handleSubmit() {
   const normalizedTitle = title.value.trim();
   const normalizedContent = content.value.trim();
   const normalizedChapterNo = Number(chapterNo.value);
 
+  // 验证章节号
   if (!Number.isFinite(normalizedChapterNo) || normalizedChapterNo <= 0) {
     localError.value = '章节号必须为正整数';
     return;
   }
+  // 验证标题
   if (!normalizedTitle) {
     localError.value = '请填写章节标题';
     return;
   }
+  // 验证内容
   if (!normalizedContent) {
     localError.value = '请填写章节正文';
     return;
   }
 
+  // 提交数据
   localError.value = '';
   emit('submit', {
     chapterNo: normalizedChapterNo,
@@ -46,6 +65,9 @@ function handleSubmit() {
   });
 }
 
+/**
+ * 重置表单
+ */
 function resetForm() {
   chapterNo.value = 1;
   title.value = '';
@@ -53,11 +75,13 @@ function resetForm() {
   localError.value = '';
 }
 
+/**
+ * 暴露方法给父组件
+ */
 defineExpose({
   resetForm,
 });
 </script>
-
 <template>
   <section class="panel">
     <h3 class="panel-title">加入之前写的章节</h3>

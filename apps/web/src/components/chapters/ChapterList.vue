@@ -1,20 +1,40 @@
 <script setup lang="ts">
 import type { ChapterItem } from '../../services/api';
 
+/**
+ * 章节列表组件属性定义
+ */
 const props = defineProps<{
+  /** 章节列表 */
   chapters: ChapterItem[];
+  /** 是否正在加载 */
   loading: boolean;
+  /** 正在生成摘要的章节号 */
   summarizingChapterNo: number | null;
 }>();
 
+/**
+ * 组件事件定义
+ */
 const emit = defineEmits<{
+  /** 请求生成摘要 */
   summarize: [chapterNo: number];
 }>();
 
+/**
+ * 格式化时间
+ * @param {string} value - 时间字符串
+ * @returns {string} 格式化后的时间
+ */
 function formatTime(value: string) {
   return new Date(value).toLocaleString();
 }
 
+/**
+ * 获取摘要来源文本
+ * @param {ChapterItem['summarySource']} source - 摘要来源
+ * @returns {string} 来源描述
+ */
 function summarySourceText(source?: ChapterItem['summarySource']) {
   if (source === 'llm') {
     return '语义摘要';

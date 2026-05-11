@@ -146,53 +146,41 @@ export function getErrorMessage(errorCode: ErrorCode): string {
 }
 
 /**
- * 错误响应类型
+ * 成功响应类型（统一格式）
  */
-export interface ErrorResponse {
-  code: ErrorCode;
-  message: string;
-  requestId: string;
-  details?: Record<string, unknown>;
+export interface ApiResponse<T = unknown> {
+  code: 0;
+  msg: 'success';
+  data: T;
 }
 
 /**
- * 成功响应类型
+ * 错误响应类型（统一格式）
  */
-export interface SuccessResponse<T = unknown> {
-  code: 200;
-  message: string;
-  data: T;
-  requestId: string;
+export interface ApiErrorResponse {
+  code: ErrorCode;
+  msg: string;
+  data: null;
 }
 
 /**
  * 创建成功响应
  */
-export function createSuccessResponse<T>(
-  data: T,
-  requestId: string,
-  message: string = 'Success'
-): SuccessResponse<T> {
+export function createApiResponse<T>(data: T): ApiResponse<T> {
   return {
-    code: 200,
-    message,
+    code: 0,
+    msg: 'success',
     data,
-    requestId,
   };
 }
 
 /**
  * 创建错误响应
  */
-export function createErrorResponse(
-  errorCode: ErrorCode,
-  requestId: string,
-  details?: Record<string, unknown>
-): ErrorResponse {
+export function createApiErrorResponse(errorCode: ErrorCode): ApiErrorResponse {
   return {
     code: errorCode,
-    message: getErrorMessage(errorCode),
-    requestId,
-    details,
+    msg: getErrorMessage(errorCode),
+    data: null,
   };
 }

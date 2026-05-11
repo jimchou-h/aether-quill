@@ -1,14 +1,18 @@
 <template>
   <div class="login-page">
     <div class="login-card">
+      <!-- 品牌标识 -->
       <div class="login-brand">
         <h1 class="brand-title">Aether Quill</h1>
         <p class="brand-subtitle">小说写作助手</p>
       </div>
 
+      <!-- 登录表单 -->
       <form class="login-form" @submit.prevent="handleLogin">
+        <!-- 错误提示 -->
         <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
 
+        <!-- 邮箱输入 -->
         <div class="field-group">
           <label class="field-label" for="email">邮箱</label>
           <input
@@ -22,6 +26,7 @@
           />
         </div>
 
+        <!-- 密码输入 -->
         <div class="field-group">
           <label class="field-label" for="password">密码</label>
           <input
@@ -35,6 +40,7 @@
           />
         </div>
 
+        <!-- 登录按钮 -->
         <button class="primary-button" type="submit" :disabled="loading">
           {{ loading ? '登录中...' : '登录' }}
         </button>
@@ -48,15 +54,25 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 
+/** 路由实例 */
 const router = useRouter();
+/** 认证状态管理 */
 const authStore = useAuthStore();
 
+/** 邮箱 */
 const email = ref('');
+/** 密码 */
 const password = ref('');
+/** 是否正在登录 */
 const loading = ref(false);
+/** 错误消息 */
 const errorMessage = ref('');
 
+/**
+ * 处理登录表单提交
+ */
 async function handleLogin() {
+  // 验证输入
   if (!email.value.trim() || !password.value.trim()) {
     errorMessage.value = '请填写邮箱和密码';
     return;
@@ -64,10 +80,14 @@ async function handleLogin() {
 
   loading.value = true;
   errorMessage.value = '';
+
   try {
+    // 调用登录接口
     await authStore.login(email.value.trim(), password.value);
+    // 登录成功后跳转至项目列表
     await router.push('/projects');
   } catch (error: any) {
+    // 处理登录失败
     const message =
       error?.response?.data?.message || error?.message || '登录失败，请检查邮箱和密码';
     errorMessage.value = message;

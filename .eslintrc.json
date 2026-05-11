@@ -10,5 +10,5 @@
   "rules": {
     "prettier/prettier": "error"
   },
-  "ignorePatterns": ["node_modules", "dist", "build"]
+  "ignorePatterns": ["node_modules", "dist", "build", "**/index.d.ts"]
 }

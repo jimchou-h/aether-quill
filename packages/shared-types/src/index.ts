@@ -4,1838 +4,1840 @@
  */
 
 export interface paths {
-    "/api/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * User login
-         * @description Authenticate user and return JWT token
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: email */
-                        email: string;
-                        /** Format: password */
-                        password: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Login successful */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** @description JWT access token */
-                                token?: string;
-                                user?: components["schemas"]["User"];
-                            };
-                        };
-                    };
-                };
-                /** @description Invalid credentials */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+  '/api/auth/login': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/auth/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    get?: never;
+    put?: never;
+    /**
+     * User login
+     * @description Authenticate user and return JWT token
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** Format: email */
+            email: string;
+            /** Format: password */
+            password: string;
+          };
         };
-        /**
-         * Get current user
-         * @description Get authenticated user information
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
+      };
+      responses: {
+        /** @description Login successful */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** @description JWT access token */
+                token?: string;
+                user?: components['schemas']['User'];
+              };
             };
-            requestBody?: never;
-            responses: {
-                /** @description User information retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["User"];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+          };
         };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Invalid credentials */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/projects": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List projects
-         * @description Get all projects for the authenticated user
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Projects retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["Project"][];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create project
-         * @description Create a new project
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        name: string;
-                        description?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Project created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["Project"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/auth/me': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/projects/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    /**
+     * Get current user
+     * @description Get authenticated user information
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description User information retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['User'];
+            };
+          };
         };
-        /**
-         * Get project by ID
-         * @description Get a specific project by ID
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Project retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["Project"];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
         };
-        put?: never;
-        post?: never;
-        /**
-         * Delete project
-         * @description Permanently delete a project and its workspace data. Only the project owner may delete.
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Project deleted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** Format: uuid */
-                                id: string;
-                            };
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project deletion failed */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        /**
-         * Update project
-         * @description Update project information
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        name?: string;
-                        description?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Project updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["Project"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        trace?: never;
+      };
     };
-    "/api/projects/{id}/documents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List documents
-         * @description Get all documents for a project
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Documents retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["Document"][];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create document
-         * @description Create a new document in a project
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        title: string;
-                        content: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Document created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["Document"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/documents/{id}/reindex": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reindex document
-         * @description Trigger reindexing of a document
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
+    /**
+     * List projects
+     * @description Get all projects for the authenticated user
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Projects retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Project'][];
             };
-            requestBody?: never;
-            responses: {
-                /** @description Reindexing started */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** Format: uuid */
-                                documentId?: string;
-                                /** @enum {string} */
-                                indexStatus?: "pending" | "indexing" | "completed" | "failed";
-                            };
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Document not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+          };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/documents/{id}/chunks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    put?: never;
+    /**
+     * Create project
+     * @description Create a new project
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            name: string;
+            description?: string;
+          };
         };
-        /**
-         * Get document chunks
-         * @description Get all chunks for a document
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
+      };
+      responses: {
+        /** @description Project created */
+        201: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Project'];
             };
-            requestBody?: never;
-            responses: {
-                /** @description Chunks retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["Chunk"][];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Document not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+          };
         };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/projects/{id}/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate content
-         * @description Generate content using RAG with SSE support
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description User prompt for generation */
-                        prompt: string;
-                        /** @description Additional context for generation */
-                        context?: Record<string, never>;
-                        /**
-                         * @description Use Server-Sent Events for streaming
-                         * @default true
-                         */
-                        useSSE?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Generation started */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** @description Unique trace ID for this generation */
-                                traceId?: string;
-                                /** @enum {string} */
-                                status?: "pending" | "generating" | "completed" | "failed";
-                            };
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/projects/{id}/generation-traces": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    /**
+     * Get project by ID
+     * @description Get a specific project by ID
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        /**
-         * List generation traces
-         * @description Get all generation traces for a project
-         */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                    offset?: number;
-                };
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Project retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Project'];
             };
-            requestBody?: never;
-            responses: {
-                /** @description Traces retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["GenerationTrace"][];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+          };
         };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/drafts/{id}/accept": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete project
+     * @description Permanently delete a project and its workspace data. Only the project owner may delete.
+     */
+    delete: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        get?: never;
-        put?: never;
-        /**
-         * Accept draft
-         * @description Accept a generated draft
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Project deleted */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** Format: uuid */
+                id: string;
+              };
             };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @description Optional edits before accepting */
-                        edits?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Draft accepted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** Format: uuid */
-                                draftId?: string;
-                                /** @enum {string} */
-                                status?: "accepted";
-                            };
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Draft not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+          };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Forbidden */
+        403: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project deletion failed */
+        500: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/drafts/{id}/rewrite": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update project
+     * @description Update project information
+     */
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        get?: never;
-        put?: never;
-        /**
-         * Rewrite draft
-         * @description Rewrite a generated draft with new instructions
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description Instructions for rewriting */
-                        instructions: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Rewrite started */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** Format: uuid */
-                                draftId?: string;
-                                /** @description New trace ID for rewrite */
-                                traceId?: string;
-                                /** @enum {string} */
-                                status?: "rewriting";
-                            };
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Draft not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            name?: string;
+            description?: string;
+          };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+      };
+      responses: {
+        /** @description Project updated */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Project'];
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/projects/{id}/prompt-config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get prompt config
-         * @description Get prompt configuration for a project
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Prompt config retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["PromptConfig"];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        /**
-         * Update prompt config
-         * @description Update prompt configuration (save as draft)
-         */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description System prompt text for generation */
-                        systemPromptText: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Prompt config updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["PromptConfig"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/documents': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/projects/{id}/prompt-config/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    /**
+     * List documents
+     * @description Get all documents for a project
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        get?: never;
-        put?: never;
-        /**
-         * Publish prompt config
-         * @description Publish prompt configuration to production
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Documents retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Document'][];
             };
-            requestBody?: never;
-            responses: {
-                /** @description Prompt config published */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** Format: uuid */
-                                configId?: string;
-                                version?: number;
-                                isPublished?: boolean;
-                                /** Format: date-time */
-                                publishedAt?: string;
-                            };
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No draft to publish */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+          };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/projects/{id}/prompt-config/rollback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    put?: never;
+    /**
+     * Create document
+     * @description Create a new document in a project
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        get?: never;
-        put?: never;
-        /**
-         * Rollback prompt config
-         * @description Rollback prompt configuration to previous version
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description Target version to rollback to */
-                        version: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Prompt config rolled back */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: {
-                                /** Format: uuid */
-                                configId?: string;
-                                version?: number;
-                                isPublished?: boolean;
-                                /** Format: date-time */
-                                rolledBackAt?: string;
-                            };
-                        };
-                    };
-                };
-                /** @description Invalid version */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project or version not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            title: string;
+            content: string;
+          };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+      };
+      responses: {
+        /** @description Document created */
+        201: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Document'];
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/projects/{id}/knowledge/chapters/summarize": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Batch summarize project chapters
-         * @description Trigger semantic summary generation for multiple chapters
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        chapterNos?: number[];
-                    };
-                };
-            };
-            responses: {
-                /** @description Summary job created */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["ChapterSummaryJob"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/documents/{id}/reindex': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/projects/{id}/knowledge/chapters/{chapterNo}/summarize": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    get?: never;
+    put?: never;
+    /**
+     * Reindex document
+     * @description Trigger reindexing of a document
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        get?: never;
-        put?: never;
-        /**
-         * Summarize a single chapter
-         * @description Trigger semantic summary generation for one chapter
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                    chapterNo: number;
-                };
-                cookie?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Reindexing started */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** Format: uuid */
+                documentId?: string;
+                /** @enum {string} */
+                indexStatus?: 'pending' | 'indexing' | 'completed' | 'failed';
+              };
             };
-            requestBody?: never;
-            responses: {
-                /** @description Summary job created */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["ChapterSummaryJob"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project or chapter not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
+          };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Document not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/projects/{id}/knowledge/summarize/{jobId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get chapter summary job
-         * @description Query status of a chapter summary job
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                    jobId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Summary job detail */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Envelope"] & {
-                            data?: components["schemas"]["ChapterSummaryJob"];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Project or job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/documents/{id}/chunks': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/consistency/check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    /**
+     * Get document chunks
+     * @description Get all chunks for a document
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        get?: never;
-        put?: never;
-        /**
-         * Check consistency
-         * @description Run consistency checks (character, timeline, world rules) on generated text
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Chunks retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Chunk'][];
             };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @description Text to check for consistency */
-                        text: string;
-                        /** @description Optional consistency context (characters, timeline, world rules) */
-                        context?: {
-                            characters?: {
-                                name?: string;
-                                aliases?: string[];
-                                age?: string;
-                                identity?: string;
-                                /** @enum {string} */
-                                status?: "alive" | "deceased" | "unknown";
-                                relationships?: {
-                                    target?: string;
-                                    relation?: string;
-                                }[];
-                            }[];
-                            timeline?: {
-                                label?: string;
-                                chapterNo?: number;
-                                description?: string;
-                            }[];
-                            worldRules?: {
-                                domain?: string;
-                                rule?: string;
-                            }[];
-                        };
-                    };
-                };
-            };
-            responses: {
-                /** @description Consistency check completed */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ConsistencyReport"];
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            error?: string;
-                        };
-                    };
-                };
-            };
+          };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Document not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/observability/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get metrics snapshot
-         * @description Get current service metrics (counters, histograms, uptime)
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Metrics snapshot */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @description Metric counters (e.g. http_requests_total) */
-                            counters?: Record<string, never>;
-                            /** @description Metric histograms (e.g. http_request_duration_ms) */
-                            histograms?: Record<string, never>;
-                            activeSpans?: number;
-                            totalTraces?: number;
-                            uptimeSeconds?: number;
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/generate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/api/observability/traces/{traceId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    get?: never;
+    put?: never;
+    /**
+     * Generate content
+     * @description Generate content using RAG with SSE support
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
         };
-        /**
-         * Get trace spans
-         * @description Get all spans for a specific trace ID
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    traceId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Trace spans retrieved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            traceId?: string;
-                            spans?: {
-                                spanId?: string;
-                                traceId?: string;
-                                operation?: string;
-                                /** Format: date-time */
-                                startTime?: string;
-                                durationMs?: number;
-                                /** @enum {string} */
-                                status?: "ok" | "error";
-                            }[];
-                        };
-                    };
-                };
-                /** @description Trace not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            error?: string;
-                        };
-                    };
-                };
-            };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @description User prompt for generation */
+            prompt: string;
+            /** @description Additional context for generation */
+            context?: Record<string, never>;
+            /**
+             * @description Use Server-Sent Events for streaming
+             * @default true
+             */
+            useSSE?: boolean;
+          };
         };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+      };
+      responses: {
+        /** @description Generation started */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** @description Unique trace ID for this generation */
+                traceId?: string;
+                /** @enum {string} */
+                status?: 'pending' | 'generating' | 'completed' | 'failed';
+              };
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
     };
-    "/api/observability/logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get recent logs */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Recent logs */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/generation-traces': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
+    /**
+     * List generation traces
+     * @description Get all generation traces for a project
+     */
+    get: {
+      parameters: {
+        query?: {
+          limit?: number;
+          offset?: number;
+        };
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Traces retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['GenerationTrace'][];
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/drafts/{id}/accept': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Accept draft
+     * @description Accept a generated draft
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': {
+            /** @description Optional edits before accepting */
+            edits?: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Draft accepted */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** Format: uuid */
+                draftId?: string;
+                /** @enum {string} */
+                status?: 'accepted';
+              };
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Draft not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/drafts/{id}/rewrite': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rewrite draft
+     * @description Rewrite a generated draft with new instructions
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @description Instructions for rewriting */
+            instructions: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Rewrite started */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** Format: uuid */
+                draftId?: string;
+                /** @description New trace ID for rewrite */
+                traceId?: string;
+                /** @enum {string} */
+                status?: 'rewriting';
+              };
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Draft not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/prompt-config': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get prompt config
+     * @description Get prompt configuration for a project
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Prompt config retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['PromptConfig'];
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    /**
+     * Update prompt config
+     * @description Update prompt configuration (save as draft)
+     */
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @description System prompt text for generation */
+            systemPromptText: string;
+          };
+        };
+      };
+      responses: {
+        /** @description Prompt config updated */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['PromptConfig'];
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/prompt-config/publish': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish prompt config
+     * @description Publish prompt configuration to production
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Prompt config published */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** Format: uuid */
+                configId?: string;
+                version?: number;
+                isPublished?: boolean;
+                /** Format: date-time */
+                publishedAt?: string;
+              };
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description No draft to publish */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/prompt-config/rollback': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rollback prompt config
+     * @description Rollback prompt configuration to previous version
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @description Target version to rollback to */
+            version: number;
+          };
+        };
+      };
+      responses: {
+        /** @description Prompt config rolled back */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                /** Format: uuid */
+                configId?: string;
+                version?: number;
+                isPublished?: boolean;
+                /** Format: date-time */
+                rolledBackAt?: string;
+              };
+            };
+          };
+        };
+        /** @description Invalid version */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project or version not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/chapters/summarize': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Batch summarize project chapters
+     * @description Trigger semantic summary generation for multiple chapters
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': {
+            chapterNos?: number[];
+          };
+        };
+      };
+      responses: {
+        /** @description Summary job created */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['ChapterSummaryJob'];
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/summarize': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Summarize a single chapter
+     * @description Trigger semantic summary generation for one chapter
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Summary job created */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['ChapterSummaryJob'];
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project or chapter not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/summarize/{jobId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get chapter summary job
+     * @description Query status of a chapter summary job
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          jobId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Summary job detail */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['ChapterSummaryJob'];
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project or job not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/consistency/check': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Check consistency
+     * @description Run consistency checks (character, timeline, world rules) on generated text
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            /** @description Text to check for consistency */
+            text: string;
+            /** @description Optional consistency context (characters, timeline, world rules) */
+            context?: {
+              characters?: {
+                name?: string;
+                aliases?: string[];
+                age?: string;
+                identity?: string;
+                /** @enum {string} */
+                status?: 'alive' | 'deceased' | 'unknown';
+                relationships?: {
+                  target?: string;
+                  relation?: string;
+                }[];
+              }[];
+              timeline?: {
+                label?: string;
+                chapterNo?: number;
+                description?: string;
+              }[];
+              worldRules?: {
+                domain?: string;
+                rule?: string;
+              }[];
+            };
+          };
+        };
+      };
+      responses: {
+        /** @description Consistency check completed */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['ConsistencyReport'];
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              error?: string;
+            };
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/observability/metrics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get metrics snapshot
+     * @description Get current service metrics (counters, histograms, uptime)
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Metrics snapshot */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              /** @description Metric counters (e.g. http_requests_total) */
+              counters?: Record<string, never>;
+              /** @description Metric histograms (e.g. http_request_duration_ms) */
+              histograms?: Record<string, never>;
+              activeSpans?: number;
+              totalTraces?: number;
+              uptimeSeconds?: number;
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/observability/traces/{traceId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get trace spans
+     * @description Get all spans for a specific trace ID
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          traceId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Trace spans retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              traceId?: string;
+              spans?: {
+                spanId?: string;
+                traceId?: string;
+                operation?: string;
+                /** Format: date-time */
+                startTime?: string;
+                durationMs?: number;
+                /** @enum {string} */
+                status?: 'ok' | 'error';
+              }[];
+            };
+          };
+        };
+        /** @description Trace not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': {
+              error?: string;
+            };
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/observability/logs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get recent logs */
+    get: {
+      parameters: {
+        query?: {
+          limit?: number;
+        };
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Recent logs */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content?: never;
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: {
-        Envelope: {
-            /** @description HTTP status code */
-            code: number;
-            /** @description Response message */
-            message: string;
-            /** @description Response data */
-            data?: Record<string, never>;
-            /** @description Unique request ID for tracing */
-            requestId: string;
-        };
-        Error: {
-            /** @description Error code */
-            code: number;
-            /** @description Error message */
-            message: string;
-            /** @description Unique request ID for tracing */
-            requestId: string;
-            /** @description Additional error details */
-            details?: Record<string, never>;
-        };
-        User: {
-            /** Format: uuid */
-            id: string;
-            /** Format: email */
-            email: string;
-            name: string;
-            /** Format: date-time */
-            createdAt?: string;
-        };
-        Project: {
-            /** Format: uuid */
-            id: string;
-            name: string;
-            description?: string;
-            /** Format: uuid */
-            userId: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-        };
-        Document: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            projectId: string;
-            title: string;
-            content?: string;
-            /** @enum {string} */
-            indexStatus: "pending" | "indexing" | "completed" | "failed";
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-        };
-        Chunk: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            documentId: string;
-            content: string;
-            metadata?: Record<string, never>;
-        };
-        GenerationTrace: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            projectId: string;
-            prompt: string;
-            /** @enum {string} */
-            status: "pending" | "generating" | "completed" | "failed";
-            traceId?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            completedAt?: string;
-        };
-        ChapterSummary: {
-            chapterNo: number;
-            summary: string;
-            /** @enum {string} */
-            summarySource: "llm" | "fallback";
-        };
-        ChapterSummaryJob: {
-            id: string;
-            projectId: string;
-            /** @enum {string} */
-            scope: "single" | "batch";
-            chapterNo?: number | null;
-            /** @enum {string} */
-            status: "processing" | "completed" | "failed";
-            totalChapters: number;
-            processedChapters: number;
-            chapterNos: number[];
-            summaries: components["schemas"]["ChapterSummary"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            completedAt?: string | null;
-            errorMessage?: string | null;
-        };
-        PromptConfig: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            projectId: string;
-            /** @description System prompt text for generation */
-            systemPromptText: string;
-            version?: number;
-            isPublished?: boolean;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-        };
-        ConsistencyCheckResult: {
-            /** @enum {string} */
-            level: "pass" | "warn" | "block";
-            /** @enum {string} */
-            category: "character" | "timeline" | "world_rule";
-            message: string;
-            detail?: string;
-            locations?: {
-                text?: string;
-            }[];
-        };
-        ConsistencyReport: {
-            /** @enum {string} */
-            overall: "pass" | "warn" | "block";
-            results: components["schemas"]["ConsistencyCheckResult"][];
-            /** Format: date-time */
-            checkedAt: string;
-        };
+  schemas: {
+    Envelope: {
+      /** @description HTTP status code */
+      code: number;
+      /** @description Response message */
+      message: string;
+      /** @description Response data */
+      data?: Record<string, never>;
+      /** @description Unique request ID for tracing */
+      requestId: string;
     };
-    responses: never;
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    Error: {
+      /** @description Error code */
+      code: number;
+      /** @description Error message */
+      message: string;
+      /** @description Unique request ID for tracing */
+      requestId: string;
+      /** @description Additional error details */
+      details?: Record<string, never>;
+    };
+    User: {
+      /** Format: uuid */
+      id: string;
+      /** Format: email */
+      email: string;
+      name: string;
+      /** Format: date-time */
+      createdAt?: string;
+    };
+    Project: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      description?: string;
+      /** Format: uuid */
+      userId: string;
+      /** Format: date-time */
+      createdAt?: string;
+      /** Format: date-time */
+      updatedAt?: string;
+    };
+    Document: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      projectId: string;
+      title: string;
+      content?: string;
+      /** @enum {string} */
+      indexStatus: 'pending' | 'indexing' | 'completed' | 'failed';
+      /** Format: date-time */
+      createdAt?: string;
+      /** Format: date-time */
+      updatedAt?: string;
+    };
+    Chunk: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      documentId: string;
+      content: string;
+      metadata?: Record<string, never>;
+    };
+    GenerationTrace: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      projectId: string;
+      prompt: string;
+      /** @enum {string} */
+      status: 'pending' | 'generating' | 'completed' | 'failed';
+      traceId?: string;
+      /** Format: date-time */
+      createdAt?: string;
+      /** Format: date-time */
+      completedAt?: string;
+    };
+    ChapterSummary: {
+      chapterNo: number;
+      summary: string;
+      /** @enum {string} */
+      summarySource: 'llm' | 'fallback';
+    };
+    ChapterSummaryJob: {
+      id: string;
+      projectId: string;
+      /** @enum {string} */
+      scope: 'single' | 'batch';
+      chapterNo?: number | null;
+      /** @enum {string} */
+      status: 'processing' | 'completed' | 'failed';
+      totalChapters: number;
+      processedChapters: number;
+      chapterNos: number[];
+      summaries: components['schemas']['ChapterSummary'][];
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      completedAt?: string | null;
+      errorMessage?: string | null;
+    };
+    PromptConfig: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      projectId: string;
+      /** @description System prompt text for generation */
+      systemPromptText: string;
+      version?: number;
+      isPublished?: boolean;
+      /** Format: date-time */
+      createdAt?: string;
+      /** Format: date-time */
+      updatedAt?: string;
+    };
+    ConsistencyCheckResult: {
+      /** @enum {string} */
+      level: 'pass' | 'warn' | 'block';
+      /** @enum {string} */
+      category: 'character' | 'timeline' | 'world_rule';
+      message: string;
+      detail?: string;
+      locations?: {
+        text?: string;
+      }[];
+    };
+    ConsistencyReport: {
+      /** @enum {string} */
+      overall: 'pass' | 'warn' | 'block';
+      results: components['schemas']['ConsistencyCheckResult'][];
+      /** Format: date-time */
+      checkedAt: string;
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
 export type $defs = Record<string, never>;
 export type operations = Record<string, never>;
+
+export * from './error-codes';

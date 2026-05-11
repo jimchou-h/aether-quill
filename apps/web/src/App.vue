@@ -1,5 +1,6 @@
 <template>
   <div id="app">
+    <!-- 应用头部导航 -->
     <header v-if="authStore.isAuthenticated" class="app-header">
       <div class="header-left">
         <router-link to="/projects" class="header-brand">Aether Quill</router-link>
@@ -9,6 +10,7 @@
         <button class="logout-button" @click="handleLogout">退出登录</button>
       </div>
     </header>
+    <!-- 主内容区域 -->
     <main class="app-main">
       <router-view />
     </main>
@@ -20,13 +22,21 @@ import { onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
 
+/** 路由实例 */
 const router = useRouter();
+/** 认证状态管理 */
 const authStore = useAuthStore();
 
+/**
+ * 组件挂载时初始化认证状态
+ */
 onMounted(() => {
   authStore.init();
 });
 
+/**
+ * 处理用户登出
+ */
 function handleLogout() {
   authStore.logout();
   router.push('/login');
