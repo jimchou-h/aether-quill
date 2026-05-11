@@ -9,6 +9,7 @@ const route = useRoute();
 const projects = ref<ProjectItem[]>([]);
 const loading = shallowRef(false);
 const submitLoading = shallowRef(false);
+const deletingProjectId = shallowRef<string | null>(null);
 const errorMessage = shallowRef('');
 const routeTipMessage = shallowRef('');
 
@@ -35,6 +36,23 @@ function applyInvalidProjectRouteTip() {
 
   routeTipMessage.value = `项目地址无效（${invalidProjectId}）。请先从项目列表进入具体项目。`;
   void router.replace({ name: 'projects' });
+}
+
+async function handleDeleteProject(project: ProjectItem) {
+  if (!confirm(`确定删除「${project.name}」？此操作不可撤销。`)) {
+    return;
+  }
+
+  deletingProjectId.value = project.id;
+  errorMessage.value = '';
+  try {
+    await apiClient.deleteProject(project.id);
+    projects.value = projects.value.filter((item) => item.id !== project.id);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '删除项目失败';
+  } finally {
+    deletingProjectId.value = null;
+  }
 }
 
 async function handleCreateProject() {
@@ -118,6 +136,14 @@ onMounted(() => {
           <router-link class="link-button" :to="`/projects/${project.id}/settings`"
             >人物设定</router-link
           >
+          <button
+            type="button"
+            class="danger-button"
+            :disabled="deletingProjectId === project.id"
+            @click="handleDeleteProject(project)"
+          >
+            {{ deletingProjectId === project.id ? '删除中...' : '删除' }}
+          </button>
         </div>
       </article>
     </section>
@@ -236,5 +262,19 @@ onMounted(() => {
   padding: 0.35rem 0.65rem;
   color: #1f2937;
   text-decoration: none;
+}
+
+.danger-button {
+  border: 1px solid #fecdca;
+  border-radius: 6px;
+  padding: 0.35rem 0.65rem;
+  background: #fff;
+  color: #b42318;
+  cursor: pointer;
+}
+
+.danger-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 </style>

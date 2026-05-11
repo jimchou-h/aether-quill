@@ -1,0 +1,42 @@
+post:
+  tags:
+    - Projects
+  summary: Publish persona
+  description: Publish a persona draft and set it as the active persona for the project
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: personaId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Persona published
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/Persona'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or persona not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

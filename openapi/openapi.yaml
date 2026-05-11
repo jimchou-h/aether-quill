@@ -57,6 +57,10 @@ paths:
     $ref: './paths/projects/prompt-config-publish.yaml'
   /api/projects/{id}/prompt-config/rollback:
     $ref: './paths/projects/prompt-config-rollback.yaml'
+  /api/projects/{id}/personas:
+    $ref: './paths/projects/personas.yaml'
+  /api/projects/{id}/personas/{personaId}/publish:
+    $ref: './paths/projects/persona-publish.yaml'
   /api/projects/{id}/knowledge/chapters/summarize:
     $ref: './paths/projects/chapter-summarize-batch.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/summarize:
@@ -306,6 +310,36 @@ components:
         errorMessage:
           type: string
           nullable: true
+    Persona:
+      type: object
+      required:
+        - id
+        - name
+        - profile
+        - state
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        profile:
+          type: string
+          description: Merged persona profile, tone, and constraints text
+        state:
+          type: string
+          description: Current narrative state for the persona
+        status:
+          type: string
+          enum: [draft, published]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     PromptConfig:
       type: object
       required:

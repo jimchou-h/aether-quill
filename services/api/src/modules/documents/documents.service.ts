@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import axios from 'axios';
 import { ProjectsService } from '../projects/projects.service';
+import { listDocumentIdsForProject } from '../projects/project-delete.util';
 import {
   DocumentRecord,
   ChunkRecord,
@@ -152,6 +153,14 @@ export class DocumentsService {
 
     this.persistState();
     return doc;
+  }
+
+  removeByProjectId(projectId: string): number {
+    const documentIds = listDocumentIdsForProject(this.documents, projectId);
+    for (const documentId of documentIds) {
+      this.remove(documentId);
+    }
+    return documentIds.length;
   }
 
   remove(documentId: string): void {

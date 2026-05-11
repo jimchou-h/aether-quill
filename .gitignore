@@ -42,3 +42,7 @@ temp/
 
 .agents
 .docs
+
+services/api/data/project-workspaces.json
+services/api/data/prompt-templates.json
+services/api/data/documents.json
