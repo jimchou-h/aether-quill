@@ -2,6 +2,7 @@ import express from 'express';
 import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
+import { GenerationService, GenerationContext } from './generation/generation.service';
 
 const app = express();
 app.use(express.json());
@@ -11,6 +12,7 @@ const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
 
 const vectorStore = new VectorStore(API_BASE_URL);
 const reranker = new Reranker();
+const generationService = new GenerationService();
 
 interface ContextChapter {
   chapterNo: number;
@@ -39,6 +41,24 @@ function getOrCreateContext(projectId: string) {
     });
   }
   return projectContextStore.get(projectId)!;
+}
+
+function getGenerationContext(
+  projectId: string,
+  _task?: Record<string, unknown>
+): GenerationContext {
+  void _task;
+  const ctx = getOrCreateContext(projectId);
+  const recentChapters = ctx.chapters.slice(-3);
+
+  return {
+    systemPromptText: ctx.systemPromptText,
+    personaProfile: ctx.personaProfile,
+    outlineSummary: ctx.outlineSummary,
+    chapterContext: recentChapters
+      .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
+      .join('\n'),
+  };
 }
 
 function keywordScore(query: string, text: string) {
@@ -202,45 +222,150 @@ app.post('/api/search', async (req, res) => {
 });
 
 app.post('/api/generate', async (req, res) => {
-  const {
+  const { projectId, prompt, useSSE = true, context: extraContext } = req.body;
+
+  if (!projectId || !prompt) {
+    return res.status(400).json({ error: 'projectId and prompt are required' });
+  }
+
+  const generationContext = getGenerationContext(
     projectId,
-    task = {},
-    citations = [],
-  }: {
-    projectId: string;
-    task: {
-      chapterNo?: number;
-      goal?: string;
-      pov?: string;
-      mustInclude?: string[];
-      avoid?: string[];
-      targetWords?: number;
-    };
-    citations?: Array<{ sourceId: string; snippet: string }>;
-  } = req.body;
+    extraContext as Record<string, unknown> | undefined
+  );
+
+  const trace = await generationService.createTrace({
+    prompt,
+    projectId,
+    systemPrompt: generationContext.systemPromptText,
+    context: extraContext,
+    useSSE,
+  });
+
+  if (useSSE) {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    res.write(`data: ${JSON.stringify({ event: 'start', traceId: trace.id })}\n\n`);
+
+    try {
+      for await (const chunk of generationService.generateStream(trace, generationContext)) {
+        const escaped = chunk.replace(/\n/g, '\\n');
+        res.write(
+          `data: ${JSON.stringify({ event: 'content', data: escaped, traceId: trace.id })}\n\n`
+        );
+      }
+
+      res.write(`data: ${JSON.stringify({ event: 'end', traceId: trace.id })}\n\n`);
+      res.end();
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Generation failed';
+      res.write(
+        `data: ${JSON.stringify({ event: 'error', data: errorMsg, traceId: trace.id })}\n\n`
+      );
+      res.end();
+    }
+  } else {
+    try {
+      const result = await generationService.generateNonStream(trace, generationContext);
+      res.json({
+        traceId: trace.id,
+        status: 'completed',
+        content: result,
+        usage: trace.usage,
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Generation failed';
+      res.status(500).json({ error: errorMsg, traceId: trace.id, status: 'failed' });
+    }
+  }
+});
+
+app.get('/api/projects/:projectId/generation-traces', (req, res) => {
+  const projectId = req.params.projectId;
+  const limit = Number(req.query.limit) || 20;
+  const offset = Number(req.query.offset) || 0;
+
+  const traces = generationService.listTraces(projectId, limit, offset);
+  res.json({ data: traces, total: traces.length });
+});
+
+app.get('/api/traces/:traceId', (req, res) => {
+  const trace = generationService.getTrace(req.params.traceId);
+  if (!trace) {
+    return res.status(404).json({ error: 'Trace not found' });
+  }
+  res.json(trace);
+});
+
+app.post('/api/generate/draft', async (req, res) => {
+  const { projectId, task = {}, citations = [] } = req.body;
 
   const context = getOrCreateContext(projectId);
   const chapterNo = Number(task.chapterNo || 1);
+  const generationContext = getGenerationContext(projectId, task);
+  const goal = task.goal || '推进主线并保持人物一致性';
+  const pov = task.pov || '第三人称';
 
-  res.json({
-    draftText: [
-      `第${chapterNo}章（编排草稿）`,
-      '',
-      `写作目标：${task.goal || '推进主线并保持人物一致性'}`,
-      `叙事视角：${task.pov || '第三人称'}`,
-      `系统提示：${context.systemPromptText}`,
-      `人物设定：${context.personaProfile}`,
-      '',
-      '章节正文示例：角色在冲突现场做出关键抉择，并留下下一章悬念。',
-    ].join('\n'),
-    reasoningBrief:
-      '使用项目上下文完成 multi-project 编排：systemPrompt + persona + outline + chapter summaries。',
-    citations,
-    consistencyNotes: context.outlineSummary
-      ? [{ level: 'info', message: '已加载项目大纲与章节摘要。' }]
-      : [{ level: 'warning', message: '未检测到大纲总结，请补充后再生成。' }],
-    message: 'Generation completed',
+  const prompt = `请根据以下项目上下文撰写第${chapterNo}章。
+
+写作目标：${goal}
+叙事视角：${pov}
+
+系统提示：${context.systemPromptText}
+人物设定：${context.personaProfile}
+大纲总结：${context.outlineSummary || '（无）'}
+近期章节摘要：${generationContext.chapterContext || '（无）'}
+
+要求：
+1. 保持与前面章节的情节连贯
+2. 人物行为符合设定
+3. ${task.targetWords || 2500}字左右`;
+
+  const trace = await generationService.createTrace({
+    prompt,
+    projectId,
+    systemPrompt: context.systemPromptText,
+    context: { task, citations },
+    useSSE: true,
   });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  res.write(`data: ${JSON.stringify({ event: 'start', traceId: trace.id, chapterNo })}\n\n`);
+
+  try {
+    for await (const chunk of generationService.generateStream(trace, generationContext)) {
+      const escaped = chunk.replace(/\n/g, '\\n');
+      res.write(
+        `data: ${JSON.stringify({ event: 'content', data: escaped, traceId: trace.id })}\n\n`
+      );
+    }
+
+    res.write(
+      `data: ${JSON.stringify({
+        event: 'end',
+        traceId: trace.id,
+        citations,
+        consistencyNotes: context.outlineSummary
+          ? [{ level: 'info', message: '已加载项目大纲与章节摘要。' }]
+          : [{ level: 'warning', message: '未检测到大纲总结，请补充后再生成。' }],
+      })}\n\n`
+    );
+    res.end();
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Generation failed';
+    res.write(`data: ${JSON.stringify({ event: 'error', data: errorMsg, traceId: trace.id })}\n\n`);
+    res.end();
+  }
 });
 
 app.listen(PORT, () => {
