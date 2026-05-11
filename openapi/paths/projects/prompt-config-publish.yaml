@@ -1,0 +1,56 @@
+post:
+  tags:
+    - PromptConfig
+  summary: Publish prompt config
+  description: Publish prompt configuration to production
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Prompt config published
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      configId:
+                        type: string
+                        format: uuid
+                      version:
+                        type: integer
+                      isPublished:
+                        type: boolean
+                        value: true
+                      publishedAt:
+                        type: string
+                        format: date-time
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '409':
+      description: No draft to publish
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

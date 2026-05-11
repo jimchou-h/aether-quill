@@ -1,0 +1,242 @@
+openapi: 3.0.3
+info:
+  title: Aether Quill API
+  description: RAG 小说写作系统 API
+  version: 1.0.0
+  contact:
+    name: Aether Quill Team
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+  - url: https://api.aether-quill.com
+    description: Production server
+
+tags:
+  - name: Auth
+    description: Authentication and user management
+  - name: Projects
+    description: Project management
+  - name: Documents
+    description: Document and knowledge base management
+  - name: Generation
+    description: Content generation and drafts
+  - name: PromptConfig
+    description: Prompt configuration and templates
+
+paths:
+  /api/auth/login:
+    $ref: './paths/auth/login.yaml'
+  /api/auth/me:
+    $ref: './paths/auth/me.yaml'
+  /api/projects:
+    $ref: './paths/projects/index.yaml'
+  /api/projects/{id}:
+    $ref: './paths/projects/by-id.yaml'
+  /api/projects/{id}/documents:
+    $ref: './paths/projects/documents.yaml'
+  /api/documents/{id}/reindex:
+    $ref: './paths/documents/reindex.yaml'
+  /api/documents/{id}/chunks:
+    $ref: './paths/documents/chunks.yaml'
+  /api/projects/{id}/generate:
+    $ref: './paths/projects/generate.yaml'
+  /api/projects/{id}/generation-traces:
+    $ref: './paths/projects/generation-traces.yaml'
+  /api/drafts/{id}/accept:
+    $ref: './paths/drafts/accept.yaml'
+  /api/drafts/{id}/rewrite:
+    $ref: './paths/drafts/rewrite.yaml'
+  /api/projects/{id}/prompt-config:
+    $ref: './paths/projects/prompt-config.yaml'
+  /api/projects/{id}/prompt-config/publish:
+    $ref: './paths/projects/prompt-config-publish.yaml'
+  /api/projects/{id}/prompt-config/rollback:
+    $ref: './paths/projects/prompt-config-rollback.yaml'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Envelope:
+      type: object
+      required:
+        - code
+        - message
+        - requestId
+      properties:
+        code:
+          type: integer
+          description: HTTP status code
+        message:
+          type: string
+          description: Response message
+        data:
+          type: object
+          description: Response data
+        requestId:
+          type: string
+          description: Unique request ID for tracing
+    Error:
+      type: object
+      required:
+        - code
+        - message
+        - requestId
+      properties:
+        code:
+          type: integer
+          description: Error code
+        message:
+          type: string
+          description: Error message
+        requestId:
+          type: string
+          description: Unique request ID for tracing
+        details:
+          type: object
+          description: Additional error details
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    Project:
+      type: object
+      required:
+        - id
+        - name
+        - userId
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        userId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Document:
+      type: object
+      required:
+        - id
+        - projectId
+        - title
+        - indexStatus
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        indexStatus:
+          type: string
+          enum: [pending, indexing, completed, failed]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Chunk:
+      type: object
+      required:
+        - id
+        - documentId
+        - content
+      properties:
+        id:
+          type: string
+          format: uuid
+        documentId:
+          type: string
+          format: uuid
+        content:
+          type: string
+        metadata:
+          type: object
+    GenerationTrace:
+      type: object
+      required:
+        - id
+        - projectId
+        - prompt
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        prompt:
+          type: string
+        status:
+          type: string
+          enum: [pending, generating, completed, failed]
+        traceId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+    PromptConfig:
+      type: object
+      required:
+        - id
+        - projectId
+        - systemPromptText
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        systemPromptText:
+          type: string
+          description: System prompt text for generation
+        version:
+          type: integer
+        isPublished:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+security:
+  - BearerAuth: []

@@ -1,0 +1,66 @@
+post:
+  tags:
+    - Generation
+  summary: Rewrite draft
+  description: Rewrite a generated draft with new instructions
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - instructions
+          properties:
+            instructions:
+              type: string
+              description: Instructions for rewriting
+  responses:
+    '200':
+      description: Rewrite started
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      draftId:
+                        type: string
+                        format: uuid
+                      traceId:
+                        type: string
+                        description: New trace ID for rewrite
+                      status:
+                        type: string
+                        enum: [rewriting]
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Draft not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
