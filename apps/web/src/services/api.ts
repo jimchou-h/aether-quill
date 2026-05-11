@@ -106,10 +106,30 @@ http.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor for error handling
+// Response interceptor for unified response format
 http.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // 统一响应格式：{ code, msg, data }
+    const data = response.data;
+    if (data && typeof data === 'object' && 'code' in data) {
+      if (data.code === 0) {
+        // 成功响应，直接返回 data 字段
+        response.data = data.data;
+      } else {
+        // 错误响应，抛出错误
+        throw new Error(data.msg || 'Request failed');
+      }
+    }
+    return response;
+  },
   (error) => {
+    // 处理错误响应
+    if (error.response?.data) {
+      const data = error.response.data;
+      if (data && typeof data === 'object' && 'msg' in data) {
+        error.message = data.msg;
+      }
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       window.location.href = '/login';
@@ -252,7 +272,7 @@ export const apiClient = {
       pov: string;
       mustInclude: string[];
       avoid: string[];
-      targetWords: number;
+      targetWords?: number;
     }
   ) {
     const response = await http.post(`/api/projects/${projectId}/write`, payload);
@@ -464,7 +484,7 @@ export const apiClient = {
       pov: string;
       mustInclude: string[];
       avoid: string[];
-      targetWords: number;
+      targetWords?: number;
     },
     citations: CitationItem[],
     callbacks: SseCallbacks
@@ -684,7 +704,7 @@ export interface WriteResult {
     usedPersonaId: string | null;
     outlineUsed: boolean;
     recentChapterCount: number;
-    targetWords: number;
+    targetWords: number | null;
   };
 }
 

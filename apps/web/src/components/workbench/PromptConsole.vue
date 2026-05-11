@@ -13,7 +13,7 @@ const emit = defineEmits<{
       pov: string;
       mustInclude: string[];
       avoid: string[];
-      targetWords: number;
+      targetWords?: number;
     },
   ];
 }>();
@@ -24,6 +24,7 @@ const pov = shallowRef('第三人称有限视角');
 const mustIncludeText = shallowRef('');
 const avoidText = shallowRef('');
 const targetWords = shallowRef(3000);
+const unlimitedWords = shallowRef(false);
 
 function parseMultiLine(text: string): string[] {
   return text
@@ -41,7 +42,7 @@ function handleGenerate() {
     pov: pov.value.trim(),
     mustInclude: parseMultiLine(mustIncludeText.value),
     avoid: parseMultiLine(avoidText.value),
-    targetWords: Number(targetWords.value),
+    ...(unlimitedWords.value ? {} : { targetWords: Number(targetWords.value) }),
   });
 }
 
@@ -52,6 +53,7 @@ function resetForm() {
   mustIncludeText.value = '';
   avoidText.value = '';
   targetWords.value = 3000;
+  unlimitedWords.value = false;
 }
 
 defineExpose({ resetForm });
@@ -66,16 +68,21 @@ defineExpose({ resetForm });
         章节号
         <input v-model.number="chapterNo" type="number" min="1" class="field-input" />
       </label>
-      <label class="field-label">
-        目标字数
+      <div class="field-label">
+        <span>目标字数</span>
+        <label class="unlimited-toggle">
+          <input v-model="unlimitedWords" type="checkbox" />
+          不限制字数（尽量写长）
+        </label>
         <input
           v-model.number="targetWords"
           type="number"
           min="200"
           step="100"
           class="field-input"
+          :disabled="unlimitedWords"
         />
-      </label>
+      </div>
     </div>
 
     <label class="field-label">
@@ -153,6 +160,15 @@ defineExpose({ resetForm });
   margin-bottom: 0.75rem;
   font-weight: 600;
   font-size: 0.9rem;
+}
+
+.unlimited-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: #4b5563;
 }
 
 .field-input,

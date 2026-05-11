@@ -14,6 +14,14 @@ import {
   trimForPrompt,
 } from './persona-state.util';
 
+function buildTargetWordsInstruction(targetWords?: number): string {
+  const parsed = Number(targetWords);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return `目标字数约 ${parsed} 字。`;
+  }
+  return '不设字数上限，在情节完整的前提下尽量充实详尽。';
+}
+
 type PersonaStatus = 'draft' | 'published';
 type IndexMode = 'full' | 'incremental';
 type IndexJobStatus = 'processing' | 'completed' | 'failed';
@@ -109,7 +117,7 @@ interface WriteTaskInput {
   pov: string;
   mustInclude: string[];
   avoid: string[];
-  targetWords: number;
+  targetWords?: number;
 }
 
 export interface WorkspaceSnapshot {
@@ -758,7 +766,10 @@ export class ProjectsService {
         usedPersonaId: activePersona?.id || null,
         outlineUsed: Boolean(knowledge.outlineSummary),
         recentChapterCount: latestChapters.length,
-        targetWords: Number(payload.targetWords || 2500),
+        targetWords:
+          Number.isFinite(Number(payload.targetWords)) && Number(payload.targetWords) > 0
+            ? Number(payload.targetWords)
+            : null,
       },
       autoUpdates,
     };
@@ -1297,7 +1308,7 @@ export class ProjectsService {
       `叙事视角：${pov}`,
       mustInclude.length > 0 ? `必须包含：${mustInclude.join('；')}` : '',
       avoid.length > 0 ? `避免内容：${avoid.join('；')}` : '',
-      `目标字数约 ${Number(payload.targetWords || 2500)} 字。`,
+      buildTargetWordsInstruction(payload.targetWords),
     ]
       .filter(Boolean)
       .join('\n');

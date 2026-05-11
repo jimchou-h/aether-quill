@@ -97,44 +97,45 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
-    Envelope:
+    ApiResponse:
       type: object
+      description: Unified API response envelope
       required:
         - code
-        - message
-        - requestId
+        - msg
+        - data
       properties:
         code:
           type: integer
-          description: HTTP status code
-        message:
+          description: Response code. 0 for success, non-zero for errors
+          example: 0
+        msg:
           type: string
           description: Response message
+          example: success
         data:
-          type: object
-          description: Response data
-        requestId:
-          type: string
-          description: Unique request ID for tracing
-    Error:
+          description: Response data. Null for errors
+    ErrorResponse:
       type: object
+      description: Error response envelope
       required:
         - code
-        - message
-        - requestId
+        - msg
+        - data
       properties:
         code:
           type: integer
-          description: Error code
-        message:
+          description: Error code (non-zero)
+          example: 1001
+        msg:
           type: string
           description: Error message
-        requestId:
-          type: string
-          description: Unique request ID for tracing
-        details:
+          example: Invalid token
+        data:
           type: object
-          description: Additional error details
+          nullable: true
+          description: Always null for error responses
+          example: null
     User:
       type: object
       required:

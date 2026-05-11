@@ -9,23 +9,38 @@ import PromptConsole from '../components/workbench/PromptConsole.vue';
 import GenerationPreview from '../components/workbench/GenerationPreview.vue';
 import ConsistencyAlert from '../components/workbench/ConsistencyAlert.vue';
 
+/** 路由实例 */
 const route = useRoute();
+/** 项目ID */
 const projectId = computed(() => String(route.params.id || ''));
 
+/** 生成状态管理 */
 const generationStore = useGenerationStore();
+/** 编辑器状态管理 */
 const editorStore = useEditorStore();
 
+/** 是否正在加载 */
 const loading = ref(false);
+/** 错误消息 */
 const errorMessage = ref('');
 
+/** 项目名称 */
 const projectName = ref('');
+/** 当前人物设定名称 */
 const activePersonaName = ref('');
+/** 章节数量 */
 const chapterCount = ref(0);
+/** 大纲是否已配置 */
 const outlineReady = ref(false);
+/** 大纲摘要 */
 const outlineSummary = ref('');
 
+/** 提示词控制台引用 */
 const promptConsoleRef = ref<InstanceType<typeof PromptConsole> | null>(null);
 
+/**
+ * 加载工作台数据
+ */
 async function loadWorkspace() {
   loading.value = true;
   errorMessage.value = '';
@@ -47,13 +62,17 @@ async function loadWorkspace() {
   }
 }
 
+/**
+ * 处理生成请求
+ * @param {Object} task - 生成任务参数
+ */
 async function handleGenerate(task: {
   chapterNo: number;
   goal: string;
   pov: string;
   mustInclude: string[];
   avoid: string[];
-  targetWords: number;
+  targetWords?: number;
 }) {
   errorMessage.value = '';
   await generationStore.generate(projectId.value, task);
@@ -62,6 +81,9 @@ async function handleGenerate(task: {
   }
 }
 
+/**
+ * 处理接受草稿
+ */
 async function handleAcceptDraft() {
   const chNo = generationStore.chapterNo;
   await generationStore.acceptDraft(projectId.value, chNo);
@@ -76,10 +98,16 @@ async function handleAcceptDraft() {
   await loadWorkspace();
 }
 
+/**
+ * 处理重新生成
+ */
 async function handleRegenerate() {
   generationStore.reset();
 }
 
+/**
+ * 组件挂载时加载数据
+ */
 onMounted(() => {
   void loadWorkspace();
 });

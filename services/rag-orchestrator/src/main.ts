@@ -36,6 +36,14 @@ const reranker = new Reranker();
 const generationService = new GenerationService();
 const consistencyChecker = new ConsistencyChecker();
 
+function buildTargetWordsRequirement(targetWords: unknown): string {
+  const parsed = Number(targetWords);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return `${parsed}字左右`;
+  }
+  return '不设字数上限，在情节完整的前提下尽量充实详尽';
+}
+
 interface ContextChapter {
   chapterNo: number;
   title: string;
@@ -449,7 +457,7 @@ app.post('/api/generate/draft', async (req, res) => {
 要求：
 1. 保持与前面章节的情节连贯
 2. 人物行为符合设定
-3. ${task.targetWords || 2500}字左右`;
+3. ${buildTargetWordsRequirement(task.targetWords)}`;
 
   const traceSpanId = startSpan(requestTraceId, 'generate.draft', {
     projectId,
