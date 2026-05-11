@@ -25,7 +25,9 @@
   },
   "devDependencies": {
     "@openapitools/openapi-generator-cli": "^2.32.0",
+    "@types/bcrypt": "^6.0.0",
     "@types/node": "^20.0.0",
+    "@types/passport-jwt": "^4.0.1",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "axios": "^1.6.0",
@@ -36,5 +38,12 @@
     "prettier": "^3.2.0",
     "typescript": "^5.4.0",
     "vue-eslint-parser": "^9.4.0"
+  },
+  "dependencies": {
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "bcrypt": "^6.0.0",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1"
   }
 }
