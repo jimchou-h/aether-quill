@@ -1,0 +1,130 @@
+post:
+  tags:
+    - Generation
+  summary: Check consistency
+  description: Run consistency checks (character, timeline, world rules) on generated text
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - text
+          properties:
+            text:
+              type: string
+              description: Text to check for consistency
+            context:
+              type: object
+              description: Optional consistency context (characters, timeline, world rules)
+              properties:
+                characters:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      aliases:
+                        type: array
+                        items:
+                          type: string
+                      age:
+                        type: string
+                      identity:
+                        type: string
+                      status:
+                        type: string
+                        enum: [alive, deceased, unknown]
+                      relationships:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            target:
+                              type: string
+                            relation:
+                              type: string
+                timeline:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      label:
+                        type: string
+                      chapterNo:
+                        type: integer
+                      description:
+                        type: string
+                worldRules:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      domain:
+                        type: string
+                      rule:
+                        type: string
+  responses:
+    '200':
+      description: Consistency check completed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConsistencyReport'
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+
+components:
+  schemas:
+    ConsistencyCheckResult:
+      type: object
+      required:
+        - level
+        - category
+        - message
+      properties:
+        level:
+          type: string
+          enum: [pass, warn, block]
+        category:
+          type: string
+          enum: [character, timeline, world_rule]
+        message:
+          type: string
+        detail:
+          type: string
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+    ConsistencyReport:
+      type: object
+      required:
+        - overall
+        - results
+        - checkedAt
+      properties:
+        overall:
+          type: string
+          enum: [pass, warn, block]
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConsistencyCheckResult'
+        checkedAt:
+          type: string
+          format: date-time
