@@ -65,6 +65,10 @@ export class GenerationService {
     return this.traceStore.getStats(projectId);
   }
 
+  getTraceCount(): number {
+    return this.traceStore.getStats().total;
+  }
+
   async generateNonStream(trace: TraceRecord, context: GenerationContext): Promise<string> {
     const prompt = this.buildPrompt(context, trace.prompt);
     this.updateTrace(trace.id, { status: 'generating' });

@@ -1,0 +1,33 @@
+get:
+  tags:
+    - Observability
+  summary: Get metrics snapshot
+  description: Get current service metrics (counters, histograms, uptime)
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Metrics snapshot
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              counters:
+                type: object
+                description: Metric counters (e.g. http_requests_total)
+              histograms:
+                type: object
+                description: Metric histograms (e.g. http_request_duration_ms)
+              activeSpans:
+                type: integer
+              totalTraces:
+                type: integer
+              uptimeSeconds:
+                type: integer
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

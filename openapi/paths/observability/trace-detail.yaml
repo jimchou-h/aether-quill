@@ -1,0 +1,51 @@
+get:
+  tags:
+    - Observability
+  summary: Get trace spans
+  description: Get all spans for a specific trace ID
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: traceId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Trace spans retrieved
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              traceId:
+                type: string
+              spans:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    spanId:
+                      type: string
+                    traceId:
+                      type: string
+                    operation:
+                      type: string
+                    startTime:
+                      type: string
+                      format: date-time
+                    durationMs:
+                      type: number
+                    status:
+                      type: string
+                      enum: [ok, error]
+    '404':
+      description: Trace not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
