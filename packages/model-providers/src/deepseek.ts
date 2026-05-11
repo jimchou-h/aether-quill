@@ -68,7 +68,7 @@ export class DeepSeekProvider implements ModelProvider {
     this.client = axios.create({
       baseURL: config.baseUrl || 'https://api.deepseek.com/v1',
       headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
     });
@@ -84,29 +84,26 @@ export class DeepSeekProvider implements ModelProvider {
 
   async generate(request: GenerationRequest): Promise<GenerationResponse> {
     const model = request.model || this.defaultModel;
-    
+
     const messages: Array<{ role: string; content: string }> = [];
-    
+
     if (request.systemPrompt) {
       messages.push({ role: 'system', content: request.systemPrompt });
     }
-    
+
     messages.push({ role: 'user', content: request.userPrompt });
 
-    const response = await this.client.post<DeepSeekChatCompletionResponse>(
-      '/chat/completions',
-      {
-        model,
-        messages,
-        max_tokens: request.maxTokens || 4096,
-        temperature: request.temperature || 0.7,
-        top_p: request.topP || 0.95,
-        stream: false,
-      }
-    );
+    const response = await this.client.post<DeepSeekChatCompletionResponse>('/chat/completions', {
+      model,
+      messages,
+      max_tokens: request.maxTokens || 4096,
+      temperature: request.temperature || 0.7,
+      top_p: request.topP || 0.95,
+      stream: false,
+    });
 
     const choice = response.data.choices[0];
-    
+
     return {
       content: choice.message.content,
       usage: response.data.usage
@@ -121,13 +118,13 @@ export class DeepSeekProvider implements ModelProvider {
 
   async *streamGenerate(request: GenerationRequest): AsyncIterable<NormalizedSseEvent> {
     const model = request.model || this.defaultModel;
-    
+
     const messages: Array<{ role: string; content: string }> = [];
-    
+
     if (request.systemPrompt) {
       messages.push({ role: 'system', content: request.systemPrompt });
     }
-    
+
     messages.push({ role: 'user', content: request.userPrompt });
 
     yield {
@@ -149,18 +146,17 @@ export class DeepSeekProvider implements ModelProvider {
         {
           responseType: 'stream',
           headers: {
-            'Accept': 'text/event-stream',
+            Accept: 'text/event-stream',
           },
         }
       );
 
       const stream = response.data as NodeJS.ReadableStream;
-      const decoder = new (require('stream').Writable || require('stream').Readable);
 
       for await (const chunk of stream) {
         const chunkStr = chunk.toString('utf-8');
         const lines = chunkStr.split('\n');
-        
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const dataStr = line.slice(6);
@@ -171,11 +167,11 @@ export class DeepSeekProvider implements ModelProvider {
               };
               return;
             }
-            
+
             try {
               const data: DeepSeekStreamChunk = JSON.parse(dataStr);
               const choice = data.choices[0];
-              
+
               if (choice.delta.content) {
                 yield {
                   type: 'content',

@@ -72,12 +72,12 @@ export const SystemErrorCodes = {
  * 所有错误码的联合类型
  */
 export type ErrorCode =
-  | typeof AuthErrorCodes[keyof typeof AuthErrorCodes]
-  | typeof ProjectErrorCodes[keyof typeof ProjectErrorCodes]
-  | typeof DocumentErrorCodes[keyof typeof DocumentErrorCodes]
-  | typeof GenerationErrorCodes[keyof typeof GenerationErrorCodes]
-  | typeof ConfigErrorCodes[keyof typeof ConfigErrorCodes]
-  | typeof SystemErrorCodes[keyof typeof SystemErrorCodes];
+  | (typeof AuthErrorCodes)[keyof typeof AuthErrorCodes]
+  | (typeof ProjectErrorCodes)[keyof typeof ProjectErrorCodes]
+  | (typeof DocumentErrorCodes)[keyof typeof DocumentErrorCodes]
+  | (typeof GenerationErrorCodes)[keyof typeof GenerationErrorCodes]
+  | (typeof ConfigErrorCodes)[keyof typeof ConfigErrorCodes]
+  | (typeof SystemErrorCodes)[keyof typeof SystemErrorCodes];
 
 /**
  * 获取错误码对应的HTTP状态码

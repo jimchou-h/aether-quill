@@ -68,7 +68,7 @@ export class SiliconFlowProvider implements ModelProvider {
     this.client = axios.create({
       baseURL: config.baseUrl || 'https://api.siliconflow.cn/v1',
       headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
     });
@@ -84,13 +84,13 @@ export class SiliconFlowProvider implements ModelProvider {
 
   async generate(request: GenerationRequest): Promise<GenerationResponse> {
     const model = request.model || this.defaultModel;
-    
+
     const messages: Array<{ role: string; content: string }> = [];
-    
+
     if (request.systemPrompt) {
       messages.push({ role: 'system', content: request.systemPrompt });
     }
-    
+
     messages.push({ role: 'user', content: request.userPrompt });
 
     const response = await this.client.post<SiliconFlowChatCompletionResponse>(
@@ -106,7 +106,7 @@ export class SiliconFlowProvider implements ModelProvider {
     );
 
     const choice = response.data.choices[0];
-    
+
     return {
       content: choice.message.content,
       usage: response.data.usage
@@ -121,13 +121,13 @@ export class SiliconFlowProvider implements ModelProvider {
 
   async *streamGenerate(request: GenerationRequest): AsyncIterable<NormalizedSseEvent> {
     const model = request.model || this.defaultModel;
-    
+
     const messages: Array<{ role: string; content: string }> = [];
-    
+
     if (request.systemPrompt) {
       messages.push({ role: 'system', content: request.systemPrompt });
     }
-    
+
     messages.push({ role: 'user', content: request.userPrompt });
 
     yield {
@@ -149,7 +149,7 @@ export class SiliconFlowProvider implements ModelProvider {
         {
           responseType: 'stream',
           headers: {
-            'Accept': 'text/event-stream',
+            Accept: 'text/event-stream',
           },
         }
       );
@@ -159,7 +159,7 @@ export class SiliconFlowProvider implements ModelProvider {
       for await (const chunk of stream) {
         const chunkStr = chunk.toString('utf-8');
         const lines = chunkStr.split('\n');
-        
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const dataStr = line.slice(6);
@@ -170,11 +170,11 @@ export class SiliconFlowProvider implements ModelProvider {
               };
               return;
             }
-            
+
             try {
               const data: SiliconFlowStreamChunk = JSON.parse(dataStr);
               const choice = data.choices[0];
-              
+
               if (choice.delta.content) {
                 yield {
                   type: 'content',

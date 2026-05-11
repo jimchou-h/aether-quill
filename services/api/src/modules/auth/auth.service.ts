@@ -26,7 +26,7 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<LoginResponse> {
     const user = this.users.get('1');
-    
+
     if (!user || user.email !== email) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -39,7 +39,8 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user);
     await this.createSession(user.id, refreshToken);
 
-    const { password: _, ...userWithoutPassword } = user;
+    const { password: _pwd, ...userWithoutPassword } = user;
+    void _pwd;
     return {
       accessToken,
       refreshToken,
@@ -49,7 +50,7 @@ export class AuthService {
 
   async refreshToken(refreshToken: string): Promise<RefreshResponse> {
     const session = this.sessions.get(refreshToken);
-    
+
     if (!session || new Date(session.expiresAt) < new Date()) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
@@ -60,7 +61,7 @@ export class AuthService {
     }
 
     this.sessions.delete(refreshToken);
-    
+
     const { accessToken, refreshToken: newRefreshToken } = await this.generateTokens(user);
     await this.createSession(user.id, newRefreshToken);
 
@@ -74,14 +75,15 @@ export class AuthService {
     if (!token) {
       throw new UnauthorizedException('Token is required');
     }
-    
+
     try {
       const decoded = this.jwtService.verify(token);
       const user = this.users.get(decoded.sub);
       if (!user) {
         throw new UnauthorizedException('Invalid token');
       }
-      const { password: _, ...userWithoutPassword } = user;
+      const { password: _pwd, ...userWithoutPassword } = user;
+      void _pwd;
       return userWithoutPassword;
     } catch (error) {
       throw new UnauthorizedException('Invalid token');
@@ -94,11 +96,11 @@ export class AuthService {
 
   private async generateTokens(user: User) {
     const payload = { sub: user.id, email: user.email, name: user.name };
-    
+
     const accessToken = this.jwtService.sign(payload, {
       expiresIn: '15m',
     });
-    
+
     const refreshToken = this.jwtService.sign(payload, {
       expiresIn: '7d',
     });

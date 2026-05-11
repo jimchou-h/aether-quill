@@ -1,9 +1,4 @@
-import {
-  ModelProvider,
-  ProviderType,
-  ProviderConfig,
-  ProviderFactory,
-} from './types';
+import { ModelProvider, ProviderType, ProviderConfig, ProviderFactory } from './types';
 import { DeepSeekFactory } from './deepseek';
 import { SiliconFlowFactory } from './siliconflow';
 

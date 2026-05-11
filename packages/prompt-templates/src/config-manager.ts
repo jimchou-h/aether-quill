@@ -69,15 +69,17 @@ export class PromptConfigManager {
     };
 
     this.configs.set(config.id, config);
-    
+
     const history: PromptConfigHistory = {
       configId: config.id,
-      versions: [{
-        version: 1,
-        systemPromptText,
-        createdAt: config.createdAt,
-        isPublished: false,
-      }],
+      versions: [
+        {
+          version: 1,
+          systemPromptText,
+          createdAt: config.createdAt,
+          isPublished: false,
+        },
+      ],
     };
     this.histories.set(config.id, history);
 
@@ -106,13 +108,16 @@ export class PromptConfigManager {
   /**
    * 获取项目对应的配置（支持发布版本或草稿）
    */
-  getByProjectIdOrLatest(projectId: string, publishedOnly: boolean = false): PromptConfig | undefined {
+  getByProjectIdOrLatest(
+    projectId: string,
+    publishedOnly: boolean = false
+  ): PromptConfig | undefined {
     const config = this.getByProjectId(projectId);
     if (!config) return undefined;
-    
+
     if (publishedOnly) {
       const history = this.histories.get(config.id);
-      const publishedVersion = history?.versions.find(v => v.isPublished);
+      const publishedVersion = history?.versions.find((v) => v.isPublished);
       if (publishedVersion) {
         return {
           ...config,
@@ -122,7 +127,7 @@ export class PromptConfigManager {
         };
       }
     }
-    
+
     return config;
   }
 
@@ -136,7 +141,7 @@ export class PromptConfigManager {
     }
 
     const history = this.histories.get(configId);
-    
+
     config.systemPromptText = systemPromptText;
     config.version += 1;
     config.updatedAt = new Date().toISOString();
@@ -172,7 +177,7 @@ export class PromptConfigManager {
       v.isPublished = false;
     }
 
-    const currentVersion = history.versions.find(v => v.version === config.version);
+    const currentVersion = history.versions.find((v) => v.version === config.version);
     if (currentVersion) {
       currentVersion.isPublished = true;
       currentVersion.publishedAt = new Date().toISOString();
@@ -207,8 +212,8 @@ export class PromptConfigManager {
       throw new Error('No previous version to rollback to');
     }
 
-    const previousVersion = targetVersion 
-      ? history.versions.find(v => v.version === targetVersion)
+    const previousVersion = targetVersion
+      ? history.versions.find((v) => v.version === targetVersion)
       : history.versions[history.versions.length - 2];
 
     if (!previousVersion) {
@@ -263,12 +268,14 @@ export class PromptConfigManager {
     const history = this.histories.get(configId);
     if (!history) return false;
 
-    const publishedVersion = history.versions.find(v => v.isPublished);
+    const publishedVersion = history.versions.find((v) => v.isPublished);
     if (!publishedVersion) return config.version > 1;
 
     const latestVersion = history.versions[history.versions.length - 1];
-    return latestVersion.version !== publishedVersion.version || 
-           latestVersion.systemPromptText !== publishedVersion.systemPromptText;
+    return (
+      latestVersion.version !== publishedVersion.version ||
+      latestVersion.systemPromptText !== publishedVersion.systemPromptText
+    );
   }
 }
 
