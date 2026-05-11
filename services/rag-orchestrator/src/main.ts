@@ -4,9 +4,21 @@ import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
 import { GenerationService, GenerationContext } from './generation/generation.service';
 import { ConsistencyChecker } from './consistency';
+import {
+  logger,
+  metrics,
+  startSpan,
+  endSpan,
+  getSpansByTrace,
+  getActiveSpanCount,
+  observabilityMiddleware,
+  observabilityErrorHandler,
+  RequestWithObservability,
+} from './observability';
 
 const app = express();
 app.use(express.json());
+app.use(observabilityMiddleware);
 
 const PORT = process.env.PORT || 3001;
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
@@ -79,6 +91,24 @@ function keywordScore(query: string, text: string) {
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'rag-orchestrator', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/observability/metrics', (_req, res) => {
+  const snapshot = metrics.getSnapshot(getActiveSpanCount(), generationService.getTraceCount());
+  res.json(snapshot);
+});
+
+app.get('/api/observability/logs', (req, res) => {
+  const limit = Number(req.query.limit) || 100;
+  res.json({ logs: logger.getRecentLogs(limit) });
+});
+
+app.get('/api/observability/traces/:traceId', (req, res) => {
+  const spans = getSpansByTrace(req.params.traceId);
+  if (spans.length === 0) {
+    return res.status(404).json({ error: 'Trace not found', traceId: req.params.traceId });
+  }
+  res.json({ traceId: req.params.traceId, spans });
 });
 
 app.get('/', (_req, res) => {
@@ -338,6 +368,10 @@ app.get('/api/projects/:projectId/generation-stats', (req, res) => {
 app.post('/api/generate/draft', async (req, res) => {
   const { projectId, task = {}, citations = [] } = req.body;
 
+  const requestTraceId =
+    (req as RequestWithObservability).traceId ||
+    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
   const context = getOrCreateContext(projectId);
   const chapterNo = Number(task.chapterNo || 1);
   const generationContext = getGenerationContext(projectId, task);
@@ -359,6 +393,12 @@ app.post('/api/generate/draft', async (req, res) => {
 2. 人物行为符合设定
 3. ${task.targetWords || 2500}字左右`;
 
+  const traceSpanId = startSpan(requestTraceId, 'generate.draft', {
+    projectId,
+    chapterNo,
+    task,
+  });
+
   const trace = await generationService.createTrace({
     prompt,
     projectId,
@@ -378,6 +418,13 @@ app.post('/api/generate/draft', async (req, res) => {
 
   res.write(`data: ${JSON.stringify({ event: 'start', traceId: trace.id, chapterNo })}\n\n`);
 
+  const streamSpanId = startSpan(
+    trace.id,
+    'generate.stream',
+    { projectId, chapterNo },
+    traceSpanId
+  );
+
   try {
     for await (const chunk of generationService.generateStream(trace, generationContext)) {
       fullDraftText += chunk;
@@ -387,9 +434,18 @@ app.post('/api/generate/draft', async (req, res) => {
       );
     }
 
+    endSpan(streamSpanId);
+
     let consistencyNotes: Array<{ level: string; message: string }> = [];
 
     if (fullDraftText.trim()) {
+      const consistencySpanId = startSpan(
+        trace.id,
+        'consistency.check',
+        { projectId, textLength: fullDraftText.length },
+        traceSpanId
+      );
+
       const character = context.personaProfile
         ? {
             name: (task.personaName as string) || '角色',
@@ -419,6 +475,8 @@ app.post('/api/generate/draft', async (req, res) => {
         level: r.level === 'block' ? 'block' : r.level === 'warn' ? 'warning' : 'info',
         message: r.message,
       }));
+
+      endSpan(consistencySpanId);
     }
 
     if (consistencyNotes.length === 0) {
@@ -436,14 +494,19 @@ app.post('/api/generate/draft', async (req, res) => {
       })}\n\n`
     );
     res.end();
+    endSpan(traceSpanId);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Generation failed';
+    endSpan(streamSpanId, errorMsg);
+    endSpan(traceSpanId, errorMsg);
     res.write(`data: ${JSON.stringify({ event: 'error', data: errorMsg, traceId: trace.id })}\n\n`);
     res.end();
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`RAG Orchestrator service running on http://localhost:${PORT}`);
-  console.log(`API Base URL: ${API_BASE_URL}`);
+  logger.info(`RAG Orchestrator service running on http://localhost:${PORT}`, { port: PORT });
+  logger.info(`API Base URL: ${API_BASE_URL}`, { apiBaseUrl: API_BASE_URL });
 });
+
+app.use(observabilityErrorHandler);

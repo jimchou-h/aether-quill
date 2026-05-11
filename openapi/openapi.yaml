@@ -25,6 +25,8 @@ tags:
     description: Prompt configuration and templates
   - name: Consistency
     description: Consistency checking for generated content
+  - name: Observability
+    description: Service observability, metrics, and tracing
 
 paths:
   /api/auth/login:
@@ -57,6 +59,26 @@ paths:
     $ref: './paths/projects/prompt-config-rollback.yaml'
   /api/consistency/check:
     $ref: './paths/consistency/check.yaml'
+  /api/observability/metrics:
+    $ref: './paths/observability/metrics.yaml'
+  /api/observability/traces/{traceId}:
+    $ref: './paths/observability/trace-detail.yaml'
+  /api/observability/logs:
+    get:
+      tags:
+        - Observability
+      summary: Get recent logs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Recent logs
 
 components:
   securitySchemes:
