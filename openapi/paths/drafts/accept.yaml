@@ -1,0 +1,55 @@
+post:
+  tags:
+    - Generation
+  summary: Accept draft
+  description: Accept a generated draft
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBody:
+    required: false
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            edits:
+              type: string
+              description: Optional edits before accepting
+  responses:
+    '200':
+      description: Draft accepted
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      draftId:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                        enum: [accepted]
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Draft not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

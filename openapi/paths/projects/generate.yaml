@@ -1,0 +1,78 @@
+post:
+  tags:
+    - Generation
+  summary: Generate content
+  description: Generate content using RAG with SSE support
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - prompt
+          properties:
+            prompt:
+              type: string
+              description: User prompt for generation
+            context:
+              type: object
+              description: Additional context for generation
+            useSSE:
+              type: boolean
+              default: true
+              description: Use Server-Sent Events for streaming
+  responses:
+    '200':
+      description: Generation started
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      traceId:
+                        type: string
+                        description: Unique trace ID for this generation
+                      status:
+                        type: string
+                        enum: [pending, generating, completed, failed]
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+  x-codeSamples:
+    - lang: curl
+      label: SSE Streaming
+      source: |
+        curl -N -H "Authorization: Bearer <token>" \
+          -H "Content-Type: application/json" \
+          -d '{"prompt":"Write a chapter","useSSE":true}' \
+          http://localhost:3000/api/projects/{id}/generate
