@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import axios from 'axios';
 import { ProjectsService } from '../projects/projects.service';
 import {
   DocumentRecord,
@@ -169,19 +170,29 @@ export class DocumentsService {
     const doc = this.findById(documentId);
 
     doc.indexStatus = 'indexing';
-
-    try {
-      const generatedChunks = this.generateChunks(doc);
-      this.chunks.set(documentId, generatedChunks);
-      doc.indexStatus = 'completed';
-    } catch {
-      doc.indexStatus = 'failed';
-    }
-
     doc.updatedAt = new Date();
     this.persistState();
 
-    return { documentId, indexStatus: doc.indexStatus };
+    const workerUrl = process.env.WORKER_URL || 'http://localhost:3002';
+
+    axios
+      .post(`${workerUrl}/api/jobs`, {
+        type: 'ingestion',
+        targetType: 'document',
+        targetId: documentId,
+        projectId: doc.projectId,
+        mode: 'full',
+      })
+      .catch((error) => {
+        console.error(
+          `Failed to dispatch ingestion job for document ${documentId}:`,
+          error.message
+        );
+        doc.indexStatus = 'failed';
+        this.persistState();
+      });
+
+    return { documentId, indexStatus: 'indexing' };
   }
 
   getChunks(documentId: string): ChunkRecord[] {
