@@ -416,6 +416,26 @@ export const apiClient = {
       return response.data;
     },
   },
+
+  // Document helper methods
+  async getDocument(id: string) {
+    const response = await http.get(`/api/documents/${id}`);
+    return response.data;
+  },
+
+  async updateDocument(id: string, payload: { title?: string; content?: string }) {
+    const response = await http.put(`/api/documents/${id}`, payload);
+    return response.data;
+  },
+
+  async deleteDocument(id: string) {
+    await http.delete(`/api/documents/${id}`);
+  },
+
+  async getDocumentVersions(id: string) {
+    const response = await http.get(`/api/documents/${id}/versions`);
+    return response.data;
+  },
 };
 
 // Export types from shared-types for convenience
@@ -437,6 +457,32 @@ export interface ProjectItem {
   description?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface DocumentItem {
+  id: string;
+  projectId: string;
+  title: string;
+  content: string;
+  indexStatus: 'pending' | 'indexing' | 'completed' | 'failed';
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChunkItem {
+  id: string;
+  documentId: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface DocumentVersionItem {
+  version: number;
+  title: string;
+  content: string;
+  createdAt: string;
 }
 
 export interface ProjectSettings {
