@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { TraceRecord, GenerateRequest } from './types';
+import { TraceStore, TraceQuery, TraceStats } from './trace-store';
 
 export interface GenerationContext {
   systemPromptText: string;
@@ -9,7 +10,7 @@ export interface GenerationContext {
 }
 
 export class GenerationService {
-  private readonly traces: TraceRecord[] = [];
+  private readonly traceStore = new TraceStore();
 
   buildPrompt(context: GenerationContext, userPrompt: string): string {
     const sections: string[] = [];
@@ -44,27 +45,24 @@ export class GenerationService {
       createdAt: new Date().toISOString(),
     };
 
-    this.traces.push(trace);
+    this.traceStore.push(trace);
     return trace;
   }
 
   updateTrace(traceId: string, updates: Partial<TraceRecord>): void {
-    const trace = this.traces.find((t) => t.id === traceId);
-    if (trace) {
-      Object.assign(trace, updates);
-    }
+    this.traceStore.update(traceId, updates);
   }
 
   getTrace(traceId: string): TraceRecord | undefined {
-    return this.traces.find((t) => t.id === traceId);
+    return this.traceStore.findById(traceId);
   }
 
-  listTraces(projectId: string, limit = 20, offset = 0): TraceRecord[] {
-    const projectTraces = this.traces
-      .filter((t) => t.projectId === projectId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  queryTraces(query: TraceQuery): { data: TraceRecord[]; total: number } {
+    return this.traceStore.query(query);
+  }
 
-    return projectTraces.slice(offset, offset + limit);
+  getStats(projectId?: string): TraceStats {
+    return this.traceStore.getStats(projectId);
   }
 
   async generateNonStream(trace: TraceRecord, context: GenerationContext): Promise<string> {
