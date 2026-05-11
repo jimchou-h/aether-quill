@@ -11,7 +11,12 @@
     "dev": "pnpm -r dev",
     "clean": "pnpm -r clean"
   },
-  "keywords": ["rag", "novel", "writing", "ai"],
+  "keywords": [
+    "rag",
+    "novel",
+    "writing",
+    "ai"
+  ],
   "author": "",
   "license": "MIT",
   "packageManager": "pnpm@9.0.0",
@@ -19,12 +24,14 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.32.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.2.0",
     "typescript": "^5.4.0",
     "vue-eslint-parser": "^9.4.0"
