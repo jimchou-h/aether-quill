@@ -3,13 +3,16 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   Post,
   Put,
   UseGuards,
   Request,
+  forwardRef,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
+import { DocumentsService } from '../documents/documents.service';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -19,7 +22,11 @@ interface AuthenticatedRequest extends ExpressRequest {
 
 @Controller('api/projects')
 export class ProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    @Inject(forwardRef(() => DocumentsService))
+    private readonly documentsService: DocumentsService
+  ) {}
 
   @UseGuards(JwtAuthGuard)
   @Get()
@@ -33,6 +40,17 @@ export class ProjectsController {
   findOne(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     const userId = req.user?.userId;
     return this.projectsService.findOne(id, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id')
+  remove(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new Error('User not authenticated');
+    }
+    this.documentsService.removeByProjectId(id);
+    return this.projectsService.remove(id, userId);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -82,8 +100,7 @@ export class ProjectsController {
     data: {
       name: string;
       profile: string;
-      tone?: string;
-      constraints?: string[];
+      state?: string;
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -155,7 +172,7 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters')
-  upsertChapter(
+  async upsertChapter(
     @Param('id') id: string,
     @Body() data: { chapterNo: number; title: string; content: string },
     @Request() req: AuthenticatedRequest

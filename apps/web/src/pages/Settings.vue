@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import { useRoute } from 'vue-router';
-import { apiClient, type PersonaItem, type ProjectSettings } from '../services/api';
+import { apiClient, type PersonaItem } from '../services/api';
 import { usePromptConfigStore } from '../stores/promptConfig';
 import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
 import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
@@ -11,7 +11,6 @@ const projectId = computed(() => String(route.params.id || ''));
 
 const promptConfigStore = usePromptConfigStore();
 
-const settings = ref<ProjectSettings | null>(null);
 const personas = ref<PersonaItem[]>([]);
 const loading = shallowRef(false);
 const creatingPersona = shallowRef(false);
@@ -19,13 +18,11 @@ const exportingBundle = shallowRef(false);
 const message = shallowRef('');
 const errorMessage = shallowRef('');
 const projectName = shallowRef('project');
-
-const activePersonaId = shallowRef<string | null>(null);
+const activeTab = shallowRef<'prompt' | 'persona'>('prompt');
 
 const personaName = shallowRef('');
 const personaProfile = shallowRef('');
-const personaTone = shallowRef('');
-const personaConstraints = shallowRef('');
+const personaState = shallowRef('');
 
 const publishedPersona = computed(
   () => personas.value.find((item) => item.status === 'published') || null
@@ -36,9 +33,7 @@ async function loadData() {
   errorMessage.value = '';
   try {
     const workspace = await apiClient.getWorkspace(projectId.value);
-    settings.value = workspace.settings;
     personas.value = workspace.personas;
-    activePersonaId.value = workspace.settings.activePersonaId;
     projectName.value = workspace.project.name || 'project';
 
     await promptConfigStore.loadConfig(projectId.value);
@@ -92,17 +87,12 @@ async function handleCreatePersona() {
     const persona = await apiClient.createPersona(projectId.value, {
       name: personaName.value.trim(),
       profile: personaProfile.value.trim(),
-      tone: personaTone.value.trim(),
-      constraints: personaConstraints.value
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean),
+      state: personaState.value.trim() || undefined,
     });
     personas.value = [...personas.value, persona];
     personaName.value = '';
     personaProfile.value = '';
-    personaTone.value = '';
-    personaConstraints.value = '';
+    personaState.value = '';
     message.value = '人物设定草稿已创建';
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '创建人物设定失败';
@@ -142,76 +132,93 @@ onMounted(() => {
     <p v-if="loading" class="message">正在加载设置...</p>
 
     <template v-if="!loading">
-      <SystemPromptEditor :project-id="projectId" />
-
-      <PromptVersionHistory :project-id="projectId" />
-
-      <section class="panel">
-        <h3 class="panel-title">创建人物设定</h3>
-        <label class="field-label">
-          人物名称
-          <input v-model="personaName" class="field-input" type="text" placeholder="例如：沈镜川" />
-        </label>
-        <label class="field-label">
-          人物画像
-          <textarea
-            v-model="personaProfile"
-            class="field-textarea"
-            placeholder="填写人物身份、行为边界、价值观和表达偏好"
-          />
-        </label>
-        <label class="field-label">
-          语气风格
-          <input
-            v-model="personaTone"
-            class="field-input"
-            type="text"
-            placeholder="例如：克制、冷静、带隐喻"
-          />
-        </label>
-        <label class="field-label">
-          禁忌规则（每行一条）
-          <textarea
-            v-model="personaConstraints"
-            class="field-textarea"
-            placeholder="例如：\n不能直接泄露终极反派\n不能改变人物核心动机"
-          />
-        </label>
-        <button class="primary-button" :disabled="creatingPersona" @click="handleCreatePersona">
-          {{ creatingPersona ? '创建中...' : '创建草稿' }}
+      <div class="settings-tabs">
+        <button
+          class="tab-button"
+          :class="{ 'tab-button-active': activeTab === 'prompt' }"
+          @click="activeTab = 'prompt'"
+        >
+          系统提示词
         </button>
-      </section>
-
-      <section class="panel">
-        <h3 class="panel-title">人物设定列表</h3>
-        <p class="meta-text">
-          当前发布版本：{{ publishedPersona ? publishedPersona.name : '暂无' }}
-        </p>
-        <div class="persona-list">
-          <article v-for="persona in personas" :key="persona.id" class="persona-card">
-            <header class="persona-header">
-              <h4 class="persona-name">{{ persona.name }}</h4>
-              <span class="persona-status">{{ persona.status }}</span>
-            </header>
-            <p class="persona-profile">{{ persona.profile }}</p>
-            <p class="meta-text">语气：{{ persona.tone }}</p>
-            <p class="meta-text">约束：{{ persona.constraints.join('；') || '无' }}</p>
-            <button
-              class="secondary-button"
-              :disabled="persona.status === 'published'"
-              @click="handlePublishPersona(persona.id)"
-            >
-              {{ persona.status === 'published' ? '已发布' : '发布并生效' }}
-            </button>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel export-panel">
-        <button class="secondary-button" :disabled="exportingBundle" @click="handleExportBundle">
-          {{ exportingBundle ? '导出中...' : '下载总结与设定(JSON)' }}
+        <button
+          class="tab-button"
+          :class="{ 'tab-button-active': activeTab === 'persona' }"
+          @click="activeTab = 'persona'"
+        >
+          人物设定
         </button>
-      </section>
+      </div>
+
+      <template v-if="activeTab === 'prompt'">
+        <SystemPromptEditor :project-id="projectId" />
+        <PromptVersionHistory :project-id="projectId" />
+      </template>
+
+      <template v-else>
+        <section class="panel">
+          <h3 class="panel-title">创建人物设定</h3>
+          <label class="field-label">
+            人物名称
+            <input
+              v-model="personaName"
+              class="field-input"
+              type="text"
+              placeholder="例如：沈镜川"
+            />
+          </label>
+          <label class="field-label">
+            人物设定（人物画像 / 语气风格 / 禁忌规则，每行一条）
+            <textarea
+              v-model="personaProfile"
+              class="field-textarea"
+              placeholder="例如：\n人物画像：前刑警，谨慎克制\n语气风格：短句、冷静\n禁忌规则：不主动暴露底牌"
+            />
+          </label>
+          <label class="field-label">
+            人物状态（可选）
+            <input
+              v-model="personaState"
+              class="field-input"
+              type="text"
+              placeholder="例如：清醒，尚未饮酒"
+            />
+          </label>
+          <button class="primary-button" :disabled="creatingPersona" @click="handleCreatePersona">
+            {{ creatingPersona ? '创建中...' : '创建草稿' }}
+          </button>
+        </section>
+
+        <section class="panel">
+          <h3 class="panel-title">人物清单</h3>
+          <p class="meta-text">
+            当前发布版本：{{ publishedPersona ? publishedPersona.name : '暂无' }}
+          </p>
+          <p v-if="personas.length === 0" class="meta-text">暂无人物设定，请先创建。</p>
+          <div v-else class="persona-list">
+            <article v-for="persona in personas" :key="persona.id" class="persona-card">
+              <header class="persona-header">
+                <h4 class="persona-name">{{ persona.name }}</h4>
+                <span class="persona-status">{{ persona.status }}</span>
+              </header>
+              <p class="persona-profile">{{ persona.profile }}</p>
+              <p class="meta-text persona-state">当前状态：{{ persona.state || '待更新' }}</p>
+              <button
+                class="secondary-button"
+                :disabled="persona.status === 'published'"
+                @click="handlePublishPersona(persona.id)"
+              >
+                {{ persona.status === 'published' ? '已发布' : '发布并生效' }}
+              </button>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel export-panel">
+          <button class="secondary-button" :disabled="exportingBundle" @click="handleExportBundle">
+            {{ exportingBundle ? '导出中...' : '下载总结与设定(JSON)' }}
+          </button>
+        </section>
+      </template>
     </template>
   </div>
 </template>
@@ -230,6 +237,29 @@ onMounted(() => {
 .page-subtitle {
   color: #666;
   margin-bottom: 1rem;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tab-button {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.45rem 0.85rem;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.tab-button-active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
 }
 
 .panel {
@@ -359,6 +389,11 @@ onMounted(() => {
   color: #6b7280;
   margin-bottom: 0.25rem;
   line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.persona-state {
+  color: #1d4ed8;
 }
 
 .export-panel {

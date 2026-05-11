@@ -8,6 +8,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import axios from 'axios';
 import { buildFallbackChapterSummary, type ChapterSummarySource } from './chapter-summary.util';
+import {
+  buildFallbackPersonaState,
+  normalizePersonaStateOutput,
+  trimForPrompt,
+} from './persona-state.util';
 
 type PersonaStatus = 'draft' | 'published';
 type IndexMode = 'full' | 'incremental';
@@ -40,8 +45,9 @@ export interface PersonaRecord {
   id: string;
   name: string;
   profile: string;
-  tone: string;
-  constraints: string[];
+  state: string;
+  tone?: string;
+  constraints?: string[];
   status: PersonaStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -238,6 +244,32 @@ export class ProjectsService {
     return this.getProjectOrThrow(id);
   }
 
+  remove(id: string, userId: string) {
+    this.checkAccess(id, userId, ['owner']);
+
+    const index = this.projects.findIndex((project) => project.id === id);
+    if (index === -1) {
+      throw new NotFoundException(`未找到项目: ${id}`);
+    }
+
+    this.projects.splice(index, 1);
+
+    for (let memberIndex = this.members.length - 1; memberIndex >= 0; memberIndex -= 1) {
+      if (this.members[memberIndex]?.projectId === id) {
+        this.members.splice(memberIndex, 1);
+      }
+    }
+
+    this.settingsStore.delete(id);
+    this.personasStore.delete(id);
+    this.knowledgeStore.delete(id);
+    this.indexJobsStore.delete(id);
+    this.summarizeJobsStore.delete(id);
+    this.persistState();
+
+    return { id };
+  }
+
   create(data: Partial<ProjectRecord>, userId?: string) {
     const now = new Date();
     const project: ProjectRecord = {
@@ -363,7 +395,7 @@ export class ProjectsService {
 
   createPersona(
     projectId: string,
-    payload: { name: string; profile: string; tone?: string; constraints?: string[] },
+    payload: { name: string; profile: string; state?: string },
     userId?: string
   ) {
     if (userId) {
@@ -383,8 +415,7 @@ export class ProjectsService {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name,
       profile,
-      tone: (payload.tone || '克制、叙事清晰').trim(),
-      constraints: payload.constraints?.filter((item) => item.trim().length > 0) ?? [],
+      state: payload.state?.trim() || '待更新',
       status: 'draft',
       createdAt: now,
       updatedAt: now,
@@ -443,7 +474,7 @@ export class ProjectsService {
     return knowledge;
   }
 
-  upsertChapter(
+  async upsertChapter(
     projectId: string,
     payload: { chapterNo: number; title: string; content: string },
     userId?: string
@@ -465,6 +496,7 @@ export class ProjectsService {
     const now = new Date();
     const existing = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
 
+    let targetChapter: ChapterRecord;
     if (existing) {
       existing.title = payload.title.trim();
       existing.content = payload.content;
@@ -472,24 +504,25 @@ export class ProjectsService {
       existing.summarySource = 'fallback';
       existing.summaryUpdatedAt = now;
       existing.updatedAt = now;
-      this.persistState();
-      return existing;
+      targetChapter = existing;
+    } else {
+      targetChapter = {
+        chapterNo,
+        title: payload.title.trim(),
+        content: payload.content,
+        summary: nextSummary,
+        summarySource: 'fallback',
+        summaryUpdatedAt: now,
+        updatedAt: now,
+      };
+
+      knowledge.chapters.push(targetChapter);
+      knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
     }
 
-    const chapter: ChapterRecord = {
-      chapterNo,
-      title: payload.title.trim(),
-      content: payload.content,
-      summary: nextSummary,
-      summarySource: 'fallback',
-      summaryUpdatedAt: now,
-      updatedAt: now,
-    };
-
-    knowledge.chapters.push(chapter);
-    knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
     this.persistState();
-    return chapter;
+    await this.updateActivePersonaStateFromChapter(projectId, chapterNo, payload.content);
+    return targetChapter;
   }
 
   createIndexJob(projectId: string, payload: { mode?: IndexMode }, userId?: string) {
@@ -706,12 +739,11 @@ export class ProjectsService {
       knowledge
     );
 
-    const autoUpdates = this.applyPostWriteUpdates(
+    const autoUpdates = await this.applyPostWriteUpdates(
       projectId,
       chapterNo,
       payload.goal,
-      draftText,
-      activePersona?.id
+      draftText
     );
 
     return {
@@ -907,6 +939,10 @@ export class ProjectsService {
             projectId,
             (personas || []).map((persona) => ({
               ...persona,
+              state:
+                typeof persona.state === 'string' && persona.state.trim()
+                  ? persona.state
+                  : '待更新',
               createdAt: new Date(persona.createdAt),
               updatedAt: new Date(persona.updatedAt),
             })),
@@ -961,18 +997,99 @@ export class ProjectsService {
     }
   }
 
-  private applyPostWriteUpdates(
+  private resolveActivePersona(projectId: string): PersonaRecord | null {
+    const personas = this.personasStore.get(projectId)!;
+    const settings = this.settingsStore.get(projectId)!;
+    return (
+      personas.find((item) => item.id === settings.activePersonaId) ||
+      personas.find((item) => item.status === 'published') ||
+      null
+    );
+  }
+
+  private async updateActivePersonaStateFromChapter(
+    projectId: string,
+    chapterNo: number,
+    chapterContent: string
+  ) {
+    const activePersona = this.resolveActivePersona(projectId);
+    if (!activePersona) {
+      return;
+    }
+
+    const nextState = await this.generatePersonaState({
+      projectId,
+      chapterNo,
+      chapterContent,
+      personaName: activePersona.name,
+      personaProfile: activePersona.profile,
+      currentState: activePersona.state,
+    });
+
+    if (!nextState || nextState === activePersona.state) {
+      return;
+    }
+
+    activePersona.state = nextState;
+    activePersona.updatedAt = new Date();
+    this.persistState();
+  }
+
+  private async generatePersonaState(input: {
+    projectId: string;
+    chapterNo: number;
+    chapterContent: string;
+    personaName: string;
+    personaProfile: string;
+    currentState: string;
+  }) {
+    const fallbackState = buildFallbackPersonaState(input.chapterNo, input.chapterContent);
+    const prompt = [
+      `你是小说角色状态提取器。`,
+      `请基于人物设定与第${input.chapterNo}章正文，输出该人物的"当前状态"（一句中文，<=60字）。`,
+      `禁止输出解释、禁止编号、禁止Markdown。`,
+      '',
+      `人物名：${input.personaName}`,
+      `人物设定：${input.personaProfile}`,
+      `历史状态：${input.currentState || '暂无'}`,
+      '',
+      `第${input.chapterNo}章正文：`,
+      trimForPrompt(input.chapterContent, 2200),
+      '',
+      '只输出状态短句。',
+    ].join('\n');
+
+    try {
+      const { data } = await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/generate`,
+        {
+          projectId: input.projectId,
+          prompt,
+          useSSE: false,
+          context: { task: { chapterNo: input.chapterNo, purpose: 'persona-state-update' } },
+        },
+        { timeout: 90000 }
+      );
+
+      const generated = normalizePersonaStateOutput(String(data?.content || ''));
+
+      return generated || fallbackState;
+    } catch {
+      return fallbackState;
+    }
+  }
+
+  private async applyPostWriteUpdates(
     projectId: string,
     chapterNo: number,
     goal: string | undefined,
-    draftText: string,
-    activePersonaId: string | null | undefined
+    draftText: string
   ) {
     const chapterTitle = goal?.trim()
       ? `第${chapterNo}章：${goal.trim().slice(0, 24)}`
       : `第${chapterNo}章：自动续写草稿`;
 
-    this.upsertChapter(projectId, {
+    await this.upsertChapter(projectId, {
       chapterNo,
       title: chapterTitle,
       content: draftText,
@@ -989,25 +1106,14 @@ export class ProjectsService {
       outlineUpdated = true;
     }
 
-    let personaUpdated = false;
-    if (activePersonaId) {
-      const personas = this.personasStore.get(projectId)!;
-      const activePersona = personas.find((persona) => persona.id === activePersonaId);
-      if (activePersona && !activePersona.profile.includes(updateLine)) {
-        activePersona.profile = `${activePersona.profile}\n${updateLine}`.trim();
-        activePersona.updatedAt = new Date();
-        personaUpdated = true;
-      }
-    }
-
-    if (outlineUpdated || personaUpdated) {
+    if (outlineUpdated) {
       this.persistState();
     }
 
     return {
       chapterUpdated: true,
       outlineUpdated,
-      personaUpdated,
+      personaUpdated: false,
       updateLine,
     };
   }
@@ -1160,7 +1266,7 @@ export class ProjectsService {
     await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
       systemPromptText: settings.systemPromptText,
       personaProfile: activePersona
-        ? `${activePersona.name}\n${activePersona.profile}\n语气：${activePersona.tone}`
+        ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
         : '未配置人物设定',
       outlineSummary: knowledge.outlineSummary,
       chapters: knowledge.chapters.map((chapter) => ({

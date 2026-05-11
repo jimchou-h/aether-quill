@@ -143,6 +143,11 @@ export const apiClient = {
     return this.unwrapPayload<ProjectItem>(result);
   },
 
+  async deleteProject(projectId: string) {
+    const result = await this.projects.delete(projectId);
+    return this.unwrapPayload<{ id: string }>(result);
+  },
+
   async getWorkspace(projectId: string) {
     const response = await http.get(`/api/projects/${projectId}/workspace`);
     return this.unwrapPayload<{
@@ -180,7 +185,7 @@ export const apiClient = {
 
   async createPersona(
     projectId: string,
-    payload: { name: string; profile: string; tone?: string; constraints?: string[] }
+    payload: { name: string; profile: string; state?: string }
   ) {
     const response = await http.post(`/api/projects/${projectId}/personas`, payload);
     return this.unwrapPayload<PersonaItem>(response.data);
@@ -293,6 +298,11 @@ export const apiClient = {
       payload: RequestBody<'/api/projects/{id}', 'patch'>
     ): Promise<ResponseData<'/api/projects/{id}', 'patch'>> {
       const response = await http.patch(`/api/projects/${id}`, payload);
+      return response.data;
+    },
+
+    async delete(id: string): Promise<ResponseData<'/api/projects/{id}', 'delete'>> {
+      const response = await http.delete(`/api/projects/${id}`);
       return response.data;
     },
   },
@@ -428,7 +438,7 @@ export const apiClient = {
       body: JSON.stringify({
         systemPromptText: workspace.settings.systemPromptText,
         personaProfile: activePersona
-          ? `${activePersona.name}\n${activePersona.profile}\n语气：${activePersona.tone}`
+          ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
           : '未配置人物设定',
         outlineSummary: workspace.knowledge.outlineSummary,
         chapters: workspace.knowledge.chapters.map((chapter) => ({
@@ -601,8 +611,7 @@ export interface PersonaItem {
   id: string;
   name: string;
   profile: string;
-  tone: string;
-  constraints: string[];
+  state: string;
   status: 'draft' | 'published';
   createdAt: string;
   updatedAt: string;
