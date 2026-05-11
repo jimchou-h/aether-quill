@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards, Request } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -83,7 +93,11 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/personas/:personaId/publish')
-  publishPersona(@Param('id') id: string, @Param('personaId') personaId: string, @Request() req: AuthenticatedRequest) {
+  publishPersona(
+    @Param('id') id: string,
+    @Param('personaId') personaId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
     const userId = req.user?.userId;
     return this.projectsService.publishPersona(id, personaId, userId);
   }
@@ -97,7 +111,11 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Put(':id/knowledge/outline')
-  updateOutline(@Param('id') id: string, @Body() data: { outlineSummary: string }, @Request() req: AuthenticatedRequest) {
+  updateOutline(
+    @Param('id') id: string,
+    @Body() data: { outlineSummary: string },
+    @Request() req: AuthenticatedRequest
+  ) {
     const userId = req.user?.userId;
     return this.projectsService.updateOutline(id, data, userId);
   }
@@ -115,14 +133,22 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/reindex')
-  createIndexJob(@Param('id') id: string, @Body() data: { mode?: 'full' | 'incremental' } = {}, @Request() req: AuthenticatedRequest) {
+  createIndexJob(
+    @Param('id') id: string,
+    @Body() data: { mode?: 'full' | 'incremental' } = {},
+    @Request() req: AuthenticatedRequest
+  ) {
     const userId = req.user?.userId;
     return this.projectsService.createIndexJob(id, data, userId);
   }
 
   @UseGuards(JwtAuthGuard)
   @Get(':id/knowledge/reindex/:jobId')
-  getIndexJob(@Param('id') id: string, @Param('jobId') jobId: string, @Request() req: AuthenticatedRequest) {
+  getIndexJob(
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
     const userId = req.user?.userId;
     return this.projectsService.getIndexJob(id, jobId, userId);
   }
@@ -148,7 +174,10 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  create(@Body() data: { name: string; description: string }, @Request() req: AuthenticatedRequest) {
+  create(
+    @Body() data: { name: string; description: string },
+    @Request() req: AuthenticatedRequest
+  ) {
     const userId = req.user?.userId;
     return this.projectsService.create(data, userId);
   }
@@ -176,7 +205,11 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id/members/:memberId')
-  removeMember(@Param('id') id: string, @Param('memberId') memberId: string, @Request() req: AuthenticatedRequest) {
+  removeMember(
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
     const currentUserId = req.user?.userId;
     if (!currentUserId) {
       throw new Error('User not authenticated');

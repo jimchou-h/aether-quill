@@ -180,9 +180,7 @@ export class ProjectsService {
     if (!userId) {
       return this.projects;
     }
-    const userProjectIds = this.members
-      .filter((m) => m.userId === userId)
-      .map((m) => m.projectId);
+    const userProjectIds = this.members.filter((m) => m.userId === userId).map((m) => m.projectId);
     return this.projects.filter((p) => userProjectIds.includes(p.id));
   }
 
@@ -204,7 +202,7 @@ export class ProjectsService {
     };
     this.projects.push(project);
     this.ensureProjectState(project.id);
-    
+
     if (userId) {
       this.members.push({
         userId,
@@ -213,7 +211,7 @@ export class ProjectsService {
         createdAt: now,
       });
     }
-    
+
     this.persistState();
     return project;
   }
@@ -397,7 +395,11 @@ export class ProjectsService {
     return knowledge;
   }
 
-  upsertChapter(projectId: string, payload: { chapterNo: number; title: string; content: string }, userId?: string) {
+  upsertChapter(
+    projectId: string,
+    payload: { chapterNo: number; title: string; content: string },
+    userId?: string
+  ) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -599,7 +601,7 @@ export class ProjectsService {
 
   addMember(projectId: string, userId: string, role: 'editor' | 'viewer') {
     this.checkAccess(projectId, userId, ['owner']);
-    
+
     const existing = this.members.find((m) => m.projectId === projectId && m.userId === userId);
     if (existing) {
       existing.role = role;
@@ -612,20 +614,20 @@ export class ProjectsService {
         createdAt: new Date(),
       });
     }
-    
+
     this.persistState();
     return this.members.filter((m) => m.projectId === projectId);
   }
 
   removeMember(projectId: string, userId: string, currentUserId: string) {
     this.checkAccess(projectId, currentUserId, ['owner']);
-    
+
     const index = this.members.findIndex((m) => m.projectId === projectId && m.userId === userId);
     if (index !== -1) {
       this.members.splice(index, 1);
       this.persistState();
     }
-    
+
     return this.members.filter((m) => m.projectId === projectId);
   }
 
@@ -641,11 +643,11 @@ export class ProjectsService {
     if (!member) {
       throw new NotFoundException(`用户无权访问项目: ${projectId}`);
     }
-    
+
     if (allowedRoles && !allowedRoles.includes(member.role)) {
       throw new NotFoundException(`用户权限不足，需要: ${allowedRoles.join('或')}`);
     }
-    
+
     return member;
   }
 
