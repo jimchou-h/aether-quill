@@ -70,10 +70,6 @@ defineExpose({ resetForm });
       </label>
       <div class="field-label">
         <span>目标字数</span>
-        <label class="unlimited-toggle">
-          <input v-model="unlimitedWords" type="checkbox" />
-          不限制字数（尽量写长）
-        </label>
         <input
           v-model.number="targetWords"
           type="number"
@@ -82,6 +78,10 @@ defineExpose({ resetForm });
           class="field-input"
           :disabled="unlimitedWords"
         />
+        <label class="unlimited-toggle">
+          <input v-model="unlimitedWords" type="checkbox" />
+          不限制字数（尽量写长）
+        </label>
       </div>
     </div>
 

@@ -16,6 +16,7 @@ const projectId = computed(() => String(route.params.id || ''));
 const chapters = ref<ChapterItem[]>([]);
 const loading = ref(false);
 const submitting = ref(false);
+const savingChapterNo = ref<number | null>(null);
 const batchSummarizing = ref(false);
 const summarizingChapterNo = ref<number | null>(null);
 const latestSummaryJob = ref<SummaryJob | null>(null);
@@ -23,6 +24,7 @@ const message = ref('');
 const errorMessage = ref('');
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
+const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
 
 function sortByChapterNo(items: ChapterItem[]) {
   return [...items].sort((a, b) => a.chapterNo - b.chapterNo);
@@ -55,6 +57,22 @@ async function handleImportChapter(payload: { chapterNo: number; title: string; 
     errorMessage.value = error instanceof Error ? error.message : '保存章节失败';
   } finally {
     submitting.value = false;
+  }
+}
+
+async function handleSaveChapter(payload: { chapterNo: number; title: string; content: string }) {
+  savingChapterNo.value = payload.chapterNo;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    await apiClient.upsertChapter(projectId.value, payload);
+    message.value = `第${payload.chapterNo}章已更新`;
+    chapterListRef.value?.clearEditing();
+    await loadWorkspace();
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '更新章节失败';
+  } finally {
+    savingChapterNo.value = null;
   }
 }
 
@@ -200,10 +218,13 @@ onMounted(() => {
     <ChapterImportForm ref="importFormRef" :submitting="submitting" @submit="handleImportChapter" />
 
     <ChapterList
+      ref="chapterListRef"
       :chapters="chapters"
       :loading="loading"
       :summarizing-chapter-no="summarizingChapterNo"
+      :saving-chapter-no="savingChapterNo"
       @summarize="handleSummarizeChapter"
+      @save="handleSaveChapter"
     />
   </div>
 </template>

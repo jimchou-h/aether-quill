@@ -41,14 +41,13 @@ function handleRollback() {
       <span class="status-label" :class="store.isPublished ? 'status-published' : 'status-draft'">
         {{ store.isPublished ? '已发布' : '草稿' }}
       </span>
-      <span class="char-count">{{ store.draftText.length }} / 4000</span>
+      <span class="char-count">已输入 {{ store.draftText.length }} 字</span>
     </div>
 
     <textarea
       v-model="store.draftText"
       class="field-textarea"
       placeholder="设置该项目的全局写作约束和风格指导"
-      maxlength="4000"
       rows="6"
     />
 

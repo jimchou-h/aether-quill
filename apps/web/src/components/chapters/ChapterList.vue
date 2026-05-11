@@ -1,40 +1,28 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { ChapterItem } from '../../services/api';
 
-/**
- * 章节列表组件属性定义
- */
 const props = defineProps<{
-  /** 章节列表 */
   chapters: ChapterItem[];
-  /** 是否正在加载 */
   loading: boolean;
-  /** 正在生成摘要的章节号 */
   summarizingChapterNo: number | null;
+  savingChapterNo: number | null;
 }>();
 
-/**
- * 组件事件定义
- */
 const emit = defineEmits<{
-  /** 请求生成摘要 */
   summarize: [chapterNo: number];
+  save: [payload: { chapterNo: number; title: string; content: string }];
 }>();
 
-/**
- * 格式化时间
- * @param {string} value - 时间字符串
- * @returns {string} 格式化后的时间
- */
+const editingChapterNo = ref<number | null>(null);
+const editTitle = ref('');
+const editContent = ref('');
+const localError = ref('');
+
 function formatTime(value: string) {
   return new Date(value).toLocaleString();
 }
 
-/**
- * 获取摘要来源文本
- * @param {ChapterItem['summarySource']} source - 摘要来源
- * @returns {string} 来源描述
- */
 function summarySourceText(source?: ChapterItem['summarySource']) {
   if (source === 'llm') {
     return '语义摘要';
@@ -44,31 +32,115 @@ function summarySourceText(source?: ChapterItem['summarySource']) {
   }
   return '未标注';
 }
+
+function isEditing(chapterNo: number) {
+  return editingChapterNo.value === chapterNo;
+}
+
+function isBusy(chapterNo: number) {
+  return (
+    props.summarizingChapterNo === chapterNo ||
+    props.savingChapterNo === chapterNo ||
+    (editingChapterNo.value !== null && editingChapterNo.value !== chapterNo)
+  );
+}
+
+function startEdit(chapter: ChapterItem) {
+  editingChapterNo.value = chapter.chapterNo;
+  editTitle.value = chapter.title;
+  editContent.value = chapter.content;
+  localError.value = '';
+}
+
+function cancelEdit() {
+  editingChapterNo.value = null;
+  editTitle.value = '';
+  editContent.value = '';
+  localError.value = '';
+}
+
+function handleSave(chapterNo: number) {
+  const title = editTitle.value.trim();
+  const content = editContent.value.trim();
+
+  if (!title) {
+    localError.value = '请填写章节标题';
+    return;
+  }
+  if (!content) {
+    localError.value = '请填写章节正文';
+    return;
+  }
+
+  localError.value = '';
+  emit('save', { chapterNo, title, content });
+}
+
+function clearEditing() {
+  cancelEdit();
+}
+
+defineExpose({ clearEditing });
 </script>
 
 <template>
   <section class="panel">
     <h3 class="panel-title">章节列表</h3>
 
+    <p v-if="localError" class="message message-error">{{ localError }}</p>
     <p v-if="props.loading" class="message">正在加载章节...</p>
     <p v-else-if="props.chapters.length === 0" class="message">暂无章节，请先新增或导入章节。</p>
 
     <div v-else class="chapter-list">
       <article v-for="chapter in props.chapters" :key="chapter.chapterNo" class="chapter-card">
         <header class="chapter-header">
-          <div class="chapter-heading">
+          <div v-if="isEditing(chapter.chapterNo)" class="chapter-edit-heading">
+            <label class="field-label">章节标题</label>
+            <input
+              v-model="editTitle"
+              class="field-input"
+              type="text"
+              :disabled="props.savingChapterNo === chapter.chapterNo"
+            />
+          </div>
+          <div v-else class="chapter-heading">
             <h4 class="chapter-title">第{{ chapter.chapterNo }}章 · {{ chapter.title }}</h4>
             <span class="summary-source">{{ summarySourceText(chapter.summarySource) }}</span>
           </div>
           <div class="chapter-actions">
             <span class="chapter-date">更新于 {{ formatTime(chapter.updatedAt) }}</span>
-            <button
-              class="secondary-button"
-              :disabled="props.summarizingChapterNo === chapter.chapterNo"
-              @click="emit('summarize', chapter.chapterNo)"
-            >
-              {{ props.summarizingChapterNo === chapter.chapterNo ? '生成中...' : '生成摘要' }}
-            </button>
+            <template v-if="isEditing(chapter.chapterNo)">
+              <button
+                class="primary-button"
+                :disabled="props.savingChapterNo === chapter.chapterNo"
+                @click="handleSave(chapter.chapterNo)"
+              >
+                {{ props.savingChapterNo === chapter.chapterNo ? '保存中...' : '保存' }}
+              </button>
+              <button
+                class="secondary-button"
+                :disabled="props.savingChapterNo === chapter.chapterNo"
+                @click="cancelEdit"
+              >
+                取消
+              </button>
+            </template>
+            <template v-else>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(chapter.chapterNo)"
+                @click="startEdit(chapter)"
+              >
+                编辑
+              </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(chapter.chapterNo)"
+                @click="emit('summarize', chapter.chapterNo)"
+              >
+                {{ props.summarizingChapterNo === chapter.chapterNo ? '生成中...' : '生成摘要' }}
+              </button>
+            </template>
           </div>
         </header>
 
@@ -82,7 +154,13 @@ function summarySourceText(source?: ChapterItem['summarySource']) {
 
         <div class="chapter-section">
           <h5 class="section-title">正文</h5>
-          <pre class="content-text">{{ chapter.content || '暂无正文' }}</pre>
+          <textarea
+            v-if="isEditing(chapter.chapterNo)"
+            v-model="editContent"
+            class="field-textarea"
+            :disabled="props.savingChapterNo === chapter.chapterNo"
+          />
+          <pre v-else class="content-text">{{ chapter.content || '暂无正文' }}</pre>
         </div>
       </article>
     </div>
@@ -103,9 +181,16 @@ function summarySourceText(source?: ChapterItem['summarySource']) {
 }
 
 .message {
-  margin: 0;
+  margin: 0 0 0.8rem;
   color: #6b7280;
   font-size: 0.85rem;
+}
+
+.message-error {
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
 }
 
 .chapter-list {
@@ -128,10 +213,13 @@ function summarySourceText(source?: ChapterItem['summarySource']) {
   margin-bottom: 0.55rem;
 }
 
-.chapter-heading {
+.chapter-heading,
+.chapter-edit-heading {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .chapter-title {
@@ -158,10 +246,28 @@ function summarySourceText(source?: ChapterItem['summarySource']) {
   white-space: nowrap;
 }
 
-.secondary-button {
-  background: #fff;
-  color: #111827;
+.field-label {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.field-input,
+.field-textarea {
+  width: 100%;
   border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.field-textarea {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.primary-button,
+.secondary-button {
   border-radius: 6px;
   padding: 0.35rem 0.7rem;
   cursor: pointer;
@@ -169,6 +275,19 @@ function summarySourceText(source?: ChapterItem['summarySource']) {
   white-space: nowrap;
 }
 
+.primary-button {
+  background: #111827;
+  color: #fff;
+  border: none;
+}
+
+.secondary-button {
+  background: #fff;
+  color: #111827;
+  border: 1px solid #d1d5db;
+}
+
+.primary-button:disabled,
 .secondary-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
