@@ -35,6 +35,24 @@ export class DocumentsController {
     return this.documentsService.reindex(id);
   }
 
+  @Put('api/documents/:id/index-result')
+  commitIndexResult(
+    @Param('id') id: string,
+    @Body()
+    payload: {
+      status: 'completed' | 'failed';
+      chunks?: Array<{
+        id: string;
+        content: string;
+        embedding?: number[];
+        metadata?: Record<string, unknown>;
+      }>;
+      errorMessage?: string;
+    }
+  ) {
+    return this.documentsService.commitIndexResult(id, payload);
+  }
+
   @Get('api/documents/:id/chunks')
   getChunks(@Param('id') id: string) {
     return this.documentsService.getChunks(id);

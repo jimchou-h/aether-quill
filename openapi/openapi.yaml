@@ -57,6 +57,12 @@ paths:
     $ref: './paths/projects/prompt-config-publish.yaml'
   /api/projects/{id}/prompt-config/rollback:
     $ref: './paths/projects/prompt-config-rollback.yaml'
+  /api/projects/{id}/knowledge/chapters/summarize:
+    $ref: './paths/projects/chapter-summarize-batch.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/summarize:
+    $ref: './paths/projects/chapter-summarize-by-no.yaml'
+  /api/projects/{id}/knowledge/summarize/{jobId}:
+    $ref: './paths/projects/chapter-summarize-job.yaml'
   /api/consistency/check:
     $ref: './paths/consistency/check.yaml'
   /api/observability/metrics:
@@ -237,6 +243,69 @@ components:
         completedAt:
           type: string
           format: date-time
+    ChapterSummary:
+      type: object
+      required:
+        - chapterNo
+        - summary
+        - summarySource
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+        summary:
+          type: string
+        summarySource:
+          type: string
+          enum: [llm, fallback]
+    ChapterSummaryJob:
+      type: object
+      required:
+        - id
+        - projectId
+        - scope
+        - status
+        - totalChapters
+        - processedChapters
+        - chapterNos
+        - summaries
+        - createdAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        scope:
+          type: string
+          enum: [single, batch]
+        chapterNo:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [processing, completed, failed]
+        totalChapters:
+          type: integer
+        processedChapters:
+          type: integer
+        chapterNos:
+          type: array
+          items:
+            type: integer
+        summaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterSummary'
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
     PromptConfig:
       type: object
       required:

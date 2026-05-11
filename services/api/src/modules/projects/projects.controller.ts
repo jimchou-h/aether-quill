@@ -121,6 +121,39 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/summarize')
+  createBatchChapterSummaryJob(
+    @Param('id') id: string,
+    @Body() data: { chapterNos?: number[] } = {},
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.createBatchChapterSummaryJob(id, data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/summarize')
+  createSingleChapterSummaryJob(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.createSingleChapterSummaryJob(id, Number(chapterNo), userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/knowledge/summarize/:jobId')
+  getSummaryJob(
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.getSummaryJob(id, jobId, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters')
   upsertChapter(
     @Param('id') id: string,
@@ -155,7 +188,7 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/write')
-  writeChapter(
+  async writeChapter(
     @Param('id') id: string,
     @Body()
     data: {

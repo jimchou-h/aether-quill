@@ -4,6 +4,7 @@
       <nav>
         <router-link :to="`/projects/${projectId}/workbench`">写作工作台</router-link>
         <router-link :to="`/projects/${projectId}/knowledge`">知识库</router-link>
+        <router-link :to="`/projects/${projectId}/chapters`">章节</router-link>
         <router-link :to="`/projects/${projectId}/settings`">设置</router-link>
       </nav>
     </aside>

@@ -28,15 +28,19 @@ export class VectorStore {
           chunkResponse.data?.data ?? (Array.isArray(chunkResponse.data) ? chunkResponse.data : []);
 
         for (const chunk of chunks) {
+          const metadata = {
+            ...(chunk.metadata || {}),
+            docTitle: doc.title,
+          };
           allChunks.push({
             id: chunk.id || `${doc.id}-chunk-${allChunks.length}`,
             documentId: doc.id,
             content: chunk.content || '',
-            embedding: chunk.embedding || this.simulateEmbedding(chunk.content || ''),
-            metadata: {
-              ...(chunk.metadata || {}),
-              docTitle: doc.title,
-            },
+            embedding:
+              chunk.embedding ||
+              this.extractEmbedding(metadata) ||
+              this.simulateEmbedding(chunk.content || ''),
+            metadata,
           });
         }
       }
@@ -74,6 +78,17 @@ export class VectorStore {
 
   invalidateProject(projectId: string): void {
     this.chunksByProject.delete(projectId);
+  }
+
+  private extractEmbedding(metadata: Record<string, unknown>): number[] | undefined {
+    const raw = metadata.embedding;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return undefined;
+    }
+    if (!raw.every((item) => typeof item === 'number')) {
+      return undefined;
+    }
+    return raw;
   }
 
   private simulateEmbedding(text: string): number[] {

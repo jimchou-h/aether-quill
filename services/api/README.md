@@ -48,6 +48,9 @@ pnpm dev
 - `GET /api/projects/:id/knowledge` - 获取项目知识库
 - `PUT /api/projects/:id/knowledge/outline` - 更新项目大纲总结
 - `POST /api/projects/:id/knowledge/chapters` - 新增/更新章节内容与摘要
+- `POST /api/projects/:id/knowledge/chapters/:chapterNo/summarize` - 单章语义摘要任务
+- `POST /api/projects/:id/knowledge/chapters/summarize` - 批量语义摘要任务
+- `GET /api/projects/:id/knowledge/summarize/:jobId` - 查询摘要任务状态
 - `POST /api/projects/:id/knowledge/reindex` - 重建章节摘要索引（全量/增量）
 - `GET /api/projects/:id/knowledge/reindex/:jobId` - 查询索引任务状态
 

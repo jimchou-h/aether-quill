@@ -70,12 +70,12 @@ export const useGenerationStore = defineStore('generation', () => {
   }
 
   async function acceptDraft(projectId: string, chapterNoVal: number) {
-    if (!traceId.value) return;
+    if (!draftText.value.trim()) {
+      errorMessage.value = '草稿内容为空，无法接受';
+      return;
+    }
 
     try {
-      await apiClient.drafts.accept(traceId.value, {
-        edits: draftText.value,
-      });
       await apiClient.upsertChapter(projectId, {
         chapterNo: chapterNoVal,
         title: `第${chapterNoVal}章`,

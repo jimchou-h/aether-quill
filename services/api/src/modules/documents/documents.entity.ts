@@ -30,3 +30,16 @@ export interface ReindexResult {
   documentId: string;
   indexStatus: IndexStatus;
 }
+
+export interface IndexedChunkInput {
+  id: string;
+  content: string;
+  embedding?: number[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CommitIndexResultInput {
+  status: 'completed' | 'failed';
+  chunks?: IndexedChunkInput[];
+  errorMessage?: string;
+}

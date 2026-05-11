@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref, shallowRef } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { apiClient, type ProjectItem } from '../services/api';
 
 const router = useRouter();
+const route = useRoute();
 
 const projects = ref<ProjectItem[]>([]);
 const loading = shallowRef(false);
 const submitLoading = shallowRef(false);
 const errorMessage = shallowRef('');
+const routeTipMessage = shallowRef('');
 
 const newProjectName = shallowRef('');
 const newProjectDescription = shallowRef('');
@@ -25,6 +27,16 @@ async function loadProjects() {
   }
 }
 
+function applyInvalidProjectRouteTip() {
+  const invalidProjectId = route.query.invalidProjectId;
+  if (typeof invalidProjectId !== 'string' || !invalidProjectId.trim()) {
+    return;
+  }
+
+  routeTipMessage.value = `项目地址无效（${invalidProjectId}）。请先从项目列表进入具体项目。`;
+  void router.replace({ name: 'projects' });
+}
+
 async function handleCreateProject() {
   if (!newProjectName.value.trim()) {
     errorMessage.value = '请填写项目名称';
@@ -38,6 +50,7 @@ async function handleCreateProject() {
       name: newProjectName.value.trim(),
       description: newProjectDescription.value.trim(),
     });
+    console.log(project);
     projects.value = [project, ...projects.value];
     newProjectName.value = '';
     newProjectDescription.value = '';
@@ -50,6 +63,7 @@ async function handleCreateProject() {
 }
 
 onMounted(() => {
+  applyInvalidProjectRouteTip();
   void loadProjects();
 });
 </script>
@@ -86,6 +100,7 @@ onMounted(() => {
       </button>
     </section>
 
+    <p v-if="routeTipMessage" class="message message-error">{{ routeTipMessage }}</p>
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
     <p v-if="loading" class="message">正在加载项目...</p>
 

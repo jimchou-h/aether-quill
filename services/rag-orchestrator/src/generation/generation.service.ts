@@ -7,6 +7,15 @@ export interface GenerationContext {
   personaProfile: string;
   outlineSummary: string;
   chapterContext: string;
+  retrievedEvidence?: string;
+}
+
+interface ProviderRuntimeConfig {
+  providerUrl: string;
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  temperature: number;
 }
 
 export class GenerationService {
@@ -26,6 +35,9 @@ export class GenerationService {
     }
     if (context.chapterContext) {
       sections.push(`【上下文】\n${context.chapterContext}`);
+    }
+    if (context.retrievedEvidence) {
+      sections.push(`【检索证据】\n${context.retrievedEvidence}`);
     }
 
     sections.push(`【用户需求】\n${userPrompt}`);
@@ -123,26 +135,84 @@ export class GenerationService {
     }
   }
 
-  private async callProviderApi(prompt: string): Promise<{
+  private resolveProviderConfig(): ProviderRuntimeConfig {
+    const apiKey =
+      process.env.PROVIDER_API_KEY ||
+      process.env.DEEPSEEK_API_KEY ||
+      process.env.SILICONFLOW_API_KEY ||
+      '';
+    if (!apiKey) {
+      throw new Error(
+        '未配置模型 API Key，请设置 PROVIDER_API_KEY、DEEPSEEK_API_KEY 或 SILICONFLOW_API_KEY'
+      );
+    }
+
+    const preferSiliconFlow =
+      Boolean(process.env.SILICONFLOW_API_KEY) &&
+      !process.env.DEEPSEEK_API_KEY &&
+      !process.env.PROVIDER_API_KEY;
+    const defaultUrl = preferSiliconFlow
+      ? 'https://api.siliconflow.cn/v1/chat/completions'
+      : 'https://api.deepseek.com/v1/chat/completions';
+    const defaultModel = preferSiliconFlow ? 'Qwen/Qwen2.5-7B-Instruct' : 'deepseek-chat';
+
+    return {
+      providerUrl: process.env.PROVIDER_API_URL || defaultUrl,
+      apiKey,
+      model: process.env.PROVIDER_MODEL || defaultModel,
+      maxTokens: Number(process.env.PROVIDER_MAX_TOKENS || 4096),
+      temperature: Number(process.env.PROVIDER_TEMPERATURE || 0.7),
+    };
+  }
+
+  buildChapterSummaryPrompt(input: { chapterNo: number; title: string; content: string }): string {
+    return [
+      '你是一位小说编辑，请为以下章节正文生成一段中文语义摘要。',
+      '要求：',
+      '1. 概括主要情节、冲突与结果，不要逐句复述',
+      '2. 控制在 80~160 字',
+      '3. 只输出摘要正文，不要标题、编号或解释',
+      '',
+      `章节：第${input.chapterNo}章 ${input.title}`,
+      '正文：',
+      input.content,
+    ].join('\n');
+  }
+
+  async summarizeChapterContent(input: {
+    chapterNo: number;
+    title: string;
+    content: string;
+  }): Promise<string> {
+    const prompt = this.buildChapterSummaryPrompt(input);
+    const result = await this.callProviderApi(prompt, {
+      maxTokens: 512,
+      temperature: 0.3,
+    });
+    return result.content.trim();
+  }
+
+  private async callProviderApi(
+    prompt: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<{
     content: string;
     usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
   }> {
-    const providerUrl =
-      process.env.PROVIDER_API_URL || 'https://api.deepseek.com/v1/chat/completions';
-    const apiKey = process.env.PROVIDER_API_KEY || process.env.DEEPSEEK_API_KEY || '';
+    const provider = this.resolveProviderConfig();
 
     const response = await axios.post(
-      providerUrl,
+      provider.providerUrl,
       {
-        model: process.env.PROVIDER_MODEL || 'deepseek-chat',
+        model: provider.model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: Number(process.env.PROVIDER_MAX_TOKENS || 4096),
-        temperature: Number(process.env.PROVIDER_TEMPERATURE || 0.7),
+        max_tokens: options?.maxTokens ?? provider.maxTokens,
+        temperature: options?.temperature ?? provider.temperature,
         stream: false,
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
         },
         timeout: 60000,
@@ -163,32 +233,20 @@ export class GenerationService {
   }
 
   private async *callProviderStream(prompt: string): AsyncGenerator<string, void, unknown> {
-    const providerUrl =
-      process.env.PROVIDER_API_URL || 'https://api.deepseek.com/v1/chat/completions';
-    const apiKey = process.env.PROVIDER_API_KEY || process.env.DEEPSEEK_API_KEY || '';
-    const useMock = !apiKey || process.env.USE_MOCK_PROVIDER === 'true';
-
-    if (useMock) {
-      const mockChunks = this.getMockChunks(prompt);
-      for (const chunk of mockChunks) {
-        yield chunk;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      return;
-    }
+    const provider = this.resolveProviderConfig();
 
     const response = await axios.post(
-      providerUrl,
+      provider.providerUrl,
       {
-        model: process.env.PROVIDER_MODEL || 'deepseek-chat',
+        model: provider.model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: Number(process.env.PROVIDER_MAX_TOKENS || 4096),
-        temperature: Number(process.env.PROVIDER_TEMPERATURE || 0.7),
+        max_tokens: provider.maxTokens,
+        temperature: provider.temperature,
         stream: true,
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
         },
         responseType: 'stream',
@@ -217,21 +275,5 @@ export class GenerationService {
         }
       }
     }
-  }
-
-  private getMockChunks(_prompt: string): string[] {
-    void _prompt;
-    const sentences = [
-      '海风掠过港口的铁链，发出沉闷的碰撞声。\n\n',
-      '林默站在码头的边缘，目光凝视着远方模糊的海平线。\n\n',
-      '他的手中紧握着一封泛黄的信件，纸张的边缘已经被反复折叠得快要破损。\n\n',
-      '"你确定要这么做吗？"身后传来一个低沉的声音。\n\n',
-      '林默没有回头，只是轻轻地点了点头。他知道，一旦踏上这条道路，就再也没有回头的余地。\n\n',
-      '远处的海面上，一艘船的轮廓逐渐清晰起来。那是他等待已久的信号。\n\n',
-      '风更大了，吹得他的衣角猎猎作响。但他站在那里，纹丝不动，如同礁石一般。\n\n',
-      '这一刻，所有的犹豫和迟疑都被抛在了身后。新的篇章，就此展开。\n\n',
-      '（本段为模拟生成内容，接入真实模型后将替换为 AI 生成文本。）',
-    ];
-    return sentences;
   }
 }

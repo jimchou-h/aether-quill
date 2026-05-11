@@ -84,6 +84,19 @@ const http: AxiosInstance = axios.create({
   },
 });
 
+function getRagOrchestratorBaseURL() {
+  const configured = import.meta.env.VITE_RAG_ORCHESTRATOR_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  if (import.meta.env.DEV) {
+    return '';
+  }
+
+  return 'http://localhost:3001';
+}
+
 // Request interceptor for auth
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
@@ -107,186 +120,123 @@ http.interceptors.response.use(
 
 // Legacy API methods for backward compatibility
 export const apiClient = {
+  unwrapPayload<T>(result: unknown): T {
+    if (
+      result &&
+      typeof result === 'object' &&
+      'data' in result &&
+      (result as { data?: unknown }).data !== undefined
+    ) {
+      return (result as { data: T }).data;
+    }
+    return result as T;
+  },
+
   // Compatibility methods
   async getProjects() {
     const result = await this.projects.list();
-    return result.data || [];
+    return this.unwrapPayload<ProjectItem[]>(result);
   },
 
   async createProject(payload: { name: string; description: string }) {
     const result = await this.projects.create(payload);
-    return (
-      result.data || {
-        id: '',
-        name: payload.name,
-        description: payload.description,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-    );
+    return this.unwrapPayload<ProjectItem>(result);
   },
 
   async getWorkspace(projectId: string) {
-    const projectResult = await this.projects.get(projectId);
-    const project = projectResult.data || {
-      id: projectId,
-      name: '',
-      description: '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    const personas: PersonaItem[] = [];
-    return {
-      project,
-      settings: {
-        systemPromptText: '',
-        activePersonaId: null,
-        updatedAt: new Date().toISOString(),
-      },
-      personas,
-      knowledge: {
-        outlineSummary: '',
-        chapters: [],
-        indexVersion: 0,
-        lastIndexedAt: null,
-      },
-      latestIndexJob: null as any,
-    };
+    const response = await http.get(`/api/projects/${projectId}/workspace`);
+    return this.unwrapPayload<{
+      project: ProjectItem;
+      settings: ProjectSettings;
+      personas: PersonaItem[];
+      knowledge: KnowledgeItem;
+      latestIndexJob: IndexJob | null;
+      latestSummaryJob: SummaryJob | null;
+    }>(response.data);
   },
 
   async getProjectExport(projectId: string) {
-    const projectResult = await this.projects.get(projectId);
-    return {
-      project: projectResult.data,
-      exportedAt: new Date().toISOString(),
-      settings: {
-        systemPromptText: '',
-        activePersonaId: null as any,
-        personas: [],
-      },
-      summary: {
-        outlineSummary: '',
-        chapterCount: 0,
-        chapters: [],
-      },
-    };
+    const response = await http.get(`/api/projects/${projectId}/export`);
+    return this.unwrapPayload<ProjectExportBundle>(response.data);
   },
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getSettings(_projectId: string) {
-    return {
-      systemPromptText: '',
-      activePersonaId: null as any,
-      updatedAt: new Date().toISOString(),
-    };
+  async getSettings(projectId: string) {
+    const response = await http.get(`/api/projects/${projectId}/settings`);
+    return this.unwrapPayload<ProjectSettings>(response.data);
   },
 
   async updateSettings(
     projectId: string,
     payload: { systemPromptText?: string; activePersonaId?: string | null }
   ) {
-    if (payload.systemPromptText !== undefined) {
-      await this.promptConfig.update(projectId, { systemPromptText: payload.systemPromptText });
-    }
-    return {
-      systemPromptText: payload.systemPromptText || '',
-      activePersonaId: payload.activePersonaId || null,
-      updatedAt: new Date().toISOString(),
-    };
+    const response = await http.put(`/api/projects/${projectId}/settings`, payload);
+    return this.unwrapPayload<ProjectSettings>(response.data);
   },
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getPersonas(_projectId: string) {
-    return [];
+  async getPersonas(projectId: string) {
+    const response = await http.get(`/api/projects/${projectId}/personas`);
+    return this.unwrapPayload<PersonaItem[]>(response.data);
   },
 
   async createPersona(
     projectId: string,
     payload: { name: string; profile: string; tone?: string; constraints?: string[] }
   ) {
-    return {
-      id: 'temp-id',
-      name: payload.name,
-      profile: payload.profile,
-      tone: payload.tone || '',
-      constraints: payload.constraints || [],
-      status: 'draft' as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    const response = await http.post(`/api/projects/${projectId}/personas`, payload);
+    return this.unwrapPayload<PersonaItem>(response.data);
   },
 
   async publishPersona(projectId: string, personaId: string) {
-    return {
-      id: personaId,
-      name: '',
-      profile: '',
-      tone: '',
-      constraints: [],
-      status: 'published' as const,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    const response = await http.post(`/api/projects/${projectId}/personas/${personaId}/publish`);
+    return this.unwrapPayload<PersonaItem>(response.data);
   },
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getKnowledge(_projectId: string) {
-    return {
-      outlineSummary: '',
-      chapters: [],
-      indexVersion: 0,
-      lastIndexedAt: null,
-    };
+  async getKnowledge(projectId: string) {
+    const response = await http.get(`/api/projects/${projectId}/knowledge`);
+    return this.unwrapPayload<KnowledgeItem>(response.data);
   },
 
   async updateOutline(projectId: string, payload: { outlineSummary: string }) {
-    return {
-      outlineSummary: payload.outlineSummary,
-      chapters: [],
-      indexVersion: 1,
-      lastIndexedAt: new Date().toISOString(),
-    };
+    const response = await http.put(`/api/projects/${projectId}/knowledge/outline`, payload);
+    return this.unwrapPayload<KnowledgeItem>(response.data);
   },
 
   async upsertChapter(
     projectId: string,
     payload: { chapterNo: number; title: string; content: string }
   ) {
-    return {
-      chapterNo: payload.chapterNo,
-      title: payload.title,
-      content: payload.content,
-      summary: '',
-      updatedAt: new Date().toISOString(),
-    };
+    const response = await http.post(`/api/projects/${projectId}/knowledge/chapters`, payload);
+    return this.unwrapPayload<ChapterItem>(response.data);
   },
 
   async createReindexJob(projectId: string, payload: { mode?: 'full' | 'incremental' } = {}) {
-    return {
-      id: 'temp-job-id',
-      projectId,
-      mode: payload.mode || 'full',
-      status: 'processing' as const,
-      totalChapters: 0,
-      processedChapters: 0,
-      createdAt: new Date().toISOString(),
-      completedAt: null,
-      errorMessage: null,
-    };
+    const response = await http.post(`/api/projects/${projectId}/knowledge/reindex`, payload);
+    return this.unwrapPayload<IndexJob>(response.data);
   },
 
   async getReindexJob(projectId: string, jobId: string) {
-    return {
-      id: jobId,
-      projectId,
-      mode: 'full' as const,
-      status: 'completed' as const,
-      totalChapters: 0,
-      processedChapters: 0,
-      createdAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      errorMessage: null,
-    };
+    const response = await http.get(`/api/projects/${projectId}/knowledge/reindex/${jobId}`);
+    return this.unwrapPayload<IndexJob>(response.data);
+  },
+
+  async createChapterSummaryJob(projectId: string, chapterNo: number) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/summarize`
+    );
+    return this.unwrapPayload<SummaryJob>(response.data);
+  },
+
+  async createBatchSummaryJob(projectId: string, payload: { chapterNos?: number[] } = {}) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/summarize`,
+      payload
+    );
+    return this.unwrapPayload<SummaryJob>(response.data);
+  },
+
+  async getSummaryJob(projectId: string, jobId: string) {
+    const response = await http.get(`/api/projects/${projectId}/knowledge/summarize/${jobId}`);
+    return this.unwrapPayload<SummaryJob>(response.data);
   },
 
   async writeChapter(
@@ -300,26 +250,8 @@ export const apiClient = {
       targetWords: number;
     }
   ) {
-    return {
-      draftText: '',
-      reasoningBrief: '',
-      citations: [],
-      consistencyNotes: [],
-      autoUpdates: {
-        chapterUpdated: false,
-        outlineUpdated: false,
-        personaUpdated: false,
-        updateLine: '',
-      },
-      context: {
-        projectId,
-        chapterNo: payload.chapterNo,
-        usedPersonaId: null,
-        outlineUsed: false,
-        recentChapterCount: 0,
-        targetWords: payload.targetWords,
-      },
-    };
+    const response = await http.post(`/api/projects/${projectId}/write`, payload);
+    return this.unwrapPayload<WriteResult>(response.data);
   },
 
   // Auth API
@@ -476,6 +408,43 @@ export const apiClient = {
     return response.data;
   },
 
+  async syncProjectContext(projectId: string) {
+    const workspace = await this.getWorkspace(projectId);
+    const activePersona =
+      workspace.personas.find((persona) => persona.id === workspace.settings.activePersonaId) ||
+      workspace.personas.find((persona) => persona.status === 'published') ||
+      null;
+
+    const ragBaseURL = getRagOrchestratorBaseURL();
+    const contextUrl = ragBaseURL
+      ? `${ragBaseURL}/api/projects/${projectId}/context`
+      : `/api/projects/${projectId}/context`;
+
+    const response = await fetch(contextUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        systemPromptText: workspace.settings.systemPromptText,
+        personaProfile: activePersona
+          ? `${activePersona.name}\n${activePersona.profile}\n语气：${activePersona.tone}`
+          : '未配置人物设定',
+        outlineSummary: workspace.knowledge.outlineSummary,
+        chapters: workspace.knowledge.chapters.map((chapter) => ({
+          chapterNo: chapter.chapterNo,
+          title: chapter.title,
+          summary: chapter.summary || chapter.content.slice(0, 160),
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || '同步项目上下文失败');
+    }
+  },
+
   // SSE streaming generation for writing workbench
   async generateDraftSSE(
     projectId: string,
@@ -490,10 +459,13 @@ export const apiClient = {
     citations: CitationItem[],
     callbacks: SseCallbacks
   ): Promise<void> {
-    const token = localStorage.getItem('token');
-    const baseURL = http.defaults.baseURL || 'http://localhost:3000';
+    await this.syncProjectContext(projectId);
 
-    const response = await fetch(`${baseURL}/api/generate/draft`, {
+    const token = localStorage.getItem('token');
+    const ragBaseURL = getRagOrchestratorBaseURL();
+    const draftUrl = ragBaseURL ? `${ragBaseURL}/api/generate/draft` : '/api/generate/draft';
+
+    const response = await fetch(draftUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -636,11 +608,15 @@ export interface PersonaItem {
   updatedAt: string;
 }
 
+export type ChapterSummarySource = 'llm' | 'fallback';
+
 export interface ChapterItem {
   chapterNo: number;
   title: string;
   content: string;
   summary: string;
+  summarySource?: ChapterSummarySource;
+  summaryUpdatedAt?: string;
   updatedAt: string;
 }
 
@@ -658,6 +634,25 @@ export interface IndexJob {
   status: 'processing' | 'completed' | 'failed';
   totalChapters: number;
   processedChapters: number;
+  createdAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
+export interface SummaryJob {
+  id: string;
+  projectId: string;
+  scope: 'single' | 'batch';
+  chapterNo: number | null;
+  status: 'processing' | 'completed' | 'failed';
+  totalChapters: number;
+  processedChapters: number;
+  chapterNos: number[];
+  summaries: Array<{
+    chapterNo: number;
+    summary: string;
+    summarySource: ChapterSummarySource;
+  }>;
   createdAt: string;
   completedAt: string | null;
   errorMessage: string | null;
