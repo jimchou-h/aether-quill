@@ -6,6 +6,21 @@
       "description": "这是一个示例小说项目",
       "createdAt": "2026-05-11T02:20:38.607Z",
       "updatedAt": "2026-05-11T02:20:38.607Z"
+    },
+    {
+      "id": "1778479698594",
+      "name": "12",
+      "description": "12",
+      "createdAt": "2026-05-11T06:08:18.594Z",
+      "updatedAt": "2026-05-11T06:08:18.594Z"
+    }
+  ],
+  "members": [
+    {
+      "userId": "1",
+      "projectId": "1778479698594",
+      "role": "owner",
+      "createdAt": "2026-05-11T06:08:18.594Z"
     }
   ],
   "settings": {
@@ -13,10 +28,16 @@
       "systemPromptText": "你是一位专业的小说写作助手，请保持设定一致与剧情连贯。",
       "activePersonaId": null,
       "updatedAt": "2026-05-11T02:20:38.608Z"
+    },
+    "1778479698594": {
+      "systemPromptText": "你是一位专业的小说写作助手，请保持设定一致与剧情连贯。",
+      "activePersonaId": null,
+      "updatedAt": "2026-05-11T06:08:18.594Z"
     }
   },
   "personas": {
-    "1": []
+    "1": [],
+    "1778479698594": []
   },
   "knowledge": {
     "1": {
@@ -24,9 +45,16 @@
       "chapters": [],
       "indexVersion": 0,
       "lastIndexedAt": null
+    },
+    "1778479698594": {
+      "outlineSummary": "",
+      "chapters": [],
+      "indexVersion": 0,
+      "lastIndexedAt": null
     }
   },
   "indexJobs": {
-    "1": []
+    "1": [],
+    "1778479698594": []
   }
 }
