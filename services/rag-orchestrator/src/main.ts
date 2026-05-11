@@ -288,9 +288,10 @@ app.get('/api/projects/:projectId/generation-traces', (req, res) => {
   const projectId = req.params.projectId;
   const limit = Number(req.query.limit) || 20;
   const offset = Number(req.query.offset) || 0;
+  const status = req.query.status as string | undefined;
 
-  const traces = generationService.listTraces(projectId, limit, offset);
-  res.json({ data: traces, total: traces.length });
+  const { data, total } = generationService.queryTraces({ projectId, status, limit, offset });
+  res.json({ data, total });
 });
 
 app.get('/api/traces/:traceId', (req, res) => {
@@ -299,6 +300,21 @@ app.get('/api/traces/:traceId', (req, res) => {
     return res.status(404).json({ error: 'Trace not found' });
   }
   res.json(trace);
+});
+
+app.get('/api/traces', (req, res) => {
+  const limit = Number(req.query.limit) || 20;
+  const offset = Number(req.query.offset) || 0;
+  const status = req.query.status as string | undefined;
+
+  const { data, total } = generationService.queryTraces({ status, limit, offset });
+  res.json({ data, total });
+});
+
+app.get('/api/projects/:projectId/generation-stats', (req, res) => {
+  const projectId = req.params.projectId;
+  const stats = generationService.getStats(projectId);
+  res.json(stats);
 });
 
 app.post('/api/generate/draft', async (req, res) => {
