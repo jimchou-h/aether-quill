@@ -18,27 +18,32 @@ defineProps<{
 
 <template>
   <section class="knowledge-panel">
-    <h3 class="panel-title">项目上下文</h3>
-    <div class="meta-list">
-      <div class="meta-item">
+    <div class="panel-heading">
+      <h3 class="panel-title">项目上下文</h3>
+      <p class="panel-description">生成时会自动引用当前项目设定与知识。</p>
+    </div>
+
+    <div class="meta-grid">
+      <article class="meta-card">
         <span class="meta-label">项目</span>
         <span class="meta-value">{{ projectName || '-' }}</span>
-      </div>
-      <div class="meta-item">
+      </article>
+      <article class="meta-card">
         <span class="meta-label">已录入章节</span>
         <span class="meta-value">{{ chapterCount }}</span>
-      </div>
-      <div class="meta-item">
+      </article>
+      <article class="meta-card">
         <span class="meta-label">大纲状态</span>
         <span class="meta-value" :class="outlineReady ? 'status-ready' : 'status-missing'">
           {{ outlineReady ? '已配置' : '未配置' }}
         </span>
-      </div>
-      <div class="meta-item">
+      </article>
+      <article class="meta-card meta-card-wide">
         <span class="meta-label">当前人物设定</span>
         <span class="meta-value">{{ activePersonaName }}</span>
-      </div>
+      </article>
     </div>
+
     <div v-if="outlineSummary" class="outline-section">
       <h4 class="sub-title">大纲摘要</h4>
       <p class="outline-text">{{ outlineSummary }}</p>
@@ -49,44 +54,65 @@ defineProps<{
 <style scoped>
 .knowledge-panel {
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  background: #fff;
+  border-radius: 16px;
+  padding: 1.35rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+.panel-heading {
+  margin-bottom: 1.1rem;
 }
 
 .panel-title {
-  margin-bottom: 0.7rem;
-  font-size: 1rem;
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.panel-description {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .sub-title {
-  margin-top: 0.75rem;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.92rem;
   color: #374151;
 }
 
-.meta-list {
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.meta-card {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #edf2f7;
 }
 
-.meta-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.85rem;
+.meta-card-wide {
+  grid-column: 1 / -1;
 }
 
 .meta-label {
   color: #6b7280;
+  font-size: 0.8rem;
 }
 
 .meta-value {
-  color: #374151;
-  font-weight: 500;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .status-ready {
@@ -98,15 +124,15 @@ defineProps<{
 }
 
 .outline-section {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #f3f4f6;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
 }
 
 .outline-text {
-  font-size: 0.85rem;
-  color: #6b7280;
-  line-height: 1.5;
+  font-size: 0.92rem;
+  color: #4b5563;
+  line-height: 1.65;
   white-space: pre-wrap;
 }
 </style>

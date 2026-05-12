@@ -32,7 +32,10 @@ const emit = defineEmits<{
 
 <template>
   <section class="generation-preview">
-    <h3 class="panel-title">生成结果</h3>
+    <div class="panel-heading">
+      <h3 class="panel-title">生成结果</h3>
+      <p class="panel-description">草稿、引用证据与关系事件会集中展示在这里。</p>
+    </div>
 
     <div v-if="isStreaming" class="streaming-indicator">
       <span class="streaming-dot"></span>
@@ -44,7 +47,8 @@ const emit = defineEmits<{
     </div>
 
     <div v-if="!draftText && !isStreaming" class="empty-state">
-      <p>输入生成参数后点击「生成章节草稿」，结果将实时显示在此处。</p>
+      <p class="empty-title">等待生成</p>
+      <p class="empty-copy">输入生成参数后点击「生成章节草稿」，结果将实时显示在此处。</p>
     </div>
 
     <div v-if="isDone" class="actions">
@@ -82,32 +86,48 @@ const emit = defineEmits<{
 
 <style scoped>
 .generation-preview {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
+  border-radius: 16px;
+  padding: 1.35rem;
   background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+.panel-heading {
+  margin-bottom: 1rem;
 }
 
 .panel-title {
-  margin-bottom: 0.7rem;
-  font-size: 1rem;
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.panel-description {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .sub-title {
-  margin-top: 0.85rem;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.92rem;
   color: #374151;
 }
 
 .streaming-indicator {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: #eff6ff;
   color: #1d4ed8;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 .streaming-dot {
@@ -129,43 +149,67 @@ const emit = defineEmits<{
 }
 
 .empty-state {
-  color: #9ca3af;
-  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 320px;
+  padding: 2rem 1.5rem;
+  border-radius: 14px;
+  border: 1px dashed #d1d5db;
+  background: #f8fafc;
   text-align: center;
-  padding: 2rem 0;
+}
+
+.empty-title {
+  margin: 0;
+  color: #374151;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.empty-copy {
+  margin: 0;
+  max-width: 24rem;
+  color: #6b7280;
+  font-size: 0.92rem;
+  line-height: 1.6;
 }
 
 .draft-section {
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .draft-output {
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 0.8rem;
+  border-radius: 14px;
+  padding: 1.1rem 1.15rem;
   background: #f8fafc;
   white-space: pre-wrap;
-  line-height: 1.7;
-  font-size: 0.9rem;
+  line-height: 1.8;
+  font-size: 0.98rem;
   font-family: inherit;
-  max-height: 60vh;
+  min-height: 360px;
+  max-height: min(72vh, 760px);
   overflow-y: auto;
 }
 
 .actions {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .primary-button {
   border: none;
   background: #1d4ed8;
   color: #fff;
-  border-radius: 6px;
-  padding: 0.52rem 0.9rem;
+  border-radius: 10px;
+  padding: 0.65rem 1rem;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 .primary-button:hover {
@@ -176,10 +220,10 @@ const emit = defineEmits<{
   border: 1px solid #d1d5db;
   background: #fff;
   color: #374151;
-  border-radius: 6px;
-  padding: 0.52rem 0.9rem;
+  border-radius: 10px;
+  padding: 0.65rem 1rem;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 .secondary-button:hover {
@@ -188,8 +232,9 @@ const emit = defineEmits<{
 }
 
 .citations-section {
-  border-top: 1px solid #f3f4f6;
-  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 1rem;
+  margin-top: 0.25rem;
 }
 
 .citation-list {
@@ -197,16 +242,16 @@ const emit = defineEmits<{
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
 
 .citation-item {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  color: #6b7280;
-  line-height: 1.4;
+  gap: 0.65rem;
+  font-size: 0.88rem;
+  color: #4b5563;
+  line-height: 1.55;
 }
 
 .citation-badge {
@@ -214,12 +259,12 @@ const emit = defineEmits<{
   background: #eff6ff;
   color: #1d4ed8;
   font-size: 0.75rem;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
   font-weight: 500;
 }
 
 .citation-snippet {
-  word-break: break-all;
+  word-break: break-word;
 }
 </style>

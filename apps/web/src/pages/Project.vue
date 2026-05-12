@@ -4,6 +4,8 @@
       <nav>
         <router-link :to="`/projects/${projectId}/workbench`">写作工作台</router-link>
         <router-link :to="`/projects/${projectId}/knowledge`">知识库</router-link>
+        <router-link :to="`/projects/${projectId}/personas`">人物设定</router-link>
+        <router-link :to="`/projects/${projectId}/relation-events`">关系事件</router-link>
         <router-link :to="`/projects/${projectId}/chapters`">章节</router-link>
         <router-link :to="`/projects/${projectId}/settings`">设置</router-link>
       </nav>
@@ -47,6 +49,7 @@ const projectId = computed(() => route.params.id as string);
 }
 .project-content {
   flex: 1;
-  padding: 1rem;
+  min-width: 0;
+  padding: 1.25rem 1.5rem;
 }
 </style>

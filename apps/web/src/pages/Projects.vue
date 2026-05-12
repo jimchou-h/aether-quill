@@ -138,7 +138,7 @@ onMounted(() => {
           <router-link class="link-button" :to="`/projects/${project.id}/knowledge`"
             >知识库</router-link
           >
-          <router-link class="link-button" :to="`/projects/${project.id}/settings`"
+          <router-link class="link-button" :to="`/projects/${project.id}/personas`"
             >人物设定</router-link
           >
           <button
