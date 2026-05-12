@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { apiClient, type PromptTemplateItem, type PromptConfigVersionItem } from '../services/api';
+import { presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
 
 /**
  * 配置状态枚举
@@ -78,7 +79,7 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
         status.value = 'draft';
       }
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '加载配置失败';
+      errorMessage.value = presentErrorFromCaught(error, '加载配置失败');
       status.value = 'error';
     }
   }
@@ -116,7 +117,7 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
       currentVersion.value = data.version ?? data.version ?? 1;
       isPublished.value = false;
       status.value = 'draft';
-      message.value = '草稿已保存';
+      message.value = presentSuccess('草稿已保存');
 
       if (data.templateId || systemTemplateId.value) {
         const tid = data.templateId || systemTemplateId.value;
@@ -124,7 +125,7 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
         await loadVersions(projectId);
       }
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '保存草稿失败';
+      errorMessage.value = presentErrorFromCaught(error, '保存草稿失败');
     } finally {
       saving.value = false;
     }
@@ -144,10 +145,10 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
       if (data.version) currentVersion.value = data.version;
       isPublished.value = true;
       status.value = 'published';
-      message.value = `已发布版本 ${data.version || currentVersion.value}`;
+      message.value = presentSuccess(`已发布版本 ${data.version || currentVersion.value}`);
       await loadVersions(projectId);
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '发布失败';
+      errorMessage.value = presentErrorFromCaught(error, '发布失败');
     } finally {
       publishing.value = false;
     }
@@ -164,10 +165,10 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     message.value = '';
     try {
       (await apiClient.promptConfig.rollback(projectId, { version: targetVersion })) as any;
-      message.value = `已回滚到版本 ${targetVersion}`;
+      message.value = presentSuccess(`已回滚到版本 ${targetVersion}`);
       await loadConfig(projectId);
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '回滚失败';
+      errorMessage.value = presentErrorFromCaught(error, '回滚失败');
     } finally {
       rollingBack.value = false;
     }

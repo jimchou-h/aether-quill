@@ -7,6 +7,12 @@ import {
   type ChunkItem,
   type DocumentVersionItem,
 } from '../services/api';
+import {
+  presentError,
+  presentErrorFromCaught,
+  presentInfo,
+  presentSuccess,
+} from '../utils/pageFeedback';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -40,7 +46,7 @@ async function loadDocuments() {
     const response = (await apiClient.documents.list(projectId.value)) as any;
     documents.value = response?.data ?? (Array.isArray(response) ? response : []);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载文档失败';
+    errorMessage.value = presentErrorFromCaught(error, '加载文档失败');
   } finally {
     loading.value = false;
   }
@@ -48,7 +54,7 @@ async function loadDocuments() {
 
 async function handleCreate() {
   if (!newTitle.value.trim()) {
-    errorMessage.value = '请填写文档标题';
+    errorMessage.value = presentError('请填写文档标题');
     return;
   }
 
@@ -63,10 +69,10 @@ async function handleCreate() {
     newTitle.value = '';
     newContent.value = '';
     showCreateForm.value = false;
-    message.value = '文档已创建';
+    message.value = presentSuccess('文档已创建');
     await loadDocuments();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '创建文档失败';
+    errorMessage.value = presentErrorFromCaught(error, '创建文档失败');
   } finally {
     submitting.value = false;
   }
@@ -90,10 +96,10 @@ async function handleUpdate() {
       content: editContent.value || undefined,
     });
     editingDoc.value = null;
-    message.value = '文档已更新';
+    message.value = presentSuccess('文档已更新');
     await loadDocuments();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '更新文档失败';
+    errorMessage.value = presentErrorFromCaught(error, '更新文档失败');
   } finally {
     submitting.value = false;
   }
@@ -106,7 +112,7 @@ async function handleDelete(doc: DocumentItem) {
   message.value = '';
   try {
     await apiClient.deleteDocument(doc.id);
-    message.value = '文档已删除';
+    message.value = presentSuccess('文档已删除');
     if (selectedDoc.value?.id === doc.id) {
       selectedDoc.value = null;
       chunks.value = [];
@@ -114,7 +120,7 @@ async function handleDelete(doc: DocumentItem) {
     }
     await loadDocuments();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '删除文档失败';
+    errorMessage.value = presentErrorFromCaught(error, '删除文档失败');
   }
 }
 
@@ -125,10 +131,10 @@ async function handleReindex(doc: DocumentItem) {
   try {
     const result = (await apiClient.documents.reindex(doc.id)) as any;
     const data = result?.data ?? result;
-    message.value = `索引任务已提交（${data.indexStatus || 'processing'}）`;
+    message.value = presentInfo(`索引任务已提交（${data.indexStatus || 'processing'}）`);
     await loadDocuments();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '启动索引失败';
+    errorMessage.value = presentErrorFromCaught(error, '启动索引失败');
   } finally {
     indexing.value = false;
   }
@@ -150,7 +156,7 @@ async function loadChunks(doc: DocumentItem) {
     const response = (await apiClient.documents.getChunks(doc.id)) as any;
     chunks.value = response?.data ?? (Array.isArray(response) ? response : []);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载 chunks 失败';
+    errorMessage.value = presentErrorFromCaught(error, '加载 chunks 失败');
     chunks.value = [];
   } finally {
     loadingDetails.value = false;
@@ -165,7 +171,7 @@ async function loadVersions(doc: DocumentItem) {
     const response = (await apiClient.getDocumentVersions(doc.id)) as any;
     versions.value = response?.data ?? (Array.isArray(response) ? response : []);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载版本历史失败';
+    errorMessage.value = presentErrorFromCaught(error, '加载版本历史失败');
     versions.value = [];
   } finally {
     loadingDetails.value = false;

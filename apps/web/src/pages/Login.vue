@@ -53,6 +53,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { presentError, presentSuccess } from '../utils/pageFeedback';
 
 /** 路由实例 */
 const router = useRouter();
@@ -74,7 +75,7 @@ const errorMessage = ref('');
 async function handleLogin() {
   // 验证输入
   if (!email.value.trim() || !password.value.trim()) {
-    errorMessage.value = '请填写邮箱和密码';
+    errorMessage.value = presentError('请填写邮箱和密码');
     return;
   }
 
@@ -84,13 +85,13 @@ async function handleLogin() {
   try {
     // 调用登录接口
     await authStore.login(email.value.trim(), password.value);
-    // 登录成功后跳转至项目列表
+    presentSuccess('登录成功');
     await router.push('/projects');
   } catch (error: any) {
     // 处理登录失败
     const message =
       error?.response?.data?.message || error?.message || '登录失败，请检查邮箱和密码';
-    errorMessage.value = message;
+    errorMessage.value = presentError(message);
   } finally {
     loading.value = false;
   }

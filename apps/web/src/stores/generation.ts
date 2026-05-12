@@ -6,6 +6,7 @@ import {
   type ConsistencyNote,
   type UsedRelationEventItem,
 } from '../services/api';
+import { presentError, presentErrorFromCaught } from '../utils/pageFeedback';
 
 /**
  * 生成状态枚举
@@ -103,12 +104,12 @@ export const useGenerationStore = defineStore('generation', () => {
           status.value = 'done';
         },
         onError: (msg) => {
-          errorMessage.value = msg;
+          errorMessage.value = presentError(msg);
           status.value = 'error';
         },
       });
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '生成请求失败';
+      errorMessage.value = presentErrorFromCaught(error, '生成请求失败');
       status.value = 'error';
     }
   }
@@ -120,7 +121,7 @@ export const useGenerationStore = defineStore('generation', () => {
    */
   async function acceptDraft(projectId: string, chapterNoVal: number) {
     if (!draftText.value.trim()) {
-      errorMessage.value = '草稿内容为空，无法接受';
+      errorMessage.value = presentError('草稿内容为空，无法接受');
       return;
     }
 
@@ -131,7 +132,7 @@ export const useGenerationStore = defineStore('generation', () => {
         content: draftText.value,
       });
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : '接受草稿失败';
+      errorMessage.value = presentErrorFromCaught(error, '接受草稿失败');
     }
   }
 

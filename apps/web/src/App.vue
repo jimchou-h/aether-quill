@@ -14,12 +14,14 @@
     <main class="app-main">
       <router-view />
     </main>
+    <AppToastHost />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
+import AppToastHost from './components/common/AppToastHost.vue';
 import { useAuthStore } from './stores/auth';
 
 /** 路由实例 */
