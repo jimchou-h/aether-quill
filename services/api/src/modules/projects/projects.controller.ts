@@ -172,6 +172,17 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/relation-events/generate')
+  generateChapterRelationEvents(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.generateChapterRelationEvents(id, Number(chapterNo), userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':id/relation-events')
   getRelationEvents(
     @Param('id') id: string,

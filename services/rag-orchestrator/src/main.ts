@@ -175,6 +175,42 @@ app.post('/api/summarize', async (req, res) => {
   }
 });
 
+app.post('/api/extract/relation-events', async (req, res) => {
+  const chapterNo = Number(req.body?.chapterNo || 0);
+  const title = String(req.body?.title || '').trim();
+  const content = String(req.body?.content || '');
+  const protagonist = String(req.body?.protagonist || '主角').trim() || '主角';
+  const personaNames = Array.isArray(req.body?.personaNames)
+    ? req.body.personaNames
+        .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+    : [];
+
+  if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+    res.status(400).json({ message: 'chapterNo 必须为正整数' });
+    return;
+  }
+
+  if (!content.trim()) {
+    res.status(400).json({ message: 'content 不能为空' });
+    return;
+  }
+
+  try {
+    const events = await generationService.extractChapterRelationEvents({
+      chapterNo,
+      title,
+      content,
+      protagonist,
+      personaNames,
+    });
+    res.json({ events });
+  } catch (error) {
+    console.error('Relation event extraction failed:', error);
+    res.status(502).json({ message: '关系事件抽取失败' });
+  }
+});
+
 app.post('/api/projects/:projectId/context', (req, res) => {
   const projectId = req.params.projectId;
   const context = getOrCreateContext(projectId);

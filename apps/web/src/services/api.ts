@@ -290,6 +290,13 @@ export const apiClient = {
     return this.unwrapPayload<SummaryJob>(response.data);
   },
 
+  async generateChapterRelationEvents(projectId: string, chapterNo: number) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/relation-events/generate`
+    );
+    return this.unwrapPayload<ChapterRelationEventGenerateResult>(response.data);
+  },
+
   async writeChapter(
     projectId: string,
     payload: {
@@ -806,6 +813,13 @@ export interface SummaryJob {
   createdAt: string;
   completedAt: string | null;
   errorMessage: string | null;
+}
+
+export interface ChapterRelationEventGenerateResult {
+  chapterNo: number;
+  createdCount: number;
+  skippedCount: number;
+  events: RelationEventItem[];
 }
 
 export interface WriteResult {
