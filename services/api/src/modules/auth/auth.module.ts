@@ -11,7 +11,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
     PassportModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'aether-quill-secret-key',
-      signOptions: { expiresIn: '15m' },
+      signOptions: { expiresIn: '30m' },
     }),
   ],
   controllers: [AuthController],

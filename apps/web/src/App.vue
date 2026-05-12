@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
 
@@ -27,11 +27,33 @@ const router = useRouter();
 /** 认证状态管理 */
 const authStore = useAuthStore();
 
+const CLICK_REFRESH_INTERVAL_MS = 30_000;
+let lastClickRefreshAt = 0;
+
+function onGlobalClick() {
+  if (!authStore.isAuthenticated) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastClickRefreshAt < CLICK_REFRESH_INTERVAL_MS) {
+    return;
+  }
+
+  lastClickRefreshAt = now;
+  void authStore.ensureFreshSession();
+}
+
 /**
  * 组件挂载时初始化认证状态
  */
 onMounted(() => {
   authStore.init();
+  document.addEventListener('click', onGlobalClick, true);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', onGlobalClick, true);
 });
 
 /**

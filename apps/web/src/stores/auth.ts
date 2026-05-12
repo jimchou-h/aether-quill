@@ -2,6 +2,38 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { apiClient } from '../services/api';
 
+const ACCESS_REFRESH_THRESHOLD_SECONDS = 5 * 60;
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+function getTokenExpirySeconds(accessToken: string): number | null {
+  const parts = accessToken.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))) as {
+      exp?: unknown;
+    };
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAccessTokenNearExpiry(
+  accessToken: string,
+  thresholdSeconds = ACCESS_REFRESH_THRESHOLD_SECONDS
+): boolean {
+  const exp = getTokenExpirySeconds(accessToken);
+  if (exp === null) {
+    return false;
+  }
+
+  return exp - Math.floor(Date.now() / 1000) <= thresholdSeconds;
+}
+
 /**
  * 认证状态管理 Store
  * 用于管理用户登录状态、token 和用户信息
@@ -53,6 +85,52 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
+   * 轮换 access / refresh token
+   */
+  async function refreshSession(): Promise<boolean> {
+    if (!refreshTokenValue.value) {
+      return false;
+    }
+
+    if (!refreshInFlight) {
+      refreshInFlight = (async () => {
+        try {
+          const data = await apiClient.auth.refresh({
+            refreshToken: refreshTokenValue.value,
+          });
+          token.value = data.accessToken || '';
+          refreshTokenValue.value = data.refreshToken || '';
+          localStorage.setItem('token', token.value);
+          localStorage.setItem('refreshToken', refreshTokenValue.value);
+          return true;
+        } catch {
+          logout();
+          return false;
+        } finally {
+          refreshInFlight = null;
+        }
+      })();
+    }
+
+    return refreshInFlight;
+  }
+
+  /**
+   * Access 临近过期时续期
+   */
+  async function ensureFreshSession(): Promise<void> {
+    if (!token.value || !refreshTokenValue.value) {
+      return;
+    }
+
+    if (!isAccessTokenNearExpiry(token.value)) {
+      return;
+    }
+
+    await refreshSession();
+  }
+
+  /**
    * 用户登出
    */
   function logout() {
@@ -80,6 +158,8 @@ export const useAuthStore = defineStore('auth', () => {
     userName,
     login,
     fetchMe,
+    refreshSession,
+    ensureFreshSession,
     logout,
     init,
   };

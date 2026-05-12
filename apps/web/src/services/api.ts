@@ -103,8 +103,26 @@ function getRagOrchestratorBaseURL() {
   return 'http://localhost:3001';
 }
 
+function shouldSkipSessionRefresh(url: string): boolean {
+  return url.includes('/api/auth/login') || url.includes('/api/auth/refresh');
+}
+
+function redirectToLogin() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('refreshToken');
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login';
+  }
+}
+
 // Request interceptor for auth
-http.interceptors.request.use((config) => {
+http.interceptors.request.use(async (config) => {
+  const requestUrl = config.url || '';
+  if (!shouldSkipSessionRefresh(requestUrl)) {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+  }
+
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -137,8 +155,7 @@ http.interceptors.response.use(
       }
     }
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+      redirectToLogin();
     }
     throw error;
   }
@@ -334,6 +351,14 @@ export const apiClient = {
 
     async me(): Promise<ResponseData<'/api/auth/me', 'get'>> {
       const response = await http.get('/api/auth/me');
+      return response.data;
+    },
+
+    async refresh(payload: { refreshToken: string }): Promise<{
+      accessToken: string;
+      refreshToken: string;
+    }> {
+      const response = await http.post('/api/auth/refresh', payload);
       return response.data;
     },
   },
@@ -573,6 +598,9 @@ export const apiClient = {
       selectedEventIds: task.selectedEventIds,
     });
 
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
     const token = localStorage.getItem('token');
     const ragBaseURL = getRagOrchestratorBaseURL();
     const draftUrl = ragBaseURL ? `${ragBaseURL}/api/generate/draft` : '/api/generate/draft';
@@ -587,6 +615,9 @@ export const apiClient = {
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
       const errorBody = await response.text().catch(() => '');
       throw new Error(errorBody || `Generation failed: ${response.statusText}`);
     }
