@@ -126,19 +126,29 @@ onMounted(() => {
 
 <template>
   <div class="workbench-page">
-    <div class="workbench-header">
-      <h2 class="page-title">写作工作台</h2>
-      <p class="page-subtitle">在当前项目下生成章节草稿，系统会自动加载该项目的设定与知识。</p>
-    </div>
+    <header class="workbench-header">
+      <div class="workbench-header-copy">
+        <p class="workbench-eyebrow">当前项目</p>
+        <h2 class="page-title">写作工作台</h2>
+        <p class="page-subtitle">配置本章生成参数，右侧实时查看草稿与引用证据。</p>
+      </div>
+      <div v-if="!loading" class="workbench-header-meta">
+        <span class="meta-pill">{{ projectName || '未命名项目' }}</span>
+        <span class="meta-pill">已录入 {{ chapterCount }} 章</span>
+        <span class="meta-pill" :class="outlineReady ? 'meta-pill-ready' : 'meta-pill-missing'">
+          {{ outlineReady ? '大纲已配置' : '大纲未配置' }}
+        </span>
+      </div>
+    </header>
 
-    <div v-if="loading" class="message">正在加载工作台...</div>
+    <div v-if="loading" class="message message-loading">正在加载工作台...</div>
     <div v-if="errorMessage || generationStore.errorMessage" class="message message-error">
       {{ errorMessage || generationStore.errorMessage }}
     </div>
 
     <template v-if="!loading">
-      <div class="workbench-layout">
-        <div class="workbench-sidebar">
+      <div class="workbench-shell">
+        <aside class="context-column">
           <KnowledgePanel
             :project-name="projectName"
             :chapter-count="chapterCount"
@@ -146,29 +156,33 @@ onMounted(() => {
             :active-persona-name="activePersonaName"
             :outline-summary="outlineSummary"
           />
-        </div>
+        </aside>
 
-        <div class="workbench-main">
-          <PromptConsole
-            ref="promptConsoleRef"
-            :generating="generationStore.isStreaming"
-            :project-id="projectId"
-            :persona-names="personaNames"
-            @generate="handleGenerate"
-          />
+        <div class="workspace-columns">
+          <section class="compose-column" aria-label="生成参数">
+            <PromptConsole
+              ref="promptConsoleRef"
+              :generating="generationStore.isStreaming"
+              :project-id="projectId"
+              :persona-names="personaNames"
+              @generate="handleGenerate"
+            />
 
-          <ConsistencyAlert :notes="generationStore.consistencyNotes" />
+            <ConsistencyAlert :notes="generationStore.consistencyNotes" />
+          </section>
 
-          <GenerationPreview
-            :draft-text="generationStore.draftText"
-            :citations="generationStore.citations"
-            :consistency-notes="generationStore.consistencyNotes"
-            :used-relation-events="generationStore.usedRelationEvents"
-            :is-streaming="generationStore.isStreaming"
-            :is-done="generationStore.isDone"
-            @accept="handleAcceptDraft"
-            @regenerate="handleRegenerate"
-          />
+          <section class="result-column" aria-label="生成结果">
+            <GenerationPreview
+              :draft-text="generationStore.draftText"
+              :citations="generationStore.citations"
+              :consistency-notes="generationStore.consistencyNotes"
+              :used-relation-events="generationStore.usedRelationEvents"
+              :is-streaming="generationStore.isStreaming"
+              :is-done="generationStore.isDone"
+              @accept="handleAcceptDraft"
+              @regenerate="handleRegenerate"
+            />
+          </section>
         </div>
       </div>
     </template>
@@ -177,55 +191,158 @@ onMounted(() => {
 
 <style scoped>
 .workbench-page {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1rem;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0.25rem 0 2rem;
 }
 
 .workbench-header {
-  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.workbench-header-copy {
+  max-width: 42rem;
+}
+
+.workbench-eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
 }
 
 .page-title {
-  margin-bottom: 0.25rem;
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+  line-height: 1.2;
 }
 
 .page-subtitle {
-  color: #666;
-  margin-bottom: 0.5rem;
+  margin: 0;
+  color: #6b7280;
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
-.workbench-layout {
+.workbench-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  max-width: 28rem;
+}
+
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  color: #374151;
+  font-size: 0.85rem;
+  line-height: 1.2;
+}
+
+.meta-pill-ready {
+  background: #ecfdf3;
+  border-color: #abefc6;
+  color: #027a48;
+}
+
+.meta-pill-missing {
+  background: #fffaeb;
+  border-color: #fedf89;
+  color: #b54708;
+}
+
+.workbench-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 1rem;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  gap: 1.5rem;
   align-items: start;
 }
 
-.workbench-sidebar {
+.context-column {
   position: sticky;
-  top: 72px;
+  top: 1rem;
 }
 
-.workbench-main {
+.workspace-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 1.5rem;
+  align-items: start;
   min-width: 0;
 }
 
+.compose-column,
+.result-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.result-column {
+  position: sticky;
+  top: 1rem;
+}
+
 .message {
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
   color: #6b7280;
+}
+
+.message-loading {
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
 }
 
 .message-error {
   color: #b42318;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: #fef3f2;
+  border: 1px solid #fecdca;
 }
 
-@media (max-width: 768px) {
-  .workbench-layout {
+@media (max-width: 1280px) {
+  .workspace-columns {
     grid-template-columns: 1fr;
   }
 
-  .workbench-sidebar {
+  .result-column {
+    position: static;
+  }
+}
+
+@media (max-width: 960px) {
+  .workbench-header {
+    flex-direction: column;
+  }
+
+  .workbench-header-meta {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .workbench-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .context-column {
     position: static;
   }
 }

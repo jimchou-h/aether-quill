@@ -30,15 +30,15 @@ defineProps<{
 <style scoped>
 .consistency-alerts {
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
+  border-radius: 14px;
+  padding: 1rem 1.15rem;
   background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03);
 }
 
 .alert-title {
-  font-size: 0.9rem;
-  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  margin: 0 0 0.75rem;
   color: #374151;
 }
 
@@ -47,17 +47,17 @@ defineProps<{
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.6rem;
 }
 
 .alert-item {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 4px;
-  line-height: 1.4;
+  gap: 0.6rem;
+  font-size: 0.88rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  line-height: 1.55;
 }
 
 .alert-info {

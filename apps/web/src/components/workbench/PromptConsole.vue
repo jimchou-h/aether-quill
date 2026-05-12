@@ -154,46 +154,51 @@ defineExpose({ resetForm });
 
 <template>
   <section class="prompt-console">
-    <h3 class="panel-title">生成参数</h3>
-
-    <div class="form-row">
-      <label class="field-label">
-        章节号
-        <input v-model.number="chapterNo" type="number" min="1" class="field-input" />
-      </label>
-      <div class="field-label">
-        <span>目标字数</span>
-        <input
-          v-model.number="targetWords"
-          type="number"
-          min="200"
-          step="100"
-          class="field-input"
-          :disabled="unlimitedWords"
-        />
-        <label class="unlimited-toggle">
-          <input v-model="unlimitedWords" type="checkbox" />
-          不限制字数（尽量写长）
-        </label>
-      </div>
+    <div class="panel-heading">
+      <h3 class="panel-title">生成参数</h3>
+      <p class="panel-description">填写本章目标、出场角色与约束条件后发起生成。</p>
     </div>
 
-    <label class="field-label">
-      本章目标
-      <textarea
-        v-model="goal"
-        class="field-textarea"
-        placeholder="例如：主角在旧港口与导师对峙并拿到怀表线索"
-        rows="3"
-      />
-    </label>
+    <div class="form-section">
+      <div class="form-row">
+        <label class="field-label">
+          章节号
+          <input v-model.number="chapterNo" type="number" min="1" class="field-input" />
+        </label>
+        <div class="field-label">
+          <span>目标字数</span>
+          <input
+            v-model.number="targetWords"
+            type="number"
+            min="200"
+            step="100"
+            class="field-input"
+            :disabled="unlimitedWords"
+          />
+          <label class="unlimited-toggle">
+            <input v-model="unlimitedWords" type="checkbox" />
+            不限制字数（尽量写长）
+          </label>
+        </div>
+      </div>
 
-    <label class="field-label">
-      叙事视角（POV）
-      <input v-model="pov" class="field-input" type="text" placeholder="例如：女主第一人称" />
-    </label>
+      <label class="field-label">
+        本章目标
+        <textarea
+          v-model="goal"
+          class="field-textarea"
+          placeholder="例如：主角在旧港口与导师对峙并拿到怀表线索"
+          rows="4"
+        />
+      </label>
 
-    <section class="relation-section">
+      <label class="field-label">
+        叙事视角（POV）
+        <input v-model="pov" class="field-input" type="text" placeholder="例如：女主第一人称" />
+      </label>
+    </div>
+
+    <section class="relation-section bordered-section">
       <h4 class="section-title">出场角色</h4>
       <div class="chip-list">
         <button
@@ -218,7 +223,7 @@ defineExpose({ resetForm });
       </div>
     </section>
 
-    <section class="relation-section">
+    <section class="relation-section bordered-section">
       <div class="section-header">
         <h4 class="section-title">关系事件（手动勾选）</h4>
         <span class="section-meta">
@@ -246,109 +251,155 @@ defineExpose({ resetForm });
       </div>
     </section>
 
-    <div class="form-grid">
-      <label class="field-label">
-        必须包含（每行一条）
-        <textarea
-          v-model="mustIncludeText"
-          class="field-textarea"
-          placeholder="旧港口&#10;怀表线索&#10;雨夜追逐"
-          rows="4"
-        />
-      </label>
-      <label class="field-label">
-        禁止内容（每行一条）
-        <textarea
-          v-model="avoidText"
-          class="field-textarea"
-          placeholder="直接揭露终极反派&#10;角色性格突变"
-          rows="4"
-        />
-      </label>
-    </div>
+    <div class="form-section">
+      <div class="form-grid">
+        <label class="field-label">
+          必须包含（每行一条）
+          <textarea
+            v-model="mustIncludeText"
+            class="field-textarea"
+            placeholder="旧港口&#10;怀表线索&#10;雨夜追逐"
+            rows="5"
+          />
+        </label>
+        <label class="field-label">
+          禁止内容（每行一条）
+          <textarea
+            v-model="avoidText"
+            class="field-textarea"
+            placeholder="直接揭露终极反派&#10;角色性格突变"
+            rows="5"
+          />
+        </label>
+      </div>
 
-    <button class="primary-button" :disabled="generating || !goal.trim()" @click="handleGenerate">
-      {{ generating ? '生成中...' : '生成章节草稿' }}
-    </button>
+      <button
+        class="primary-button generate-button"
+        :disabled="generating || !goal.trim()"
+        @click="handleGenerate"
+      >
+        {{ generating ? '生成中...' : '生成章节草稿' }}
+      </button>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .prompt-console {
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
+  border-radius: 16px;
+  padding: 1.35rem;
   background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+.panel-heading {
+  margin-bottom: 1.25rem;
 }
 
 .panel-title {
-  margin-bottom: 0.7rem;
-  font-size: 1rem;
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.panel-description {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.form-section:last-child {
+  margin-bottom: 0;
 }
 
 .form-row {
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .form-grid {
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .field-label {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 0.75rem;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 .unlimited-toggle {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.45rem;
   font-weight: 500;
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   color: #4b5563;
 }
 
 .field-input,
 .field-textarea {
   border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 0.5rem 0.6rem;
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
   font-size: 0.95rem;
   font-family: inherit;
+  background: #fff;
+}
+
+.field-input:focus,
+.field-textarea:focus {
+  outline: none;
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 .field-textarea {
-  min-height: 80px;
+  min-height: 112px;
   resize: vertical;
+  line-height: 1.6;
+}
+
+.bordered-section {
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
 }
 
 .relation-section {
-  margin-bottom: 0.75rem;
+  margin-bottom: 0;
 }
 
 .section-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.9rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
 }
 
 .section-header {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
+  margin-bottom: 0.75rem;
 }
 
 .section-meta {
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   color: #6b7280;
 }
 
@@ -356,20 +407,20 @@ defineExpose({ resetForm });
 .custom-character-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
 .custom-character-row {
-  margin-top: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 .chip-button,
 .secondary-button,
 .primary-button {
-  border-radius: 6px;
-  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  padding: 0.5rem 0.9rem;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.88rem;
 }
 
 .chip-button {
@@ -396,6 +447,14 @@ defineExpose({ resetForm });
   color: #fff;
 }
 
+.generate-button {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  padding: 0.72rem 1.2rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+}
+
 .primary-button:disabled {
   opacity: 0.65;
   cursor: not-allowed;
@@ -404,26 +463,28 @@ defineExpose({ resetForm });
 .event-checklist {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  max-height: 240px;
+  gap: 0.65rem;
+  max-height: 320px;
   overflow: auto;
+  padding-right: 0.15rem;
 }
 
 .event-option {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.65rem;
   align-items: flex-start;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 0.5rem;
-  background: #fafafa;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #fff;
 }
 
 .event-option-text {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.85rem;
+  gap: 0.25rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
 }
 
 .event-option-meta {
@@ -431,11 +492,18 @@ defineExpose({ resetForm });
 }
 
 .message {
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem;
+  margin-bottom: 0.65rem;
+  font-size: 0.88rem;
 }
 
 .message-error {
   color: #b42318;
+}
+
+@media (max-width: 960px) {
+  .form-row,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
