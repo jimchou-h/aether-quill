@@ -61,6 +61,12 @@ paths:
     $ref: './paths/projects/personas.yaml'
   /api/projects/{id}/personas/{personaId}/publish:
     $ref: './paths/projects/persona-publish.yaml'
+  /api/projects/{id}/relation-events:
+    $ref: './paths/projects/relation-events.yaml'
+  /api/projects/{id}/relation-events/{eventId}:
+    $ref: './paths/projects/relation-event-by-id.yaml'
+  /api/projects/{id}/write:
+    $ref: './paths/projects/write.yaml'
   /api/projects/{id}/knowledge/chapters/summarize:
     $ref: './paths/projects/chapter-summarize-batch.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/summarize:
@@ -367,6 +373,189 @@ components:
         updatedAt:
           type: string
           format: date-time
+    RelationEvent:
+      type: object
+      required:
+        - id
+        - projectId
+        - protagonist
+        - counterparty
+        - actors
+        - summary
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        protagonist:
+          type: string
+        counterparty:
+          type: string
+        actors:
+          type: array
+          items:
+            type: string
+        summary:
+          type: string
+        evidenceSnippet:
+          type: string
+        chapterNo:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+    RelationEventInput:
+      type: object
+      required:
+        - counterparty
+        - summary
+      properties:
+        protagonist:
+          type: string
+        counterparty:
+          type: string
+        actors:
+          type: array
+          items:
+            type: string
+        summary:
+          type: string
+        evidenceSnippet:
+          type: string
+        chapterNo:
+          type: integer
+          nullable: true
+    UsedRelationEvent:
+      type: object
+      required:
+        - id
+        - protagonist
+        - counterparty
+        - summary
+      properties:
+        id:
+          type: string
+        protagonist:
+          type: string
+        counterparty:
+          type: string
+        summary:
+          type: string
+        evidenceSnippet:
+          type: string
+        chapterNo:
+          type: integer
+          nullable: true
+    WriteChapterRequest:
+      type: object
+      required:
+        - chapterNo
+        - goal
+        - pov
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+        goal:
+          type: string
+        pov:
+          type: string
+        mustInclude:
+          type: array
+          items:
+            type: string
+        avoid:
+          type: array
+          items:
+            type: string
+        targetWords:
+          type: integer
+          minimum: 1
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+        selectedEventIds:
+          type: array
+          items:
+            type: string
+    WriteChapterResult:
+      type: object
+      required:
+        - draftText
+        - reasoningBrief
+        - citations
+        - consistencyNotes
+        - context
+        - autoUpdates
+      properties:
+        draftText:
+          type: string
+        reasoningBrief:
+          type: string
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              sourceType:
+                type: string
+              sourceId:
+                type: string
+              snippet:
+                type: string
+        consistencyNotes:
+          type: array
+          items:
+            type: object
+            properties:
+              level:
+                type: string
+                enum: [info, warning, block]
+              message:
+                type: string
+        usedRelationEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsedRelationEvent'
+        context:
+          type: object
+          properties:
+            projectId:
+              type: string
+            chapterNo:
+              type: integer
+            usedPersonaId:
+              type: string
+              nullable: true
+            outlineUsed:
+              type: boolean
+            recentChapterCount:
+              type: integer
+            targetWords:
+              type: integer
+              nullable: true
+        autoUpdates:
+          type: object
+          properties:
+            chapterUpdated:
+              type: boolean
+            outlineUpdated:
+              type: boolean
+            personaUpdated:
+              type: boolean
+            updateLine:
+              type: string
 
 security:
   - BearerAuth: []

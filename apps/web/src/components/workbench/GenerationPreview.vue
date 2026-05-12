@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CitationItem, ConsistencyNote } from '../../services/api';
+import type { CitationItem, ConsistencyNote, UsedRelationEventItem } from '../../services/api';
 
 /**
  * 生成预览组件属性定义
@@ -11,6 +11,8 @@ defineProps<{
   citations: CitationItem[];
   /** 一致性提示列表 */
   consistencyNotes: ConsistencyNote[];
+  /** 本次使用的关系事件 */
+  usedRelationEvents: UsedRelationEventItem[];
   /** 是否正在生成 */
   isStreaming: boolean;
   /** 是否生成完成 */
@@ -48,6 +50,18 @@ const emit = defineEmits<{
     <div v-if="isDone" class="actions">
       <button class="primary-button" @click="emit('accept')">接受草稿</button>
       <button class="secondary-button" @click="emit('regenerate')">重新生成</button>
+    </div>
+
+    <div v-if="usedRelationEvents.length > 0" class="citations-section">
+      <h4 class="sub-title">本次使用的关系事件</h4>
+      <ul class="citation-list">
+        <li v-for="event in usedRelationEvents" :key="event.id" class="citation-item">
+          <span class="citation-badge">relation-event</span>
+          <span class="citation-snippet">
+            {{ event.protagonist }} ↔ {{ event.counterparty }} · {{ event.summary }}
+          </span>
+        </li>
+      </ul>
     </div>
 
     <div v-if="citations.length > 0" class="citations-section">

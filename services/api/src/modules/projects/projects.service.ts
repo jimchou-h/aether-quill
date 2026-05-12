@@ -13,6 +13,14 @@ import {
   normalizePersonaStateOutput,
   trimForPrompt,
 } from './persona-state.util';
+import {
+  buildRelationMemoryBlock,
+  matchesRelationEventFilters,
+  normalizeSelectedEventIds,
+  resolveRelationEventActors,
+  RELATION_EVENT_SELECTED_MAX_COUNT,
+  RELATION_EVENT_SUMMARY_MAX_LENGTH,
+} from './relation-event.util';
 
 function buildTargetWordsInstruction(targetWords?: number): string {
   const parsed = Number(targetWords);
@@ -118,6 +126,31 @@ interface WriteTaskInput {
   mustInclude: string[];
   avoid: string[];
   targetWords?: number;
+  appearingCharacters?: string[];
+  selectedEventIds?: string[];
+}
+
+export interface RelationEventRecord {
+  id: string;
+  projectId: string;
+  protagonist: string;
+  counterparty: string;
+  actors: string[];
+  summary: string;
+  evidenceSnippet?: string;
+  chapterNo: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+export interface UsedRelationEventRecord {
+  id: string;
+  protagonist: string;
+  counterparty: string;
+  summary: string;
+  evidenceSnippet?: string;
+  chapterNo: number | null;
 }
 
 export interface WorkspaceSnapshot {
@@ -189,6 +222,16 @@ interface PersistedProjectState {
       }
     >
   >;
+  relationEvents: Record<
+    string,
+    Array<
+      Omit<RelationEventRecord, 'createdAt' | 'updatedAt' | 'deletedAt'> & {
+        createdAt: string;
+        updatedAt: string;
+        deletedAt: string | null;
+      }
+    >
+  >;
 }
 
 @Injectable()
@@ -214,6 +257,7 @@ export class ProjectsService {
   private readonly knowledgeStore = new Map<string, KnowledgeRecord>();
   private readonly indexJobsStore = new Map<string, IndexJobRecord[]>();
   private readonly summarizeJobsStore = new Map<string, SummaryJobRecord[]>();
+  private readonly relationEventsStore = new Map<string, RelationEventRecord[]>();
 
   constructor() {
     const restored = this.restoreStateFromDisk();
@@ -225,6 +269,7 @@ export class ProjectsService {
       this.hydrateMap(this.knowledgeStore, restored.knowledge);
       this.hydrateMap(this.indexJobsStore, restored.indexJobs);
       this.hydrateMap(this.summarizeJobsStore, restored.summarizeJobs);
+      this.hydrateMap(this.relationEventsStore, restored.relationEvents);
     }
 
     for (const project of this.projects) {
@@ -273,6 +318,7 @@ export class ProjectsService {
     this.knowledgeStore.delete(id);
     this.indexJobsStore.delete(id);
     this.summarizeJobsStore.delete(id);
+    this.relationEventsStore.delete(id);
     this.persistState();
 
     return { id };
@@ -678,6 +724,134 @@ export class ProjectsService {
     return job;
   }
 
+  getRelationEvents(
+    projectId: string,
+    filters: {
+      counterparty?: string;
+      chapterNo?: number;
+      keyword?: string;
+      appearingCharacters?: string[];
+    } = {},
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const events = this.relationEventsStore
+      .get(projectId)!
+      .filter((event) => !event.deletedAt)
+      .filter((event) =>
+        matchesRelationEventFilters(
+          {
+            protagonist: event.protagonist,
+            counterparty: event.counterparty,
+            summary: event.summary,
+            evidenceSnippet: event.evidenceSnippet,
+            chapterNo: event.chapterNo,
+            actors: event.actors,
+          },
+          filters
+        )
+      )
+      .sort((left, right) => {
+        const leftChapter = left.chapterNo ?? 0;
+        const rightChapter = right.chapterNo ?? 0;
+        if (leftChapter !== rightChapter) {
+          return rightChapter - leftChapter;
+        }
+        return right.updatedAt.getTime() - left.updatedAt.getTime();
+      });
+
+    return events;
+  }
+
+  createRelationEvent(
+    projectId: string,
+    payload: {
+      protagonist?: string;
+      counterparty: string;
+      actors?: string[];
+      summary: string;
+      evidenceSnippet?: string;
+      chapterNo?: number | null;
+    },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalized = this.normalizeRelationEventInput(projectId, payload);
+    const now = new Date();
+    const event: RelationEventRecord = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      projectId,
+      ...normalized,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+
+    this.relationEventsStore.get(projectId)!.push(event);
+    this.persistState();
+    return event;
+  }
+
+  updateRelationEvent(
+    projectId: string,
+    eventId: string,
+    payload: {
+      protagonist?: string;
+      counterparty: string;
+      actors?: string[];
+      summary: string;
+      evidenceSnippet?: string;
+      chapterNo?: number | null;
+    },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const events = this.relationEventsStore.get(projectId)!;
+    const event = events.find((item) => item.id === eventId && !item.deletedAt);
+    if (!event) {
+      throw new NotFoundException(`未找到关系事件: ${eventId}`);
+    }
+
+    const normalized = this.normalizeRelationEventInput(projectId, payload, event.protagonist);
+    Object.assign(event, normalized, { updatedAt: new Date() });
+    this.persistState();
+    return event;
+  }
+
+  deleteRelationEvent(projectId: string, eventId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const events = this.relationEventsStore.get(projectId)!;
+    const event = events.find((item) => item.id === eventId && !item.deletedAt);
+    if (!event) {
+      throw new NotFoundException(`未找到关系事件: ${eventId}`);
+    }
+
+    event.deletedAt = new Date();
+    event.updatedAt = new Date();
+    this.persistState();
+    return { id: event.id };
+  }
+
   async writeChapter(projectId: string, payload: Partial<WriteTaskInput>, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
@@ -738,13 +912,19 @@ export class ProjectsService {
       });
     }
 
+    const usedRelationEvents = this.resolveSelectedRelationEvents(
+      projectId,
+      payload.selectedEventIds
+    );
+
     const draftText = await this.generateDraftThroughOrchestrator(
       projectId,
       chapterNo,
       payload,
       settings,
       personas,
-      knowledge
+      knowledge,
+      usedRelationEvents
     );
 
     const autoUpdates = await this.applyPostWriteUpdates(
@@ -760,6 +940,7 @@ export class ProjectsService {
         '已按项目维度拼接 systemPrompt + persona + outline + recent chapters 生成草稿。',
       citations,
       consistencyNotes,
+      usedRelationEvents,
       context: {
         projectId,
         chapterNo,
@@ -854,6 +1035,7 @@ export class ProjectsService {
       knowledge: {},
       indexJobs: {},
       summarizeJobs: {},
+      relationEvents: {},
     };
 
     for (const [projectId, settings] of this.settingsStore.entries()) {
@@ -902,6 +1084,15 @@ export class ProjectsService {
       }));
     }
 
+    for (const [projectId, events] of this.relationEventsStore.entries()) {
+      payload.relationEvents[projectId] = events.map((event) => ({
+        ...event,
+        createdAt: event.createdAt.toISOString(),
+        updatedAt: event.updatedAt.toISOString(),
+        deletedAt: event.deletedAt ? event.deletedAt.toISOString() : null,
+      }));
+    }
+
     const targetDir = dirname(this.storagePath);
     if (!existsSync(targetDir)) {
       mkdirSync(targetDir, { recursive: true });
@@ -917,6 +1108,7 @@ export class ProjectsService {
     knowledge: Record<string, KnowledgeRecord>;
     indexJobs: Record<string, IndexJobRecord[]>;
     summarizeJobs: Record<string, SummaryJobRecord[]>;
+    relationEvents: Record<string, RelationEventRecord[]>;
   } | null {
     if (!existsSync(this.storagePath)) {
       return null;
@@ -994,6 +1186,31 @@ export class ProjectsService {
               createdAt: new Date(job.createdAt),
               completedAt: job.completedAt ? new Date(job.completedAt) : null,
             })),
+          ])
+        ),
+        relationEvents: Object.fromEntries(
+          Object.entries(parsed.relationEvents || {}).map(([projectId, events]) => [
+            projectId,
+            (events || []).map((event) => {
+              const protagonist = event.protagonist?.trim() || '主角';
+              const counterparty = event.counterparty?.trim() || '';
+              return {
+                id: event.id,
+                projectId: event.projectId,
+                protagonist,
+                counterparty,
+                actors: resolveRelationEventActors(event.actors, protagonist, counterparty),
+                summary: event.summary,
+                evidenceSnippet: event.evidenceSnippet,
+                chapterNo:
+                  typeof event.chapterNo === 'number' && Number.isFinite(event.chapterNo)
+                    ? event.chapterNo
+                    : null,
+                createdAt: new Date(event.createdAt),
+                updatedAt: new Date(event.updatedAt),
+                deletedAt: event.deletedAt ? new Date(event.deletedAt) : null,
+              };
+            }),
           ])
         ),
       };
@@ -1248,6 +1465,10 @@ export class ProjectsService {
     if (!this.summarizeJobsStore.has(projectId)) {
       this.summarizeJobsStore.set(projectId, []);
     }
+
+    if (!this.relationEventsStore.has(projectId)) {
+      this.relationEventsStore.set(projectId, []);
+    }
   }
 
   private getProjectOrThrow(projectId: string) {
@@ -1267,7 +1488,8 @@ export class ProjectsService {
     projectId: string,
     settings: ProjectSettings,
     personas: PersonaRecord[],
-    knowledge: KnowledgeRecord
+    knowledge: KnowledgeRecord,
+    usedRelationEvents: UsedRelationEventRecord[] = []
   ) {
     const activePersona =
       personas.find((item) => item.id === settings.activePersonaId) ||
@@ -1285,6 +1507,8 @@ export class ProjectsService {
         title: chapter.title,
         summary: chapter.summary || chapter.content.slice(0, 160),
       })),
+      selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
+      usedRelationEvents,
     });
   }
 
@@ -1294,9 +1518,16 @@ export class ProjectsService {
     payload: Partial<WriteTaskInput>,
     settings: ProjectSettings,
     personas: PersonaRecord[],
-    knowledge: KnowledgeRecord
+    knowledge: KnowledgeRecord,
+    usedRelationEvents: UsedRelationEventRecord[] = []
   ) {
-    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      usedRelationEvents
+    );
 
     const goal = payload.goal?.trim() || '推进主线并保持人物一致性';
     const pov = payload.pov?.trim() || '第三人称';
@@ -1347,5 +1578,91 @@ export class ProjectsService {
         `projectId 无效: ${projectId}。该值是前端页面路由名，不是项目 ID。请先调用 GET /api/projects 获取真实项目 ID。`
       );
     }
+  }
+
+  private normalizeRelationEventInput(
+    projectId: string,
+    payload: {
+      protagonist?: string;
+      counterparty: string;
+      actors?: string[];
+      summary: string;
+      evidenceSnippet?: string;
+      chapterNo?: number | null;
+    },
+    fallbackProtagonist?: string
+  ) {
+    const protagonist =
+      payload.protagonist?.trim() ||
+      fallbackProtagonist ||
+      this.resolveActivePersona(projectId)?.name ||
+      '主角';
+    const counterparty = payload.counterparty?.trim();
+    const summary = payload.summary?.trim();
+    const chapterNo =
+      payload.chapterNo === null || payload.chapterNo === undefined
+        ? null
+        : Number(payload.chapterNo);
+
+    if (!counterparty) {
+      throw new BadRequestException('counterparty 不能为空');
+    }
+    if (!summary) {
+      throw new BadRequestException('summary 不能为空');
+    }
+    if (summary.length > RELATION_EVENT_SUMMARY_MAX_LENGTH) {
+      throw new BadRequestException(`summary 不能超过 ${RELATION_EVENT_SUMMARY_MAX_LENGTH} 字`);
+    }
+    if (chapterNo !== null && (!Number.isFinite(chapterNo) || chapterNo <= 0)) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+
+    const actors = resolveRelationEventActors(payload.actors, protagonist, counterparty);
+
+    return {
+      protagonist,
+      counterparty,
+      actors,
+      summary,
+      evidenceSnippet: payload.evidenceSnippet?.trim() || undefined,
+      chapterNo,
+    };
+  }
+
+  private resolveSelectedRelationEvents(
+    projectId: string,
+    selectedEventIds?: string[]
+  ): UsedRelationEventRecord[] {
+    const normalizedIds = normalizeSelectedEventIds(selectedEventIds);
+    if (normalizedIds.length === 0) {
+      return [];
+    }
+    if (normalizedIds.length > RELATION_EVENT_SELECTED_MAX_COUNT) {
+      throw new BadRequestException(
+        `selectedEventIds 不能超过 ${RELATION_EVENT_SELECTED_MAX_COUNT} 条`
+      );
+    }
+
+    this.ensureProjectState(projectId);
+    const events = this.relationEventsStore.get(projectId)!;
+    const resolved: UsedRelationEventRecord[] = [];
+
+    for (const eventId of normalizedIds) {
+      const event = events.find((item) => item.id === eventId && !item.deletedAt);
+      if (!event) {
+        throw new BadRequestException(`未找到可用关系事件: ${eventId}`);
+      }
+
+      resolved.push({
+        id: event.id,
+        protagonist: event.protagonist,
+        counterparty: event.counterparty,
+        summary: event.summary,
+        evidenceSnippet: event.evidenceSnippet,
+        chapterNo: event.chapterNo,
+      });
+    }
+
+    return resolved;
   }
 }

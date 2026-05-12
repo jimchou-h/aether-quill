@@ -5,6 +5,7 @@ import { apiClient, type PersonaItem } from '../services/api';
 import { usePromptConfigStore } from '../stores/promptConfig';
 import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
 import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
+import RelationEventManager from '../components/settings/RelationEventManager.vue';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -18,7 +19,7 @@ const exportingBundle = shallowRef(false);
 const message = shallowRef('');
 const errorMessage = shallowRef('');
 const projectName = shallowRef('project');
-const activeTab = shallowRef<'prompt' | 'persona'>('prompt');
+const activeTab = shallowRef<'prompt' | 'persona' | 'relation'>('prompt');
 
 const personaName = shallowRef('');
 const personaProfile = shallowRef('');
@@ -147,6 +148,13 @@ onMounted(() => {
         >
           人物设定
         </button>
+        <button
+          class="tab-button"
+          :class="{ 'tab-button-active': activeTab === 'relation' }"
+          @click="activeTab = 'relation'"
+        >
+          关系事件
+        </button>
       </div>
 
       <template v-if="activeTab === 'prompt'">
@@ -154,7 +162,7 @@ onMounted(() => {
         <PromptVersionHistory :project-id="projectId" />
       </template>
 
-      <template v-else>
+      <template v-else-if="activeTab === 'persona'">
         <section class="panel">
           <h3 class="panel-title">创建人物设定</h3>
           <label class="field-label">
@@ -218,6 +226,10 @@ onMounted(() => {
             {{ exportingBundle ? '导出中...' : '下载总结与设定(JSON)' }}
           </button>
         </section>
+      </template>
+
+      <template v-else-if="activeTab === 'relation'">
+        <RelationEventManager :project-id="projectId" :personas="personas" />
       </template>
     </template>
   </div>

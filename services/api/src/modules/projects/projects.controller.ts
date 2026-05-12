@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   UseGuards,
   Request,
   forwardRef,
@@ -171,6 +172,86 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get(':id/relation-events')
+  getRelationEvents(
+    @Param('id') id: string,
+    @Query('counterparty') counterparty: string | undefined,
+    @Query('chapterNo') chapterNo: string | undefined,
+    @Query('keyword') keyword: string | undefined,
+    @Query('appearingCharacters') appearingCharacters: string | undefined,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    const parsedChapterNo = Number(chapterNo);
+    return this.projectsService.getRelationEvents(
+      id,
+      {
+        counterparty,
+        chapterNo:
+          Number.isFinite(parsedChapterNo) && parsedChapterNo > 0 ? parsedChapterNo : undefined,
+        keyword,
+        appearingCharacters: appearingCharacters
+          ? appearingCharacters
+              .split(',')
+              .map((item) => item.trim())
+              .filter(Boolean)
+          : undefined,
+      },
+      userId
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/relation-events')
+  createRelationEvent(
+    @Param('id') id: string,
+    @Body()
+    data: {
+      protagonist?: string;
+      counterparty: string;
+      actors?: string[];
+      summary: string;
+      evidenceSnippet?: string;
+      chapterNo?: number | null;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.createRelationEvent(id, data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put(':id/relation-events/:eventId')
+  updateRelationEvent(
+    @Param('id') id: string,
+    @Param('eventId') eventId: string,
+    @Body()
+    data: {
+      protagonist?: string;
+      counterparty: string;
+      actors?: string[];
+      summary: string;
+      evidenceSnippet?: string;
+      chapterNo?: number | null;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.updateRelationEvent(id, eventId, data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id/relation-events/:eventId')
+  deleteRelationEvent(
+    @Param('id') id: string,
+    @Param('eventId') eventId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.deleteRelationEvent(id, eventId, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters')
   async upsertChapter(
     @Param('id') id: string,
@@ -215,6 +296,8 @@ export class ProjectsController {
       mustInclude?: string[];
       avoid?: string[];
       targetWords?: number;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
     },
     @Request() req: AuthenticatedRequest
   ) {
