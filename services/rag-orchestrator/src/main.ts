@@ -55,6 +55,15 @@ interface ProjectContext {
   personaProfile: string;
   outlineSummary: string;
   chapters: ContextChapter[];
+  selectedRelationMemory?: string;
+  usedRelationEvents?: Array<{
+    id: string;
+    protagonist: string;
+    counterparty: string;
+    summary: string;
+    evidenceSnippet?: string;
+    chapterNo?: number | null;
+  }>;
   updatedAt: string;
 }
 
@@ -88,6 +97,7 @@ function getGenerationContext(
     chapterContext: recentChapters
       .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
       .join('\n'),
+    retrievedEvidence: ctx.selectedRelationMemory?.trim() || undefined,
   };
 }
 
@@ -181,6 +191,12 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
   if (Array.isArray(payload.chapters)) {
     context.chapters = payload.chapters;
+  }
+  if (typeof payload.selectedRelationMemory === 'string') {
+    context.selectedRelationMemory = payload.selectedRelationMemory;
+  }
+  if (Array.isArray(payload.usedRelationEvents)) {
+    context.usedRelationEvents = payload.usedRelationEvents;
   }
 
   context.updatedAt = new Date().toISOString();
@@ -565,6 +581,7 @@ app.post('/api/generate/draft', async (req, res) => {
         traceId: trace.id,
         citations: resolvedCitations,
         consistencyNotes,
+        usedRelationEvents: context.usedRelationEvents || [],
       })}\n\n`
     );
     res.end();

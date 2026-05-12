@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { shallowRef } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { apiClient, type RelationEventItem } from '../../services/api';
 
-defineProps<{
+const props = defineProps<{
   generating: boolean;
+  projectId: string;
+  personaNames: string[];
 }>();
 
 const emit = defineEmits<{
@@ -14,23 +17,97 @@ const emit = defineEmits<{
       mustInclude: string[];
       avoid: string[];
       targetWords?: number;
+      appearingCharacters: string[];
+      selectedEventIds: string[];
     },
   ];
 }>();
 
-const chapterNo = shallowRef(1);
-const goal = shallowRef('');
-const pov = shallowRef('第三人称有限视角');
-const mustIncludeText = shallowRef('');
-const avoidText = shallowRef('');
-const targetWords = shallowRef(3000);
-const unlimitedWords = shallowRef(false);
+const chapterNo = ref(1);
+const goal = ref('');
+const pov = ref('第三人称有限视角');
+const mustIncludeText = ref('');
+const avoidText = ref('');
+const targetWords = ref(3000);
+const unlimitedWords = ref(false);
+const customCharacter = ref('');
+const appearingCharacters = ref<string[]>([]);
+const selectedEventIds = ref<string[]>([]);
+const relationEvents = ref<RelationEventItem[]>([]);
+const loadingEvents = ref(false);
+const eventError = ref('');
+
+const availableCharacters = computed(() => [...new Set(props.personaNames.filter(Boolean))]);
+
+const filteredEvents = computed(() => {
+  if (appearingCharacters.value.length === 0) {
+    return relationEvents.value;
+  }
+
+  const selected = new Set(appearingCharacters.value);
+  return relationEvents.value.filter((event) => event.actors.some((actor) => selected.has(actor)));
+});
+
+const selectedPreviewLength = computed(() =>
+  filteredEvents.value
+    .filter((event) => selectedEventIds.value.includes(event.id))
+    .reduce((total, event) => total + event.summary.length, 0)
+);
 
 function parseMultiLine(text: string): string[] {
   return text
     .split('\n')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function toggleCharacter(name: string) {
+  if (appearingCharacters.value.includes(name)) {
+    appearingCharacters.value = appearingCharacters.value.filter((item) => item !== name);
+    return;
+  }
+  appearingCharacters.value = [...appearingCharacters.value, name];
+}
+
+function addCustomCharacter() {
+  const name = customCharacter.value.trim();
+  if (!name || appearingCharacters.value.includes(name)) {
+    return;
+  }
+  appearingCharacters.value = [...appearingCharacters.value, name];
+  customCharacter.value = '';
+}
+
+function toggleEvent(eventId: string) {
+  if (selectedEventIds.value.includes(eventId)) {
+    selectedEventIds.value = selectedEventIds.value.filter((item) => item !== eventId);
+    return;
+  }
+  if (selectedEventIds.value.length >= 30) {
+    eventError.value = '最多勾选 30 条关系事件';
+    return;
+  }
+  eventError.value = '';
+  selectedEventIds.value = [...selectedEventIds.value, eventId];
+}
+
+async function loadRelationEvents() {
+  if (!props.projectId) return;
+  loadingEvents.value = true;
+  eventError.value = '';
+  try {
+    relationEvents.value = await apiClient.getRelationEvents(props.projectId, {
+      appearingCharacters:
+        appearingCharacters.value.length > 0 ? appearingCharacters.value : undefined,
+    });
+    selectedEventIds.value = selectedEventIds.value.filter((eventId) =>
+      relationEvents.value.some((event) => event.id === eventId)
+    );
+  } catch (error) {
+    eventError.value = error instanceof Error ? error.message : '加载关系事件失败';
+  } finally {
+    loadingEvents.value = false;
+  }
 }
 
 function handleGenerate() {
@@ -42,6 +119,8 @@ function handleGenerate() {
     pov: pov.value.trim(),
     mustInclude: parseMultiLine(mustIncludeText.value),
     avoid: parseMultiLine(avoidText.value),
+    appearingCharacters: [...appearingCharacters.value],
+    selectedEventIds: [...selectedEventIds.value],
     ...(unlimitedWords.value ? {} : { targetWords: Number(targetWords.value) }),
   });
 }
@@ -54,7 +133,21 @@ function resetForm() {
   avoidText.value = '';
   targetWords.value = 3000;
   unlimitedWords.value = false;
+  customCharacter.value = '';
+  appearingCharacters.value = [];
+  selectedEventIds.value = [];
 }
+
+watch(
+  () => [props.projectId, appearingCharacters.value.join('|')] as const,
+  () => {
+    void loadRelationEvents();
+  }
+);
+
+onMounted(() => {
+  void loadRelationEvents();
+});
 
 defineExpose({ resetForm });
 </script>
@@ -99,6 +192,59 @@ defineExpose({ resetForm });
       叙事视角（POV）
       <input v-model="pov" class="field-input" type="text" placeholder="例如：女主第一人称" />
     </label>
+
+    <section class="relation-section">
+      <h4 class="section-title">出场角色</h4>
+      <div class="chip-list">
+        <button
+          v-for="name in availableCharacters"
+          :key="name"
+          type="button"
+          class="chip-button"
+          :class="{ 'chip-button-active': appearingCharacters.includes(name) }"
+          @click="toggleCharacter(name)"
+        >
+          {{ name }}
+        </button>
+      </div>
+      <div class="custom-character-row">
+        <input
+          v-model="customCharacter"
+          class="field-input"
+          placeholder="自定义出场角色"
+          @keyup.enter.prevent="addCustomCharacter"
+        />
+        <button class="secondary-button" type="button" @click="addCustomCharacter">添加</button>
+      </div>
+    </section>
+
+    <section class="relation-section">
+      <div class="section-header">
+        <h4 class="section-title">关系事件（手动勾选）</h4>
+        <span class="section-meta">
+          已选 {{ selectedEventIds.length }} 条 / 约 {{ selectedPreviewLength }} 字
+        </span>
+      </div>
+      <p v-if="eventError" class="message message-error">{{ eventError }}</p>
+      <p v-if="loadingEvents" class="message">正在加载关系事件...</p>
+      <p v-else-if="filteredEvents.length === 0" class="message">暂无可选关系事件。</p>
+      <div v-else class="event-checklist">
+        <label v-for="event in filteredEvents" :key="event.id" class="event-option">
+          <input
+            type="checkbox"
+            :checked="selectedEventIds.includes(event.id)"
+            @change="toggleEvent(event.id)"
+          />
+          <span class="event-option-text">
+            <strong>{{ event.protagonist }} ↔ {{ event.counterparty }}</strong>
+            <span class="event-option-meta">
+              <template v-if="event.chapterNo">第{{ event.chapterNo }}章</template>
+            </span>
+            <span>{{ event.summary }}</span>
+          </span>
+        </label>
+      </div>
+    </section>
 
     <div class="form-grid">
       <label class="field-label">
@@ -185,18 +331,111 @@ defineExpose({ resetForm });
   resize: vertical;
 }
 
+.relation-section {
+  margin-bottom: 0.75rem;
+}
+
+.section-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.section-meta {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.chip-list,
+.custom-character-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.custom-character-row {
+  margin-top: 0.5rem;
+}
+
+.chip-button,
+.secondary-button,
+.primary-button {
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.chip-button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+}
+
+.chip-button-active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.secondary-button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+}
+
 .primary-button {
   border: none;
   background: #1d4ed8;
   color: #fff;
-  border-radius: 6px;
-  padding: 0.52rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.9rem;
 }
 
 .primary-button:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.event-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.event-option {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.5rem;
+  background: #fafafa;
+}
+
+.event-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.event-option-meta {
+  color: #6b7280;
+}
+
+.message {
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.message-error {
+  color: #b42318;
 }
 </style>

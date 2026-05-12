@@ -1,0 +1,107 @@
+get:
+  tags:
+    - Projects
+  summary: List relation events
+  description: List manually maintained protagonist relation events for a project
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: counterparty
+      in: query
+      schema:
+        type: string
+    - name: chapterNo
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+    - name: keyword
+      in: query
+      schema:
+        type: string
+    - name: appearingCharacters
+      in: query
+      description: Comma-separated character names used to filter event pool
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Relation events retrieved
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '../../openapi.yaml#/components/schemas/RelationEvent'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+
+post:
+  tags:
+    - Projects
+  summary: Create relation event
+  description: Create a manually maintained relation event
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/RelationEventInput'
+  responses:
+    '200':
+      description: Relation event created
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/RelationEvent'
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

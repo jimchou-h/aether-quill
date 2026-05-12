@@ -35,6 +35,8 @@ const outlineReady = ref(false);
 /** 大纲摘要 */
 const outlineSummary = ref('');
 
+/** 人物名称列表 */
+const personaNames = ref<string[]>([]);
 /** 提示词控制台引用 */
 const promptConsoleRef = ref<InstanceType<typeof PromptConsole> | null>(null);
 
@@ -54,6 +56,7 @@ async function loadWorkspace() {
       workspace.personas.find(
         (item: { id: string; name: string }) => item.id === workspace.settings.activePersonaId
       )?.name || '未指定';
+    personaNames.value = workspace.personas.map((item: { name: string }) => item.name);
     editorStore.setChapters(workspace.knowledge.chapters);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '加载工作台失败';
@@ -73,6 +76,8 @@ async function handleGenerate(task: {
   mustInclude: string[];
   avoid: string[];
   targetWords?: number;
+  appearingCharacters: string[];
+  selectedEventIds: string[];
 }) {
   errorMessage.value = '';
   await generationStore.generate(projectId.value, task);
@@ -139,6 +144,8 @@ onMounted(() => {
           <PromptConsole
             ref="promptConsoleRef"
             :generating="generationStore.isStreaming"
+            :project-id="projectId"
+            :persona-names="personaNames"
             @generate="handleGenerate"
           />
 
@@ -148,6 +155,7 @@ onMounted(() => {
             :draft-text="generationStore.draftText"
             :citations="generationStore.citations"
             :consistency-notes="generationStore.consistencyNotes"
+            :used-relation-events="generationStore.usedRelationEvents"
             :is-streaming="generationStore.isStreaming"
             :is-done="generationStore.isDone"
             @accept="handleAcceptDraft"

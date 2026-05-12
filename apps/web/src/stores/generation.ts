@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { apiClient, type CitationItem, type ConsistencyNote } from '../services/api';
+import {
+  apiClient,
+  type CitationItem,
+  type ConsistencyNote,
+  type UsedRelationEventItem,
+} from '../services/api';
 
 /**
  * 生成状态枚举
@@ -25,6 +30,8 @@ export const useGenerationStore = defineStore('generation', () => {
   const citations = ref<CitationItem[]>([]);
   /** 一致性提示列表 */
   const consistencyNotes = ref<ConsistencyNote[]>([]);
+  /** 本次使用的关系事件 */
+  const usedRelationEvents = ref<UsedRelationEventItem[]>([]);
   /** 错误消息 */
   const errorMessage = ref('');
 
@@ -47,6 +54,7 @@ export const useGenerationStore = defineStore('generation', () => {
     draftText.value = '';
     citations.value = [];
     consistencyNotes.value = [];
+    usedRelationEvents.value = [];
     errorMessage.value = '';
   }
 
@@ -70,6 +78,8 @@ export const useGenerationStore = defineStore('generation', () => {
       mustInclude: string[];
       avoid: string[];
       targetWords?: number;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
     }
   ) {
     reset();
@@ -85,10 +95,11 @@ export const useGenerationStore = defineStore('generation', () => {
         onContent: (text) => {
           draftText.value += text;
         },
-        onEnd: (id, cites, notes) => {
+        onEnd: (id, cites, notes, usedEvents) => {
           traceId.value = id;
           citations.value = cites;
           consistencyNotes.value = notes;
+          usedRelationEvents.value = usedEvents;
           status.value = 'done';
         },
         onError: (msg) => {
@@ -131,6 +142,7 @@ export const useGenerationStore = defineStore('generation', () => {
     draftText,
     citations,
     consistencyNotes,
+    usedRelationEvents,
     errorMessage,
     isStreaming,
     isDone,

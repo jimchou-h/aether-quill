@@ -59,6 +59,7 @@ export interface SseEndEvent {
   traceId: string;
   citations: CitationItem[];
   consistencyNotes: ConsistencyNote[];
+  usedRelationEvents?: UsedRelationEventItem[];
 }
 
 export interface SseErrorEvent {
@@ -72,7 +73,12 @@ export type SseEvent = SseStartEvent | SseContentEvent | SseEndEvent | SseErrorE
 export interface SseCallbacks {
   onStart?: (traceId: string, chapterNo: number) => void;
   onContent?: (text: string) => void;
-  onEnd?: (traceId: string, citations: CitationItem[], consistencyNotes: ConsistencyNote[]) => void;
+  onEnd?: (
+    traceId: string,
+    citations: CitationItem[],
+    consistencyNotes: ConsistencyNote[],
+    usedRelationEvents: UsedRelationEventItem[]
+  ) => void;
   onError?: (error: string) => void;
 }
 
@@ -273,10 +279,48 @@ export const apiClient = {
       mustInclude: string[];
       avoid: string[];
       targetWords?: number;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
     }
   ) {
     const response = await http.post(`/api/projects/${projectId}/write`, payload);
     return this.unwrapPayload<WriteResult>(response.data);
+  },
+
+  async getRelationEvents(
+    projectId: string,
+    params: {
+      counterparty?: string;
+      chapterNo?: number;
+      keyword?: string;
+      appearingCharacters?: string[];
+    } = {}
+  ) {
+    const response = await http.get(`/api/projects/${projectId}/relation-events`, {
+      params: {
+        ...params,
+        appearingCharacters: params.appearingCharacters?.join(','),
+      },
+    });
+    return this.unwrapPayload<RelationEventItem[]>(response.data);
+  },
+
+  async createRelationEvent(projectId: string, payload: RelationEventInput) {
+    const response = await http.post(`/api/projects/${projectId}/relation-events`, payload);
+    return this.unwrapPayload<RelationEventItem>(response.data);
+  },
+
+  async updateRelationEvent(projectId: string, eventId: string, payload: RelationEventInput) {
+    const response = await http.put(
+      `/api/projects/${projectId}/relation-events/${eventId}`,
+      payload
+    );
+    return this.unwrapPayload<RelationEventItem>(response.data);
+  },
+
+  async deleteRelationEvent(projectId: string, eventId: string) {
+    const response = await http.delete(`/api/projects/${projectId}/relation-events/${eventId}`);
+    return this.unwrapPayload<{ id: string }>(response.data);
   },
 
   // Auth API
@@ -438,12 +482,21 @@ export const apiClient = {
     return response.data;
   },
 
-  async syncProjectContext(projectId: string) {
+  async syncProjectContext(
+    projectId: string,
+    options: {
+      selectedEventIds?: string[];
+    } = {}
+  ) {
     const workspace = await this.getWorkspace(projectId);
     const activePersona =
       workspace.personas.find((persona) => persona.id === workspace.settings.activePersonaId) ||
       workspace.personas.find((persona) => persona.status === 'published') ||
       null;
+
+    const selectedEvents = options.selectedEventIds?.length
+      ? await this.resolveSelectedRelationEvents(projectId, options.selectedEventIds)
+      : [];
 
     const ragBaseURL = getRagOrchestratorBaseURL();
     const contextUrl = ragBaseURL
@@ -466,6 +519,8 @@ export const apiClient = {
           title: chapter.title,
           summary: chapter.summary || chapter.content.slice(0, 160),
         })),
+        selectedRelationMemory: buildRelationMemoryBlock(selectedEvents),
+        usedRelationEvents: selectedEvents,
       }),
     });
 
@@ -473,6 +528,29 @@ export const apiClient = {
       const errorBody = await response.text().catch(() => '');
       throw new Error(errorBody || '同步项目上下文失败');
     }
+  },
+
+  async resolveSelectedRelationEvents(projectId: string, selectedEventIds: string[]) {
+    const events = await this.getRelationEvents(projectId);
+    const eventMap = new Map(events.map((event) => [event.id, event]));
+    const resolved: UsedRelationEventItem[] = [];
+
+    for (const eventId of [...new Set(selectedEventIds)]) {
+      const event = eventMap.get(eventId);
+      if (!event) {
+        throw new Error(`未找到可用关系事件: ${eventId}`);
+      }
+      resolved.push({
+        id: event.id,
+        protagonist: event.protagonist,
+        counterparty: event.counterparty,
+        summary: event.summary,
+        evidenceSnippet: event.evidenceSnippet,
+        chapterNo: event.chapterNo,
+      });
+    }
+
+    return resolved;
   },
 
   // SSE streaming generation for writing workbench
@@ -485,11 +563,15 @@ export const apiClient = {
       mustInclude: string[];
       avoid: string[];
       targetWords?: number;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
     },
     citations: CitationItem[],
     callbacks: SseCallbacks
   ): Promise<void> {
-    await this.syncProjectContext(projectId);
+    await this.syncProjectContext(projectId, {
+      selectedEventIds: task.selectedEventIds,
+    });
 
     const token = localStorage.getItem('token');
     const ragBaseURL = getRagOrchestratorBaseURL();
@@ -537,7 +619,12 @@ export const apiClient = {
                 callbacks.onContent?.(data.data.replace(/\\n/g, '\n'));
                 break;
               case 'end':
-                callbacks.onEnd?.(data.traceId, data.citations, data.consistencyNotes);
+                callbacks.onEnd?.(
+                  data.traceId,
+                  data.citations,
+                  data.consistencyNotes,
+                  data.usedRelationEvents || []
+                );
                 reading = false;
                 break;
               case 'error':
@@ -692,6 +779,7 @@ export interface WriteResult {
   reasoningBrief: string;
   citations: Array<{ sourceType: string; sourceId: string; snippet: string }>;
   consistencyNotes: Array<{ level: 'info' | 'warning'; message: string }>;
+  usedRelationEvents?: UsedRelationEventItem[];
   autoUpdates: {
     chapterUpdated: boolean;
     outlineUpdated: boolean;
@@ -740,4 +828,64 @@ export interface PromptConfigVersionItem {
   content: string;
   createdAt: string;
   isPublished: boolean;
+}
+
+export interface RelationEventItem {
+  id: string;
+  projectId: string;
+  protagonist: string;
+  counterparty: string;
+  actors: string[];
+  summary: string;
+  evidenceSnippet?: string;
+  chapterNo: number | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+}
+
+export interface RelationEventInput {
+  protagonist?: string;
+  counterparty: string;
+  actors?: string[];
+  summary: string;
+  evidenceSnippet?: string;
+  chapterNo?: number | null;
+}
+
+export interface UsedRelationEventItem {
+  id: string;
+  protagonist: string;
+  counterparty: string;
+  summary: string;
+  evidenceSnippet?: string;
+  chapterNo?: number | null;
+}
+
+function buildRelationMemoryBlock(events: UsedRelationEventItem[]): string {
+  if (events.length === 0) {
+    return '';
+  }
+
+  const lines = events.map((event, index) => {
+    const chapterLabel =
+      typeof event.chapterNo === 'number' && event.chapterNo > 0
+        ? `第${event.chapterNo}章`
+        : '章节未标注';
+    const pair = `${event.protagonist}-${event.counterparty}`;
+    let line = `${index + 1}. [${chapterLabel}][${pair}] ${event.summary}`;
+    if (event.evidenceSnippet?.trim()) {
+      line += `\n   证据：${event.evidenceSnippet.trim()}`;
+    }
+    return line;
+  });
+
+  return [
+    '【用户选择的关系事件（既定事实）】',
+    lines.join('\n'),
+    '',
+    '【执行约束】',
+    '- 上述事件视为已发生事实，不得无因否定',
+    '- 如需关系反转，必须写出过渡情节',
+  ].join('\n');
 }
