@@ -71,6 +71,8 @@ paths:
     $ref: './paths/projects/chapter-summarize-batch.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/summarize:
     $ref: './paths/projects/chapter-summarize-by-no.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/relation-events/generate:
+    $ref: './paths/projects/chapter-relation-events-generate.yaml'
   /api/projects/{id}/knowledge/summarize/{jobId}:
     $ref: './paths/projects/chapter-summarize-job.yaml'
   /api/consistency/check:
@@ -317,6 +319,27 @@ components:
         errorMessage:
           type: string
           nullable: true
+    ChapterRelationEventGenerateResult:
+      type: object
+      required:
+        - chapterNo
+        - createdCount
+        - skippedCount
+        - events
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+        createdCount:
+          type: integer
+          minimum: 0
+        skippedCount:
+          type: integer
+          minimum: 0
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelationEvent'
     Persona:
       type: object
       required:

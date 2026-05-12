@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   buildRelationMemoryBlock,
   matchesRelationEventFilters,
+  normalizeRelationEventDedupeKey,
   normalizeSelectedEventIds,
+  parseExtractedRelationEventCandidates,
   resolveRelationEventActors,
 } from './relation-event.util';
 
@@ -53,4 +55,43 @@ test('matchesRelationEventFilters filters by appearing characters', () => {
     matchesRelationEventFilters(event, { appearingCharacters: ['女主B'] }),
     false
   );
+});
+
+test('normalizeRelationEventDedupeKey ignores whitespace in summary', () => {
+  const left = normalizeRelationEventDedupeKey({
+    chapterNo: 3,
+    protagonist: '男主',
+    counterparty: '女主A',
+    summary: '两人 和解',
+  });
+  const right = normalizeRelationEventDedupeKey({
+    chapterNo: 3,
+    protagonist: '男主',
+    counterparty: '女主A',
+    summary: '两人和解',
+  });
+  assert.equal(left, right);
+});
+
+test('parseExtractedRelationEventCandidates parses fenced json arrays', () => {
+  const candidates = parseExtractedRelationEventCandidates(
+    '```json\n[{"counterparty":"女主A","summary":"误会加深","evidenceSnippet":"她转身离开"}]\n```'
+  );
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.counterparty, '女主A');
+  assert.equal(candidates[0]?.summary, '误会加深');
+  assert.equal(candidates[0]?.evidenceSnippet, '她转身离开');
+});
+
+test('parseExtractedRelationEventCandidates skips invalid items', () => {
+  const candidates = parseExtractedRelationEventCandidates([
+    { counterparty: '女主A', summary: '有效事件' },
+    { counterparty: '', summary: '无效' },
+    { counterparty: '女主B' },
+  ]);
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.counterparty, '女主A');
+  assert.equal(candidates[0]?.summary, '有效事件');
 });

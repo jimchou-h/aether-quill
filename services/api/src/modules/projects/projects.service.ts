@@ -16,7 +16,9 @@ import {
 import {
   buildRelationMemoryBlock,
   matchesRelationEventFilters,
+  normalizeRelationEventDedupeKey,
   normalizeSelectedEventIds,
+  parseExtractedRelationEventCandidates,
   resolveRelationEventActors,
   RELATION_EVENT_SELECTED_MAX_COUNT,
   RELATION_EVENT_SUMMARY_MAX_LENGTH,
@@ -722,6 +724,123 @@ export class ProjectsService {
       throw new NotFoundException(`未找到摘要任务: ${jobId}`);
     }
     return job;
+  }
+
+  async generateChapterRelationEvents(projectId: string, chapterNo: number, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = Number(chapterNo);
+    if (!Number.isFinite(normalizedChapterNo) || normalizedChapterNo <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到章节: ${normalizedChapterNo}`);
+    }
+
+    if (!chapter.content.trim()) {
+      throw new BadRequestException('章节正文为空，无法生成关系事件');
+    }
+
+    const protagonist = this.resolveActivePersona(projectId)?.name || '主角';
+    const personas = this.personasStore.get(projectId)!;
+    const personaNames = personas.map((item) => item.name).filter(Boolean);
+
+    let extracted;
+    try {
+      const response = await axios.post<{ events?: unknown }>(
+        `${this.getRagOrchestratorUrl()}/api/extract/relation-events`,
+        {
+          chapterNo: chapter.chapterNo,
+          title: chapter.title,
+          content: chapter.content,
+          protagonist,
+          personaNames,
+        },
+        { timeout: 120000 }
+      );
+      extracted = parseExtractedRelationEventCandidates(response.data?.events ?? response.data);
+    } catch (error) {
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : '调用关系事件抽取服务失败';
+      throw new BadGatewayException(message);
+    }
+
+    const existingEvents = this.relationEventsStore
+      .get(projectId)!
+      .filter((event) => !event.deletedAt);
+    const existingKeys = new Set(
+      existingEvents.map((event) =>
+        normalizeRelationEventDedupeKey({
+          chapterNo: event.chapterNo,
+          protagonist: event.protagonist,
+          counterparty: event.counterparty,
+          summary: event.summary,
+        })
+      )
+    );
+
+    const createdEvents: RelationEventRecord[] = [];
+    let skippedCount = 0;
+
+    for (const candidate of extracted) {
+      const dedupeKey = normalizeRelationEventDedupeKey({
+        chapterNo: normalizedChapterNo,
+        protagonist,
+        counterparty: candidate.counterparty,
+        summary: candidate.summary,
+      });
+      if (existingKeys.has(dedupeKey)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      const normalized = this.normalizeRelationEventInput(
+        projectId,
+        {
+          protagonist,
+          counterparty: candidate.counterparty,
+          actors: candidate.actors,
+          summary: candidate.summary,
+          evidenceSnippet: candidate.evidenceSnippet,
+          chapterNo: normalizedChapterNo,
+        },
+        protagonist
+      );
+
+      const now = new Date();
+      const event: RelationEventRecord = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        projectId,
+        ...normalized,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+
+      this.relationEventsStore.get(projectId)!.push(event);
+      existingKeys.add(dedupeKey);
+      createdEvents.push(event);
+    }
+
+    if (createdEvents.length > 0) {
+      this.persistState();
+    }
+
+    return {
+      chapterNo: normalizedChapterNo,
+      createdCount: createdEvents.length,
+      skippedCount,
+      events: createdEvents,
+    };
   }
 
   getRelationEvents(

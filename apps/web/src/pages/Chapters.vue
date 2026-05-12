@@ -25,12 +25,37 @@ const submitting = ref(false);
 const savingChapterNo = ref<number | null>(null);
 const batchSummarizing = ref(false);
 const summarizingChapterNo = ref<number | null>(null);
+const generatingRelationChapterNo = ref<number | null>(null);
 const latestSummaryJob = ref<SummaryJob | null>(null);
 const message = ref('');
 const errorMessage = ref('');
+const selectedChapterNo = ref<number | null>(null);
+const showImportModal = ref(false);
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
 const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
+
+function syncSelectedChapter() {
+  if (chapters.value.length === 0) {
+    selectedChapterNo.value = null;
+    return;
+  }
+
+  const currentExists = chapters.value.some(
+    (chapter) => chapter.chapterNo === selectedChapterNo.value
+  );
+  if (!currentExists) {
+    selectedChapterNo.value = chapters.value[0]?.chapterNo ?? null;
+  }
+}
+
+function openImportModal() {
+  showImportModal.value = true;
+}
+
+function closeImportModal() {
+  showImportModal.value = false;
+}
 
 function sortByChapterNo(items: ChapterItem[]) {
   return [...items].sort((a, b) => a.chapterNo - b.chapterNo);
@@ -43,6 +68,7 @@ async function loadWorkspace() {
     const workspace = await apiClient.getWorkspace(projectId.value);
     chapters.value = sortByChapterNo(workspace.knowledge.chapters);
     latestSummaryJob.value = workspace.latestSummaryJob;
+    syncSelectedChapter();
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '加载章节失败');
   } finally {
@@ -58,6 +84,8 @@ async function handleImportChapter(payload: { chapterNo: number; title: string; 
     await apiClient.upsertChapter(projectId.value, payload);
     message.value = presentSuccess(`第${payload.chapterNo}章已保存`);
     importFormRef.value?.resetForm();
+    selectedChapterNo.value = payload.chapterNo;
+    closeImportModal();
     await loadWorkspace();
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '保存章节失败');
@@ -161,6 +189,37 @@ async function handleSummarizeChapter(chapterNo: number) {
   }
 }
 
+async function handleGenerateChapterRelationEvents(chapterNo: number) {
+  generatingRelationChapterNo.value = chapterNo;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    message.value = presentInfo(`第${chapterNo}章关系事件生成中...`);
+    const result = await apiClient.generateChapterRelationEvents(projectId.value, chapterNo);
+
+    if (result.createdCount > 0) {
+      message.value = presentSuccess(
+        `第${chapterNo}章已新增 ${result.createdCount} 条关系事件` +
+          (result.skippedCount > 0 ? `，跳过 ${result.skippedCount} 条重复` : '')
+      );
+      return;
+    }
+
+    if (result.skippedCount > 0) {
+      message.value = presentInfo(
+        `第${chapterNo}章未新增关系事件，跳过 ${result.skippedCount} 条重复`
+      );
+      return;
+    }
+
+    message.value = presentInfo(`第${chapterNo}章未识别到可写入的关系事件`);
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '生成关系事件失败');
+  } finally {
+    generatingRelationChapterNo.value = null;
+  }
+}
+
 async function handleGenerateSummaries() {
   batchSummarizing.value = true;
   errorMessage.value = '';
@@ -203,8 +262,15 @@ onMounted(() => {
 
 <template>
   <div class="chapters-page">
-    <h2 class="page-title">章节模块</h2>
-    <p class="page-subtitle">查看小说正文与摘要，补录历史章节，并按章或批量生成语义摘要。</p>
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">章节模块</h2>
+        <p class="page-subtitle">
+          查看小说正文与摘要，补录历史章节，并按章生成语义摘要或关系事件。
+        </p>
+      </div>
+      <button class="primary-button" type="button" @click="openImportModal">新增章节</button>
+    </div>
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
     <p v-if="message" class="message message-ok">{{ message }}</p>
@@ -225,17 +291,50 @@ onMounted(() => {
       </div>
     </section>
 
-    <ChapterImportForm ref="importFormRef" :submitting="submitting" @submit="handleImportChapter" />
-
     <ChapterList
       ref="chapterListRef"
       :chapters="chapters"
       :loading="loading"
+      :selected-chapter-no="selectedChapterNo"
       :summarizing-chapter-no="summarizingChapterNo"
+      :generating-relation-chapter-no="generatingRelationChapterNo"
       :saving-chapter-no="savingChapterNo"
+      @select="selectedChapterNo = $event"
       @summarize="handleSummarizeChapter"
+      @generate-relation-events="handleGenerateChapterRelationEvents"
       @save="handleSaveChapter"
     />
+
+    <div
+      v-if="showImportModal"
+      class="modal-overlay"
+      role="presentation"
+      @click.self="closeImportModal"
+    >
+      <section
+        class="modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="import-modal-title"
+      >
+        <header class="modal-header">
+          <div>
+            <h3 id="import-modal-title" class="modal-title">新增章节</h3>
+            <p class="modal-subtitle">补录历史章节后，可在左侧列表中查看正文与摘要。</p>
+          </div>
+          <button type="button" class="modal-close" aria-label="关闭弹窗" @click="closeImportModal">
+            ×
+          </button>
+        </header>
+
+        <ChapterImportForm
+          ref="importFormRef"
+          embedded
+          :submitting="submitting"
+          @submit="handleImportChapter"
+        />
+      </section>
+    </div>
   </div>
 </template>
 
@@ -244,6 +343,13 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
 }
 
 .page-title {
@@ -321,5 +427,58 @@ onMounted(() => {
 .primary-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.modal-dialog {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  border-radius: 12px;
+  background: #fff;
+  padding: 1.25rem;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.modal-subtitle {
+  margin: 0.35rem 0 0;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  color: #111827;
 }
 </style>
