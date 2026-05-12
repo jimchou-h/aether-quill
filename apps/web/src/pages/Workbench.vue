@@ -8,6 +8,7 @@ import KnowledgePanel from '../components/workbench/KnowledgePanel.vue';
 import PromptConsole from '../components/workbench/PromptConsole.vue';
 import GenerationPreview from '../components/workbench/GenerationPreview.vue';
 import ConsistencyAlert from '../components/workbench/ConsistencyAlert.vue';
+import { presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
 
 /** 路由实例 */
 const route = useRoute();
@@ -59,7 +60,7 @@ async function loadWorkspace() {
     personaNames.value = workspace.personas.map((item: { name: string }) => item.name);
     editorStore.setChapters(workspace.knowledge.chapters);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载工作台失败';
+    errorMessage.value = presentErrorFromCaught(error, '加载工作台失败');
   } finally {
     loading.value = false;
   }
@@ -82,6 +83,7 @@ async function handleGenerate(task: {
   errorMessage.value = '';
   await generationStore.generate(projectId.value, task);
   if (generationStore.isDone) {
+    presentSuccess(`第${task.chapterNo}章草稿生成完成`);
     await loadWorkspace();
   }
 }
@@ -92,6 +94,9 @@ async function handleGenerate(task: {
 async function handleAcceptDraft() {
   const chNo = generationStore.chapterNo;
   await generationStore.acceptDraft(projectId.value, chNo);
+  if (generationStore.errorMessage) {
+    return;
+  }
   editorStore.addOrUpdateChapter({
     chapterNo: chNo,
     title: `第${chNo}章`,
@@ -99,6 +104,7 @@ async function handleAcceptDraft() {
     summary: '',
     updatedAt: new Date().toISOString(),
   });
+  presentSuccess(`第${chNo}章草稿已落库`);
   promptConsoleRef.value?.resetForm();
   await loadWorkspace();
 }
@@ -126,7 +132,9 @@ onMounted(() => {
     </div>
 
     <div v-if="loading" class="message">正在加载工作台...</div>
-    <div v-if="errorMessage" class="message message-error">{{ errorMessage }}</div>
+    <div v-if="errorMessage || generationStore.errorMessage" class="message message-error">
+      {{ errorMessage || generationStore.errorMessage }}
+    </div>
 
     <template v-if="!loading">
       <div class="workbench-layout">

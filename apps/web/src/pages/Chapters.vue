@@ -9,6 +9,12 @@ import {
 } from '../services/api';
 import ChapterImportForm from '../components/chapters/ChapterImportForm.vue';
 import ChapterList from '../components/chapters/ChapterList.vue';
+import {
+  presentError,
+  presentErrorFromCaught,
+  presentInfo,
+  presentSuccess,
+} from '../utils/pageFeedback';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -38,7 +44,7 @@ async function loadWorkspace() {
     chapters.value = sortByChapterNo(workspace.knowledge.chapters);
     latestSummaryJob.value = workspace.latestSummaryJob;
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载章节失败';
+    errorMessage.value = presentErrorFromCaught(error, '加载章节失败');
   } finally {
     loading.value = false;
   }
@@ -50,11 +56,11 @@ async function handleImportChapter(payload: { chapterNo: number; title: string; 
   message.value = '';
   try {
     await apiClient.upsertChapter(projectId.value, payload);
-    message.value = `第${payload.chapterNo}章已保存`;
+    message.value = presentSuccess(`第${payload.chapterNo}章已保存`);
     importFormRef.value?.resetForm();
     await loadWorkspace();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '保存章节失败';
+    errorMessage.value = presentErrorFromCaught(error, '保存章节失败');
   } finally {
     submitting.value = false;
   }
@@ -66,11 +72,11 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
   message.value = '';
   try {
     await apiClient.upsertChapter(projectId.value, payload);
-    message.value = `第${payload.chapterNo}章已更新`;
+    message.value = presentSuccess(`第${payload.chapterNo}章已更新`);
     chapterListRef.value?.clearEditing();
     await loadWorkspace();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '更新章节失败';
+    errorMessage.value = presentErrorFromCaught(error, '更新章节失败');
   } finally {
     savingChapterNo.value = null;
   }
@@ -126,7 +132,7 @@ async function handleSummarizeChapter(chapterNo: number) {
   try {
     const created = await apiClient.createChapterSummaryJob(projectId.value, chapterNo);
     latestSummaryJob.value = created;
-    message.value = `第${chapterNo}章摘要任务已提交，正在处理...`;
+    message.value = presentInfo(`第${chapterNo}章摘要任务已提交，正在处理...`);
 
     const finalJob =
       created.status === 'completed' || created.status === 'failed'
@@ -136,18 +142,20 @@ async function handleSummarizeChapter(chapterNo: number) {
     await loadWorkspace();
 
     if (!finalJob) {
-      message.value = `第${chapterNo}章摘要任务已提交，请稍后刷新查看结果`;
+      message.value = presentInfo(`第${chapterNo}章摘要任务已提交，请稍后刷新查看结果`);
       return;
     }
 
     if (finalJob.status === 'completed') {
       const latest = finalJob.summaries.find((item) => item.chapterNo === chapterNo);
-      message.value = `第${chapterNo}章摘要已更新（${summarySourceText(latest?.summarySource)}）`;
+      message.value = presentSuccess(
+        `第${chapterNo}章摘要已更新（${summarySourceText(latest?.summarySource)}）`
+      );
     } else if (finalJob.status === 'failed') {
-      errorMessage.value = finalJob.errorMessage || `第${chapterNo}章摘要生成失败`;
+      errorMessage.value = presentError(finalJob.errorMessage || `第${chapterNo}章摘要生成失败`);
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '触发章节摘要失败';
+    errorMessage.value = presentErrorFromCaught(error, '触发章节摘要失败');
   } finally {
     summarizingChapterNo.value = null;
   }
@@ -160,7 +168,7 @@ async function handleGenerateSummaries() {
   try {
     const created = await apiClient.createBatchSummaryJob(projectId.value);
     latestSummaryJob.value = created;
-    message.value = '批量摘要任务已提交，正在处理...';
+    message.value = presentInfo('批量摘要任务已提交，正在处理...');
 
     const finalJob =
       created.status === 'completed' || created.status === 'failed'
@@ -170,17 +178,19 @@ async function handleGenerateSummaries() {
     await loadWorkspace();
 
     if (!finalJob) {
-      message.value = '批量摘要任务已提交，请稍后刷新查看结果';
+      message.value = presentInfo('批量摘要任务已提交，请稍后刷新查看结果');
       return;
     }
 
     if (finalJob.status === 'completed') {
-      message.value = `批量摘要完成（${finalJob.processedChapters}/${finalJob.totalChapters}）`;
+      message.value = presentSuccess(
+        `批量摘要完成（${finalJob.processedChapters}/${finalJob.totalChapters}）`
+      );
     } else if (finalJob.status === 'failed') {
-      errorMessage.value = finalJob.errorMessage || '批量摘要生成失败';
+      errorMessage.value = presentError(finalJob.errorMessage || '批量摘要生成失败');
     }
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '触发批量摘要失败';
+    errorMessage.value = presentErrorFromCaught(error, '触发批量摘要失败');
   } finally {
     batchSummarizing.value = false;
   }

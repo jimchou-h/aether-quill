@@ -2,6 +2,7 @@
 import { onMounted, ref, shallowRef } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiClient, type ProjectItem } from '../services/api';
+import { presentError, presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
 
 const router = useRouter();
 const route = useRoute();
@@ -22,7 +23,7 @@ async function loadProjects() {
   try {
     projects.value = await apiClient.getProjects();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载项目失败';
+    errorMessage.value = presentErrorFromCaught(error, '加载项目失败');
   } finally {
     loading.value = false;
   }
@@ -34,7 +35,9 @@ function applyInvalidProjectRouteTip() {
     return;
   }
 
-  routeTipMessage.value = `项目地址无效（${invalidProjectId}）。请先从项目列表进入具体项目。`;
+  routeTipMessage.value = presentError(
+    `项目地址无效（${invalidProjectId}）。请先从项目列表进入具体项目。`
+  );
   void router.replace({ name: 'projects' });
 }
 
@@ -48,8 +51,9 @@ async function handleDeleteProject(project: ProjectItem) {
   try {
     await apiClient.deleteProject(project.id);
     projects.value = projects.value.filter((item) => item.id !== project.id);
+    presentSuccess(`「${project.name}」已删除`);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '删除项目失败';
+    errorMessage.value = presentErrorFromCaught(error, '删除项目失败');
   } finally {
     deletingProjectId.value = null;
   }
@@ -57,7 +61,7 @@ async function handleDeleteProject(project: ProjectItem) {
 
 async function handleCreateProject() {
   if (!newProjectName.value.trim()) {
-    errorMessage.value = '请填写项目名称';
+    errorMessage.value = presentError('请填写项目名称');
     return;
   }
 
@@ -72,9 +76,10 @@ async function handleCreateProject() {
     projects.value = [project, ...projects.value];
     newProjectName.value = '';
     newProjectDescription.value = '';
+    presentSuccess(`项目「${project.name}」已创建`);
     await router.push(`/projects/${project.id}/workbench`);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '创建项目失败';
+    errorMessage.value = presentErrorFromCaught(error, '创建项目失败');
   } finally {
     submitLoading.value = false;
   }

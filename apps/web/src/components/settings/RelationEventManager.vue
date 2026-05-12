@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { apiClient, type PersonaItem, type RelationEventItem } from '../../services/api';
+import { presentSuccess } from '../../utils/pageFeedback';
 
 const props = defineProps<{
   projectId: string;
@@ -97,10 +98,10 @@ async function handleSubmit() {
 
     if (editingEventId.value) {
       await apiClient.updateRelationEvent(props.projectId, editingEventId.value, payload);
-      message.value = '关系事件已更新';
+      message.value = presentSuccess('关系事件已更新');
     } else {
       await apiClient.createRelationEvent(props.projectId, payload);
-      message.value = '关系事件已创建';
+      message.value = presentSuccess('关系事件已创建');
     }
 
     resetForm();
@@ -122,7 +123,7 @@ async function handleDelete(event: RelationEventItem) {
     if (editingEventId.value === event.id) {
       resetForm();
     }
-    message.value = '关系事件已删除';
+    message.value = presentSuccess('关系事件已删除');
     await loadEvents();
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '删除关系事件失败';

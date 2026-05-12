@@ -6,6 +6,7 @@ import { usePromptConfigStore } from '../stores/promptConfig';
 import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
 import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
 import RelationEventManager from '../components/settings/RelationEventManager.vue';
+import { presentError, presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -39,7 +40,7 @@ async function loadData() {
 
     await promptConfigStore.loadConfig(projectId.value);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '加载设置失败';
+    errorMessage.value = presentErrorFromCaught(error, '加载设置失败');
   } finally {
     loading.value = false;
   }
@@ -67,9 +68,9 @@ async function handleExportBundle() {
       JSON.stringify(bundle, null, 2),
       'application/json;charset=utf-8'
     );
-    message.value = '总结与设定已下载到本地';
+    message.value = presentSuccess('总结与设定已下载到本地');
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '导出失败';
+    errorMessage.value = presentErrorFromCaught(error, '导出失败');
   } finally {
     exportingBundle.value = false;
   }
@@ -77,7 +78,7 @@ async function handleExportBundle() {
 
 async function handleCreatePersona() {
   if (!personaName.value.trim() || !personaProfile.value.trim()) {
-    errorMessage.value = '人物名称与人物设定不能为空';
+    errorMessage.value = presentError('人物名称与人物设定不能为空');
     return;
   }
 
@@ -94,9 +95,9 @@ async function handleCreatePersona() {
     personaName.value = '';
     personaProfile.value = '';
     personaState.value = '';
-    message.value = '人物设定草稿已创建';
+    message.value = presentSuccess('人物设定草稿已创建');
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '创建人物设定失败';
+    errorMessage.value = presentErrorFromCaught(error, '创建人物设定失败');
   } finally {
     creatingPersona.value = false;
   }
@@ -108,9 +109,9 @@ async function handlePublishPersona(personaId: string) {
   try {
     await apiClient.publishPersona(projectId.value, personaId);
     await loadData();
-    message.value = '人物设定已发布并设为生效版本';
+    message.value = presentSuccess('人物设定已发布并设为生效版本');
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '发布人物设定失败';
+    errorMessage.value = presentErrorFromCaught(error, '发布人物设定失败');
   }
 }
 
