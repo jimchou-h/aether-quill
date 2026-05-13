@@ -8,11 +8,12 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
   Request,
   forwardRef,
 } from '@nestjs/common';
-import { Request as ExpressRequest } from 'express';
+import { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { DocumentsService } from '../documents/documents.service';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -110,6 +111,34 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Put(':id/personas/:personaId')
+  updatePersona(
+    @Param('id') id: string,
+    @Param('personaId') personaId: string,
+    @Body()
+    data: {
+      name?: string;
+      profile?: string;
+      state?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.updatePersona(id, personaId, data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id/personas/:personaId')
+  deletePersona(
+    @Param('id') id: string,
+    @Param('personaId') personaId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.deletePersona(id, personaId, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/personas/:personaId/publish')
   publishPersona(
     @Param('id') id: string,
@@ -180,6 +209,92 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
     return this.projectsService.generateChapterRelationEvents(id, Number(chapterNo), userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/plan')
+  optimizeChapterPlan(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      instruction?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.optimizeChapterPlan(id, Number(chapterNo), data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/draft')
+  async optimizeChapterDraft(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      instruction?: string;
+      planText?: string;
+      planId?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const writeEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    try {
+      await this.projectsService.optimizeChapterDraftStream(id, Number(chapterNo), data, userId, {
+        onStart: ({ traceId, chapterNo: cno }) => {
+          writeEvent({ event: 'start', traceId, chapterNo: cno });
+        },
+        onContent: (text) => {
+          writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+        },
+        onEnd: ({ traceId }) => {
+          writeEvent({ event: 'end', traceId });
+        },
+        onError: (message) => {
+          writeEvent({ event: 'error', data: message });
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '优化正文生成失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/apply')
+  applyChapterOptimization(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      draftText?: string;
+      expectedChapterUpdatedAt?: string;
+      planId?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.applyChapterOptimization(id, Number(chapterNo), data, userId);
   }
 
   @UseGuards(JwtAuthGuard)

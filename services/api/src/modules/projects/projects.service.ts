@@ -14,6 +14,10 @@ import {
   trimForPrompt,
 } from './persona-state.util';
 import {
+  normalizePersonaUpdateInput,
+  resolveActivePersonaIdAfterDelete,
+} from './persona-management.util';
+import {
   buildRelationMemoryBlock,
   matchesRelationEventFilters,
   normalizeRelationEventDedupeKey,
@@ -23,6 +27,23 @@ import {
   RELATION_EVENT_SELECTED_MAX_COUNT,
   RELATION_EVENT_SUMMARY_MAX_LENGTH,
 } from './relation-event.util';
+import {
+  CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+  ChapterVersionConflictError,
+  assertDraftText,
+  assertInstruction,
+  assertPlanText,
+  buildDraftUserPrompt,
+  buildPlanUserPrompt,
+  ensureChapterVersionMatches,
+  makeOptimizationId,
+  normalizeInstruction,
+  parseExpectedUpdatedAt,
+  type ChapterOptimizeUsedRelationEvent,
+} from './chapter-optimize.util';
 
 function buildTargetWordsInstruction(targetWords?: number): string {
   const parsed = Number(targetWords);
@@ -506,6 +527,72 @@ export class ProjectsService {
 
     this.persistState();
     return persona;
+  }
+
+  updatePersona(
+    projectId: string,
+    personaId: string,
+    payload: { name?: string; profile?: string; state?: string },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const personas = this.personasStore.get(projectId)!;
+    const persona = personas.find((item) => item.id === personaId);
+    if (!persona) {
+      throw new NotFoundException(`未找到 persona: ${personaId}`);
+    }
+
+    const normalized = normalizePersonaUpdateInput(payload);
+    if (normalized.name !== undefined) {
+      if (!normalized.name) {
+        throw new BadRequestException('name 不能为空');
+      }
+      persona.name = normalized.name;
+    }
+    if (normalized.profile !== undefined) {
+      if (!normalized.profile) {
+        throw new BadRequestException('profile 不能为空');
+      }
+      persona.profile = normalized.profile;
+    }
+    if (normalized.state !== undefined) {
+      persona.state = normalized.state || '待更新';
+    }
+
+    persona.updatedAt = new Date();
+    this.persistState();
+    return persona;
+  }
+
+  deletePersona(projectId: string, personaId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const personas = this.personasStore.get(projectId)!;
+    const index = personas.findIndex((item) => item.id === personaId);
+    if (index < 0) {
+      throw new NotFoundException(`未找到 persona: ${personaId}`);
+    }
+
+    personas.splice(index, 1);
+
+    const settings = this.settingsStore.get(projectId)!;
+    settings.activePersonaId = resolveActivePersonaIdAfterDelete(
+      settings.activePersonaId,
+      personaId
+    );
+    settings.updatedAt = new Date();
+
+    this.persistState();
+    return { id: personaId };
   }
 
   getKnowledge(projectId: string, userId?: string) {
@@ -1073,6 +1160,351 @@ export class ProjectsService {
       },
       autoUpdates,
     };
+  }
+
+  async optimizeChapterPlan(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    if (!chapter.content?.trim()) {
+      throw new BadRequestException(`第${normalizedChapterNo}章正文为空，无法优化`);
+    }
+
+    const instruction = normalizeInstruction(payload.instruction);
+    assertInstruction(instruction);
+
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const usedRelationEvents = this.resolveSelectedRelationEvents(
+      projectId,
+      payload.selectedEventIds
+    );
+
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      usedRelationEvents
+    );
+
+    const userPrompt = buildPlanUserPrompt({
+      chapter: {
+        chapterNo: chapter.chapterNo,
+        title: chapter.title,
+        content: chapter.content,
+        updatedAt: chapter.updatedAt,
+      },
+      instruction,
+      appearingCharacters: payload.appearingCharacters,
+      selectedRelationEvents: usedRelationEvents.map(
+        (event): ChapterOptimizeUsedRelationEvent => ({
+          id: event.id,
+          protagonist: event.protagonist,
+          counterparty: event.counterparty,
+          summary: event.summary,
+          evidenceSnippet: event.evidenceSnippet,
+          chapterNo: event.chapterNo,
+        })
+      ),
+    });
+
+    const planId = makeOptimizationId('plan');
+
+    let planText = '';
+    let traceId = '';
+    try {
+      const { data } = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
+        projectId,
+        prompt: userPrompt,
+        useSSE: false,
+        systemPromptOverride: CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
+        templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+        context: {
+          task: 'chapter.optimize.plan',
+          chapterNo: normalizedChapterNo,
+          planId,
+          inputChapterChars: chapter.content.length,
+          inputContextChars: userPrompt.length,
+        },
+      });
+
+      if (!data?.content || typeof data.content !== 'string') {
+        throw new BadGatewayException('优化方案生成失败：未返回方案文本');
+      }
+
+      planText = data.content.trim();
+      traceId = typeof data.traceId === 'string' ? data.traceId : '';
+    } catch (error) {
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : '调用优化方案生成失败';
+      throw new BadGatewayException(message);
+    }
+
+    const activePersona =
+      personas.find((item) => item.id === settings.activePersonaId) ||
+      personas.find((item) => item.status === 'published') ||
+      null;
+
+    return {
+      planText,
+      planId,
+      traceId,
+      basis: {
+        usedPersonaId: activePersona?.id || null,
+        outlineUsed: Boolean(knowledge.outlineSummary),
+        chapterSummaryCount: knowledge.chapters.filter((item) => item.summary).length,
+        usedRelationEvents,
+      },
+    };
+  }
+
+  async optimizeChapterDraftStream(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction?: string;
+      planText?: string;
+      planId?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: { traceId: string; chapterNo: number }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: { traceId: string }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    if (!chapter.content?.trim()) {
+      throw new BadRequestException(`第${normalizedChapterNo}章正文为空，无法优化`);
+    }
+
+    const instruction = normalizeInstruction(payload.instruction);
+    assertInstruction(instruction);
+
+    const planText = typeof payload.planText === 'string' ? payload.planText.trim() : '';
+    assertPlanText(planText);
+
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const usedRelationEvents = this.resolveSelectedRelationEvents(
+      projectId,
+      payload.selectedEventIds
+    );
+
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      usedRelationEvents
+    );
+
+    const userPrompt = buildDraftUserPrompt({
+      chapter: {
+        chapterNo: chapter.chapterNo,
+        title: chapter.title,
+        content: chapter.content,
+        updatedAt: chapter.updatedAt,
+      },
+      instruction,
+      planText,
+      appearingCharacters: payload.appearingCharacters,
+      selectedRelationEvents: usedRelationEvents.map(
+        (event): ChapterOptimizeUsedRelationEvent => ({
+          id: event.id,
+          protagonist: event.protagonist,
+          counterparty: event.counterparty,
+          summary: event.summary,
+          evidenceSnippet: event.evidenceSnippet,
+          chapterNo: event.chapterNo,
+        })
+      ),
+    });
+
+    let response;
+    try {
+      response = await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/generate`,
+        {
+          projectId,
+          prompt: userPrompt,
+          useSSE: true,
+          systemPromptOverride: CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
+          templateKey: CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
+          context: {
+            task: 'chapter.optimize.draft',
+            chapterNo: normalizedChapterNo,
+            planId: payload.planId || null,
+            inputChapterChars: chapter.content.length,
+            inputContextChars: userPrompt.length,
+          },
+        },
+        { responseType: 'stream' }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '调用优化正文生成失败';
+      throw new BadGatewayException(message);
+    }
+
+    let firstStartEmitted = false;
+    let buffer = '';
+
+    await new Promise<void>((resolveStream, rejectStream) => {
+      const stream = response.data as NodeJS.ReadableStream;
+
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf-8');
+        const segments = buffer.split('\n\n');
+        buffer = segments.pop() || '';
+
+        for (const segment of segments) {
+          const trimmedSegment = segment.trim();
+          if (!trimmedSegment.startsWith('data:')) {
+            continue;
+          }
+          const dataPart = trimmedSegment.replace(/^data:\s*/, '');
+          if (!dataPart) {
+            continue;
+          }
+          let event: { event?: string; data?: string; traceId?: string };
+          try {
+            event = JSON.parse(dataPart);
+          } catch {
+            continue;
+          }
+
+          switch (event.event) {
+            case 'start': {
+              const traceId = typeof event.traceId === 'string' ? event.traceId : '';
+              if (!firstStartEmitted) {
+                callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
+                firstStartEmitted = true;
+              }
+              break;
+            }
+            case 'content': {
+              const raw = typeof event.data === 'string' ? event.data : '';
+              callbacks.onContent(raw.replace(/\\n/g, '\n'));
+              break;
+            }
+            case 'end': {
+              const traceId = typeof event.traceId === 'string' ? event.traceId : '';
+              callbacks.onEnd({ traceId });
+              break;
+            }
+            case 'error': {
+              const message = typeof event.data === 'string' ? event.data : '优化正文生成失败';
+              callbacks.onError(message);
+              break;
+            }
+          }
+        }
+      });
+
+      stream.on('end', () => resolveStream());
+      stream.on('error', (error: unknown) => rejectStream(error));
+    });
+  }
+
+  async applyChapterOptimization(
+    projectId: string,
+    chapterNo: number,
+    payload: { draftText?: string; expectedChapterUpdatedAt?: string; planId?: string },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
+    assertDraftText(draftText);
+
+    const expected = parseExpectedUpdatedAt(payload.expectedChapterUpdatedAt);
+    try {
+      ensureChapterVersionMatches(normalizedChapterNo, expected, chapter.updatedAt);
+    } catch (error) {
+      if (error instanceof ChapterVersionConflictError) {
+        throw new BadRequestException({
+          code: 1307,
+          msg: '章节正文已被其他操作更新，请重新拉取后再发起优化',
+          chapterNo: normalizedChapterNo,
+          expected: error.expected,
+          actual: error.actual,
+        });
+      }
+      throw error;
+    }
+
+    chapter.content = draftText;
+    chapter.updatedAt = new Date();
+    knowledge.indexVersion += 1;
+    this.persistState();
+
+    return {
+      chapter: {
+        chapterNo: chapter.chapterNo,
+        title: chapter.title,
+        content: chapter.content,
+        summary: chapter.summary,
+        summarySource: chapter.summarySource,
+        summaryUpdatedAt: chapter.summaryUpdatedAt,
+        updatedAt: chapter.updatedAt,
+      },
+    };
+  }
+
+  private normalizeChapterNo(chapterNo: number) {
+    const normalized = Number(chapterNo);
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+    return normalized;
   }
 
   addMember(projectId: string, userId: string, role: 'editor' | 'viewer') {

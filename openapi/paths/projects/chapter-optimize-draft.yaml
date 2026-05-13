@@ -1,0 +1,65 @@
+post:
+  tags:
+    - Projects
+  summary: Stream optimized chapter draft (SSE)
+  description: |
+    Stream the optimized chapter draft via Server-Sent Events. The original chapter text and the
+    confirmed plan text from the previous step are always injected into the prompt.
+
+    SSE event sequence is identical to `/api/generate/draft`:
+      - `data: {"event":"start","traceId":"...","chapterNo":N}`
+      - `data: {"event":"content","data":"...","traceId":"..."}` (multiple)
+      - `data: {"event":"end","traceId":"...","citations":[...],"consistencyNotes":[...]}`
+      - `data: {"event":"error","data":"...","traceId":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizationDraftRequest'
+  responses:
+    '200':
+      description: SSE stream
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: Server-Sent Events stream of generation events
+    '400':
+      description: Invalid request (empty instruction or planText)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Optimization draft generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

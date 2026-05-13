@@ -30,7 +30,9 @@ export function normalizeRelationEventDedupeKey(input: {
   return `${chapter}|${protagonist}|${counterparty}|${summary}`;
 }
 
-export function parseExtractedRelationEventCandidates(raw: unknown): ExtractedRelationEventCandidate[] {
+export function parseExtractedRelationEventCandidates(
+  raw: unknown
+): ExtractedRelationEventCandidate[] {
   let payload = raw;
   if (typeof payload === 'string') {
     const trimmed = payload.trim();
@@ -45,7 +47,9 @@ export function parseExtractedRelationEventCandidates(raw: unknown): ExtractedRe
 
   const items = Array.isArray(payload)
     ? payload
-    : payload && typeof payload === 'object' && Array.isArray((payload as { events?: unknown[] }).events)
+    : payload &&
+        typeof payload === 'object' &&
+        Array.isArray((payload as { events?: unknown[] }).events)
       ? (payload as { events: unknown[] }).events
       : [];
 
@@ -186,7 +190,9 @@ export function matchesRelationEventFilters(
   }
 
   if (Array.isArray(filters.appearingCharacters) && filters.appearingCharacters.length > 0) {
-    const appearing = new Set(filters.appearingCharacters.map((item) => item.trim()).filter(Boolean));
+    const appearing = new Set(
+      filters.appearingCharacters.map((item) => item.trim()).filter(Boolean)
+    );
     const intersects = event.actors.some((actor) => appearing.has(actor));
     if (!intersects) {
       return false;

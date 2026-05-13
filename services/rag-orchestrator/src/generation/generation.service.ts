@@ -237,7 +237,9 @@ export class GenerationService {
 
     const items = Array.isArray(payload)
       ? payload
-      : payload && typeof payload === 'object' && Array.isArray((payload as { events?: unknown[] }).events)
+      : payload &&
+          typeof payload === 'object' &&
+          Array.isArray((payload as { events?: unknown[] }).events)
         ? (payload as { events: unknown[] }).events
         : [];
 
@@ -254,7 +256,8 @@ export class GenerationService {
       }
 
       const record = item as Record<string, unknown>;
-      const counterparty = typeof record.counterparty === 'string' ? record.counterparty.trim() : '';
+      const counterparty =
+        typeof record.counterparty === 'string' ? record.counterparty.trim() : '';
       const summary = typeof record.summary === 'string' ? record.summary.trim() : '';
       if (!counterparty || !summary) {
         continue;

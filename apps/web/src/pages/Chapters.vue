@@ -9,6 +9,7 @@ import {
 } from '../services/api';
 import ChapterImportForm from '../components/chapters/ChapterImportForm.vue';
 import ChapterList from '../components/chapters/ChapterList.vue';
+import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
 import {
   presentError,
   presentErrorFromCaught,
@@ -26,11 +27,14 @@ const savingChapterNo = ref<number | null>(null);
 const batchSummarizing = ref(false);
 const summarizingChapterNo = ref<number | null>(null);
 const generatingRelationChapterNo = ref<number | null>(null);
+const optimizingChapterNo = ref<number | null>(null);
 const latestSummaryJob = ref<SummaryJob | null>(null);
 const message = ref('');
 const errorMessage = ref('');
 const selectedChapterNo = ref<number | null>(null);
 const showImportModal = ref(false);
+const showOptimizeModal = ref(false);
+const optimizingChapter = ref<ChapterItem | null>(null);
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
 const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
@@ -220,6 +224,24 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
   }
 }
 
+function handleOpenOptimizeDialog(chapter: ChapterItem) {
+  optimizingChapter.value = chapter;
+  optimizingChapterNo.value = chapter.chapterNo;
+  showOptimizeModal.value = true;
+}
+
+function handleCloseOptimizeDialog() {
+  showOptimizeModal.value = false;
+  optimizingChapter.value = null;
+  optimizingChapterNo.value = null;
+}
+
+async function handleOptimizeApplied(updated: ChapterItem) {
+  message.value = presentSuccess(`第${updated.chapterNo}章已更新为优化后的正文`);
+  await loadWorkspace();
+  selectedChapterNo.value = updated.chapterNo;
+}
+
 async function handleGenerateSummaries() {
   batchSummarizing.value = true;
   errorMessage.value = '';
@@ -298,11 +320,21 @@ onMounted(() => {
       :selected-chapter-no="selectedChapterNo"
       :summarizing-chapter-no="summarizingChapterNo"
       :generating-relation-chapter-no="generatingRelationChapterNo"
+      :optimizing-chapter-no="optimizingChapterNo"
       :saving-chapter-no="savingChapterNo"
       @select="selectedChapterNo = $event"
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
+      @optimize="handleOpenOptimizeDialog"
       @save="handleSaveChapter"
+    />
+
+    <ChapterOptimizeDialog
+      :visible="showOptimizeModal"
+      :project-id="projectId"
+      :chapter="optimizingChapter"
+      @close="handleCloseOptimizeDialog"
+      @applied="handleOptimizeApplied"
     />
 
     <div

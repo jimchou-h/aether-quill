@@ -366,7 +366,14 @@ app.post('/api/consistency/check', (req, res) => {
 });
 
 app.post('/api/generate', async (req, res) => {
-  const { projectId, prompt, useSSE = true, context: extraContext } = req.body;
+  const {
+    projectId,
+    prompt,
+    useSSE = true,
+    context: extraContext,
+    systemPromptOverride,
+    templateKey,
+  } = req.body;
 
   if (!projectId || !prompt) {
     return res.status(400).json({ error: 'projectId and prompt are required' });
@@ -377,11 +384,20 @@ app.post('/api/generate', async (req, res) => {
     extraContext as Record<string, unknown> | undefined
   );
 
+  if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {
+    generationContext.systemPromptText = systemPromptOverride.trim();
+  }
+
+  const traceContext =
+    templateKey || extraContext
+      ? { ...(extraContext || {}), templateKey: templateKey || undefined }
+      : undefined;
+
   const trace = await generationService.createTrace({
     prompt,
     projectId,
     systemPrompt: generationContext.systemPromptText,
-    context: extraContext,
+    context: traceContext,
     useSSE,
   });
 

@@ -8,6 +8,7 @@ const props = defineProps<{
   selectedChapterNo: number | null;
   summarizingChapterNo: number | null;
   generatingRelationChapterNo: number | null;
+  optimizingChapterNo: number | null;
   savingChapterNo: number | null;
 }>();
 
@@ -15,6 +16,7 @@ const emit = defineEmits<{
   select: [chapterNo: number];
   summarize: [chapterNo: number];
   generateRelationEvents: [chapterNo: number];
+  optimize: [chapter: ChapterItem];
   save: [payload: { chapterNo: number; title: string; content: string }];
 }>();
 
@@ -49,6 +51,7 @@ function isBusy(chapterNo: number) {
   return (
     props.summarizingChapterNo === chapterNo ||
     props.generatingRelationChapterNo === chapterNo ||
+    props.optimizingChapterNo === chapterNo ||
     props.savingChapterNo === chapterNo ||
     (editingChapterNo.value !== null && editingChapterNo.value !== chapterNo)
   );
@@ -202,6 +205,15 @@ defineExpose({ clearEditing });
                   props.generatingRelationChapterNo === selectedChapter.chapterNo
                     ? '生成中...'
                     : '生成关系事件'
+                }}
+              </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                @click="emit('optimize', selectedChapter)"
+              >
+                {{
+                  props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '优化章节'
                 }}
               </button>
             </template>
