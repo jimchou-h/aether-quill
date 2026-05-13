@@ -233,6 +233,8 @@ export class ProjectsController {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    // 避免在同步上下文 / 上游首包较慢时长时间无响应体，被中间层或客户端当作空闲连接断开
+    res.write(': keep-alive\n\n');
 
     const writeEvent = (payload: Record<string, unknown>) => {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -285,6 +287,8 @@ export class ProjectsController {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    // 避免在同步上下文 / 上游首包较慢时长时间无响应体，被中间层或客户端当作空闲连接断开
+    res.write(': keep-alive\n\n');
 
     const writeEvent = (payload: Record<string, unknown>) => {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);

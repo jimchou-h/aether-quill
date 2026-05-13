@@ -110,7 +110,7 @@ async function handleGeneratePlan() {
         },
         onEnd: (result) => {
           plan.value = result;
-          presentSuccess('优化方案已生成，请确认或重新生成');
+          presentSuccess('优化方案已生成，可直接修改方案文本后再生成正文');
         },
         onError: (message) => {
           errorMessage.value = presentError(message || '生成优化方案失败');
@@ -153,7 +153,7 @@ async function handleRegeneratePlan() {
         },
         onEnd: (result) => {
           plan.value = result;
-          presentInfo('优化方案已重新生成');
+          presentInfo('优化方案已重新生成，可按需编辑后再生成正文');
         },
         onError: (message) => {
           errorMessage.value = presentError(message || '重新生成优化方案失败');
@@ -170,6 +170,12 @@ async function handleRegeneratePlan() {
 async function handleGenerateDraft() {
   if (!props.chapter || !plan.value) return;
 
+  const planBody = plan.value.planText.trim();
+  if (!planBody) {
+    errorMessage.value = presentError('方案内容不能为空，请填写或重新生成方案');
+    return;
+  }
+
   draftText.value = '';
   draftTraceId.value = '';
   step.value = 'draft';
@@ -182,7 +188,7 @@ async function handleGenerateDraft() {
       props.chapter.chapterNo,
       {
         instruction: instruction.value.trim(),
-        planText: plan.value.planText,
+        planText: planBody,
         planId: plan.value.planId,
       },
       {
@@ -264,7 +270,9 @@ async function handleApply() {
           <h3 id="optimize-modal-title" class="modal-title">
             章节优化{{ props.chapter ? ` · 第${props.chapter.chapterNo}章` : '' }}
           </h3>
-          <p class="modal-subtitle">三步流程：输入要求 → 确认方案 → 确认正文 → 覆盖原章节</p>
+          <p class="modal-subtitle">
+            三步流程：输入要求 → 确认或编辑方案 → 生成正文 → 覆盖原章节
+          </p>
         </div>
         <button
           type="button"
@@ -320,7 +328,15 @@ async function handleApply() {
 
       <section v-else-if="step === 'plan'" class="step-section">
         <h4 class="section-title">优化方案</h4>
-        <pre class="result-text">{{ plan?.planText }}</pre>
+        <label class="field-label" for="optimize-plan-text">方案内容</label>
+        <textarea
+          v-if="plan"
+          id="optimize-plan-text"
+          v-model="plan.planText"
+          class="field-textarea plan-text-editor"
+          :readonly="generatingPlan"
+          placeholder="生成完成后可在此修改要点，再点击「确认方案，生成正文」"
+        />
         <p class="meta-line">
           基于：人物 {{ plan?.basis.usedPersonaId ? '已应用' : '未配置' }} · 大纲
           {{ plan?.basis.outlineUsed ? '已注入' : '未注入' }} · 章节摘要
@@ -350,7 +366,7 @@ async function handleApply() {
           <button
             class="primary-button"
             type="button"
-            :disabled="!plan?.planText || isBusy"
+            :disabled="!plan?.planText?.trim() || isBusy"
             @click="handleGenerateDraft"
           >
             确认方案，生成正文
@@ -540,6 +556,18 @@ async function handleApply() {
   font-size: 0.9rem;
   font-family: inherit;
   resize: vertical;
+}
+
+.plan-text-editor {
+  min-height: 220px;
+  max-height: 420px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.plan-text-editor:read-only {
+  background: #f9fafb;
+  cursor: wait;
 }
 
 .result-text {

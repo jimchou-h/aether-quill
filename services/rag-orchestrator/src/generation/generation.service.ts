@@ -83,6 +83,7 @@ export class GenerationService {
 
   async generateNonStream(trace: TraceRecord, context: GenerationContext): Promise<string> {
     const prompt = this.buildPrompt(context, trace.prompt);
+    console.log('传入prompt', prompt);
     this.updateTrace(trace.id, { status: 'generating' });
 
     try {
@@ -110,6 +111,7 @@ export class GenerationService {
     context: GenerationContext
   ): AsyncGenerator<string, void, unknown> {
     const prompt = this.buildPrompt(context, trace.prompt);
+    console.log('传入prompt', prompt);
     this.updateTrace(trace.id, { status: 'generating' });
     let fullContent = '';
 
@@ -362,7 +364,8 @@ export class GenerationService {
           'Content-Type': 'application/json',
         },
         responseType: 'stream',
-        timeout: 120000,
+        // 长章节流式生成可能远超 120s；首包慢时不应被总时长误杀（各环境对 stream+timeout 语义不一致）
+        timeout: 0,
       }
     );
 
