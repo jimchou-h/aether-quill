@@ -213,7 +213,7 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/optimize/plan')
-  optimizeChapterPlan(
+  async optimizeChapterPlan(
     @Param('id') id: string,
     @Param('chapterNo') chapterNo: string,
     @Body()
@@ -222,10 +222,43 @@ export class ProjectsController {
       appearingCharacters?: string[];
       selectedEventIds?: string[];
     },
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
   ) {
     const userId = req.user?.userId;
-    return this.projectsService.optimizeChapterPlan(id, Number(chapterNo), data, userId);
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const writeEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    try {
+      await this.projectsService.optimizeChapterPlanStream(id, Number(chapterNo), data, userId, {
+        onStart: ({ traceId, chapterNo: cno, planId, basis }) => {
+          writeEvent({ event: 'start', traceId, chapterNo: cno, planId, basis });
+        },
+        onContent: (text) => {
+          writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+        },
+        onEnd: ({ traceId, planText, planId, basis }) => {
+          writeEvent({ event: 'end', traceId, planText, planId, basis });
+        },
+        onError: (message) => {
+          writeEvent({ event: 'error', data: message });
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '生成优化方案失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
   }
 
   @UseGuards(JwtAuthGuard)

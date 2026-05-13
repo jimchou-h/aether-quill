@@ -1,7 +1,6 @@
 import { loadEnv } from './config/load-env';
+import { assertRagInfrastructureEnv } from '@aether-quill/config';
 import express from 'express';
-
-loadEnv();
 import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
@@ -24,6 +23,8 @@ import {
   RequestWithObservability,
 } from './observability';
 
+loadEnv();
+assertRagInfrastructureEnv('rag-orchestrator');
 const app = express();
 app.use(express.json());
 app.use(observabilityMiddleware);
@@ -31,7 +32,7 @@ app.use(observabilityMiddleware);
 const PORT = process.env.PORT || 3001;
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
 
-const vectorStore = new VectorStore(API_BASE_URL);
+const vectorStore = new VectorStore();
 const reranker = new Reranker();
 const generationService = new GenerationService();
 const consistencyChecker = new ConsistencyChecker();

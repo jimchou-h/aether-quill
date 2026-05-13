@@ -89,14 +89,40 @@ async function handleGeneratePlan() {
   generatingPlan.value = true;
   errorMessage.value = '';
   try {
-    const result = await apiClient.optimizeChapterPlan(props.projectId, props.chapter.chapterNo, {
-      instruction: instruction.value.trim(),
-    });
-    plan.value = result;
-    step.value = 'plan';
-    presentSuccess('优化方案已生成，请确认或重新生成');
+    await apiClient.optimizeChapterPlanSSE(
+      props.projectId,
+      props.chapter.chapterNo,
+      { instruction: instruction.value.trim() },
+      {
+        onStart: (p) => {
+          plan.value = {
+            planText: '',
+            planId: p.planId,
+            traceId: p.traceId,
+            basis: p.basis,
+          };
+          step.value = 'plan';
+        },
+        onContent: (text) => {
+          if (plan.value) {
+            plan.value = { ...plan.value, planText: plan.value.planText + text };
+          }
+        },
+        onEnd: (result) => {
+          plan.value = result;
+          presentSuccess('优化方案已生成，请确认或重新生成');
+        },
+        onError: (message) => {
+          errorMessage.value = presentError(message || '生成优化方案失败');
+          plan.value = null;
+          step.value = 'instruction';
+        },
+      }
+    );
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '生成优化方案失败');
+    plan.value = null;
+    step.value = 'instruction';
   } finally {
     generatingPlan.value = false;
   }
@@ -107,11 +133,33 @@ async function handleRegeneratePlan() {
   generatingPlan.value = true;
   errorMessage.value = '';
   try {
-    const result = await apiClient.optimizeChapterPlan(props.projectId, props.chapter.chapterNo, {
-      instruction: instruction.value.trim(),
-    });
-    plan.value = result;
-    presentInfo('优化方案已重新生成');
+    await apiClient.optimizeChapterPlanSSE(
+      props.projectId,
+      props.chapter.chapterNo,
+      { instruction: instruction.value.trim() },
+      {
+        onStart: (p) => {
+          plan.value = {
+            planText: '',
+            planId: p.planId,
+            traceId: p.traceId,
+            basis: p.basis,
+          };
+        },
+        onContent: (text) => {
+          if (plan.value) {
+            plan.value = { ...plan.value, planText: plan.value.planText + text };
+          }
+        },
+        onEnd: (result) => {
+          plan.value = result;
+          presentInfo('优化方案已重新生成');
+        },
+        onError: (message) => {
+          errorMessage.value = presentError(message || '重新生成优化方案失败');
+        },
+      }
+    );
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '重新生成优化方案失败');
   } finally {

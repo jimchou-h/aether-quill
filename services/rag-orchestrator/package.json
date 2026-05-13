@@ -7,10 +7,13 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "lint": "eslint src --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @aether-quill/config run build && pnpm --filter @aether-quill/model-providers run build && tsc --noEmit",
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {
+    "@aether-quill/config": "workspace:*",
+    "@aether-quill/model-providers": "workspace:^",
+    "@qdrant/js-client-rest": "^1.14.0",
     "axios": "^1.7.0",
     "express": "^5.2.1"
   },

@@ -35,6 +35,8 @@ export const useGenerationStore = defineStore('generation', () => {
   const usedRelationEvents = ref<UsedRelationEventItem[]>([]);
   /** 错误消息 */
   const errorMessage = ref('');
+  /** 是否正在落库 */
+  const accepting = ref(false);
 
   /** 是否正在生成 */
   const isStreaming = computed(() => status.value === 'streaming');
@@ -44,6 +46,8 @@ export const useGenerationStore = defineStore('generation', () => {
   const isError = computed(() => status.value === 'error');
   /** 是否处于空闲状态 */
   const isIdle = computed(() => status.value === 'idle');
+  /** 是否正在接受草稿 */
+  const isAccepting = computed(() => accepting.value);
 
   /**
    * 重置所有状态
@@ -57,6 +61,7 @@ export const useGenerationStore = defineStore('generation', () => {
     consistencyNotes.value = [];
     usedRelationEvents.value = [];
     errorMessage.value = '';
+    accepting.value = false;
   }
 
   /**
@@ -125,6 +130,7 @@ export const useGenerationStore = defineStore('generation', () => {
       return;
     }
 
+    accepting.value = true;
     try {
       await apiClient.upsertChapter(projectId, {
         chapterNo: chapterNoVal,
@@ -133,6 +139,8 @@ export const useGenerationStore = defineStore('generation', () => {
       });
     } catch (error) {
       errorMessage.value = presentErrorFromCaught(error, '接受草稿失败');
+    } finally {
+      accepting.value = false;
     }
   }
 
@@ -145,10 +153,12 @@ export const useGenerationStore = defineStore('generation', () => {
     consistencyNotes,
     usedRelationEvents,
     errorMessage,
+    accepting,
     isStreaming,
     isDone,
     isError,
     isIdle,
+    isAccepting,
     reset,
     generate,
     acceptDraft,

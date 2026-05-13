@@ -3,6 +3,7 @@ import { Queue, Worker, Job as BullJob } from 'bullmq';
 import IORedis from 'ioredis';
 import { IngestionJobData, JobRecord } from '../jobs/types';
 import { IngestionProcessor } from '../jobs/ingestion.processor';
+import { replaceDocumentVectorsInQdrant } from '../retrieval/qdrant-sync';
 
 interface QueueServiceOptions {
   redisUrl: string;
@@ -123,6 +124,17 @@ export class QueueService {
       try {
         const result = await this.processor.processDocument(data.targetId, (progress) => {
           void updateProgress(progress);
+        });
+
+        const language = (process.env.DEFAULT_LANGUAGE || 'zh').trim() || 'zh';
+        await replaceDocumentVectorsInQdrant({
+          projectId: result.projectId || data.projectId,
+          documentId: result.documentId,
+          documentType: 'document',
+          versionId: result.documentVersion,
+          docTitle: result.documentTitle,
+          language,
+          chunks: result.chunks,
         });
 
         await axios.put(`${this.apiBaseUrl}/api/documents/${data.targetId}/index-result`, {

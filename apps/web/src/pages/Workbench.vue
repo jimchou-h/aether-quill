@@ -84,7 +84,6 @@ async function handleGenerate(task: {
   await generationStore.generate(projectId.value, task);
   if (generationStore.isDone) {
     presentSuccess(`第${task.chapterNo}章草稿生成完成`);
-    await loadWorkspace();
   }
 }
 
@@ -179,6 +178,7 @@ onMounted(() => {
               :used-relation-events="generationStore.usedRelationEvents"
               :is-streaming="generationStore.isStreaming"
               :is-done="generationStore.isDone"
+              :is-accepting="generationStore.isAccepting"
               @accept="handleAcceptDraft"
               @regenerate="handleRegenerate"
             />

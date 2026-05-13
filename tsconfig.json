@@ -16,8 +16,7 @@
     "baseUrl": ".",
     "paths": {
       "@aether-quill/shared-types": ["packages/shared-types/src/index.ts"],
-      "@aether-quill/prompt-templates": ["packages/prompt-templates/src/index.ts"],
-      "@aether-quill/config": ["packages/config/src/index.ts"]
+      "@aether-quill/prompt-templates": ["packages/prompt-templates/src/index.ts"]
     }
   },
   "include": ["apps/**/*", "services/**/*", "packages/**/*"],

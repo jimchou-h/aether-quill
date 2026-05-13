@@ -695,20 +695,121 @@ export const apiClient = {
     }
   },
 
-  async optimizeChapterPlan(
+  async optimizeChapterPlanSSE(
     projectId: string,
     chapterNo: number,
     payload: {
       instruction: string;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
+    },
+    callbacks: ChapterOptimizePlanCallbacks
+  ): Promise<void> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
+    const token = localStorage.getItem('token');
+    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/plan`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `生成优化方案失败: ${response.statusText}`);
     }
-  ) {
-    const response = await http.post(
-      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/plan`,
-      payload
-    );
-    return this.unwrapPayload<ChapterOptimizationPlanResult>(response.data);
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let reading = true;
+
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const segments = buffer.split('\n\n');
+      buffer = segments.pop() || '';
+
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        const dataPart = trimmed.replace(/^data:\s*/, '');
+        if (!dataPart) {
+          continue;
+        }
+
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            planId?: string;
+            planText?: string;
+            basis?: ChapterOptimizationBasis;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId || '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                planId: event.planId || '',
+                basis: event.basis ?? {
+                  usedPersonaId: null,
+                  outlineUsed: false,
+                  chapterSummaryCount: 0,
+                  usedRelationEvents: [],
+                },
+              });
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'end': {
+              const result: ChapterOptimizationPlanResult = {
+                traceId: event.traceId || '',
+                planText: (event.planText || '').trim(),
+                planId: event.planId || '',
+                basis:
+                  event.basis ??
+                  ({
+                    usedPersonaId: null,
+                    outlineUsed: false,
+                    chapterSummaryCount: 0,
+                    usedRelationEvents: [],
+                  } as ChapterOptimizationBasis),
+              };
+              callbacks.onEnd?.(result);
+              reading = false;
+              break;
+            }
+            case 'error':
+              callbacks.onError?.(event.data || '生成优化方案失败');
+              reading = false;
+              break;
+          }
+        } catch {
+          // skip malformed SSE lines
+        }
+      }
+    }
   },
 
   async optimizeChapterDraftSSE(
@@ -923,6 +1024,18 @@ export interface ChapterOptimizationPlanResult {
   planId: string;
   traceId: string;
   basis: ChapterOptimizationBasis;
+}
+
+export interface ChapterOptimizePlanCallbacks {
+  onStart?: (payload: {
+    traceId: string;
+    chapterNo: number;
+    planId: string;
+    basis: ChapterOptimizationBasis;
+  }) => void;
+  onContent?: (text: string) => void;
+  onEnd?: (result: ChapterOptimizationPlanResult) => void;
+  onError?: (message: string) => void;
 }
 
 export interface ChapterOptimizeDraftCallbacks {

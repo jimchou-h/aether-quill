@@ -17,6 +17,8 @@ defineProps<{
   isStreaming: boolean;
   /** 是否生成完成 */
   isDone: boolean;
+  /** 是否正在接受草稿（写入章节） */
+  isAccepting: boolean;
 }>();
 
 /**
@@ -52,8 +54,17 @@ const emit = defineEmits<{
     </div>
 
     <div v-if="isDone" class="actions">
-      <button class="primary-button" @click="emit('accept')">接受草稿</button>
-      <button class="secondary-button" @click="emit('regenerate')">重新生成</button>
+      <button class="primary-button" type="button" :disabled="isAccepting" @click="emit('accept')">
+        {{ isAccepting ? '接受中...' : '接受草稿' }}
+      </button>
+      <button
+        class="secondary-button"
+        type="button"
+        :disabled="isAccepting"
+        @click="emit('regenerate')"
+      >
+        重新生成
+      </button>
     </div>
 
     <div v-if="usedRelationEvents.length > 0" class="citations-section">
@@ -214,6 +225,12 @@ const emit = defineEmits<{
 
 .primary-button:hover {
   background: #2563eb;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .secondary-button {

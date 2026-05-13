@@ -49,6 +49,11 @@ export const GenerationErrorCodes = {
   ChapterOptimizationDraftFailed: 1306,
   ChapterVersionConflict: 1307,
   OptimizationInstructionRequired: 1308,
+  EmbeddingProviderUnavailable: 1309,
+  VectorStoreUnavailable: 1310,
+  RetrievalTimeout: 1311,
+  RerankFailed: 1312,
+  IngestionChunkingFailed: 1313,
 } as const;
 
 /**
@@ -96,6 +101,9 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     if (errorCode === 1304) return 429;
     if (errorCode === 1303) return 408;
     if (errorCode === 1305 || errorCode === 1306) return 502;
+    if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
+    if (errorCode === 1311) return 504;
+    if (errorCode === 1313) return 500;
     if (errorCode === 1100 || errorCode === 1200 || errorCode === 1400) return 404;
     return 400;
   }
@@ -140,6 +148,11 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1306: 'Chapter optimization draft failed',
     1307: 'Chapter version conflict',
     1308: 'Optimization instruction required',
+    1309: 'Embedding provider unavailable',
+    1310: 'Vector store unavailable',
+    1311: 'Retrieval timeout',
+    1312: 'Rerank failed',
+    1313: 'Ingestion chunking failed',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

@@ -1,8 +1,16 @@
 post:
   tags:
     - Projects
-  summary: Generate chapter optimization plan
-  description: Produce an optimization plan for a chapter based on the user instruction and project context. Original chapter text is always injected into the prompt.
+  summary: Stream chapter optimization plan (SSE)
+  description: |
+    Stream the optimization plan via Server-Sent Events so long-running LLM calls keep the HTTP
+    connection active (avoids proxy idle timeouts). Original chapter text is always injected into the prompt.
+
+    SSE event sequence:
+      - `data: {"event":"start","traceId":"...","chapterNo":N,"planId":"...","basis":{...}}`
+      - `data: {"event":"content","data":"..."}` (multiple; newlines escaped as `\\n`)
+      - `data: {"event":"end","traceId":"...","planText":"...","planId":"...","basis":{...}}`
+      - `data: {"event":"error","data":"..."}`
   security:
     - BearerAuth: []
   parameters:
@@ -25,16 +33,12 @@ post:
           $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizationPlanRequest'
   responses:
     '200':
-      description: Optimization plan generated
+      description: SSE stream of plan chunks and final structured result
       content:
-        application/json:
+        text/event-stream:
           schema:
-            allOf:
-              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
-              - type: object
-                properties:
-                  data:
-                    $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizationPlanResult'
+            type: string
+            description: Server-Sent Events stream (see summary for event shapes)
     '400':
       description: Invalid request (empty instruction etc.)
       content:

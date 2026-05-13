@@ -5,6 +5,7 @@
  */
 
 export * from './types';
+export * from './embedding';
 export * from './deepseek';
 export * from './siliconflow';
 export * from './manager';
