@@ -10,9 +10,10 @@ const projectId = computed(() => String(route.params.id || ''));
 
 const personas = ref<PersonaItem[]>([]);
 const loading = shallowRef(false);
-const creatingPersona = shallowRef(false);
+const savingPersona = shallowRef(false);
 const exportingBundle = shallowRef(false);
-const showCreateModal = shallowRef(false);
+const showPersonaModal = shallowRef(false);
+const editingPersonaId = shallowRef<string | null>(null);
 const message = shallowRef('');
 const errorMessage = shallowRef('');
 const projectName = shallowRef('project');
@@ -25,28 +26,55 @@ const publishedPersona = computed(
   () => personas.value.find((item) => item.status === 'published') || null
 );
 
+const personaModalTitle = computed(() =>
+  editingPersonaId.value ? '编辑人物设定' : '新增人物设定'
+);
+
+const personaModalSubtitle = computed(() =>
+  editingPersonaId.value
+    ? '更新后列表会立即刷新，发布状态保持不变。'
+    : '创建草稿后可在列表中发布并设为当前生效版本。'
+);
+
+const personaModalSubmitLabel = computed(() => {
+  if (savingPersona.value) {
+    return editingPersonaId.value ? '保存中...' : '创建中...';
+  }
+  return editingPersonaId.value ? '保存修改' : '创建草稿';
+});
+
 function formatPersonaStatus(status: PersonaItem['status']) {
   return status === 'published' ? '已发布' : '草稿';
 }
 
-function resetCreateForm() {
+function resetPersonaForm() {
   personaName.value = '';
   personaProfile.value = '';
   personaState.value = '';
+  editingPersonaId.value = null;
 }
 
 function openCreateModal() {
   errorMessage.value = '';
-  resetCreateForm();
-  showCreateModal.value = true;
+  resetPersonaForm();
+  showPersonaModal.value = true;
 }
 
-function closeCreateModal() {
-  if (creatingPersona.value) {
+function startEdit(persona: PersonaItem) {
+  errorMessage.value = '';
+  editingPersonaId.value = persona.id;
+  personaName.value = persona.name;
+  personaProfile.value = persona.profile;
+  personaState.value = persona.state === '待更新' ? '' : persona.state;
+  showPersonaModal.value = true;
+}
+
+function closePersonaModal() {
+  if (savingPersona.value) {
     return;
   }
-  showCreateModal.value = false;
-  resetCreateForm();
+  showPersonaModal.value = false;
+  resetPersonaForm();
 }
 
 async function loadData() {
@@ -93,29 +121,64 @@ async function handleExportBundle() {
   }
 }
 
-async function handleCreatePersona() {
+async function handleSubmitPersona() {
   if (!personaName.value.trim() || !personaProfile.value.trim()) {
     errorMessage.value = presentError('人物名称与人物设定不能为空');
     return;
   }
 
-  creatingPersona.value = true;
+  savingPersona.value = true;
   errorMessage.value = '';
   message.value = '';
   try {
-    const persona = await apiClient.createPersona(projectId.value, {
+    const payload = {
       name: personaName.value.trim(),
       profile: personaProfile.value.trim(),
       state: personaState.value.trim() || undefined,
-    });
-    personas.value = [...personas.value, persona];
-    message.value = presentSuccess('人物设定草稿已创建');
-    showCreateModal.value = false;
-    resetCreateForm();
+    };
+
+    if (editingPersonaId.value) {
+      const persona = await apiClient.updatePersona(
+        projectId.value,
+        editingPersonaId.value,
+        payload
+      );
+      personas.value = personas.value.map((item) => (item.id === persona.id ? persona : item));
+      message.value = presentSuccess('人物设定已更新');
+    } else {
+      const persona = await apiClient.createPersona(projectId.value, payload);
+      personas.value = [...personas.value, persona];
+      message.value = presentSuccess('人物设定草稿已创建');
+    }
+
+    showPersonaModal.value = false;
+    resetPersonaForm();
   } catch (error) {
-    errorMessage.value = presentErrorFromCaught(error, '创建人物设定失败');
+    errorMessage.value = presentErrorFromCaught(
+      error,
+      editingPersonaId.value ? '更新人物设定失败' : '创建人物设定失败'
+    );
   } finally {
-    creatingPersona.value = false;
+    savingPersona.value = false;
+  }
+}
+
+async function handleDeletePersona(persona: PersonaItem) {
+  if (!confirm(`确定删除「${persona.name}」？此操作不可撤销。`)) {
+    return;
+  }
+
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    await apiClient.deletePersona(projectId.value, persona.id);
+    if (editingPersonaId.value === persona.id) {
+      closePersonaModal();
+    }
+    personas.value = personas.value.filter((item) => item.id !== persona.id);
+    message.value = presentSuccess('人物设定已删除');
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '删除人物设定失败');
   }
 }
 
@@ -198,13 +261,26 @@ onMounted(() => {
                 <td class="profile-cell" :title="persona.profile">{{ persona.profile }}</td>
                 <td>{{ persona.state || '待更新' }}</td>
                 <td class="actions-col">
-                  <button
-                    class="table-button"
-                    :disabled="persona.status === 'published'"
-                    @click="handlePublishPersona(persona.id)"
-                  >
-                    {{ persona.status === 'published' ? '已发布' : '发布并生效' }}
-                  </button>
+                  <div class="row-actions">
+                    <button class="table-button" type="button" @click="startEdit(persona)">
+                      编辑
+                    </button>
+                    <button
+                      class="table-button"
+                      type="button"
+                      :disabled="persona.status === 'published'"
+                      @click="handlePublishPersona(persona.id)"
+                    >
+                      {{ persona.status === 'published' ? '已发布' : '发布并生效' }}
+                    </button>
+                    <button
+                      class="table-button danger"
+                      type="button"
+                      @click="handleDeletePersona(persona)"
+                    >
+                      删除
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -214,20 +290,15 @@ onMounted(() => {
     </template>
 
     <AppModal
-      :open="showCreateModal"
-      title="新增人物设定"
-      subtitle="创建草稿后可在列表中发布并设为当前生效版本。"
-      title-id="persona-create-title"
-      @close="closeCreateModal"
+      :open="showPersonaModal"
+      :title="personaModalTitle"
+      :subtitle="personaModalSubtitle"
+      title-id="persona-form-title"
+      @close="closePersonaModal"
     >
       <label class="field-label">
         人物名称
-        <input
-          v-model="personaName"
-          class="field-input"
-          type="text"
-          placeholder="例如：沈镜川"
-        />
+        <input v-model="personaName" class="field-input" type="text" placeholder="例如：沈镜川" />
       </label>
       <label class="field-label">
         人物设定（人物画像 / 语气风格 / 禁忌规则，每行一条）
@@ -252,11 +323,21 @@ onMounted(() => {
       </label>
 
       <template #footer>
-        <button class="secondary-button" type="button" :disabled="creatingPersona" @click="closeCreateModal">
+        <button
+          class="secondary-button"
+          type="button"
+          :disabled="savingPersona"
+          @click="closePersonaModal"
+        >
           取消
         </button>
-        <button class="primary-button" type="button" :disabled="creatingPersona" @click="handleCreatePersona">
-          {{ creatingPersona ? '创建中...' : '创建草稿' }}
+        <button
+          class="primary-button"
+          type="button"
+          :disabled="savingPersona"
+          @click="handleSubmitPersona"
+        >
+          {{ personaModalSubmitLabel }}
         </button>
       </template>
     </AppModal>
@@ -382,8 +463,19 @@ onMounted(() => {
 }
 
 .actions-col {
-  width: 8.5rem;
+  width: 15rem;
   white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.table-button.danger {
+  color: #b42318;
+  border-color: #fecdca;
 }
 
 .status-badge {

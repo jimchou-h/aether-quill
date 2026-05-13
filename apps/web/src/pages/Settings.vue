@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { apiClient } from '../services/api';
 import { usePromptConfigStore } from '../stores/promptConfig';
 import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
+import OutlineSummaryEditor from '../components/settings/OutlineSummaryEditor.vue';
 import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
 import { presentErrorFromCaught } from '../utils/pageFeedback';
 
@@ -36,7 +37,7 @@ onMounted(() => {
 <template>
   <div class="settings-page">
     <h2 class="page-title">项目设置</h2>
-    <p class="page-subtitle">维护系统提示词版本，确保每个项目独立生效。</p>
+    <p class="page-subtitle">维护大纲摘要与系统提示词版本，确保每个项目独立生效。</p>
 
     <p v-if="errorMessage || promptConfigStore.errorMessage" class="message message-error">
       {{ errorMessage || promptConfigStore.errorMessage }}
@@ -47,6 +48,7 @@ onMounted(() => {
     <p v-if="loading" class="message">正在加载设置...</p>
 
     <template v-if="!loading">
+      <OutlineSummaryEditor :project-id="projectId" />
       <SystemPromptEditor :project-id="projectId" />
       <PromptVersionHistory :project-id="projectId" />
     </template>
