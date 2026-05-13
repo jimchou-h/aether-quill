@@ -34,6 +34,15 @@ function isAccessTokenNearExpiry(
   return exp - Math.floor(Date.now() / 1000) <= thresholdSeconds;
 }
 
+/** 仅 HTTP 401 视为会话失效；5xx / 网络错误不应清 token，否则会误踢回登录页 */
+function isUnauthorizedHttpError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const status = (error as { response?: { status?: number } }).response?.status;
+  return status === 401;
+}
+
 /**
  * 认证状态管理 Store
  * 用于管理用户登录状态、token 和用户信息
@@ -79,8 +88,10 @@ export const useAuthStore = defineStore('auth', () => {
         email: data.email || '',
         name: data.name || '',
       };
-    } catch {
-      logout();
+    } catch (error: unknown) {
+      if (isUnauthorizedHttpError(error)) {
+        logout();
+      }
     }
   }
 
@@ -103,8 +114,10 @@ export const useAuthStore = defineStore('auth', () => {
           localStorage.setItem('token', token.value);
           localStorage.setItem('refreshToken', refreshTokenValue.value);
           return true;
-        } catch {
-          logout();
+        } catch (error: unknown) {
+          if (isUnauthorizedHttpError(error)) {
+            logout();
+          }
           return false;
         } finally {
           refreshInFlight = null;
