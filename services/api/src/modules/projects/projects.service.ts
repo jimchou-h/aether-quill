@@ -1162,7 +1162,7 @@ export class ProjectsService {
     };
   }
 
-  async optimizeChapterPlan(
+  async optimizeChapterPlanStream(
     projectId: string,
     chapterNo: number,
     payload: {
@@ -1170,8 +1170,34 @@ export class ProjectsService {
       appearingCharacters?: string[];
       selectedEventIds?: string[];
     },
-    userId?: string
-  ) {
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: {
+        traceId: string;
+        chapterNo: number;
+        planId: string;
+        basis: {
+          usedPersonaId: string | null;
+          outlineUsed: boolean;
+          chapterSummaryCount: number;
+          usedRelationEvents: UsedRelationEventRecord[];
+        };
+      }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: {
+        traceId: string;
+        planText: string;
+        planId: string;
+        basis: {
+          usedPersonaId: string | null;
+          outlineUsed: boolean;
+          chapterSummaryCount: number;
+          usedRelationEvents: UsedRelationEventRecord[];
+        };
+      }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -1230,54 +1256,142 @@ export class ProjectsService {
 
     const planId = makeOptimizationId('plan');
 
-    let planText = '';
-    let traceId = '';
-    try {
-      const { data } = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
-        projectId,
-        prompt: userPrompt,
-        useSSE: false,
-        systemPromptOverride: CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
-        templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
-        context: {
-          task: 'chapter.optimize.plan',
-          chapterNo: normalizedChapterNo,
-          planId,
-          inputChapterChars: chapter.content.length,
-          inputContextChars: userPrompt.length,
-        },
-      });
-
-      if (!data?.content || typeof data.content !== 'string') {
-        throw new BadGatewayException('优化方案生成失败：未返回方案文本');
-      }
-
-      planText = data.content.trim();
-      traceId = typeof data.traceId === 'string' ? data.traceId : '';
-    } catch (error) {
-      if (error instanceof BadGatewayException) {
-        throw error;
-      }
-      const message = error instanceof Error ? error.message : '调用优化方案生成失败';
-      throw new BadGatewayException(message);
-    }
-
     const activePersona =
       personas.find((item) => item.id === settings.activePersonaId) ||
       personas.find((item) => item.status === 'published') ||
       null;
 
-    return {
-      planText,
-      planId,
-      traceId,
-      basis: {
-        usedPersonaId: activePersona?.id || null,
-        outlineUsed: Boolean(knowledge.outlineSummary),
-        chapterSummaryCount: knowledge.chapters.filter((item) => item.summary).length,
-        usedRelationEvents,
-      },
+    const basis = {
+      usedPersonaId: activePersona?.id || null,
+      outlineUsed: Boolean(knowledge.outlineSummary),
+      chapterSummaryCount: knowledge.chapters.filter((item) => item.summary).length,
+      usedRelationEvents,
     };
+
+    let response;
+    try {
+      response = await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/generate`,
+        {
+          projectId,
+          prompt: userPrompt,
+          useSSE: true,
+          systemPromptOverride: CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
+          templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+          context: {
+            task: 'chapter.optimize.plan',
+            chapterNo: normalizedChapterNo,
+            planId,
+            inputChapterChars: chapter.content.length,
+            inputContextChars: userPrompt.length,
+          },
+        },
+        { responseType: 'stream' }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '调用优化方案生成失败';
+      throw new BadGatewayException(message);
+    }
+
+    let accumulated = '';
+    let traceId = '';
+    let sawTerminalSse = false;
+
+    await new Promise<void>((resolveStream, rejectStream) => {
+      const stream = response.data as NodeJS.ReadableStream;
+      let buffer = '';
+
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf-8');
+        const segments = buffer.split('\n\n');
+        buffer = segments.pop() || '';
+
+        for (const segment of segments) {
+          const trimmedSegment = segment.trim();
+          if (!trimmedSegment.startsWith('data:')) {
+            continue;
+          }
+          const dataPart = trimmedSegment.replace(/^data:\s*/, '');
+          if (!dataPart) {
+            continue;
+          }
+          let event: { event?: string; data?: string; traceId?: string };
+          try {
+            event = JSON.parse(dataPart);
+          } catch {
+            continue;
+          }
+
+          switch (event.event) {
+            case 'start': {
+              traceId = typeof event.traceId === 'string' ? event.traceId : '';
+              callbacks.onStart({
+                traceId,
+                chapterNo: normalizedChapterNo,
+                planId,
+                basis,
+              });
+              break;
+            }
+            case 'content': {
+              const raw = typeof event.data === 'string' ? event.data : '';
+              const piece = raw.replace(/\\n/g, '\n');
+              accumulated += piece;
+              callbacks.onContent(piece);
+              break;
+            }
+            case 'end': {
+              sawTerminalSse = true;
+              traceId = typeof event.traceId === 'string' ? event.traceId : traceId;
+              try {
+                const planText = accumulated.trim();
+                assertPlanText(planText);
+                callbacks.onEnd({
+                  traceId,
+                  planText,
+                  planId,
+                  basis,
+                });
+              } catch (error) {
+                const message =
+                  error instanceof Error ? error.message : '优化方案生成失败：方案文本无效';
+                callbacks.onError(message);
+              }
+              break;
+            }
+            case 'error': {
+              sawTerminalSse = true;
+              const message = typeof event.data === 'string' ? event.data : '优化方案生成失败';
+              callbacks.onError(message);
+              break;
+            }
+          }
+        }
+      });
+
+      stream.on('end', () => {
+        if (!sawTerminalSse) {
+          const fallback = accumulated.trim();
+          if (fallback) {
+            try {
+              assertPlanText(fallback);
+              callbacks.onEnd({
+                traceId,
+                planText: fallback,
+                planId,
+                basis,
+              });
+            } catch {
+              callbacks.onError('优化方案生成失败：未收到完整响应');
+            }
+          } else {
+            callbacks.onError('优化方案生成失败：未收到完整响应');
+          }
+        }
+        resolveStream();
+      });
+      stream.on('error', (error: unknown) => rejectStream(error));
+    });
   }
 
   async optimizeChapterDraftStream(

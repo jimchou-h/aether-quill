@@ -1,6 +1,20 @@
 import { ModelProvider, ProviderType, ProviderConfig, ProviderFactory } from './types';
 import { DeepSeekFactory } from './deepseek';
 import { SiliconFlowFactory } from './siliconflow';
+import { createEmbeddingProviderFromEnv } from './embedding/factory';
+import type { EmbeddingProvider } from './embedding/types';
+
+let embeddingProviderSingleton: EmbeddingProvider | null = null;
+
+/**
+ * 获取（并缓存）Embedding 供应商实例，配置来源为环境变量。
+ */
+export function getEmbeddingProvider(): EmbeddingProvider {
+  if (!embeddingProviderSingleton) {
+    embeddingProviderSingleton = createEmbeddingProviderFromEnv();
+  }
+  return embeddingProviderSingleton;
+}
 
 /**
  * 供应商注册表

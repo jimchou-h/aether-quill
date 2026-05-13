@@ -1,6 +1,11 @@
+import { assertRagInfrastructureEnv } from '@aether-quill/config';
 import express from 'express';
+import { loadEnv } from './config/load-env';
 import { QueueService } from './queue/queue.service';
 import { IngestionJobData } from './jobs/types';
+
+loadEnv();
+assertRagInfrastructureEnv('worker');
 
 const app = express();
 app.use(express.json());
