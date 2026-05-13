@@ -59,6 +59,8 @@ paths:
     $ref: './paths/projects/prompt-config-rollback.yaml'
   /api/projects/{id}/personas:
     $ref: './paths/projects/personas.yaml'
+  /api/projects/{id}/personas/{personaId}:
+    $ref: './paths/projects/persona-by-id.yaml'
   /api/projects/{id}/personas/{personaId}/publish:
     $ref: './paths/projects/persona-publish.yaml'
   /api/projects/{id}/relation-events:
@@ -73,6 +75,12 @@ paths:
     $ref: './paths/projects/chapter-summarize-by-no.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/relation-events/generate:
     $ref: './paths/projects/chapter-relation-events-generate.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/plan:
+    $ref: './paths/projects/chapter-optimize-plan.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/draft:
+    $ref: './paths/projects/chapter-optimize-draft.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/apply:
+    $ref: './paths/projects/chapter-optimize-apply.yaml'
   /api/projects/{id}/knowledge/summarize/{jobId}:
     $ref: './paths/projects/chapter-summarize-job.yaml'
   /api/consistency/check:
@@ -579,6 +587,140 @@ components:
               type: boolean
             updateLine:
               type: string
+    ChapterOptimizationBasis:
+      type: object
+      required:
+        - usedPersonaId
+        - outlineUsed
+        - chapterSummaryCount
+        - usedRelationEvents
+      properties:
+        usedPersonaId:
+          type: string
+          nullable: true
+        outlineUsed:
+          type: boolean
+        chapterSummaryCount:
+          type: integer
+          minimum: 0
+        usedRelationEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsedRelationEvent'
+    ChapterOptimizationPlanRequest:
+      type: object
+      required:
+        - instruction
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User-provided optimization request for the chapter.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+        selectedEventIds:
+          type: array
+          items:
+            type: string
+    ChapterOptimizationPlanResult:
+      type: object
+      required:
+        - planText
+        - planId
+        - traceId
+        - basis
+      properties:
+        planText:
+          type: string
+          description: Optimization plan text returned by the model.
+        planId:
+          type: string
+          description: Stable identifier for the plan, used to correlate the draft step trace.
+        traceId:
+          type: string
+        basis:
+          $ref: '#/components/schemas/ChapterOptimizationBasis'
+    ChapterOptimizationDraftRequest:
+      type: object
+      required:
+        - planText
+        - instruction
+      properties:
+        planText:
+          type: string
+          minLength: 1
+          description: Confirmed plan text from the previous step. Always re-injected into the prompt.
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        planId:
+          type: string
+          description: Optional plan id from the plan step, for trace correlation.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+        selectedEventIds:
+          type: array
+          items:
+            type: string
+    ChapterOptimizationApplyRequest:
+      type: object
+      required:
+        - draftText
+        - expectedChapterUpdatedAt
+      properties:
+        draftText:
+          type: string
+          minLength: 1
+          description: Optimized chapter content to overwrite the existing chapter.
+        expectedChapterUpdatedAt:
+          type: string
+          format: date-time
+          description: |
+            ISO timestamp of the chapter at the time the optimization session started, used as an
+            optimistic concurrency token. Returns 1307 if it does not match the latest chapter.
+        planId:
+          type: string
+          description: Optional plan id, recorded into the trace for auditability.
+    ChapterOptimizationApplyResult:
+      type: object
+      required:
+        - chapter
+      properties:
+        chapter:
+          $ref: '#/components/schemas/ChapterItem'
+    ChapterItem:
+      type: object
+      required:
+        - chapterNo
+        - title
+        - content
+        - summary
+        - updatedAt
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+        content:
+          type: string
+        summary:
+          type: string
+        summarySource:
+          type: string
+          enum: [llm, fallback]
+        summaryUpdatedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 
 security:
   - BearerAuth: []

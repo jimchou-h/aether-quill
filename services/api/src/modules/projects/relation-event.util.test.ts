@@ -47,14 +47,8 @@ test('matchesRelationEventFilters filters by appearing characters', () => {
     actors: ['男主', '女主A'],
   };
 
-  assert.equal(
-    matchesRelationEventFilters(event, { appearingCharacters: ['女主A'] }),
-    true
-  );
-  assert.equal(
-    matchesRelationEventFilters(event, { appearingCharacters: ['女主B'] }),
-    false
-  );
+  assert.equal(matchesRelationEventFilters(event, { appearingCharacters: ['女主A'] }), true);
+  assert.equal(matchesRelationEventFilters(event, { appearingCharacters: ['女主B'] }), false);
 });
 
 test('normalizeRelationEventDedupeKey ignores whitespace in summary', () => {

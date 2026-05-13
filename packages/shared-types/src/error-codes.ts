@@ -45,6 +45,10 @@ export const GenerationErrorCodes = {
   InvalidGenerationParameters: 1302,
   GenerationTimeout: 1303,
   RateLimitExceeded: 1304,
+  ChapterOptimizationPlanFailed: 1305,
+  ChapterOptimizationDraftFailed: 1306,
+  ChapterVersionConflict: 1307,
+  OptimizationInstructionRequired: 1308,
 } as const;
 
 /**
@@ -86,10 +90,12 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
   if (errorCode >= 1000 && errorCode <= 1099) return 401; // Auth errors
   if (errorCode === 1003) return 403; // Forbidden
   if (errorCode >= 1100 && errorCode <= 1499) {
-    if (errorCode === 1102 || errorCode === 1202 || errorCode === 1204) return 409;
+    if (errorCode === 1102 || errorCode === 1202 || errorCode === 1204 || errorCode === 1307)
+      return 409;
     if (errorCode === 1205) return 413;
     if (errorCode === 1304) return 429;
     if (errorCode === 1303) return 408;
+    if (errorCode === 1305 || errorCode === 1306) return 502;
     if (errorCode === 1100 || errorCode === 1200 || errorCode === 1400) return 404;
     return 400;
   }
@@ -130,6 +136,10 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1302: 'Invalid generation parameters',
     1303: 'Generation timeout',
     1304: 'Rate limit exceeded',
+    1305: 'Chapter optimization plan failed',
+    1306: 'Chapter optimization draft failed',
+    1307: 'Chapter version conflict',
+    1308: 'Optimization instruction required',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

@@ -242,6 +242,20 @@ export const apiClient = {
     return this.unwrapPayload<PersonaItem>(response.data);
   },
 
+  async updatePersona(
+    projectId: string,
+    personaId: string,
+    payload: { name?: string; profile?: string; state?: string }
+  ) {
+    const response = await http.put(`/api/projects/${projectId}/personas/${personaId}`, payload);
+    return this.unwrapPayload<PersonaItem>(response.data);
+  },
+
+  async deletePersona(projectId: string, personaId: string) {
+    const response = await http.delete(`/api/projects/${projectId}/personas/${personaId}`);
+    return this.unwrapPayload<{ id: string }>(response.data);
+  },
+
   async getKnowledge(projectId: string) {
     const response = await http.get(`/api/projects/${projectId}/knowledge`);
     return this.unwrapPayload<KnowledgeItem>(response.data);
@@ -681,6 +695,126 @@ export const apiClient = {
     }
   },
 
+  async optimizeChapterPlan(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/plan`,
+      payload
+    );
+    return this.unwrapPayload<ChapterOptimizationPlanResult>(response.data);
+  },
+
+  async optimizeChapterDraftSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction: string;
+      planText: string;
+      planId?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    callbacks: ChapterOptimizeDraftCallbacks
+  ): Promise<void> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
+    const token = localStorage.getItem('token');
+    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/draft`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `优化正文生成失败: ${response.statusText}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let reading = true;
+
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const segments = buffer.split('\n\n');
+      buffer = segments.pop() || '';
+
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        const dataPart = trimmed.replace(/^data:\s*/, '');
+        if (!dataPart) {
+          continue;
+        }
+
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.(event.traceId || '', event.chapterNo || chapterNo);
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.(event.traceId || '');
+              reading = false;
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || '优化正文生成失败');
+              reading = false;
+              break;
+          }
+        } catch {
+          // skip malformed SSE events
+        }
+      }
+    }
+  },
+
+  async applyChapterOptimization(
+    projectId: string,
+    chapterNo: number,
+    payload: { draftText: string; expectedChapterUpdatedAt: string; planId?: string }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/apply`,
+      payload
+    );
+    return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
+  },
+
   // Document helper methods
   async getDocument(id: string) {
     const response = await http.get(`/api/documents/${id}`);
@@ -775,6 +909,27 @@ export interface ChapterItem {
   summarySource?: ChapterSummarySource;
   summaryUpdatedAt?: string;
   updatedAt: string;
+}
+
+export interface ChapterOptimizationBasis {
+  usedPersonaId: string | null;
+  outlineUsed: boolean;
+  chapterSummaryCount: number;
+  usedRelationEvents: UsedRelationEventItem[];
+}
+
+export interface ChapterOptimizationPlanResult {
+  planText: string;
+  planId: string;
+  traceId: string;
+  basis: ChapterOptimizationBasis;
+}
+
+export interface ChapterOptimizeDraftCallbacks {
+  onStart?: (traceId: string, chapterNo: number) => void;
+  onContent?: (text: string) => void;
+  onEnd?: (traceId: string) => void;
+  onError?: (message: string) => void;
 }
 
 export interface KnowledgeItem {
