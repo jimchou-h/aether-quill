@@ -1,0 +1,109 @@
+put:
+  tags:
+    - Projects
+  summary: Update persona
+  description: Update persona name, profile, or state without changing publish status
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: personaId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            name:
+              type: string
+            profile:
+              type: string
+              description: Merged persona profile, tone, and constraints text
+            state:
+              type: string
+              description: Current narrative state for the persona
+  responses:
+    '200':
+      description: Persona updated
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/Persona'
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or persona not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+
+delete:
+  tags:
+    - Projects
+  summary: Delete persona
+  description: Delete a persona and clear activePersonaId when it points to the deleted persona
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: personaId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Persona deleted
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or persona not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

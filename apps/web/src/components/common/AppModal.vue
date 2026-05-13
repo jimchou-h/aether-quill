@@ -14,12 +14,7 @@ const emit = defineEmits<{
 
 <template>
   <Teleport to="body">
-    <div
-      v-if="open"
-      class="modal-overlay"
-      role="presentation"
-      @click.self="emit('close')"
-    >
+    <div v-if="open" class="modal-overlay" role="presentation" @click.self="emit('close')">
       <section
         class="modal-dialog"
         role="dialog"
