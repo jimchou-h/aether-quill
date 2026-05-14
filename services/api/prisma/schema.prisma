@@ -1,0 +1,250 @@
+// AQ-121: PostgreSQL persistence (see scripts/migrate-json-to-pg.ts)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String          @id @map("id")
+  email     String          @unique
+  password  String          @map("password")
+  name      String          @map("name")
+  createdAt DateTime        @map("created_at")
+  updatedAt DateTime        @map("updated_at")
+  members   ProjectMember[]
+
+  @@map("users")
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid()) @map("id")
+  userId    String   @map("user_id")
+  projectId String   @map("project_id")
+  role      String   @map("role")
+  createdAt DateTime @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId], map: "project_members_user_project_uidx")
+  @@map("project_members")
+}
+
+model Project {
+  id               String    @id @map("id")
+  name             String    @map("name")
+  description      String    @default("") @map("description")
+  createdAt        DateTime  @map("created_at")
+  updatedAt        DateTime  @map("updated_at")
+  outlineSummary   String    @default("") @map("outline_summary") @db.Text
+  indexVersion     Int       @default(0) @map("index_version")
+  lastIndexedAt    DateTime? @map("last_indexed_at")
+
+  members          ProjectMember[]
+  settings         ProjectSettings?
+  personas         Persona[]
+  chapters         Chapter[]
+  indexJobs        IndexJob[]
+  summaryJobs      SummaryJob[]
+  relationEvents   RelationEvent[]
+  promptTemplates  PromptTemplate[]
+
+  @@map("projects")
+}
+
+model ProjectSettings {
+  projectId        String   @id @map("project_id")
+  systemPromptText String   @map("system_prompt_text") @db.Text
+  activePersonaId  String?  @map("active_persona_id")
+  updatedAt        DateTime @map("updated_at")
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_settings")
+}
+
+model Persona {
+  id          String   @id @map("id")
+  projectId   String   @map("project_id")
+  name        String   @map("name")
+  profile     String   @map("profile") @db.Text
+  state       String   @default("") @map("state")
+  tone        String?  @map("tone")
+  constraints Json?    @map("constraints")
+  status      String   @map("status")
+  createdAt   DateTime @map("created_at")
+  updatedAt   DateTime @map("updated_at")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId], map: "personas_project_id_idx")
+  @@map("personas")
+}
+
+model Chapter {
+  id               String    @id @default(cuid()) @map("id")
+  projectId        String    @map("project_id")
+  chapterNo        Int       @map("chapter_no")
+  title            String    @map("title")
+  content          String    @map("content") @db.Text
+  summary          String    @default("") @map("summary") @db.Text
+  summarySource    String?   @map("summary_source")
+  summaryUpdatedAt DateTime? @map("summary_updated_at")
+  updatedAt        DateTime  @map("updated_at")
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, chapterNo], map: "chapters_project_chapter_uidx")
+  @@map("chapters")
+}
+
+model IndexJob {
+  id                 String    @id @map("id")
+  projectId          String    @map("project_id")
+  mode               String    @map("mode")
+  status             String    @map("status")
+  totalChapters      Int       @map("total_chapters")
+  processedChapters  Int       @map("processed_chapters")
+  createdAt          DateTime  @map("created_at")
+  completedAt        DateTime? @map("completed_at")
+  errorMessage       String?   @map("error_message") @db.Text
+  project            Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId], map: "index_jobs_project_id_idx")
+  @@map("index_jobs")
+}
+
+model SummaryJob {
+  id                 String    @id @map("id")
+  projectId          String    @map("project_id")
+  scope              String    @map("scope")
+  chapterNo          Int?      @map("chapter_no")
+  status             String    @map("status")
+  totalChapters      Int       @map("total_chapters")
+  processedChapters  Int     @map("processed_chapters")
+  chapterNosJson     Json      @map("chapter_nos_json")
+  summariesJson      Json      @map("summaries_json")
+  createdAt          DateTime  @map("created_at")
+  completedAt        DateTime? @map("completed_at")
+  errorMessage       String?   @map("error_message") @db.Text
+  project            Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId], map: "summary_jobs_project_id_idx")
+  @@map("summary_jobs")
+}
+
+model RelationEvent {
+  id               String    @id @map("id")
+  projectId        String    @map("project_id")
+  protagonist      String    @map("protagonist")
+  counterparty     String    @map("counterparty")
+  actors           Json      @map("actors")
+  summary          String    @map("summary") @db.Text
+  evidenceSnippet  String?   @map("evidence_snippet") @db.Text
+  chapterNo        Int?      @map("chapter_no")
+  createdAt        DateTime  @map("created_at")
+  updatedAt        DateTime  @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId], map: "relation_events_project_id_idx")
+  @@map("relation_events")
+}
+
+model Document {
+  id          String             @id @map("id")
+  projectId   String             @map("project_id")
+  title       String             @map("title")
+  content     String             @map("content") @db.Text
+  indexStatus String             @map("index_status")
+  version     Int                @map("version")
+  createdAt   DateTime           @map("created_at")
+  updatedAt   DateTime           @map("updated_at")
+  versions    DocumentVersion[]
+  chunks      DocChunk[]
+
+  @@index([projectId], map: "documents_project_id_idx")
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id         String   @id @default(cuid()) @map("id")
+  documentId String   @map("document_id")
+  version    Int      @map("version")
+  title      String   @map("title")
+  content    String   @map("content") @db.Text
+  createdAt  DateTime @map("created_at")
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version], map: "document_versions_doc_ver_uidx")
+  @@map("document_versions")
+}
+
+model DocChunk {
+  id         String   @id @map("id")
+  documentId String   @map("document_id")
+  content    String   @map("content") @db.Text
+  metadata   Json     @map("metadata")
+  createdAt  DateTime @map("created_at")
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId], map: "doc_chunks_document_id_idx")
+  @@map("doc_chunks")
+}
+
+model PromptTemplate {
+  id          String   @map("id")
+  projectId   String   @map("project_id")
+  name        String   @map("name")
+  category    String   @map("category")
+  content     String   @map("content") @db.Text
+  version     Int      @map("version")
+  isPublished Boolean  @map("is_published")
+  createdAt   DateTime @map("created_at")
+  updatedAt   DateTime @map("updated_at")
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions    PromptTemplateVersion[]
+
+  @@id([projectId, id])
+  @@map("prompt_templates")
+}
+
+model PromptTemplateVersion {
+  id           String         @id @default(cuid()) @map("id")
+  templateId   String         @map("template_id")
+  projectId    String         @map("project_id")
+  version      Int            @map("version")
+  content      String         @map("content") @db.Text
+  isPublished  Boolean        @map("is_published")
+  createdAt    DateTime       @map("created_at")
+  template     PromptTemplate @relation(fields: [projectId, templateId], references: [projectId, id], onDelete: Cascade)
+
+  @@unique([projectId, templateId, version], map: "prompt_template_versions_uidx")
+  @@map("prompt_template_versions")
+}
+
+model Draft {
+  id        String   @id @default(cuid()) @map("id")
+  projectId String   @map("project_id")
+  chapterNo Int?     @map("chapter_no")
+  title     String?  @map("title")
+  content   String   @map("content") @db.Text
+  metadata  Json?    @map("metadata")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("drafts")
+}
+
+model GenerationTrace {
+  id          String    @id @map("id")
+  projectId   String?   @map("project_id")
+  prompt      String?   @map("prompt") @db.Text
+  context     Json?     @map("context")
+  status      String?   @map("status")
+  result      String?   @map("result") @db.Text
+  createdAt   DateTime  @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@map("generation_traces")
+}

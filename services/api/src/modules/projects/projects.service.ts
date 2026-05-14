@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -44,6 +45,13 @@ import {
   parseExpectedUpdatedAt,
   type ChapterOptimizeUsedRelationEvent,
 } from './chapter-optimize.util';
+import { PrismaService } from '../../prisma/prisma.service';
+import { usePostgresPersistence } from '../../persistence/use-postgres';
+import {
+  loadWorkspaceFromPostgres,
+  syncWorkspaceToPostgres,
+} from '../../persistence/workspace-pg-sync';
+import type { PersistedProjectState } from './persisted-workspace.types';
 
 function buildTargetWordsInstruction(targetWords?: number): string {
   const parsed = Number(targetWords);
@@ -200,65 +208,19 @@ export interface ProjectExportBundle {
   };
 }
 
-interface PersistedProjectState {
-  projects: Array<
-    Omit<ProjectRecord, 'createdAt' | 'updatedAt'> & { createdAt: string; updatedAt: string }
-  >;
-  members: Array<Omit<ProjectMember, 'createdAt'> & { createdAt: string }>;
-  settings: Record<
-    string,
-    { systemPromptText: string; activePersonaId: string | null; updatedAt: string }
-  >;
-  personas: Record<
-    string,
-    Array<Omit<PersonaRecord, 'createdAt' | 'updatedAt'> & { createdAt: string; updatedAt: string }>
-  >;
-  knowledge: Record<
-    string,
-    {
-      outlineSummary: string;
-      chapters: Array<
-        Omit<ChapterRecord, 'updatedAt' | 'summaryUpdatedAt'> & {
-          updatedAt: string;
-          summaryUpdatedAt?: string;
-        }
-      >;
-      indexVersion: number;
-      lastIndexedAt: string | null;
-    }
-  >;
-  indexJobs: Record<
-    string,
-    Array<
-      Omit<IndexJobRecord, 'createdAt' | 'completedAt'> & {
-        createdAt: string;
-        completedAt: string | null;
-      }
-    >
-  >;
-  summarizeJobs: Record<
-    string,
-    Array<
-      Omit<SummaryJobRecord, 'createdAt' | 'completedAt'> & {
-        createdAt: string;
-        completedAt: string | null;
-      }
-    >
-  >;
-  relationEvents: Record<
-    string,
-    Array<
-      Omit<RelationEventRecord, 'createdAt' | 'updatedAt' | 'deletedAt'> & {
-        createdAt: string;
-        updatedAt: string;
-        deletedAt: string | null;
-      }
-    >
-  >;
-}
+type RestoredWorkspace = {
+  projects: ProjectRecord[];
+  members: ProjectMember[];
+  settings: Record<string, ProjectSettings>;
+  personas: Record<string, PersonaRecord[]>;
+  knowledge: Record<string, KnowledgeRecord>;
+  indexJobs: Record<string, IndexJobRecord[]>;
+  summarizeJobs: Record<string, SummaryJobRecord[]>;
+  relationEvents: Record<string, RelationEventRecord[]>;
+};
 
 @Injectable()
-export class ProjectsService {
+export class ProjectsService implements OnModuleInit {
   private readonly storagePath = join(resolve(process.cwd()), 'data', 'project-workspaces.json');
   private readonly reservedProjectRouteNames = new Set([
     'workbench',
@@ -282,17 +244,21 @@ export class ProjectsService {
   private readonly summarizeJobsStore = new Map<string, SummaryJobRecord[]>();
   private readonly relationEventsStore = new Map<string, RelationEventRecord[]>();
 
-  constructor() {
+  private persistenceResolve!: () => void;
+  readonly persistenceReady: Promise<void>;
+
+  constructor(private readonly prisma: PrismaService) {
+    this.persistenceReady = new Promise<void>((resolve) => {
+      this.persistenceResolve = resolve;
+    });
+
+    if (usePostgresPersistence()) {
+      return;
+    }
+
     const restored = this.restoreStateFromDisk();
     if (restored) {
-      this.projects.splice(0, this.projects.length, ...restored.projects);
-      this.members.splice(0, this.members.length, ...restored.members);
-      this.hydrateMap(this.settingsStore, restored.settings);
-      this.hydrateMap(this.personasStore, restored.personas);
-      this.hydrateMap(this.knowledgeStore, restored.knowledge);
-      this.hydrateMap(this.indexJobsStore, restored.indexJobs);
-      this.hydrateMap(this.summarizeJobsStore, restored.summarizeJobs);
-      this.hydrateMap(this.relationEventsStore, restored.relationEvents);
+      this.applyRestoredWorkspace(restored);
     }
 
     for (const project of this.projects) {
@@ -301,6 +267,44 @@ export class ProjectsService {
 
     if (!restored) {
       this.persistState();
+    }
+    this.persistenceResolve();
+  }
+
+  async onModuleInit() {
+    if (!usePostgresPersistence()) {
+      return;
+    }
+    try {
+      const fromPg = await loadWorkspaceFromPostgres(this.prisma);
+      if (fromPg?.projects.length) {
+        this.applyRestoredWorkspace(this.mapPersistedToRuntime(fromPg));
+      } else {
+        const fromJson = this.restoreStateFromDisk();
+        if (fromJson) {
+          this.applyRestoredWorkspace(fromJson);
+        }
+        for (const project of this.projects) {
+          this.ensureProjectState(project.id);
+        }
+        if (this.projects.length > 0) {
+          await syncWorkspaceToPostgres(this.prisma, this.buildPersistedPayload());
+        }
+      }
+      for (const project of this.projects) {
+        this.ensureProjectState(project.id);
+      }
+    } catch (err) {
+      console.error('[persistence] workspace PG 初始化失败，回退到 JSON 镜像', err);
+      const fromJson = this.restoreStateFromDisk();
+      if (fromJson) {
+        this.applyRestoredWorkspace(fromJson);
+      }
+      for (const project of this.projects) {
+        this.ensureProjectState(project.id);
+      }
+    } finally {
+      this.persistenceResolve();
     }
   }
 
@@ -1685,6 +1689,20 @@ export class ProjectsService {
   }
 
   private persistState() {
+    const payload = this.buildPersistedPayload();
+    const targetDir = dirname(this.storagePath);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+    if (usePostgresPersistence()) {
+      void syncWorkspaceToPostgres(this.prisma, payload).catch((err) =>
+        console.error('[persistence] workspace PG 同步失败', err)
+      );
+    }
+  }
+
+  private buildPersistedPayload(): PersistedProjectState {
     const payload: PersistedProjectState = {
       projects: this.projects.map((project) => ({
         ...project,
@@ -1758,23 +1776,10 @@ export class ProjectsService {
       }));
     }
 
-    const targetDir = dirname(this.storagePath);
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-    }
-    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+    return payload;
   }
 
-  private restoreStateFromDisk(): {
-    projects: ProjectRecord[];
-    members: ProjectMember[];
-    settings: Record<string, ProjectSettings>;
-    personas: Record<string, PersonaRecord[]>;
-    knowledge: Record<string, KnowledgeRecord>;
-    indexJobs: Record<string, IndexJobRecord[]>;
-    summarizeJobs: Record<string, SummaryJobRecord[]>;
-    relationEvents: Record<string, RelationEventRecord[]>;
-  } | null {
+  private restoreStateFromDisk(): RestoredWorkspace | null {
     if (!existsSync(this.storagePath)) {
       return null;
     }
@@ -1782,106 +1787,143 @@ export class ProjectsService {
     try {
       const raw = readFileSync(this.storagePath, 'utf8');
       const parsed = JSON.parse(raw) as PersistedProjectState;
-      return {
-        projects: (parsed.projects || []).map((project) => ({
-          ...project,
-          createdAt: new Date(project.createdAt),
-          updatedAt: new Date(project.updatedAt),
-        })),
-        members: (parsed.members || []).map((member) => ({
-          ...member,
-          createdAt: new Date(member.createdAt),
-        })),
-        settings: Object.fromEntries(
-          Object.entries(parsed.settings || {}).map(([projectId, value]) => [
-            projectId,
-            {
-              systemPromptText: value.systemPromptText,
-              activePersonaId: value.activePersonaId,
-              updatedAt: new Date(value.updatedAt),
-            },
-          ])
-        ),
-        personas: Object.fromEntries(
-          Object.entries(parsed.personas || {}).map(([projectId, personas]) => [
-            projectId,
-            (personas || []).map((persona) => ({
-              ...persona,
-              state:
-                typeof persona.state === 'string' && persona.state.trim()
-                  ? persona.state
-                  : '待更新',
-              createdAt: new Date(persona.createdAt),
-              updatedAt: new Date(persona.updatedAt),
-            })),
-          ])
-        ),
-        knowledge: Object.fromEntries(
-          Object.entries(parsed.knowledge || {}).map(([projectId, knowledge]) => [
-            projectId,
-            {
-              outlineSummary: knowledge.outlineSummary,
-              chapters: (knowledge.chapters || []).map((chapter) => ({
-                ...chapter,
-                updatedAt: new Date(chapter.updatedAt),
-                summaryUpdatedAt: chapter.summaryUpdatedAt
-                  ? new Date(chapter.summaryUpdatedAt)
-                  : undefined,
-              })),
-              indexVersion: knowledge.indexVersion,
-              lastIndexedAt: knowledge.lastIndexedAt ? new Date(knowledge.lastIndexedAt) : null,
-            },
-          ])
-        ),
-        indexJobs: Object.fromEntries(
-          Object.entries(parsed.indexJobs || {}).map(([projectId, jobs]) => [
-            projectId,
-            (jobs || []).map((job) => ({
-              ...job,
-              createdAt: new Date(job.createdAt),
-              completedAt: job.completedAt ? new Date(job.completedAt) : null,
-            })),
-          ])
-        ),
-        summarizeJobs: Object.fromEntries(
-          Object.entries(parsed.summarizeJobs || {}).map(([projectId, jobs]) => [
-            projectId,
-            (jobs || []).map((job) => ({
-              ...job,
-              createdAt: new Date(job.createdAt),
-              completedAt: job.completedAt ? new Date(job.completedAt) : null,
-            })),
-          ])
-        ),
-        relationEvents: Object.fromEntries(
-          Object.entries(parsed.relationEvents || {}).map(([projectId, events]) => [
-            projectId,
-            (events || []).map((event) => {
-              const protagonist = event.protagonist?.trim() || '主角';
-              const counterparty = event.counterparty?.trim() || '';
-              return {
-                id: event.id,
-                projectId: event.projectId,
-                protagonist,
-                counterparty,
-                actors: resolveRelationEventActors(event.actors, protagonist, counterparty),
-                summary: event.summary,
-                evidenceSnippet: event.evidenceSnippet,
-                chapterNo:
-                  typeof event.chapterNo === 'number' && Number.isFinite(event.chapterNo)
-                    ? event.chapterNo
-                    : null,
-                createdAt: new Date(event.createdAt),
-                updatedAt: new Date(event.updatedAt),
-                deletedAt: event.deletedAt ? new Date(event.deletedAt) : null,
-              };
-            }),
-          ])
-        ),
-      };
+      return this.mapPersistedToRuntime(parsed);
     } catch {
       return null;
     }
+  }
+
+  private mapPersistedToRuntime(parsed: PersistedProjectState): RestoredWorkspace {
+    return {
+      projects: (parsed.projects || []).map((project) => ({
+        ...project,
+        createdAt: new Date(project.createdAt),
+        updatedAt: new Date(project.updatedAt),
+      })),
+      members: (parsed.members || []).map((member) => ({
+        ...member,
+        createdAt: new Date(member.createdAt),
+      })),
+      settings: Object.fromEntries(
+        Object.entries(parsed.settings || {}).map(([projectId, value]) => [
+          projectId,
+          {
+            systemPromptText: value.systemPromptText,
+            activePersonaId: value.activePersonaId,
+            updatedAt: new Date(value.updatedAt),
+          },
+        ])
+      ),
+      personas: Object.fromEntries(
+        Object.entries(parsed.personas || {}).map(([projectId, personas]) => [
+          projectId,
+          (personas || []).map((persona) => ({
+            ...persona,
+            state:
+              typeof persona.state === 'string' && persona.state.trim() ? persona.state : '待更新',
+            createdAt: new Date(persona.createdAt),
+            updatedAt: new Date(persona.updatedAt),
+          })),
+        ])
+      ),
+      knowledge: Object.fromEntries(
+        Object.entries(parsed.knowledge || {}).map(([projectId, knowledge]) => [
+          projectId,
+          {
+            outlineSummary: knowledge.outlineSummary,
+            chapters: (knowledge.chapters || []).map((chapter) => ({
+              ...chapter,
+              summarySource: chapter.summarySource as ChapterSummarySource | undefined,
+              updatedAt: new Date(chapter.updatedAt),
+              summaryUpdatedAt: chapter.summaryUpdatedAt
+                ? new Date(chapter.summaryUpdatedAt)
+                : undefined,
+            })),
+            indexVersion: knowledge.indexVersion,
+            lastIndexedAt: knowledge.lastIndexedAt ? new Date(knowledge.lastIndexedAt) : null,
+          },
+        ])
+      ),
+      indexJobs: Object.fromEntries(
+        Object.entries(parsed.indexJobs || {}).map(([projectId, jobs]) => [
+          projectId,
+          (jobs || []).map((job) => ({
+            ...job,
+            mode: job.mode as IndexMode,
+            status: job.status as IndexJobStatus,
+            createdAt: new Date(job.createdAt),
+            completedAt: job.completedAt ? new Date(job.completedAt) : null,
+          })),
+        ])
+      ),
+      summarizeJobs: Object.fromEntries(
+        Object.entries(parsed.summarizeJobs || {}).map(([projectId, jobs]) => [
+          projectId,
+          (jobs || []).map((job) => ({
+            id: job.id,
+            projectId: job.projectId,
+            scope: job.scope as SummaryJobScope,
+            chapterNo: job.chapterNo,
+            status: job.status as SummaryJobStatus,
+            totalChapters: job.totalChapters,
+            processedChapters: job.processedChapters,
+            chapterNos: job.chapterNos ?? [],
+            summaries: (job.summaries || []).map((s) => ({
+              chapterNo: s.chapterNo,
+              summary: s.summary,
+              summarySource: (s.summarySource === 'llm'
+                ? 'llm'
+                : 'fallback') as ChapterSummarySource,
+            })),
+            createdAt: new Date(job.createdAt),
+            completedAt: job.completedAt ? new Date(job.completedAt) : null,
+            errorMessage: job.errorMessage,
+          })),
+        ])
+      ),
+      relationEvents: Object.fromEntries(
+        Object.entries(parsed.relationEvents || {}).map(([projectId, events]) => [
+          projectId,
+          (events || []).map((event) => {
+            const protagonist = event.protagonist?.trim() || '主角';
+            const counterparty = event.counterparty?.trim() || '';
+            return {
+              id: event.id,
+              projectId: event.projectId,
+              protagonist,
+              counterparty,
+              actors: resolveRelationEventActors(event.actors, protagonist, counterparty),
+              summary: event.summary,
+              evidenceSnippet: event.evidenceSnippet,
+              chapterNo:
+                typeof event.chapterNo === 'number' && Number.isFinite(event.chapterNo)
+                  ? event.chapterNo
+                  : null,
+              createdAt: new Date(event.createdAt),
+              updatedAt: new Date(event.updatedAt),
+              deletedAt: event.deletedAt ? new Date(event.deletedAt) : null,
+            };
+          }),
+        ])
+      ),
+    };
+  }
+
+  private applyRestoredWorkspace(restored: RestoredWorkspace) {
+    this.projects.splice(0, this.projects.length, ...restored.projects);
+    this.members.splice(0, this.members.length, ...restored.members);
+    this.settingsStore.clear();
+    this.personasStore.clear();
+    this.knowledgeStore.clear();
+    this.indexJobsStore.clear();
+    this.summarizeJobsStore.clear();
+    this.relationEventsStore.clear();
+    this.hydrateMap(this.settingsStore, restored.settings);
+    this.hydrateMap(this.personasStore, restored.personas);
+    this.hydrateMap(this.knowledgeStore, restored.knowledge);
+    this.hydrateMap(this.indexJobsStore, restored.indexJobs);
+    this.hydrateMap(this.summarizeJobsStore, restored.summarizeJobs);
+    this.hydrateMap(this.relationEventsStore, restored.relationEvents);
   }
 
   private hydrateMap<T>(target: Map<string, T>, source: Record<string, T>) {

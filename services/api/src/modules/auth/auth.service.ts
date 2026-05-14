@@ -1,15 +1,58 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { usePostgresPersistence } from '../../persistence/use-postgres';
+import { PrismaService } from '../../prisma/prisma.service';
 import { User, Session, LoginResponse, RefreshResponse } from './auth.entity';
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   private users: Map<string, User> = new Map();
   private sessions: Map<string, Session> = new Map();
 
-  constructor(private readonly jwtService: JwtService) {
-    this.initializeMockUser();
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService
+  ) {
+    if (!usePostgresPersistence()) {
+      this.initializeMockUser();
+    }
+  }
+
+  async onModuleInit() {
+    if (!usePostgresPersistence()) {
+      return;
+    }
+    try {
+      let rows = await this.prisma.user.findMany();
+      if (rows.length === 0) {
+        const hashedPassword = bcrypt.hashSync('password123', 10);
+        await this.prisma.user.create({
+          data: {
+            id: '1',
+            email: 'admin@example.com',
+            password: hashedPassword,
+            name: 'Admin User',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+        rows = await this.prisma.user.findMany();
+      }
+      for (const u of rows) {
+        this.users.set(u.id, {
+          id: u.id,
+          email: u.email,
+          password: u.password,
+          name: u.name,
+          createdAt: u.createdAt.toISOString(),
+          updatedAt: u.updatedAt.toISOString(),
+        });
+      }
+    } catch (err) {
+      console.error('[persistence] users PG 加载失败，回退到内存种子', err);
+      this.initializeMockUser();
+    }
   }
 
   private initializeMockUser() {
@@ -24,10 +67,19 @@ export class AuthService {
     });
   }
 
-  async login(email: string, password: string): Promise<LoginResponse> {
-    const user = this.users.get('1');
+  private findUserByEmail(email: string): User | undefined {
+    for (const u of this.users.values()) {
+      if (u.email === email) {
+        return u;
+      }
+    }
+    return undefined;
+  }
 
-    if (!user || user.email !== email) {
+  async login(email: string, password: string): Promise<LoginResponse> {
+    const user = this.findUserByEmail(email);
+
+    if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
 

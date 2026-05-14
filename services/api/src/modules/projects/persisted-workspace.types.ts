@@ -1,0 +1,104 @@
+/**
+ * 与 `data/project-workspaces.json` 落盘结构一致（供 PG 同步与迁移脚本共用）。
+ */
+export interface PersistedProjectState {
+  projects: Array<{
+    id: string;
+    name: string;
+    description: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  members: Array<{
+    userId: string;
+    projectId: string;
+    role: 'owner' | 'editor' | 'viewer';
+    createdAt: string;
+  }>;
+  settings: Record<
+    string,
+    { systemPromptText: string; activePersonaId: string | null; updatedAt: string }
+  >;
+  personas: Record<
+    string,
+    Array<{
+      id: string;
+      name: string;
+      profile: string;
+      state: string;
+      tone?: string;
+      constraints?: string[];
+      status: 'draft' | 'published';
+      createdAt: string;
+      updatedAt: string;
+    }>
+  >;
+  knowledge: Record<
+    string,
+    {
+      outlineSummary: string;
+      chapters: Array<{
+        chapterNo: number;
+        title: string;
+        content: string;
+        summary: string;
+        summarySource?: string;
+        summaryUpdatedAt?: string;
+        updatedAt: string;
+      }>;
+      indexVersion: number;
+      lastIndexedAt: string | null;
+    }
+  >;
+  indexJobs: Record<
+    string,
+    Array<{
+      id: string;
+      projectId: string;
+      mode: string;
+      status: string;
+      totalChapters: number;
+      processedChapters: number;
+      createdAt: string;
+      completedAt: string | null;
+      errorMessage: string | null;
+    }>
+  >;
+  summarizeJobs: Record<
+    string,
+    Array<{
+      id: string;
+      projectId: string;
+      scope: string;
+      chapterNo: number | null;
+      status: string;
+      totalChapters: number;
+      processedChapters: number;
+      chapterNos: number[];
+      summaries: Array<{
+        chapterNo: number;
+        summary: string;
+        summarySource: string;
+      }>;
+      createdAt: string;
+      completedAt: string | null;
+      errorMessage: string | null;
+    }>
+  >;
+  relationEvents: Record<
+    string,
+    Array<{
+      id: string;
+      projectId: string;
+      protagonist: string;
+      counterparty: string;
+      actors: string[];
+      summary: string;
+      evidenceSnippet?: string;
+      chapterNo: number | null;
+      createdAt: string;
+      updatedAt: string;
+      deletedAt: string | null;
+    }>
+  >;
+}

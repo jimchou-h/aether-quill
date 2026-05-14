@@ -37,7 +37,7 @@ aether-quill/
 - Prompt 配置：`systemPromptText` 草稿/发布/回滚；模板治理与运行时副本镜像
 - 工程基线：统一 envelope 响应、错误码体系（1000~1599）、全局 Toast、`request_id` / `trace_id` 贯穿
 
-详细完成度见 `/.docs/02-开发执行/任务开发进度清单-v1.md`（已完成阶段 P0~P17）。
+详细完成度见 `/.docs/02-开发执行/任务开发进度清单-v1.md`（已完成阶段 P0~P18 内 AQ 条目）。
 
 ### 当前关键现状（必读，避免误判）
 
@@ -45,7 +45,7 @@ aether-quill/
 
 | 维度 | 方案 v1 设计 | 当前代码 |
 | :--- | :--- | :--- |
-| 持久化 | PostgreSQL + Prisma | `services/api/data/*.json` + in-memory `Map` |
+| 持久化 | PostgreSQL + Prisma（`DATABASE_URL` 可选） | 未配置时：`services/api/data/*.json` + in-memory；配置后：**PG 主存 + JSON 镜像双写**，`scripts/migrate-json-to-pg.ts`（`--dry-run` / `--confirm` / `--rollback`） |
 | 向量库 | Qdrant / pgvector | 未接入；`vector-store.ts` 在内存里 cache chunks |
 | Embedding | 真模型（BGE / OpenAI） | `Math.sin(charCodeSum * i)` 模拟向量（见 `services/rag-orchestrator/src/retrieval/vector-store.ts:94` / `services/worker/src/jobs/ingestion.processor.ts:76`） |
 | 切分 | 语义段 + token + overlap | 500 字符硬切 + 0 overlap |
@@ -54,7 +54,7 @@ aether-quill/
 
 结论：
 - 当前"RAG"实际是 long-context prompt 风格。**改链路前请勿引用「检索效果」作为论据**。
-- 已立项 `AQ-117 ~ AQ-122`（P0 真 RAG 落地）专项解决上述差距，方案见 `/.docs/新增需求/2026-05-13-真RAG落地.md` 第 0 节「执行决策」。
+- 已立项 `AQ-117 ~ AQ-122`（P0 真 RAG 落地）专项解决检索与持久化差距，方案见 `/.docs/新增需求/2026-05-13-真RAG落地.md` 第 0 节「执行决策」。**P18 内 AQ-117~AQ-122 已闭环**（含 AQ-121：可选 PG + 迁移脚本）。
 - P1 / P2 / P3 backlog 沉淀在 `/.docs/待做需求清单-v1.md`；**P0 完成前不引入 P1+ 条目**。
 
 ### 当前推进状态（动态）
@@ -71,6 +71,12 @@ pnpm install
 # 启动本地依赖容器（PG / Qdrant / Redis / MinIO）
 docker compose -f infra/docker/docker-compose.yml up -d
 
+# 一键并行启动：前端 + API + rag-orchestrator + worker（日常开发）
+pnpm dev
+
+# 仅监听 workspace 共享包（改 packages/* 时用）
+pnpm dev:packages
+
 # 全量自检
 pnpm -r lint && pnpm -r typecheck && pnpm -r test && pnpm -r build
 
@@ -78,6 +84,10 @@ pnpm -r lint && pnpm -r typecheck && pnpm -r test && pnpm -r build
 pnpm --filter @aether-quill/api lint typecheck test
 pnpm --filter @aether-quill/web build
 pnpm --filter @aether-quill/rag-orchestrator test
+
+# API：Prisma 迁移与 JSON→PG 一次性灌库（需 DATABASE_URL；灌库前备份 data/*.json）
+pnpm --filter @aether-quill/api db:migrate
+pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 ```
 
 ### 提交卫生（强制）
