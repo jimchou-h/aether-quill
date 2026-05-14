@@ -46,4 +46,5 @@ temp/
 services/api/data/project-workspaces.json
 services/api/data/prompt-templates.json
 services/api/data/documents.json
+services/api/data/.backup/
 services/rag-orchestrator/data/traces.json

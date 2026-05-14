@@ -1,7 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { ProjectsService } from '../projects/projects.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { usePostgresPersistence } from '../../persistence/use-postgres';
+import {
+  loadPromptTemplatesFromPostgres,
+  syncPromptTemplatesToPostgres,
+  type PersistedPromptTemplatesPayload,
+  type RestoredPromptTemplatesState,
+} from '../../persistence/prompt-templates-pg-sync';
 import {
   TemplateRecord,
   TemplateVersion,
@@ -32,11 +40,6 @@ interface PersistedTemplateState {
   >;
 }
 
-interface RestoredTemplateState {
-  templates: TemplateRecord[];
-  versions: Record<string, TemplateVersion[]>;
-}
-
 const DEFAULT_TEMPLATES: Array<{ name: string; category: TemplateCategory; content: string }> = [
   {
     name: '系统默认模板',
@@ -57,18 +60,54 @@ const DEFAULT_TEMPLATES: Array<{ name: string; category: TemplateCategory; conte
 ];
 
 @Injectable()
-export class PromptTemplatesService {
+export class PromptTemplatesService implements OnModuleInit {
   private readonly storagePath = join(resolve(process.cwd()), 'data', 'prompt-templates.json');
 
   private readonly templates: TemplateRecord[] = [];
   private readonly versions = new Map<string, TemplateVersion[]>();
 
-  constructor(private readonly projectsService: ProjectsService) {
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly prisma: PrismaService
+  ) {
+    if (usePostgresPersistence()) {
+      return;
+    }
     const restored = this.restoreStateFromDisk();
     if (restored) {
-      this.templates.splice(0, this.templates.length, ...restored.templates);
-      this.hydrateMap(this.versions, restored.versions);
+      this.applyRestored(restored);
     }
+  }
+
+  async onModuleInit() {
+    await this.projectsService.persistenceReady;
+    if (!usePostgresPersistence()) {
+      return;
+    }
+    try {
+      const fromPg = await loadPromptTemplatesFromPostgres(this.prisma);
+      if (fromPg) {
+        this.applyRestored(fromPg);
+      } else {
+        const fromJson = this.restoreStateFromDisk();
+        if (fromJson) {
+          this.applyRestored(fromJson);
+          await syncPromptTemplatesToPostgres(this.prisma, this.buildPersistedPayload());
+        }
+      }
+    } catch (err) {
+      console.error('[persistence] prompt-templates PG 初始化失败', err);
+      const fromJson = this.restoreStateFromDisk();
+      if (fromJson) {
+        this.applyRestored(fromJson);
+      }
+    }
+  }
+
+  private applyRestored(restored: RestoredPromptTemplatesState) {
+    this.templates.splice(0, this.templates.length, ...restored.templates);
+    this.versions.clear();
+    this.hydrateMap(this.versions, restored.versions);
   }
 
   findByProject(projectId: string): TemplateRecord[] {
@@ -237,9 +276,24 @@ export class PromptTemplatesService {
   }
 
   private persistState() {
-    const payload: PersistedTemplateState = {
+    const payload = this.buildPersistedPayload();
+    const targetDir = dirname(this.storagePath);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+    if (usePostgresPersistence()) {
+      void syncPromptTemplatesToPostgres(this.prisma, payload).catch((err) =>
+        console.error('[persistence] prompt-templates PG 同步失败', err)
+      );
+    }
+  }
+
+  private buildPersistedPayload(): PersistedPromptTemplatesPayload {
+    const payload: PersistedPromptTemplatesPayload = {
       templates: this.templates.map((t) => ({
         ...t,
+        category: t.category,
         createdAt: t.createdAt.toISOString(),
         updatedAt: t.updatedAt.toISOString(),
       })),
@@ -253,14 +307,10 @@ export class PromptTemplatesService {
       }));
     }
 
-    const targetDir = dirname(this.storagePath);
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-    }
-    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+    return payload;
   }
 
-  private restoreStateFromDisk(): RestoredTemplateState | null {
+  private restoreStateFromDisk(): RestoredPromptTemplatesState | null {
     if (!existsSync(this.storagePath)) return null;
     try {
       const raw = readFileSync(this.storagePath, 'utf8');
@@ -268,6 +318,7 @@ export class PromptTemplatesService {
       return {
         templates: (parsed.templates || []).map((t) => ({
           ...t,
+          category: t.category as TemplateCategory,
           createdAt: new Date(t.createdAt),
           updatedAt: new Date(t.updatedAt),
         })),

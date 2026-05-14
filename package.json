@@ -8,7 +8,10 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "dev": "pnpm -r dev",
+    "dev": "pnpm run dev:stack",
+    "dev:stack": "pnpm --parallel --filter @aether-quill/web --filter @aether-quill/api --filter @aether-quill/rag-orchestrator --filter @aether-quill/worker dev",
+    "dev:packages": "pnpm -r --filter \"./packages/**\" dev",
+    "dev:all-recursive": "pnpm -r dev",
     "clean": "pnpm -r clean"
   },
   "keywords": [

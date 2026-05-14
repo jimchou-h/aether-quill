@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import axios from 'axios';
@@ -12,6 +12,14 @@ import {
   IndexStatus,
   CommitIndexResultInput,
 } from './documents.entity';
+import { PrismaService } from '../../prisma/prisma.service';
+import { usePostgresPersistence } from '../../persistence/use-postgres';
+import {
+  loadDocumentsFromPostgres,
+  syncDocumentsToPostgres,
+  type PersistedDocumentsPayload,
+  type RestoredDocumentsState,
+} from '../../persistence/documents-pg-sync';
 
 interface PersistedDocumentState {
   documents: Array<{
@@ -45,27 +53,58 @@ interface PersistedDocumentState {
   >;
 }
 
-interface RestoredState {
-  documents: DocumentRecord[];
-  versions: Record<string, DocumentVersion[]>;
-  chunks: Record<string, ChunkRecord[]>;
-}
-
 @Injectable()
-export class DocumentsService {
+export class DocumentsService implements OnModuleInit {
   private readonly storagePath = join(resolve(process.cwd()), 'data', 'documents.json');
 
   private readonly documents: DocumentRecord[] = [];
   private readonly versions = new Map<string, DocumentVersion[]>();
   private readonly chunks = new Map<string, ChunkRecord[]>();
 
-  constructor(private readonly projectsService: ProjectsService) {
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly prisma: PrismaService
+  ) {
+    if (usePostgresPersistence()) {
+      return;
+    }
     const restored = this.restoreStateFromDisk();
     if (restored) {
-      this.documents.splice(0, this.documents.length, ...restored.documents);
-      this.hydrateMap(this.versions, restored.versions);
-      this.hydrateMap(this.chunks, restored.chunks);
+      this.applyRestored(restored);
     }
+  }
+
+  async onModuleInit() {
+    await this.projectsService.persistenceReady;
+    if (!usePostgresPersistence()) {
+      return;
+    }
+    try {
+      const fromPg = await loadDocumentsFromPostgres(this.prisma);
+      if (fromPg) {
+        this.applyRestored(fromPg);
+      } else {
+        const fromJson = this.restoreStateFromDisk();
+        if (fromJson) {
+          this.applyRestored(fromJson);
+          await syncDocumentsToPostgres(this.prisma, this.buildPersistedPayload());
+        }
+      }
+    } catch (err) {
+      console.error('[persistence] documents PG 初始化失败', err);
+      const fromJson = this.restoreStateFromDisk();
+      if (fromJson) {
+        this.applyRestored(fromJson);
+      }
+    }
+  }
+
+  private applyRestored(restored: RestoredDocumentsState) {
+    this.documents.splice(0, this.documents.length, ...restored.documents);
+    this.versions.clear();
+    this.chunks.clear();
+    this.hydrateMap(this.versions, restored.versions);
+    this.hydrateMap(this.chunks, restored.chunks);
   }
 
   findAll(projectId: string): DocumentRecord[] {
@@ -281,7 +320,21 @@ export class DocumentsService {
   }
 
   private persistState() {
-    const payload: PersistedDocumentState = {
+    const payload = this.buildPersistedPayload();
+    const targetDir = dirname(this.storagePath);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+    if (usePostgresPersistence()) {
+      void syncDocumentsToPostgres(this.prisma, payload).catch((err) =>
+        console.error('[persistence] documents PG 同步失败', err)
+      );
+    }
+  }
+
+  private buildPersistedPayload(): PersistedDocumentsPayload {
+    const payload: PersistedDocumentsPayload = {
       documents: this.documents.map((doc) => ({
         ...doc,
         createdAt: doc.createdAt.toISOString(),
@@ -305,14 +358,10 @@ export class DocumentsService {
       }));
     }
 
-    const targetDir = dirname(this.storagePath);
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
-    }
-    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+    return payload;
   }
 
-  private restoreStateFromDisk(): RestoredState | null {
+  private restoreStateFromDisk(): RestoredDocumentsState | null {
     if (!existsSync(this.storagePath)) {
       return null;
     }

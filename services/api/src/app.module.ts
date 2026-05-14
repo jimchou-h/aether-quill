@@ -5,9 +5,11 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { PromptTemplatesModule } from './modules/prompt-templates/prompt-templates.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { HealthController } from './health.controller';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
+    PrismaModule,
     AuthModule,
     ProjectsModule,
     DocumentsModule,
