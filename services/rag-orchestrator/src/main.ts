@@ -5,8 +5,11 @@ import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
 import {
+  buildChapterOptimizeRetrievalQuery,
   buildGenerationRetrievalQuery,
   buildRetrievalQuery,
+  CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
   DraftCitation,
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
@@ -395,7 +398,30 @@ app.post('/api/generate', async (req, res) => {
   const ragEnv = getResolvedRagInfrastructureEnv();
   const projectCtx = getOrCreateContext(projectId);
   const extra = extraContext as Record<string, unknown> | undefined;
-  const retrievalQuery = buildGenerationRetrievalQuery(String(prompt), projectCtx, extra);
+  const tk = typeof templateKey === 'string' ? templateKey.trim() : '';
+  const chapterNoRaw = extra?.chapterNo;
+  const chapterNo =
+    typeof chapterNoRaw === 'number' && Number.isFinite(chapterNoRaw)
+      ? chapterNoRaw
+      : Number(chapterNoRaw);
+
+  let retrievalQuery: string;
+  if (
+    (tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY || tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY) &&
+    typeof extra?.retrievalInstruction === 'string' &&
+    extra.retrievalInstruction.trim()
+  ) {
+    retrievalQuery = buildChapterOptimizeRetrievalQuery(projectCtx, {
+      chapterNo: Number.isFinite(chapterNo) && chapterNo > 0 ? chapterNo : 0,
+      title:
+        typeof extra.retrievalChapterTitle === 'string' ? extra.retrievalChapterTitle.trim() : '',
+      instruction: extra.retrievalInstruction.trim(),
+      chapterSummary:
+        typeof extra.retrievalChapterSummary === 'string' ? extra.retrievalChapterSummary : '',
+    });
+  } else {
+    retrievalQuery = buildGenerationRetrievalQuery(String(prompt), projectCtx, extra);
+  }
 
   let retrievedChunkIds: string[] = [];
   let retrievedEvidence = '';

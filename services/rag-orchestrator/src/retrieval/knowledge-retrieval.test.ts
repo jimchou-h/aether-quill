@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  buildChapterOptimizeRetrievalQuery,
   buildGenerationRetrievalQuery,
   buildRetrievalQuery,
   formatEvidence,
@@ -29,6 +30,29 @@ describe('buildGenerationRetrievalQuery', () => {
     assert.ok(q.includes('写一章'));
     assert.ok(q.includes('揭露反派'));
     assert.ok(q.includes('雨天'));
+  });
+});
+
+describe('buildChapterOptimizeRetrievalQuery', () => {
+  const project = {
+    outlineSummary: '卷一',
+    personaProfile: '主角',
+  };
+
+  it('uses summary and instruction without full chapter body', () => {
+    const q = buildChapterOptimizeRetrievalQuery(project, {
+      chapterNo: 3,
+      title: '风起',
+      instruction: '加强对话张力',
+      chapterSummary: '主角与反派首次对峙。',
+    });
+    assert.ok(q.includes('第3章'));
+    assert.ok(q.includes('风起'));
+    assert.ok(q.includes('加强对话张力'));
+    assert.ok(q.includes('主角与反派首次对峙'));
+    assert.ok(q.includes('卷一'));
+    assert.ok(q.includes('主角'));
+    assert.ok(!q.includes('<chapter-original>'));
   });
 });
 

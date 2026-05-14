@@ -47,6 +47,47 @@ export function buildGenerationRetrievalQuery(
   return parts.join('\n\n');
 }
 
+/** 与 API `chapter-optimize.util` 及 prompt-templates 模板 key 保持一致 */
+export const CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY = 'chapter.optimize.plan';
+export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
+
+export interface ChapterOptimizeRetrievalInput {
+  chapterNo: number;
+  title: string;
+  instruction: string;
+  /** 有摘要用摘要；无则由 API 传入正文前缀，勿含整章 */
+  chapterSummary: string;
+}
+
+/**
+ * 章节优化（plan/draft）向量检索：避免把 `<chapter-original>` 全文送进 embedding。
+ */
+export function buildChapterOptimizeRetrievalQuery(
+  projectCtx: { outlineSummary: string; personaProfile: string },
+  input: ChapterOptimizeRetrievalInput
+): string {
+  const title =
+    input.title.trim() || (input.chapterNo > 0 ? `第${input.chapterNo}章` : '未命名章节');
+  const parts: string[] = [
+    `【章节优化检索】第${input.chapterNo}章「${title}」`,
+    `【用户优化要求】\n${input.instruction.trim()}`,
+  ];
+
+  const sum = input.chapterSummary.trim();
+  if (sum) {
+    parts.push(`【本章摘要】\n${sum}`);
+  }
+
+  if (projectCtx.outlineSummary.trim()) {
+    parts.push(projectCtx.outlineSummary.trim().slice(0, 800));
+  }
+  if (projectCtx.personaProfile.trim() && projectCtx.personaProfile !== '未配置人物设定') {
+    parts.push(projectCtx.personaProfile.trim().slice(0, 500));
+  }
+
+  return parts.join('\n\n');
+}
+
 export function buildRetrievalQuery(
   task: Record<string, unknown>,
   context: { outlineSummary: string; personaProfile: string }
