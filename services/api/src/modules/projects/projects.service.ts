@@ -1272,6 +1272,9 @@ export class ProjectsService implements OnModuleInit {
       usedRelationEvents,
     };
 
+    const chapterSummaryForRetrieval =
+      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+
     let response;
     try {
       response = await axios.post(
@@ -1288,6 +1291,9 @@ export class ProjectsService implements OnModuleInit {
             planId,
             inputChapterChars: chapter.content.length,
             inputContextChars: userPrompt.length,
+            retrievalInstruction: instruction,
+            retrievalChapterSummary: chapterSummaryForRetrieval,
+            retrievalChapterTitle: chapter.title,
           },
         },
         { responseType: 'stream' }
@@ -1476,6 +1482,9 @@ export class ProjectsService implements OnModuleInit {
       ),
     });
 
+    const chapterSummaryForRetrieval =
+      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+
     let response;
     try {
       response = await axios.post(
@@ -1492,6 +1501,9 @@ export class ProjectsService implements OnModuleInit {
             planId: payload.planId || null,
             inputChapterChars: chapter.content.length,
             inputContextChars: userPrompt.length,
+            retrievalInstruction: instruction,
+            retrievalChapterSummary: chapterSummaryForRetrieval,
+            retrievalChapterTitle: chapter.title,
           },
         },
         { responseType: 'stream' }
