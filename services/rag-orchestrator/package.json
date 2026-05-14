@@ -8,6 +8,7 @@
     "start": "node dist/main.js",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "pnpm --filter @aether-quill/config run build && pnpm --filter @aether-quill/model-providers run build && tsc --noEmit",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {

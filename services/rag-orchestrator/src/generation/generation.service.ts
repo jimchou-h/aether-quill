@@ -3,10 +3,14 @@ import { TraceRecord, GenerateRequest } from './types';
 import { TraceStore, TraceQuery, TraceStats } from './trace-store';
 
 export interface GenerationContext {
+  /** 项目级 systemPromptText（Settings） */
   systemPromptText: string;
-  personaProfile: string;
-  outlineSummary: string;
-  chapterContext: string;
+  /**
+   * 叙事上下文：人物 + 大纲 + 近期章节摘要 + 已选关系备忘（不含向量检索证据）。
+   * 与 `retrievedEvidence` 分段拼装，对应模板占位 `{{narrativeContext}}` 语义。
+   */
+  narrativeContext: string;
+  /** 向量检索 + 重排后的证据块，对应 `{{retrievedEvidence}}` */
   retrievedEvidence?: string;
 }
 
@@ -24,20 +28,14 @@ export class GenerationService {
   buildPrompt(context: GenerationContext, userPrompt: string): string {
     const sections: string[] = [];
 
-    if (context.systemPromptText) {
-      sections.push(`【系统指令】\n${context.systemPromptText}`);
+    if (context.systemPromptText?.trim()) {
+      sections.push(`【系统指令】\n${context.systemPromptText.trim()}`);
     }
-    if (context.personaProfile && context.personaProfile !== '未配置人物设定') {
-      sections.push(`【人物设定】\n${context.personaProfile}`);
+    if (context.narrativeContext?.trim()) {
+      sections.push(`【叙事上下文】\n${context.narrativeContext.trim()}`);
     }
-    if (context.outlineSummary) {
-      sections.push(`【大纲总结】\n${context.outlineSummary}`);
-    }
-    if (context.chapterContext) {
-      sections.push(`【上下文】\n${context.chapterContext}`);
-    }
-    if (context.retrievedEvidence) {
-      sections.push(`【检索证据】\n${context.retrievedEvidence}`);
+    if (context.retrievedEvidence?.trim()) {
+      sections.push(`【检索证据】\n${context.retrievedEvidence.trim()}`);
     }
 
     sections.push(`【用户需求】\n${userPrompt}`);
@@ -83,7 +81,6 @@ export class GenerationService {
 
   async generateNonStream(trace: TraceRecord, context: GenerationContext): Promise<string> {
     const prompt = this.buildPrompt(context, trace.prompt);
-    console.log('传入prompt', prompt);
     this.updateTrace(trace.id, { status: 'generating' });
 
     try {
@@ -111,7 +108,6 @@ export class GenerationService {
     context: GenerationContext
   ): AsyncGenerator<string, void, unknown> {
     const prompt = this.buildPrompt(context, trace.prompt);
-    console.log('传入prompt', prompt);
     this.updateTrace(trace.id, { status: 'generating' });
     let fullContent = '';
 

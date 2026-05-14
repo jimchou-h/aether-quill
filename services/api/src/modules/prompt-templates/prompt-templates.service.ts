@@ -47,7 +47,7 @@ const DEFAULT_TEMPLATES: Array<{ name: string; category: TemplateCategory; conte
     name: '章节写作模板',
     category: 'chapter',
     content:
-      '请根据以下项目上下文撰写第{chapterNo}章。\n\n写作目标：{goal}\n叙事视角：{pov}\n系统提示：{systemPrompt}\n人物设定：{personaProfile}\n\n大纲总结：{outlineSummary}\n\n近期章节摘要：{chapterSummaries}\n\n要求：\n1. 保持与前面章节的情节连贯\n2. 人物行为符合设定\n3. {targetWords}字左右',
+      '撰写第{chapterNo}章正文。\n写作目标：{goal}\n叙事视角：{pov}\n说明：RAG Orchestrator 会将项目 systemPrompt、人物、大纲与近期章节摘要注入【叙事上下文】，将知识库向量检索结果注入【检索证据】；本模板仅描述章节任务骨架。\n字数期望：{targetWords}',
   },
   {
     name: '人物模板-基础版',

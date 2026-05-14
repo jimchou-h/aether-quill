@@ -1,10 +1,11 @@
 import { loadEnv } from './config/load-env';
-import { assertRagInfrastructureEnv } from '@aether-quill/config';
+import { assertRagInfrastructureEnv, getResolvedRagInfrastructureEnv } from '@aether-quill/config';
 import express from 'express';
 import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
 import {
+  buildGenerationRetrievalQuery,
   buildRetrievalQuery,
   DraftCitation,
   retrieveKnowledgeForDraft,
@@ -83,22 +84,33 @@ function getOrCreateContext(projectId: string) {
   return projectContextStore.get(projectId)!;
 }
 
-function getGenerationContext(
-  projectId: string,
-  _task?: Record<string, unknown>
-): GenerationContext {
-  void _task;
-  const ctx = getOrCreateContext(projectId);
+function buildNarrativeContext(ctx: ProjectContext): string {
+  const sections: string[] = [];
+  if (ctx.personaProfile && ctx.personaProfile !== '未配置人物设定') {
+    sections.push(`【人物设定】\n${ctx.personaProfile}`);
+  }
+  if (ctx.outlineSummary?.trim()) {
+    sections.push(`【大纲总结】\n${ctx.outlineSummary.trim()}`);
+  }
   const recentChapters = ctx.chapters.slice(-3);
+  if (recentChapters.length > 0) {
+    sections.push(
+      `【近期章节摘要】\n${recentChapters
+        .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
+        .join('\n')}`
+    );
+  }
+  if (ctx.selectedRelationMemory?.trim()) {
+    sections.push(`【已选关系事件备忘】\n${ctx.selectedRelationMemory.trim()}`);
+  }
+  return sections.join('\n\n');
+}
 
+function getGenerationContext(projectId: string): GenerationContext {
+  const ctx = getOrCreateContext(projectId);
   return {
     systemPromptText: ctx.systemPromptText,
-    personaProfile: ctx.personaProfile,
-    outlineSummary: ctx.outlineSummary,
-    chapterContext: recentChapters
-      .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
-      .join('\n'),
-    retrievedEvidence: ctx.selectedRelationMemory?.trim() || undefined,
+    narrativeContext: buildNarrativeContext(ctx),
   };
 }
 
@@ -380,19 +392,45 @@ app.post('/api/generate', async (req, res) => {
     return res.status(400).json({ error: 'projectId and prompt are required' });
   }
 
-  const generationContext = getGenerationContext(
-    projectId,
-    extraContext as Record<string, unknown> | undefined
-  );
+  const ragEnv = getResolvedRagInfrastructureEnv();
+  const projectCtx = getOrCreateContext(projectId);
+  const extra = extraContext as Record<string, unknown> | undefined;
+  const retrievalQuery = buildGenerationRetrievalQuery(String(prompt), projectCtx, extra);
+
+  let retrievedChunkIds: string[] = [];
+  let retrievedEvidence = '';
+  try {
+    const retrieval = await retrieveKnowledgeForDraft(
+      vectorStore,
+      reranker,
+      projectId,
+      retrievalQuery,
+      {
+        topK: ragEnv.retrievalTopK,
+        topN: ragEnv.rerankTopN,
+        minScore: ragEnv.retrievalMinScore,
+      }
+    );
+    retrievedEvidence = retrieval.evidenceText;
+    retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+  } catch (error) {
+    console.error('Generate retrieval failed:', error);
+  }
+
+  const generationContext = getGenerationContext(projectId);
 
   if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {
     generationContext.systemPromptText = systemPromptOverride.trim();
   }
 
-  const traceContext =
-    templateKey || extraContext
-      ? { ...(extraContext || {}), templateKey: templateKey || undefined }
-      : undefined;
+  generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
+
+  const traceContext: Record<string, unknown> = {
+    retrieval_query: retrievalQuery,
+    retrieved_chunk_ids: retrievedChunkIds,
+    ...(extra || {}),
+    ...(templateKey ? { templateKey } : {}),
+  };
 
   const trace = await generationService.createTrace({
     prompt,
@@ -479,7 +517,6 @@ app.get('/api/projects/:projectId/generation-stats', (req, res) => {
 });
 
 app.post('/api/generate/draft', async (req, res) => {
-  console.log('generate/draft', req.body);
   const { projectId, task = {}, citations = [] } = req.body;
 
   const requestTraceId =
@@ -490,19 +527,28 @@ app.post('/api/generate/draft', async (req, res) => {
   const chapterNo = Number(task.chapterNo || 1);
   const goal = task.goal || '推进主线并保持人物一致性';
   const pov = task.pov || '第三人称';
+  const ragEnv = getResolvedRagInfrastructureEnv();
 
-  const retrievalQuery = buildRetrievalQuery(task, context);
+  const taskRecord = task as Record<string, unknown>;
+  const retrievalQuery = buildRetrievalQuery(taskRecord, context);
   let resolvedCitations: DraftCitation[] = Array.isArray(citations) ? [...citations] : [];
   let retrievedEvidence = '';
+  let retrievedChunkIds: string[] = [];
 
   try {
     const retrieval = await retrieveKnowledgeForDraft(
       vectorStore,
       reranker,
       projectId,
-      retrievalQuery
+      retrievalQuery,
+      {
+        topK: ragEnv.retrievalTopK,
+        topN: ragEnv.rerankTopN,
+        minScore: ragEnv.retrievalMinScore,
+      }
     );
     retrievedEvidence = retrieval.evidenceText;
+    retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
     if (resolvedCitations.length === 0) {
       resolvedCitations = retrieval.citations;
     }
@@ -510,43 +556,32 @@ app.post('/api/generate/draft', async (req, res) => {
     console.error('Knowledge retrieval failed:', error);
   }
 
-  const generationContext = getGenerationContext(projectId, task);
-  generationContext.retrievedEvidence = retrievedEvidence;
+  const generationContext = getGenerationContext(projectId);
+  generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
 
-  const prompt = `请根据以下项目上下文撰写第${chapterNo}章。
-
-写作目标：${goal}
-叙事视角：${pov}
-
-系统提示：${context.systemPromptText}
-人物设定：${context.personaProfile}
-大纲总结：${context.outlineSummary || '（无）'}
-近期章节摘要：${generationContext.chapterContext || '（无）'}
-
-要求：
-1. 保持与前面章节的情节连贯
-2. 人物行为符合设定
-3. ${buildTargetWordsRequirement(task.targetWords)}`;
+  const prompt = [
+    `请撰写第${chapterNo}章小说正文。`,
+    `写作目标：${goal}`,
+    `叙事视角：${pov}`,
+    `要求：保持情节连贯、人物行为符合【叙事上下文】与【检索证据】（如有）；${buildTargetWordsRequirement(task.targetWords)}`,
+  ].join('\n');
 
   const traceSpanId = startSpan(requestTraceId, 'generate.draft', {
     projectId,
     chapterNo,
     task,
   });
-  console.log({
-    prompt,
-    projectId,
-    systemPrompt: context.systemPromptText,
-    retrievalQuery,
-    retrievedEvidence,
-    context: { task, citations: resolvedCitations },
-    useSSE: true,
-  });
+
   const trace = await generationService.createTrace({
     prompt,
     projectId,
     systemPrompt: context.systemPromptText,
-    context: { task, citations: resolvedCitations, retrievalQuery },
+    context: {
+      task,
+      citations: resolvedCitations,
+      retrieval_query: retrievalQuery,
+      retrieved_chunk_ids: retrievedChunkIds,
+    },
     useSSE: true,
   });
 

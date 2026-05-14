@@ -1143,7 +1143,7 @@ export class ProjectsService {
     return {
       draftText,
       reasoningBrief:
-        '已按项目维度拼接 systemPrompt + persona + outline + recent chapters 生成草稿。',
+        '已由 RAG Orchestrator 注入【叙事上下文】与向量【检索证据】（TopK→TopN），并完成章节草稿生成。',
       citations,
       consistencyNotes,
       usedRelationEvents,
