@@ -85,12 +85,36 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
 };
 
 /**
- * 模板键到模板对象的映射（AQ-112）
+ * 通用章节续写（AQ-122）
+ *
+ * 运行时由 `services/rag-orchestrator` 的 `GenerationService.buildPrompt` 拼装为：
+ * 【系统指令】← 项目 `systemPromptText`（或章节优化的 `systemPromptOverride`）
+ * 【叙事上下文】← 人物 / 大纲 / 近期章节摘要 / 已选关系备忘
+ * 【检索证据】← Qdrant 向量 TopK 召回 + 重排 TopN（`formatEvidence` 含 `chunk_id` 与文档标题）
+ * 【用户需求】← 调用方 `prompt` 正文
+ *
+ * 治理占位符 `{{narrativeContext}}` / `{{retrievedEvidence}}` 与上述中文分节一一对应，便于审计与模板 diff。
+ */
+export const writeChapterTaskTemplate: PromptTemplate = {
+  id: 'write.chapter',
+  name: '通用章节续写（叙事上下文 + 检索证据）',
+  version: '1.1.0',
+  category: 'task',
+  status: 'published',
+  systemPromptText:
+    '写作时请区分「叙事上下文」（项目摘要与设定）与「检索证据」（知识库召回）；证据块仅作参考，不得当作已发表正文复述。',
+  content:
+    '占位说明：{{narrativeContext}}、{{retrievedEvidence}} 由 Orchestrator 注入；本模板 id 供 templateKey 扩展与文档对齐。',
+};
+
+/**
+ * 模板键到模板对象的映射（AQ-112 + AQ-122）
  * orchestrator 在 /api/generate 收到 templateKey 时按此查找。
  */
 export const templateRegistry: Record<string, PromptTemplate> = {
   [chapterOptimizePlanTemplate.id]: chapterOptimizePlanTemplate,
   [chapterOptimizeDraftTemplate.id]: chapterOptimizeDraftTemplate,
+  [writeChapterTaskTemplate.id]: writeChapterTaskTemplate,
 };
 
 export function findTemplateByKey(key: string | undefined | null): PromptTemplate | undefined {

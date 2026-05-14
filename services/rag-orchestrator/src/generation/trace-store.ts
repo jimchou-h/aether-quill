@@ -58,9 +58,14 @@ export class TraceStore {
 
   update(traceId: string, updates: Partial<TraceRecord>): void {
     const trace = this.traces.find((t) => t.id === traceId);
-    if (trace) {
-      Object.assign(trace, updates);
+    if (!trace) {
+      return;
     }
+    const { context: incomingContext, ...rest } = updates;
+    if (incomingContext && typeof incomingContext === 'object') {
+      trace.context = { ...(trace.context || {}), ...incomingContext };
+    }
+    Object.assign(trace, rest);
   }
 
   findById(traceId: string): TraceRecord | undefined {

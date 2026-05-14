@@ -15,6 +15,38 @@ export interface KnowledgeRetrievalResult {
   query: string;
 }
 
+/** 供 /api/generate 检索：用户 prompt +（可选）任务字段 + 项目侧摘要，单次拼接即 V1「query rewrite」 */
+export function buildGenerationRetrievalQuery(
+  userPrompt: string,
+  projectCtx: { outlineSummary: string; personaProfile: string },
+  extraContext?: Record<string, unknown>
+): string {
+  const parts: string[] = [];
+  const trimmed = userPrompt.trim();
+  if (trimmed) {
+    parts.push(trimmed);
+  }
+
+  const task = extraContext?.task;
+  const isTaskObject = typeof task === 'object' && task !== null && !Array.isArray(task);
+
+  if (isTaskObject) {
+    const tail = buildRetrievalQuery(task as Record<string, unknown>, projectCtx);
+    if (tail.trim()) {
+      parts.push(tail.trim());
+    }
+  } else {
+    if (projectCtx.outlineSummary.trim()) {
+      parts.push(projectCtx.outlineSummary.trim().slice(0, 800));
+    }
+    if (projectCtx.personaProfile.trim() && projectCtx.personaProfile !== '未配置人物设定') {
+      parts.push(projectCtx.personaProfile.trim().slice(0, 500));
+    }
+  }
+
+  return parts.join('\n\n');
+}
+
 export function buildRetrievalQuery(
   task: Record<string, unknown>,
   context: { outlineSummary: string; personaProfile: string }
@@ -63,7 +95,8 @@ export function formatEvidence(chunks: ChunkWithEmbedding[]): string {
     .map((chunk, index) => {
       const title =
         typeof chunk.metadata?.docTitle === 'string' ? chunk.metadata.docTitle : '未命名文档';
-      return `[证据${index + 1}] ${title}\n${chunk.content.trim()}`;
+      const cid = chunk.id?.trim() || `chunk-${index + 1}`;
+      return `[证据${index + 1}] chunk_id=${cid} doc=${title}\n${chunk.content.trim()}`;
     })
     .join('\n\n');
 }
