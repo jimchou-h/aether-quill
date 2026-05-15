@@ -216,10 +216,7 @@ export const apiClient = {
     return this.unwrapPayload<ProjectSettings>(response.data);
   },
 
-  async updateSettings(
-    projectId: string,
-    payload: { systemPromptText?: string; activePersonaId?: string | null }
-  ) {
+  async updateSettings(projectId: string, payload: components['schemas']['ProjectSettingsUpdate']) {
     const response = await http.put(`/api/projects/${projectId}/settings`, payload);
     return this.unwrapPayload<ProjectSettings>(response.data);
   },
@@ -595,6 +592,8 @@ export const apiClient = {
           title: doc.title,
           content: doc.content,
         })),
+        chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
+        generationTemperature: workspace.settings.generationTemperature,
         selectedRelationMemory: buildRelationMemoryBlock(selectedEvents),
         usedRelationEvents: selectedEvents,
       }),
@@ -1011,11 +1010,7 @@ export interface DocumentVersionItem {
   createdAt: string;
 }
 
-export interface ProjectSettings {
-  systemPromptText: string;
-  activePersonaId: string | null;
-  updatedAt: string;
-}
+export type ProjectSettings = components['schemas']['ProjectSettings'];
 
 export interface PersonaItem {
   id: string;

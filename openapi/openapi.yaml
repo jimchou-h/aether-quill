@@ -37,6 +37,8 @@ paths:
     $ref: './paths/projects/index.yaml'
   /api/projects/{id}:
     $ref: './paths/projects/by-id.yaml'
+  /api/projects/{id}/settings:
+    $ref: './paths/projects/project-settings.yaml'
   /api/projects/{id}/documents:
     $ref: './paths/projects/documents.yaml'
   /api/documents/{id}/reindex:
@@ -350,6 +352,55 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RelationEvent'
+    ProjectSettings:
+      type: object
+      required:
+        - systemPromptText
+        - activePersonaId
+        - chapterSummaryPromptCount
+        - generationTemperature
+        - updatedAt
+      properties:
+        systemPromptText:
+          type: string
+          description: 项目级系统提示词（与 Prompt 配置可并存，生成链路以本字段为准）
+        activePersonaId:
+          type: string
+          nullable: true
+          description: 当前启用的已发布人物卡 ID
+        chapterSummaryPromptCount:
+          type: integer
+          minimum: 0
+          maximum: 20
+          default: 3
+          description: 叙事上下文中注入的「当前章之前」章节摘要条数；0 表示不注入
+        generationTemperature:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 2
+          default: 0.7
+          description: 章节生成等主链路的采样温度（项目级）
+        updatedAt:
+          type: string
+          format: date-time
+    ProjectSettingsUpdate:
+      type: object
+      properties:
+        systemPromptText:
+          type: string
+        activePersonaId:
+          type: string
+          nullable: true
+        chapterSummaryPromptCount:
+          type: integer
+          minimum: 0
+          maximum: 20
+        generationTemperature:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 2
     Persona:
       type: object
       required:

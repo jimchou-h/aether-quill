@@ -1,0 +1,231 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from 'vue';
+import { apiClient, type ProjectSettings } from '../../services/api';
+import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
+
+const props = defineProps<{
+  projectId: string;
+}>();
+
+const summaryCount = ref(3);
+const temperature = ref(0.7);
+const saved = ref<{ summaryCount: number; temperature: number } | null>(null);
+
+const loading = ref(false);
+const saving = ref(false);
+const errorMessage = ref('');
+const message = ref('');
+
+const isDirty = computed(() => {
+  if (!saved.value) {
+    return false;
+  }
+  return (
+    summaryCount.value !== saved.value.summaryCount || temperature.value !== saved.value.temperature
+  );
+});
+
+function applyFromSettings(s: ProjectSettings) {
+  summaryCount.value = s.chapterSummaryPromptCount;
+  temperature.value = s.generationTemperature;
+  saved.value = { summaryCount: s.chapterSummaryPromptCount, temperature: s.generationTemperature };
+}
+
+async function load() {
+  loading.value = true;
+  errorMessage.value = '';
+  try {
+    const s = await apiClient.getSettings(props.projectId);
+    applyFromSettings(s);
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '加载生成偏好失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleSave() {
+  saving.value = true;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    const s = await apiClient.updateSettings(props.projectId, {
+      chapterSummaryPromptCount: summaryCount.value,
+      generationTemperature: temperature.value,
+    });
+    applyFromSettings(s);
+    message.value = presentSuccess('生成偏好已保存');
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '保存生成偏好失败');
+  } finally {
+    saving.value = false;
+  }
+}
+
+watch(
+  () => props.projectId,
+  () => {
+    void load();
+  }
+);
+
+onMounted(() => {
+  void load();
+});
+</script>
+
+<template>
+  <section class="panel">
+    <h3 class="panel-title">生成偏好</h3>
+    <p class="field-hint">
+      「摘要数」决定叙事上下文中注入多少条<strong>当前章节之前</strong>的章节摘要（按章号从新到旧）；设为
+      0 则不注入摘要段。「温度」作用于章节流式生成等主链路（也可在单次请求中覆盖）。
+    </p>
+
+    <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
+    <p v-if="message" class="message message-ok">{{ message }}</p>
+    <p v-if="loading" class="message">正在加载生成偏好...</p>
+
+    <template v-if="!loading">
+      <div class="row">
+        <label class="field-label" for="aq-summary-count">Prompt 携带章节摘要数</label>
+        <input
+          id="aq-summary-count"
+          v-model.number="summaryCount"
+          class="field-input"
+          type="number"
+          min="0"
+          max="20"
+          step="1"
+        />
+      </div>
+      <p class="field-hint inline-hint">
+        范围 0~20；默认 3。仅选取「章号 &lt; 当前写作章节」且有摘要文本的章节。
+      </p>
+
+      <div class="row">
+        <label class="field-label" for="aq-temperature">生成温度（temperature）</label>
+        <input
+          id="aq-temperature"
+          v-model.number="temperature"
+          class="field-input"
+          type="number"
+          min="0"
+          max="2"
+          step="0.05"
+        />
+      </div>
+      <p class="field-hint inline-hint">范围 0~2；默认 0.7。数值越高，模型输出越发散。</p>
+
+      <div class="meta-bar">
+        <span v-if="isDirty" class="dirty-badge">未保存</span>
+      </div>
+
+      <div class="action-bar">
+        <button
+          class="primary-button"
+          type="button"
+          :disabled="saving || !isDirty"
+          @click="handleSave"
+        >
+          {{ saving ? '保存中...' : '保存生成偏好' }}
+        </button>
+      </div>
+    </template>
+  </section>
+</template>
+
+<style scoped>
+.panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #fff;
+}
+
+.panel-title {
+  margin-bottom: 0.35rem;
+  font-size: 1rem;
+}
+
+.field-hint {
+  color: #9ca3af;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.inline-hint {
+  margin-top: -0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.message {
+  margin-bottom: 0.75rem;
+}
+
+.message-ok {
+  color: #027a48;
+}
+
+.message-error {
+  color: #b42318;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.field-label {
+  min-width: 11rem;
+  font-size: 0.9rem;
+  color: #374151;
+}
+
+.field-input {
+  width: 8rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.meta-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.dirty-badge {
+  font-size: 0.75rem;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+}
+
+.action-bar {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.primary-button {
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.primary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+</style>

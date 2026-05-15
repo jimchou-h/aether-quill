@@ -31,6 +31,12 @@ post:
               type: boolean
               default: true
               description: Use Server-Sent Events for streaming
+            temperature:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 2
+              description: 可选；覆盖项目设置中的 generationTemperature（本次请求）
   responses:
     '200':
       description: Generation started

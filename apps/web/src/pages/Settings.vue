@@ -5,6 +5,7 @@ import { apiClient } from '../services/api';
 import { usePromptConfigStore } from '../stores/promptConfig';
 import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
 import OutlineSummaryEditor from '../components/settings/OutlineSummaryEditor.vue';
+import ProjectGenerationPreferences from '../components/settings/ProjectGenerationPreferences.vue';
 import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
 import { presentErrorFromCaught } from '../utils/pageFeedback';
 
@@ -49,6 +50,7 @@ onMounted(() => {
 
     <template v-if="!loading">
       <OutlineSummaryEditor :project-id="projectId" />
+      <ProjectGenerationPreferences :project-id="projectId" />
       <SystemPromptEditor :project-id="projectId" />
       <PromptVersionHistory :project-id="projectId" />
     </template>

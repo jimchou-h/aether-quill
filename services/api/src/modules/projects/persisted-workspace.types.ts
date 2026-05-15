@@ -28,7 +28,13 @@ export interface PersistedProjectState {
   }>;
   settings: Record<
     string,
-    { systemPromptText: string; activePersonaId: string | null; updatedAt: string }
+    {
+      systemPromptText: string;
+      activePersonaId: string | null;
+      chapterSummaryPromptCount?: number;
+      generationTemperature?: number;
+      updatedAt: string;
+    }
   >;
   personas: Record<
     string,

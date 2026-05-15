@@ -16,6 +16,13 @@ import {
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
+import { pickPriorChapterSummariesForPrompt } from './context/prior-chapter-summaries';
+import {
+  clampChapterSummaryPromptCount,
+  clampGenerationTemperature,
+  DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+  DEFAULT_GENERATION_TEMPERATURE,
+} from './context/generation-preferences';
 import { ConsistencyChecker } from './consistency';
 import {
   logger,
@@ -70,6 +77,10 @@ interface ProjectContext {
   personaProfile: string;
   outlineSummary: string;
   chapters: ContextChapter[];
+  /** 叙事上下文注入：当前章之前最近 N 章摘要（0 不注入） */
+  chapterSummaryPromptCount: number;
+  /** 主生成链路采样温度 */
+  generationTemperature: number;
   /** 项目知识库文档全文列表，用于标题匹配后整文注入 */
   knowledgeDocuments?: KnowledgeDocumentPayload[];
   selectedRelationMemory?: string;
@@ -93,13 +104,15 @@ function getOrCreateContext(projectId: string) {
       personaProfile: '未配置人物设定',
       outlineSummary: '',
       chapters: [],
+      chapterSummaryPromptCount: DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+      generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
       updatedAt: new Date().toISOString(),
     });
   }
   return projectContextStore.get(projectId)!;
 }
 
-function buildNarrativeContext(ctx: ProjectContext): string {
+function buildNarrativeContext(ctx: ProjectContext, currentChapterNo?: number): string {
   const sections: string[] = [];
   if (ctx.personaProfile && ctx.personaProfile !== '未配置人物设定') {
     sections.push(`【人物设定】\n${ctx.personaProfile}`);
@@ -107,10 +120,14 @@ function buildNarrativeContext(ctx: ProjectContext): string {
   if (ctx.outlineSummary?.trim()) {
     sections.push(`【大纲总结】\n${ctx.outlineSummary.trim()}`);
   }
-  const recentChapters = ctx.chapters.slice(-3);
-  if (recentChapters.length > 0) {
+  const maxCount = clampChapterSummaryPromptCount(ctx.chapterSummaryPromptCount);
+  const prior = pickPriorChapterSummariesForPrompt(ctx.chapters, {
+    currentChapterNo,
+    maxCount,
+  });
+  if (prior.length > 0) {
     sections.push(
-      `【近期章节摘要】\n${recentChapters
+      `【近期章节摘要】\n${prior
         .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
         .join('\n')}`
     );
@@ -121,11 +138,22 @@ function buildNarrativeContext(ctx: ProjectContext): string {
   return sections.join('\n\n');
 }
 
-function getGenerationContext(projectId: string): GenerationContext {
+function resolveGenerationTemperature(bodyTemp: unknown, ctx: ProjectContext): number {
+  if (typeof bodyTemp === 'number' && Number.isFinite(bodyTemp)) {
+    return clampGenerationTemperature(bodyTemp);
+  }
+  const env = Number(process.env.PROVIDER_TEMPERATURE || 0.7);
+  if (typeof ctx.generationTemperature === 'number' && Number.isFinite(ctx.generationTemperature)) {
+    return clampGenerationTemperature(ctx.generationTemperature);
+  }
+  return clampGenerationTemperature(env);
+}
+
+function getGenerationContext(projectId: string, currentChapterNo?: number): GenerationContext {
   const ctx = getOrCreateContext(projectId);
   return {
     systemPromptText: ctx.systemPromptText,
-    narrativeContext: buildNarrativeContext(ctx),
+    narrativeContext: buildNarrativeContext(ctx, currentChapterNo),
   };
 }
 
@@ -304,6 +332,15 @@ app.post('/api/projects/:projectId/context', (req, res) => {
         return { id, title, content };
       })
       .filter((x): x is KnowledgeDocumentPayload => Boolean(x));
+  }
+
+  if (payload.chapterSummaryPromptCount !== undefined) {
+    context.chapterSummaryPromptCount = clampChapterSummaryPromptCount(
+      payload.chapterSummaryPromptCount
+    );
+  }
+  if (payload.generationTemperature !== undefined) {
+    context.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
   }
 
   context.updatedAt = new Date().toISOString();
@@ -488,6 +525,7 @@ app.post('/api/generate', async (req, res) => {
     Number.isFinite(draftChapterFromTask) && draftChapterFromTask > 0
       ? draftChapterFromTask
       : extraChapterNo;
+  const narrativeCurrentChapter = structuredChapterNo > 0 ? structuredChapterNo : undefined;
   const useStructuredChapterKb = structuredChapterNo > 0;
   const chapterScopedEmbeddingQuery = resolveChapterScopedEmbeddingQuery(
     projectCtx,
@@ -541,7 +579,7 @@ app.post('/api/generate', async (req, res) => {
     console.error('Generate retrieval failed:', error);
   }
 
-  const generationContext = getGenerationContext(projectId);
+  const generationContext = getGenerationContext(projectId, narrativeCurrentChapter);
 
   if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {
     generationContext.systemPromptText = systemPromptOverride.trim();
@@ -549,9 +587,12 @@ app.post('/api/generate', async (req, res) => {
 
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
 
+  const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, projectCtx);
+
   const traceContext: Record<string, unknown> = {
     retrieval_query: retrievalQuery,
     retrieved_chunk_ids: retrievedChunkIds,
+    generation_temperature: resolvedTemperature,
     ...(structuredKbTrace
       ? {
           title_matched_document_ids: structuredKbTrace.titleMatchedDocumentIds,
@@ -568,6 +609,7 @@ app.post('/api/generate', async (req, res) => {
     systemPrompt: generationContext.systemPromptText,
     context: traceContext,
     useSSE,
+    temperature: resolvedTemperature,
   });
 
   if (useSSE) {
@@ -689,7 +731,8 @@ app.post('/api/generate/draft', async (req, res) => {
     console.error('Knowledge retrieval failed:', error);
   }
 
-  const generationContext = getGenerationContext(projectId);
+  const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, context);
+  const generationContext = getGenerationContext(projectId, chapterNo > 0 ? chapterNo : undefined);
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
 
   const prompt = [
@@ -716,8 +759,10 @@ app.post('/api/generate/draft', async (req, res) => {
       retrieved_chunk_ids: retrievedChunkIds,
       title_matched_document_ids: structuredRetrieval.titleMatchedDocumentIds,
       retrieval_skipped_no_structured: structuredRetrieval.retrievalSkippedNoStructured === true,
+      generation_temperature: resolvedTemperature,
     },
     useSSE: true,
+    temperature: resolvedTemperature,
   });
 
   let fullDraftText = '';
