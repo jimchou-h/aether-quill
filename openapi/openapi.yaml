@@ -45,6 +45,8 @@ paths:
     $ref: './paths/documents/reindex.yaml'
   /api/documents/{id}/chunks:
     $ref: './paths/documents/chunks.yaml'
+  /api/documents/batch-get:
+    $ref: './paths/documents/batch-get.yaml'
   /api/projects/{id}/generate:
     $ref: './paths/projects/generate.yaml'
   /api/projects/{id}/generation-traces:
@@ -224,6 +226,68 @@ components:
         updatedAt:
           type: string
           format: date-time
+    DocumentBatchItem:
+      type: object
+      required:
+        - id
+        - title
+        - content
+        - type
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+          description: Inferred document type (persona_card, world_doc, outline_doc, document)
+    RetrievalFullDocument:
+      type: object
+      required:
+        - documentId
+        - title
+        - content
+        - docType
+        - matchedSections
+        - reason
+        - docScore
+        - hitChunkIds
+      properties:
+        documentId:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        docType:
+          type: string
+        matchedSections:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+        docScore:
+          type: number
+        hitChunkIds:
+          type: array
+          items:
+            type: string
+    KnowledgeRetrievalEvidence:
+      type: object
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Chunk'
+        fullDocuments:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievalFullDocument'
+        evidenceText:
+          type: string
     Chunk:
       type: object
       required:

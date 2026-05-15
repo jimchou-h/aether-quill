@@ -71,8 +71,12 @@ export async function replaceDocumentVectorsInQdrant(input: {
       project_id: input.projectId,
       document_id: input.documentId,
       document_type: input.documentType,
+      doc_type: typeof c.metadata?.doc_type === 'string' ? c.metadata.doc_type : input.documentType,
       version_id: input.versionId,
       chunk_id: c.id,
+      section: typeof c.metadata?.section === 'string' ? c.metadata.section : 'general',
+      section_title:
+        typeof c.metadata?.section_title === 'string' ? c.metadata.section_title : input.docTitle,
       chapter_no: null,
       character_tags: [],
       timeline_tags: [],

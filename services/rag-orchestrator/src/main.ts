@@ -540,6 +540,7 @@ app.post('/api/generate', async (req, res) => {
 
   let retrievedChunkIds: string[] = [];
   let retrievedEvidence = '';
+  let retrievedFullDocuments: Array<Record<string, unknown>> = [];
   try {
     if (useStructuredChapterKb) {
       const sr = buildStructuredKnowledgeEvidence(structuredChapterNo, {
@@ -557,6 +558,7 @@ app.post('/api/generate', async (req, res) => {
       retrievalQuery = sr.query.trim() ? sr.query : retrievalQuery;
       retrievedEvidence = sr.evidenceText;
       retrievedChunkIds = sr.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+      retrievedFullDocuments = (sr.fullDocuments ?? []).map((d) => ({ ...d }));
     } else {
       const retrieval = await retrieveKnowledgeForDraft(
         vectorStore,
@@ -567,6 +569,8 @@ app.post('/api/generate', async (req, res) => {
           topK: ragEnv.retrievalTopK,
           topN: ragEnv.rerankTopN,
           minScore: ragEnv.retrievalMinScore,
+          apiBaseUrl: API_BASE_URL,
+          enrichFullDocuments: true,
           ...(chapterScopedEmbeddingQuery !== undefined
             ? { embeddingQuery: chapterScopedEmbeddingQuery }
             : {}),
@@ -574,6 +578,7 @@ app.post('/api/generate', async (req, res) => {
       );
       retrievedEvidence = retrieval.evidenceText;
       retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+      retrievedFullDocuments = (retrieval.fullDocuments ?? []).map((d) => ({ ...d }));
     }
   } catch (error) {
     console.error('Generate retrieval failed:', error);
@@ -592,6 +597,7 @@ app.post('/api/generate', async (req, res) => {
   const traceContext: Record<string, unknown> = {
     retrieval_query: retrievalQuery,
     retrieved_chunk_ids: retrievedChunkIds,
+    full_documents: retrievedFullDocuments,
     generation_temperature: resolvedTemperature,
     ...(structuredKbTrace
       ? {
@@ -718,12 +724,14 @@ app.post('/api/generate/draft', async (req, res) => {
   let resolvedCitations: DraftCitation[] = Array.isArray(citations) ? [...citations] : [];
   let retrievedEvidence = '';
   let retrievedChunkIds: string[] = [];
+  let retrievedFullDocuments: Array<Record<string, unknown>> = [];
 
   try {
     retrievedEvidence = structuredRetrieval.evidenceText;
     retrievedChunkIds = structuredRetrieval.chunks
       .map((c) => c.id)
       .filter((id) => Boolean(id?.trim()));
+    retrievedFullDocuments = (structuredRetrieval.fullDocuments ?? []).map((d) => ({ ...d }));
     if (resolvedCitations.length === 0) {
       resolvedCitations = structuredRetrieval.citations;
     }
@@ -757,6 +765,7 @@ app.post('/api/generate/draft', async (req, res) => {
       citations: resolvedCitations,
       retrieval_query: retrievalQuery,
       retrieved_chunk_ids: retrievedChunkIds,
+      full_documents: retrievedFullDocuments,
       title_matched_document_ids: structuredRetrieval.titleMatchedDocumentIds,
       retrieval_skipped_no_structured: structuredRetrieval.retrievalSkippedNoStructured === true,
       generation_temperature: resolvedTemperature,

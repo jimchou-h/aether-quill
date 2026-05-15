@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { getResolvedRagInfrastructureEnv } from '@aether-quill/config';
 import { getEmbeddingProvider } from '@aether-quill/model-providers';
+import { inferDocType, sectionsForIngestion } from './doc-section-parser';
 import { countChunkTokens, segmentForIngestion } from './segmenter';
 
 export interface ChunkResult {
@@ -56,12 +57,8 @@ export class IngestionProcessor {
 
     const content: string = doc.content || '';
     const env = getResolvedRagInfrastructureEnv();
-
-    const segmentTexts = segmentForIngestion(content, {
-      maxTokensPerChunk: env.ingestChunkTokenSize,
-      tokenOverlap: env.ingestChunkTokenOverlap,
-      mode: env.ingestSegmenter,
-    });
+    const docType = inferDocType(documentTitle, content);
+    const sections = sectionsForIngestion(documentTitle, content, docType);
 
     const draftChunks: Array<{
       id: string;
@@ -71,36 +68,68 @@ export class IngestionProcessor {
 
     onProgress?.(0);
 
-    const totalSeg = Math.max(segmentTexts.length, 1);
-    segmentTexts.forEach((text, index) => {
+    let segIndex = 0;
+    const plannedSegments: Array<{
+      text: string;
+      section: string;
+      sectionTitle: string;
+    }> = [];
+
+    for (const section of sections) {
+      const segmentTexts = segmentForIngestion(section.content, {
+        maxTokensPerChunk: env.ingestChunkTokenSize,
+        tokenOverlap: env.ingestChunkTokenOverlap,
+        mode: env.ingestSegmenter,
+      });
+      for (const text of segmentTexts) {
+        plannedSegments.push({
+          text,
+          section: section.section,
+          sectionTitle: section.sectionTitle,
+        });
+      }
+    }
+
+    const totalSeg = Math.max(plannedSegments.length, 1);
+    plannedSegments.forEach((seg, index) => {
       const progress = Math.min(Math.round(((index + 1) / totalSeg) * 90), 90);
       onProgress?.(progress);
 
       draftChunks.push({
-        id: `${documentId}-seg-${index}`,
-        content: text,
+        id: `${documentId}-seg-${segIndex}`,
+        content: seg.text,
         metadata: {
-          index,
+          index: segIndex,
           total: totalSeg,
-          docTitle: doc.title,
+          docTitle: documentTitle,
           documentId,
+          doc_type: docType,
+          document_type: docType,
+          section: seg.section,
+          section_title: seg.sectionTitle,
           ingestSegmenter: env.ingestSegmenter,
-          tokenCount: countChunkTokens(text),
+          tokenCount: countChunkTokens(seg.text),
         },
       });
+      segIndex += 1;
     });
 
     if (draftChunks.length === 0) {
+      const fallback = doc.content || '';
       draftChunks.push({
         id: `${documentId}-seg-0`,
-        content: doc.content || '',
+        content: fallback,
         metadata: {
           index: 0,
           total: 1,
-          docTitle: doc.title,
+          docTitle: documentTitle,
           documentId,
+          doc_type: docType,
+          document_type: docType,
+          section: 'general',
+          section_title: '正文',
           ingestSegmenter: env.ingestSegmenter,
-          tokenCount: countChunkTokens(doc.content || ''),
+          tokenCount: countChunkTokens(fallback),
         },
       });
     }

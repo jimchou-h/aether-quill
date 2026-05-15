@@ -15,6 +15,13 @@ export class DocumentsController {
     return this.documentsService.create(projectId, data);
   }
 
+  @Post('api/documents/batch-get')
+  batchGet(@Body() body: { projectId: string; documentIds: string[] }) {
+    return {
+      documents: this.documentsService.batchGet(body.projectId, body.documentIds ?? []),
+    };
+  }
+
   @Get('api/documents/:id')
   findOne(@Param('id') id: string) {
     return this.documentsService.findById(id);
