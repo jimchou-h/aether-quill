@@ -1,6 +1,13 @@
 import { Reranker } from './reranker';
+import {
+  enrichVectorRetrieval,
+  buildFullDocumentsFromTitleMatches,
+  type RetrievalFullDocument,
+} from './retrieval-enrichment';
 import { ChunkWithEmbedding } from './types';
 import { VectorStore } from './vector-store';
+
+export type { RetrievalFullDocument };
 
 export interface DraftCitation {
   sourceType: string;
@@ -13,6 +20,7 @@ export interface KnowledgeRetrievalResult {
   citations: DraftCitation[];
   evidenceText: string;
   query: string;
+  fullDocuments?: RetrievalFullDocument[];
 }
 
 /** 供 /api/generate 检索：用户 prompt +（可选）任务字段 + 项目侧摘要，单次拼接即 V1「query rewrite」 */
@@ -184,11 +192,13 @@ export async function retrieveKnowledgeForDraft(
     minScore?: number;
     /** 仅用于向量 embedding；未传则与 `query` 相同 */
     embeddingQuery?: string;
+    apiBaseUrl?: string;
+    enrichFullDocuments?: boolean;
   }
 ): Promise<KnowledgeRetrievalResult> {
   const trimmed = query.trim();
   if (!trimmed) {
-    return { chunks: [], citations: [], evidenceText: '', query: trimmed };
+    return { chunks: [], citations: [], evidenceText: '', query: trimmed, fullDocuments: [] };
   }
 
   const topK = options?.topK ?? 30;
@@ -205,11 +215,26 @@ export async function retrieveKnowledgeForDraft(
   });
   const reranked = reranker.rerank(trimmed, retrieved, topN);
 
+  const shouldEnrich = options?.enrichFullDocuments !== false && Boolean(options?.apiBaseUrl);
+  if (shouldEnrich && options?.apiBaseUrl) {
+    const enriched = await enrichVectorRetrieval(options.apiBaseUrl, projectId, trimmed, reranked, {
+      maxDocs: topN,
+    });
+    return {
+      chunks: enriched.chunks,
+      citations: chunksToCitations(enriched.chunks),
+      evidenceText: enriched.evidenceText || formatEvidence(reranked),
+      query: trimmed,
+      fullDocuments: enriched.fullDocuments,
+    };
+  }
+
   return {
     chunks: reranked,
     citations: chunksToCitations(reranked),
     evidenceText: formatEvidence(reranked),
     query: trimmed,
+    fullDocuments: [],
   };
 }
 
@@ -325,7 +350,17 @@ export function buildStructuredKnowledgeEvidence(
   }
 
   const picked = pickTopTitleMatchedDocuments(matchingText, kbCtx.knowledgeDocuments, topN);
-  const evidenceText = formatFullDocumentKnowledgeEvidence(picked);
+  const fullDocuments = buildFullDocumentsFromTitleMatches(matchingText, picked);
+  const evidenceText =
+    fullDocuments.length > 0
+      ? fullDocuments
+          .map((d, index) => {
+            const sections =
+              d.matchedSections.length > 0 ? d.matchedSections.join(',') : 'title_match';
+            return `[知识全文${index + 1}] document_id=${d.documentId} title=${d.title} sections=${sections}\n命中理由：${d.reason}\n${d.content.trim()}`;
+          })
+          .join('\n\n')
+      : formatFullDocumentKnowledgeEvidence(picked);
   const chunks: ChunkWithEmbedding[] = picked.map((d, i) => ({
     id: `doc-full:${d.id}`,
     documentId: d.id,
@@ -341,5 +376,6 @@ export function buildStructuredKnowledgeEvidence(
     evidenceText,
     query: matchingText,
     titleMatchedDocumentIds: picked.map((d) => d.id),
+    fullDocuments,
   };
 }

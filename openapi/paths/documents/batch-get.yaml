@@ -1,0 +1,48 @@
+post:
+  tags:
+    - Documents
+  summary: Batch get documents by ids
+  description: Fetch multiple documents for a project in one request (used by RAG orchestrator for persona card hydration).
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - projectId
+            - documentIds
+          properties:
+            projectId:
+              type: string
+            documentIds:
+              type: array
+              items:
+                type: string
+              minItems: 1
+              maxItems: 50
+  responses:
+    '200':
+      description: Documents retrieved
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    required:
+                      - documents
+                    properties:
+                      documents:
+                        type: array
+                        items:
+                          $ref: '../../openapi.yaml#/components/schemas/DocumentBatchItem'
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

@@ -127,10 +127,14 @@ export class QueueService {
         });
 
         const language = (process.env.DEFAULT_LANGUAGE || 'zh').trim() || 'zh';
+        const docType =
+          typeof result.chunks[0]?.metadata?.doc_type === 'string'
+            ? String(result.chunks[0].metadata.doc_type)
+            : 'document';
         await replaceDocumentVectorsInQdrant({
           projectId: result.projectId || data.projectId,
           documentId: result.documentId,
-          documentType: 'document',
+          documentType: docType,
           versionId: result.documentVersion,
           docTitle: result.documentTitle,
           language,

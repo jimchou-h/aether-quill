@@ -646,6 +646,65 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/documents/batch-get': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+    /**
+     * Batch get documents by ids
+     * @description Fetch multiple documents for a project in one request
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            projectId: string;
+            documentIds: string[];
+          };
+        };
+      };
+      responses: {
+        /** @description Documents retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: {
+                documents?: components['schemas']['DocumentBatchItem'][];
+              };
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+  };
   '/api/documents/{id}/reindex': {
     parameters: {
       query?: never;
@@ -1893,6 +1952,27 @@ export interface components {
       createdAt?: string;
       /** Format: date-time */
       updatedAt?: string;
+    };
+    DocumentBatchItem: {
+      id: string;
+      title: string;
+      content: string;
+      type: string;
+    };
+    RetrievalFullDocument: {
+      documentId: string;
+      title: string;
+      content: string;
+      docType: string;
+      matchedSections: string[];
+      reason: string;
+      docScore: number;
+      hitChunkIds: string[];
+    };
+    KnowledgeRetrievalEvidence: {
+      chunks?: components['schemas']['Chunk'][];
+      fullDocuments?: components['schemas']['RetrievalFullDocument'][];
+      evidenceText?: string;
     };
     Chunk: {
       /** Format: uuid */

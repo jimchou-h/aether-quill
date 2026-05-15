@@ -20,6 +20,7 @@ import {
   type PersistedDocumentsPayload,
   type RestoredDocumentsState,
 } from '../../persistence/documents-pg-sync';
+import { inferDocumentKnowledgeType } from './documents-type.util';
 
 interface PersistedDocumentState {
   documents: Array<{
@@ -252,6 +253,32 @@ export class DocumentsService implements OnModuleInit {
   getVersions(documentId: string): DocumentVersion[] {
     this.findById(documentId);
     return this.versions.get(documentId) || [];
+  }
+
+  batchGet(
+    projectId: string,
+    documentIds: string[]
+  ): Array<{ id: string; title: string; content: string; type: string }> {
+    this.projectsService.findOne(projectId);
+    const uniqueIds = [...new Set(documentIds.map((id) => id.trim()).filter(Boolean))].slice(0, 50);
+    if (uniqueIds.length === 0) {
+      throw new BadRequestException('documentIds 不能为空');
+    }
+
+    const out: Array<{ id: string; title: string; content: string; type: string }> = [];
+    for (const id of uniqueIds) {
+      const doc = this.documents.find((d) => d.id === id && d.projectId === projectId);
+      if (!doc) {
+        continue;
+      }
+      out.push({
+        id: doc.id,
+        title: doc.title,
+        content: doc.content,
+        type: inferDocumentKnowledgeType(doc.title, doc.content),
+      });
+    }
+    return out;
   }
 
   commitIndexResult(documentId: string, payload: CommitIndexResultInput): DocumentRecord {

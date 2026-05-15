@@ -41,28 +41,45 @@ const personaNames = ref<string[]>([]);
 /** 提示词控制台引用 */
 const promptConsoleRef = ref<InstanceType<typeof PromptConsole> | null>(null);
 
+function applyWorkspaceSnapshot(workspace: Awaited<ReturnType<typeof apiClient.getWorkspace>>) {
+  projectName.value = workspace.project.name;
+  chapterCount.value = workspace.knowledge.chapters.length;
+  outlineReady.value = Boolean(workspace.knowledge.outlineSummary.trim());
+  outlineSummary.value = workspace.knowledge.outlineSummary;
+  activePersonaName.value =
+    workspace.personas.find(
+      (item: { id: string; name: string }) => item.id === workspace.settings.activePersonaId
+    )?.name || '未指定';
+  personaNames.value = workspace.personas.map((item: { name: string }) => item.name);
+  editorStore.setChapters(workspace.knowledge.chapters);
+}
+
 /**
- * 加载工作台数据
+ * 加载工作台数据（首屏展示 loading，会短暂卸载子组件）
  */
 async function loadWorkspace() {
   loading.value = true;
   errorMessage.value = '';
   try {
     const workspace = await apiClient.getWorkspace(projectId.value);
-    projectName.value = workspace.project.name;
-    chapterCount.value = workspace.knowledge.chapters.length;
-    outlineReady.value = Boolean(workspace.knowledge.outlineSummary.trim());
-    outlineSummary.value = workspace.knowledge.outlineSummary;
-    activePersonaName.value =
-      workspace.personas.find(
-        (item: { id: string; name: string }) => item.id === workspace.settings.activePersonaId
-      )?.name || '未指定';
-    personaNames.value = workspace.personas.map((item: { name: string }) => item.name);
-    editorStore.setChapters(workspace.knowledge.chapters);
+    applyWorkspaceSnapshot(workspace);
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '加载工作台失败');
   } finally {
     loading.value = false;
+  }
+}
+
+/**
+ * 静默同步工作台数据（不切换 loading，避免卸载 PromptConsole 导致生成参数丢失）
+ */
+async function refreshWorkspaceData() {
+  errorMessage.value = '';
+  try {
+    const workspace = await apiClient.getWorkspace(projectId.value);
+    applyWorkspaceSnapshot(workspace);
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '刷新工作台数据失败');
   }
 }
 
@@ -169,7 +186,7 @@ onMounted(() => {
               :persona-names="personaNames"
               :knowledge-chapters="editorStore.chapters"
               @generate="handleGenerate"
-              @structured-parsed="loadWorkspace"
+              @structured-parsed="refreshWorkspaceData"
             />
 
             <ConsistencyAlert :notes="generationStore.consistencyNotes" />

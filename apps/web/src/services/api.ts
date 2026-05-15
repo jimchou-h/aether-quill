@@ -49,6 +49,9 @@ export interface CitationItem {
   snippet: string;
 }
 
+/** 检索命中的完整文档（角色卡回表等），与 orchestrator trace `full_documents` 对齐 */
+export type RetrievalFullDocument = components['schemas']['RetrievalFullDocument'];
+
 export interface ConsistencyNote {
   level: 'info' | 'warning' | 'block';
   message: string;
@@ -457,6 +460,14 @@ export const apiClient = {
 
     async getChunks(id: string): Promise<ResponseData<'/api/documents/{id}/chunks', 'get'>> {
       const response = await http.get(`/api/documents/${id}/chunks`);
+      return response.data;
+    },
+
+    async batchGet(
+      projectId: string,
+      documentIds: string[]
+    ): Promise<ResponseData<'/api/documents/batch-get', 'post'>> {
+      const response = await http.post('/api/documents/batch-get', { projectId, documentIds });
       return response.data;
     },
   },
