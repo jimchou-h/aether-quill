@@ -56,6 +56,12 @@ import {
   syncWorkspaceToPostgres,
 } from '../../persistence/workspace-pg-sync';
 import type { PersistedProjectState } from './persisted-workspace.types';
+import {
+  clampChapterSummaryPromptCount,
+  clampGenerationTemperature,
+  DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+  DEFAULT_GENERATION_TEMPERATURE,
+} from './project-settings.util';
 
 function buildTargetWordsInstruction(targetWords?: number): string {
   const parsed = Number(targetWords);
@@ -89,6 +95,10 @@ export interface ProjectMember {
 export interface ProjectSettings {
   systemPromptText: string;
   activePersonaId: string | null;
+  /** 叙事上下文注入：当前章之前最近 N 章摘要，0 表示不注入 */
+  chapterSummaryPromptCount: number;
+  /** 主生成链路采样温度（0~2） */
+  generationTemperature: number;
   updatedAt: Date;
 }
 
@@ -205,6 +215,8 @@ export interface ProjectExportBundle {
   settings: {
     systemPromptText: string;
     activePersonaId: string | null;
+    chapterSummaryPromptCount: number;
+    generationTemperature: number;
     personas: PersonaRecord[];
   };
   summary: {
@@ -415,6 +427,8 @@ export class ProjectsService implements OnModuleInit {
       settings: {
         systemPromptText: settings.systemPromptText,
         activePersonaId: settings.activePersonaId,
+        chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
+        generationTemperature: settings.generationTemperature,
         personas,
       },
       summary: {
@@ -436,12 +450,19 @@ export class ProjectsService implements OnModuleInit {
     }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
-    return this.settingsStore.get(projectId)!;
+    const settings = this.settingsStore.get(projectId)!;
+    this.patchSettingsDefaults(settings);
+    return settings;
   }
 
   updateSettings(
     projectId: string,
-    payload: { systemPromptText?: string; activePersonaId?: string | null },
+    payload: {
+      systemPromptText?: string;
+      activePersonaId?: string | null;
+      chapterSummaryPromptCount?: number;
+      generationTemperature?: number;
+    },
     userId?: string
   ) {
     if (userId) {
@@ -470,7 +491,18 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
+    if (payload.chapterSummaryPromptCount !== undefined) {
+      settings.chapterSummaryPromptCount = clampChapterSummaryPromptCount(
+        payload.chapterSummaryPromptCount
+      );
+    }
+
+    if (payload.generationTemperature !== undefined) {
+      settings.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
+    }
+
     settings.updatedAt = new Date();
+    this.patchSettingsDefaults(settings);
     this.persistState();
     return settings;
   }
@@ -1929,6 +1961,10 @@ export class ProjectsService implements OnModuleInit {
           {
             systemPromptText: value.systemPromptText,
             activePersonaId: value.activePersonaId,
+            chapterSummaryPromptCount: clampChapterSummaryPromptCount(
+              value.chapterSummaryPromptCount
+            ),
+            generationTemperature: clampGenerationTemperature(value.generationTemperature),
             updatedAt: new Date(value.updatedAt),
           },
         ])
@@ -2267,8 +2303,12 @@ export class ProjectsService implements OnModuleInit {
       this.settingsStore.set(projectId, {
         systemPromptText: '你是一位专业的小说写作助手，请保持设定一致与剧情连贯。',
         activePersonaId: null,
+        chapterSummaryPromptCount: DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+        generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
         updatedAt: new Date(),
       });
+    } else {
+      this.patchSettingsDefaults(this.settingsStore.get(projectId)!);
     }
 
     if (!this.personasStore.has(projectId)) {
@@ -2295,6 +2335,13 @@ export class ProjectsService implements OnModuleInit {
     if (!this.relationEventsStore.has(projectId)) {
       this.relationEventsStore.set(projectId, []);
     }
+  }
+
+  private patchSettingsDefaults(settings: ProjectSettings) {
+    settings.chapterSummaryPromptCount = clampChapterSummaryPromptCount(
+      settings.chapterSummaryPromptCount
+    );
+    settings.generationTemperature = clampGenerationTemperature(settings.generationTemperature);
   }
 
   private getProjectOrThrow(projectId: string) {
@@ -2330,6 +2377,8 @@ export class ProjectsService implements OnModuleInit {
         ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
         : '未配置人物设定',
       outlineSummary: knowledge.outlineSummary,
+      chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
+      generationTemperature: settings.generationTemperature,
       chapters: knowledge.chapters.map((chapter) => ({
         chapterNo: chapter.chapterNo,
         title: chapter.title,

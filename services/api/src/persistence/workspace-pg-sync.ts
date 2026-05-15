@@ -4,6 +4,10 @@ import type {
   ChapterStructuredInfoPersisted,
   PersistedProjectState,
 } from '../modules/projects/persisted-workspace.types';
+import {
+  DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+  DEFAULT_GENERATION_TEMPERATURE,
+} from '../modules/projects/project-settings.util';
 
 export async function loadWorkspaceFromPostgres(
   prisma: PrismaClient
@@ -56,6 +60,8 @@ export async function loadWorkspaceFromPostgres(
       settings[p.id] = {
         systemPromptText: p.settings.systemPromptText,
         activePersonaId: p.settings.activePersonaId,
+        chapterSummaryPromptCount: p.settings.chapterSummaryPromptCount,
+        generationTemperature: p.settings.generationTemperature,
         updatedAt: p.settings.updatedAt.toISOString(),
       };
     }
@@ -224,11 +230,17 @@ export async function syncWorkspaceToPostgres(
           projectId: pid,
           systemPromptText: s.systemPromptText,
           activePersonaId: s.activePersonaId,
+          chapterSummaryPromptCount:
+            s.chapterSummaryPromptCount ?? DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+          generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
           updatedAt: new Date(s.updatedAt),
         },
         update: {
           systemPromptText: s.systemPromptText,
           activePersonaId: s.activePersonaId,
+          chapterSummaryPromptCount:
+            s.chapterSummaryPromptCount ?? DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+          generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
           updatedAt: new Date(s.updatedAt),
         },
       });

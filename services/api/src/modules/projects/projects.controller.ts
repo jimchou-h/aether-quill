@@ -80,7 +80,13 @@ export class ProjectsController {
   @Put(':id/settings')
   updateSettings(
     @Param('id') id: string,
-    @Body() data: { systemPromptText?: string; activePersonaId?: string | null },
+    @Body()
+    data: {
+      systemPromptText?: string;
+      activePersonaId?: string | null;
+      chapterSummaryPromptCount?: number;
+      generationTemperature?: number;
+    },
     @Request() req: AuthenticatedRequest
   ) {
     const userId = req.user?.userId;

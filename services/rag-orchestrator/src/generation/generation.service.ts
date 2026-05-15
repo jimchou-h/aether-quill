@@ -55,6 +55,9 @@ export class GenerationService {
       model: request.model || 'deepseek-chat',
       status: 'pending',
       createdAt: new Date().toISOString(),
+      ...(typeof request.temperature === 'number' && Number.isFinite(request.temperature)
+        ? { temperature: request.temperature }
+        : {}),
     };
 
     this.traceStore.push(trace);
@@ -85,8 +88,17 @@ export class GenerationService {
     const prompt = this.buildPrompt(context, trace.prompt);
     this.updateTrace(trace.id, { status: 'generating' });
 
+    const provider = this.resolveProviderConfig();
+    const temperature =
+      typeof trace.temperature === 'number' && Number.isFinite(trace.temperature)
+        ? Math.min(2, Math.max(0, trace.temperature))
+        : provider.temperature;
+
     try {
-      const response = await this.callProviderApi(prompt);
+      const response = await this.callProviderApi(prompt, {
+        maxTokens: provider.maxTokens,
+        temperature,
+      });
       this.updateTrace(trace.id, {
         status: 'completed',
         result: response.content,
@@ -114,7 +126,7 @@ export class GenerationService {
     let fullContent = '';
 
     try {
-      for await (const chunk of this.callProviderStream(prompt)) {
+      for await (const chunk of this.callProviderStream(prompt, trace)) {
         fullContent += chunk;
         yield chunk;
       }
@@ -453,16 +465,32 @@ export class GenerationService {
     };
   }
 
-  private async *callProviderStream(prompt: string): AsyncGenerator<string, void, unknown> {
+  private streamParamsForTrace(trace: TraceRecord): { maxTokens: number; temperature: number } {
     const provider = this.resolveProviderConfig();
+    const t =
+      typeof trace.temperature === 'number' && Number.isFinite(trace.temperature)
+        ? trace.temperature
+        : provider.temperature;
+    return {
+      maxTokens: provider.maxTokens,
+      temperature: Math.min(2, Math.max(0, t)),
+    };
+  }
+
+  private async *callProviderStream(
+    prompt: string,
+    trace: TraceRecord
+  ): AsyncGenerator<string, void, unknown> {
+    const provider = this.resolveProviderConfig();
+    const { maxTokens, temperature } = this.streamParamsForTrace(trace);
 
     const response = await axios.post(
       provider.providerUrl,
       {
         model: provider.model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: provider.maxTokens,
-        temperature: provider.temperature,
+        max_tokens: maxTokens,
+        temperature,
         stream: true,
       },
       {

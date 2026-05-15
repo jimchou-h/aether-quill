@@ -9,6 +9,8 @@ export interface TraceRecord {
   providerType: string;
   model: string;
   status: TraceStatus;
+  /** 本次生成使用的采样温度（已解析后的最终值） */
+  temperature?: number;
   usage?: {
     promptTokens: number;
     completionTokens: number;
