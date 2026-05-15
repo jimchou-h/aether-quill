@@ -91,6 +91,7 @@ model Chapter {
   summary          String    @default("") @map("summary") @db.Text
   summarySource    String?   @map("summary_source")
   summaryUpdatedAt DateTime? @map("summary_updated_at")
+  structuredInfo   Json?     @map("structured_info")
   updatedAt        DateTime  @map("updated_at")
   project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

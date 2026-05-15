@@ -270,9 +270,7 @@ async function handleApply() {
           <h3 id="optimize-modal-title" class="modal-title">
             章节优化{{ props.chapter ? ` · 第${props.chapter.chapterNo}章` : '' }}
           </h3>
-          <p class="modal-subtitle">
-            三步流程：输入要求 → 确认或编辑方案 → 生成正文 → 覆盖原章节
-          </p>
+          <p class="modal-subtitle">三步流程：输入要求 → 确认或编辑方案 → 生成正文 → 覆盖原章节</p>
         </div>
         <button
           type="button"

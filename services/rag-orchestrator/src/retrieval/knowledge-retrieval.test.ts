@@ -4,7 +4,9 @@ import {
   buildChapterOptimizeRetrievalQuery,
   buildGenerationRetrievalQuery,
   buildRetrievalQuery,
+  buildStructuredKnowledgeEvidence,
   formatEvidence,
+  resolveChapterScopedEmbeddingQuery,
 } from './knowledge-retrieval';
 import type { ChunkWithEmbedding } from './types';
 
@@ -30,6 +32,31 @@ describe('buildGenerationRetrievalQuery', () => {
     assert.ok(q.includes('写一章'));
     assert.ok(q.includes('揭露反派'));
     assert.ok(q.includes('雨天'));
+  });
+});
+
+describe('resolveChapterScopedEmbeddingQuery', () => {
+  const ctx = {
+    chapters: [
+      { chapterNo: 1, structuredMatchingText: '  港口 走私  ' },
+      { chapterNo: 2, structuredMatchingText: '' },
+    ],
+  };
+
+  it('returns undefined when no chapter anchor', () => {
+    assert.equal(resolveChapterScopedEmbeddingQuery(ctx, NaN, 0), undefined);
+  });
+
+  it('prefers task chapterNo over extra', () => {
+    assert.equal(resolveChapterScopedEmbeddingQuery(ctx, 1, 2), '港口 走私');
+  });
+
+  it('uses extra chapterNo when task invalid', () => {
+    assert.equal(resolveChapterScopedEmbeddingQuery(ctx, NaN, 1), '港口 走私');
+  });
+
+  it('returns empty string when chapter has no structured text', () => {
+    assert.equal(resolveChapterScopedEmbeddingQuery(ctx, 2, 0), '');
   });
 });
 
@@ -71,6 +98,40 @@ describe('formatEvidence', () => {
     assert.ok(text.includes('chunk_id=doc-1-seg-0'));
     assert.ok(text.includes('doc=第一章草稿'));
     assert.ok(text.includes('正文片段'));
+  });
+});
+
+describe('buildStructuredKnowledgeEvidence', () => {
+  const docs = [
+    { id: 'd1', title: '世界观：旧港口设定集', content: '全文A' },
+    { id: 'd2', title: '人物小传：林策', content: '全文B' },
+    { id: 'd3', title: '无关文档', content: '全文C' },
+  ];
+
+  it('returns empty when structured text missing', () => {
+    const r = buildStructuredKnowledgeEvidence(1, {
+      chapterNo: 1,
+      chapters: [{ chapterNo: 1 }],
+      knowledgeDocuments: docs,
+    });
+    assert.equal(r.retrievalSkippedNoStructured, true);
+    assert.equal(r.evidenceText, '');
+    assert.deepEqual(r.titleMatchedDocumentIds, []);
+  });
+
+  it('injects top title-matched full documents', () => {
+    const r = buildStructuredKnowledgeEvidence(2, {
+      chapterNo: 2,
+      chapters: [{ chapterNo: 2, structuredMatchingText: '旧港口 林策' }],
+      knowledgeDocuments: docs,
+    });
+    assert.equal(r.retrievalSkippedNoStructured, undefined);
+    assert.ok(r.evidenceText.includes('document_id=d1'));
+    assert.ok(r.evidenceText.includes('全文A'));
+    assert.ok(r.evidenceText.includes('document_id=d2'));
+    assert.ok(r.titleMatchedDocumentIds.includes('d1'));
+    assert.ok(r.titleMatchedDocumentIds.includes('d2'));
+    assert.equal(r.titleMatchedDocumentIds.includes('d3'), false);
   });
 });
 

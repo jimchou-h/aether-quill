@@ -75,6 +75,8 @@ paths:
     $ref: './paths/projects/chapter-summarize-by-no.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/relation-events/generate:
     $ref: './paths/projects/chapter-relation-events-generate.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/structured-info/parse:
+    $ref: './paths/projects/chapter-structured-info-parse.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/plan:
     $ref: './paths/projects/chapter-optimize-plan.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/draft:
@@ -587,6 +589,87 @@ components:
               type: boolean
             updateLine:
               type: string
+    ChapterStructuredInfo:
+      type: object
+      required:
+        - matchingText
+      properties:
+        matchingText:
+          type: string
+          description: 用于与知识库文档标题做匹配的拼接文本
+        keywords:
+          type: array
+          items:
+            type: string
+        narrativeSummary:
+          type: string
+          description: 供作者快速核对解析是否贴合意图
+        parseSource:
+          type: string
+          enum: [workbench, chapter]
+        parsedAt:
+          type: string
+          format: date-time
+        lastError:
+          type: string
+    StructuredInfoParseRequest:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum: [workbench, chapter]
+        goal:
+          type: string
+        pov:
+          type: string
+        mustInclude:
+          type: array
+          items:
+            type: string
+        avoid:
+          type: array
+          items:
+            type: string
+      description: |
+        `workbench` 模式需提供本章目标相关字段（可与表单一致）；`chapter` 模式使用服务端已保存的章节正文。
+    StructuredInfoParseResult:
+      type: object
+      required:
+        - chapter
+        - structuredInfo
+      properties:
+        chapter:
+          type: object
+          required:
+            - chapterNo
+            - title
+            - content
+            - summary
+            - updatedAt
+          properties:
+            chapterNo:
+              type: integer
+            title:
+              type: string
+            content:
+              type: string
+            summary:
+              type: string
+            summarySource:
+              type: string
+              enum: [llm, fallback]
+            summaryUpdatedAt:
+              type: string
+              format: date-time
+            structuredInfo:
+              $ref: '#/components/schemas/ChapterStructuredInfo'
+            updatedAt:
+              type: string
+              format: date-time
+        structuredInfo:
+          $ref: '#/components/schemas/ChapterStructuredInfo'
     ChapterOptimizationBasis:
       type: object
       required:

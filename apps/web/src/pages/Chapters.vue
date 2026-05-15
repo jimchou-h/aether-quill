@@ -32,6 +32,7 @@ const latestSummaryJob = ref<SummaryJob | null>(null);
 const message = ref('');
 const errorMessage = ref('');
 const selectedChapterNo = ref<number | null>(null);
+const parsingStructuredChapterNo = ref<number | null>(null);
 const showImportModal = ref(false);
 const showOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
@@ -111,6 +112,21 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
     errorMessage.value = presentErrorFromCaught(error, '更新章节失败');
   } finally {
     savingChapterNo.value = null;
+  }
+}
+
+async function handleParseStructuredChapter(chapterNo: number) {
+  parsingStructuredChapterNo.value = chapterNo;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    await apiClient.parseChapterStructuredInfo(projectId.value, chapterNo, { mode: 'chapter' });
+    message.value = presentSuccess(`第${chapterNo}章结构化信息已解析`);
+    await loadWorkspace();
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '解析结构化信息失败');
+  } finally {
+    parsingStructuredChapterNo.value = null;
   }
 }
 
@@ -290,6 +306,9 @@ onMounted(() => {
         <p class="page-subtitle">
           查看小说正文与摘要，补录历史章节，并按章生成语义摘要或关系事件。
         </p>
+        <p class="page-hint page-hint-warn">
+          生成章节草稿时依赖「结构化信息」做知识库标题匹配；若未解析，将无法注入知识库文档。请在本页或写作工作台使用「解析结构化信息」。
+        </p>
       </div>
       <button class="primary-button" type="button" @click="openImportModal">新增章节</button>
     </div>
@@ -322,11 +341,13 @@ onMounted(() => {
       :generating-relation-chapter-no="generatingRelationChapterNo"
       :optimizing-chapter-no="optimizingChapterNo"
       :saving-chapter-no="savingChapterNo"
+      :parsing-structured-chapter-no="parsingStructuredChapterNo"
       @select="selectedChapterNo = $event"
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
       @optimize="handleOpenOptimizeDialog"
       @save="handleSaveChapter"
+      @parse-structured="handleParseStructuredChapter"
     />
 
     <ChapterOptimizeDialog
@@ -393,6 +414,21 @@ onMounted(() => {
   margin: -0.2rem 0 0;
   color: #6b7280;
   font-size: 0.9rem;
+}
+
+.page-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  max-width: 52rem;
+}
+
+.page-hint-warn {
+  color: #92400e;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
 }
 
 .message {

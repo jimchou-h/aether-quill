@@ -130,6 +130,9 @@ onMounted(() => {
         <p class="workbench-eyebrow">当前项目</p>
         <h2 class="page-title">写作工作台</h2>
         <p class="page-subtitle">配置本章生成参数，右侧实时查看草稿与引用证据。</p>
+        <p class="page-hint page-hint-warn">
+          未生成结构化信息则无法匹配知识库；请在左侧表单填写本章目标后点击「解析结构化信息」，再生成草稿。
+        </p>
       </div>
       <div v-if="!loading" class="workbench-header-meta">
         <span class="meta-pill">{{ projectName || '未命名项目' }}</span>
@@ -164,7 +167,9 @@ onMounted(() => {
               :generating="generationStore.isStreaming"
               :project-id="projectId"
               :persona-names="personaNames"
+              :knowledge-chapters="editorStore.chapters"
               @generate="handleGenerate"
+              @structured-parsed="loadWorkspace"
             />
 
             <ConsistencyAlert :notes="generationStore.consistencyNotes" />
@@ -231,6 +236,20 @@ onMounted(() => {
   color: #6b7280;
   font-size: 1rem;
   line-height: 1.6;
+}
+
+.page-hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.page-hint-warn {
+  color: #92400e;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
 }
 
 .workbench-header-meta {

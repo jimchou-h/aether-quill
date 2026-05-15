@@ -1,12 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import { apiClient, type RelationEventItem } from '../../services/api';
+import { computed, onMounted, ref, watch, withDefaults } from 'vue';
+import { apiClient, type ChapterItem, type RelationEventItem } from '../../services/api';
+import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
 
-const props = defineProps<{
-  generating: boolean;
-  projectId: string;
-  personaNames: string[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    generating: boolean;
+    projectId: string;
+    personaNames: string[];
+    knowledgeChapters: ChapterItem[];
+  }>(),
+  {
+    knowledgeChapters: () => [],
+  }
+);
 
 const emit = defineEmits<{
   generate: [
@@ -21,6 +28,7 @@ const emit = defineEmits<{
       selectedEventIds: string[];
     },
   ];
+  'structured-parsed': [];
 }>();
 
 const chapterNo = ref(1);
@@ -36,8 +44,17 @@ const selectedEventIds = ref<string[]>([]);
 const relationEvents = ref<RelationEventItem[]>([]);
 const loadingEvents = ref(false);
 const eventError = ref('');
+const parsingStructured = ref(false);
+const structuredParseError = ref('');
 
 const availableCharacters = computed(() => [...new Set(props.personaNames.filter(Boolean))]);
+
+const currentStructured = computed(() => {
+  const n = Number(chapterNo.value);
+  return props.knowledgeChapters.find((c) => c.chapterNo === n)?.structuredInfo;
+});
+
+const missingStructuredForKb = computed(() => !currentStructured.value?.matchingText?.trim());
 
 const filteredEvents = computed(() => {
   if (appearingCharacters.value.length === 0) {
@@ -125,6 +142,26 @@ function handleGenerate() {
   });
 }
 
+async function handleParseStructured() {
+  structuredParseError.value = '';
+  parsingStructured.value = true;
+  try {
+    await apiClient.parseChapterStructuredInfo(props.projectId, Number(chapterNo.value), {
+      mode: 'workbench',
+      goal: goal.value,
+      pov: pov.value,
+      mustInclude: parseMultiLine(mustIncludeText.value),
+      avoid: parseMultiLine(avoidText.value),
+    });
+    presentSuccess('本章结构化信息已解析并保存');
+    emit('structured-parsed');
+  } catch (error) {
+    structuredParseError.value = presentErrorFromCaught(error, '解析失败');
+  } finally {
+    parsingStructured.value = false;
+  }
+}
+
 function resetForm() {
   chapterNo.value = 1;
   goal.value = '';
@@ -144,6 +181,10 @@ watch(
     void loadRelationEvents();
   }
 );
+
+watch(chapterNo, () => {
+  structuredParseError.value = '';
+});
 
 onMounted(() => {
   void loadRelationEvents();
@@ -191,6 +232,33 @@ defineExpose({ resetForm });
           rows="4"
         />
       </label>
+
+      <div v-if="missingStructuredForKb" class="structured-kb-banner" role="status">
+        <p class="structured-kb-title">知识库匹配提示</p>
+        <p class="structured-kb-body">
+          未生成结构化信息，无法匹配知识库。请先点击下方「解析结构化信息」，将本章目标字段抽取为与文档标题对齐的匹配文本。
+        </p>
+      </div>
+      <div v-else class="structured-kb-ok" role="status">
+        <p class="structured-kb-title">结构化信息（已就绪）</p>
+        <p v-if="currentStructured?.narrativeSummary" class="structured-kb-body">
+          {{ currentStructured.narrativeSummary }}
+        </p>
+        <p v-else class="structured-kb-body text-muted">
+          已生成匹配文本，生成草稿时将按标题匹配注入知识库文档全文。
+        </p>
+      </div>
+      <p v-if="structuredParseError" class="message message-error">{{ structuredParseError }}</p>
+      <div class="structured-actions">
+        <button
+          type="button"
+          class="secondary-button"
+          :disabled="parsingStructured || generating || !goal.trim()"
+          @click="handleParseStructured"
+        >
+          {{ parsingStructured ? '解析中...' : '解析结构化信息' }}
+        </button>
+      </div>
 
       <label class="field-label">
         叙事视角（POV）
@@ -498,6 +566,50 @@ defineExpose({ resetForm });
 
 .message-error {
   color: #b42318;
+}
+
+.structured-kb-banner,
+.structured-kb-ok {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+}
+
+.structured-kb-ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.structured-kb-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #92400e;
+}
+
+.structured-kb-ok .structured-kb-title {
+  color: #166534;
+}
+
+.structured-kb-body {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: #78350f;
+}
+
+.structured-kb-ok .structured-kb-body {
+  color: #14532d;
+}
+
+.text-muted {
+  color: #6b7280;
+}
+
+.structured-actions {
+  margin-bottom: 0.75rem;
 }
 
 @media (max-width: 960px) {

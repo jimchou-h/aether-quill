@@ -88,6 +88,29 @@ export function buildChapterOptimizeRetrievalQuery(
   return parts.join('\n\n');
 }
 
+/**
+ * 章节锚定（task 或 extra 的 chapterNo）时：向量 embedding 只用该章 `structuredMatchingText`，
+ * 不把大纲/摘要/优化说明等拼进向量。无结构化则返回空串（跳过向量检索）。
+ * 无章节锚点时返回 `undefined`，由调用方对向量使用完整 `retrievalQuery`。
+ */
+export function resolveChapterScopedEmbeddingQuery(
+  projectCtx: { chapters: Array<{ chapterNo: number; structuredMatchingText?: string }> },
+  taskChapterNo: number,
+  extraChapterNo: number
+): string | undefined {
+  const ch =
+    Number.isFinite(taskChapterNo) && taskChapterNo > 0
+      ? taskChapterNo
+      : Number.isFinite(extraChapterNo) && extraChapterNo > 0
+        ? extraChapterNo
+        : 0;
+  if (ch <= 0) {
+    return undefined;
+  }
+  const st = projectCtx.chapters.find((c) => c.chapterNo === ch)?.structuredMatchingText?.trim();
+  return st ?? '';
+}
+
 export function buildRetrievalQuery(
   task: Record<string, unknown>,
   context: { outlineSummary: string; personaProfile: string }
@@ -155,7 +178,13 @@ export async function retrieveKnowledgeForDraft(
   reranker: Reranker,
   projectId: string,
   query: string,
-  options?: { topK?: number; topN?: number; minScore?: number }
+  options?: {
+    topK?: number;
+    topN?: number;
+    minScore?: number;
+    /** 仅用于向量 embedding；未传则与 `query` 相同 */
+    embeddingQuery?: string;
+  }
 ): Promise<KnowledgeRetrievalResult> {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -166,11 +195,13 @@ export async function retrieveKnowledgeForDraft(
   const topN = options?.topN ?? 10;
   vectorStore.invalidateProject(projectId);
 
+  const embedOpt = options?.embeddingQuery;
   const retrieved = await vectorStore.retrieve({
     query: trimmed,
     projectId,
     topK,
     minScore: options?.minScore ?? 0,
+    ...(embedOpt !== undefined ? { embeddingQuery: embedOpt } : {}),
   });
   const reranked = reranker.rerank(trimmed, retrieved, topN);
 
@@ -179,5 +210,136 @@ export async function retrieveKnowledgeForDraft(
     citations: chunksToCitations(reranked),
     evidenceText: formatEvidence(reranked),
     query: trimmed,
+  };
+}
+
+/** 知识库文档（用于标题匹配后整文注入） */
+export interface KnowledgeDocumentForMatch {
+  id: string;
+  title: string;
+  content: string;
+}
+
+/** 标题匹配后默认注入的文档篇数（本期固定 Top10） */
+export const TITLE_MATCHED_FULL_DOC_TOP_N = 10;
+
+export function scoreTitleAgainstMatchingText(matchingText: string, title: string): number {
+  const m = matchingText.trim().toLowerCase();
+  const t = title.trim().toLowerCase();
+  if (!m || !t) {
+    return 0;
+  }
+
+  let score = 0;
+  const segments = m.split(/[\s\n，。、；：,.;:!?《》「」"'“”]+/).filter((s) => s.length > 0);
+  for (const seg of segments) {
+    if (seg.length >= 2 && t.includes(seg)) {
+      score += seg.length >= 4 ? 4 : 2;
+    }
+  }
+  const prefix = m.slice(0, Math.min(32, m.length));
+  if (prefix.length >= 2 && t.includes(prefix)) {
+    score += 8;
+  }
+  return score;
+}
+
+export function pickTopTitleMatchedDocuments(
+  matchingText: string,
+  docs: KnowledgeDocumentForMatch[],
+  topN = TITLE_MATCHED_FULL_DOC_TOP_N
+): KnowledgeDocumentForMatch[] {
+  if (!matchingText.trim() || docs.length === 0) {
+    return [];
+  }
+
+  const ranked = [...docs]
+    .map((doc) => ({
+      doc,
+      score: scoreTitleAgainstMatchingText(matchingText, doc.title),
+    }))
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || a.doc.title.localeCompare(b.doc.title));
+
+  const seen = new Set<string>();
+  const out: KnowledgeDocumentForMatch[] = [];
+  for (const row of ranked) {
+    if (seen.has(row.doc.id)) {
+      continue;
+    }
+    seen.add(row.doc.id);
+    out.push(row.doc);
+    if (out.length >= topN) {
+      break;
+    }
+  }
+  return out;
+}
+
+export function formatFullDocumentKnowledgeEvidence(docs: KnowledgeDocumentForMatch[]): string {
+  if (docs.length === 0) {
+    return '';
+  }
+  return docs
+    .map((d, index) => {
+      return `[知识全文${index + 1}] document_id=${d.id} title=${d.title}\n${d.content.trim()}`;
+    })
+    .join('\n\n');
+}
+
+export interface ChapterKbContextInput {
+  chapterNo: number;
+  chapters: Array<{
+    chapterNo: number;
+    structuredMatchingText?: string;
+  }>;
+  knowledgeDocuments: KnowledgeDocumentForMatch[];
+}
+
+export type StructuredKnowledgeRetrievalResult = KnowledgeRetrievalResult & {
+  retrievalSkippedNoStructured?: boolean;
+  titleMatchedDocumentIds: string[];
+};
+
+/**
+ * 章节草稿：依赖章节已解析的 `structuredMatchingText`；无则跳过知识库证据。
+ * 有则按标题匹配取 TopN 篇文档**全文**作为证据（不走向量 chunk）。
+ */
+export function buildStructuredKnowledgeEvidence(
+  chapterNo: number,
+  kbCtx: ChapterKbContextInput,
+  topN = TITLE_MATCHED_FULL_DOC_TOP_N
+): StructuredKnowledgeRetrievalResult {
+  const ch = kbCtx.chapters.find((c) => c.chapterNo === chapterNo);
+  const matchingText = ch?.structuredMatchingText?.trim() ?? '';
+
+  if (!matchingText) {
+    return {
+      chunks: [],
+      citations: [],
+      evidenceText: '',
+      query: '',
+      retrievalSkippedNoStructured: true,
+      titleMatchedDocumentIds: [],
+    };
+  }
+
+  const picked = pickTopTitleMatchedDocuments(matchingText, kbCtx.knowledgeDocuments, topN);
+  const evidenceText = formatFullDocumentKnowledgeEvidence(picked);
+  const chunks: ChunkWithEmbedding[] = picked.map((d, i) => ({
+    id: `doc-full:${d.id}`,
+    documentId: d.id,
+    content: d.content,
+    embedding: [],
+    metadata: { docTitle: d.title, evidenceKind: 'full_document_by_title' },
+    score: 1 - i * 0.001,
+  }));
+
+  return {
+    chunks,
+    citations: chunksToCitations(chunks),
+    evidenceText,
+    query: matchingText,
+    titleMatchedDocumentIds: picked.map((d) => d.id),
   };
 }
