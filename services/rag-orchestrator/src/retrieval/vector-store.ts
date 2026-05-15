@@ -43,19 +43,26 @@ export class VectorStore {
     projectId: string;
     topK?: number;
     minScore?: number;
+    /**
+     * 若传入则仅该文本参与 embedding；未传则使用 `query`。
+     * 传空字符串表示跳过向量检索（仍可将 `query` 用于上游 rerank 等）。
+     */
+    embeddingQuery?: string;
   }): Promise<ChunkWithEmbedding[]> {
     const topK = request.topK ?? this.env.retrievalTopK;
     const minScore = request.minScore ?? this.env.retrievalMinScore;
     const collection = projectChunksCollectionName(request.projectId);
 
-    const query = request.query.trim();
-    if (!query) {
+    const embedText = (
+      request.embeddingQuery !== undefined ? request.embeddingQuery : request.query
+    ).trim();
+    if (!embedText) {
       return [];
     }
 
     try {
       const provider = getEmbeddingProvider();
-      const { embeddings } = await provider.embed([query]);
+      const { embeddings } = await provider.embed([embedText]);
       const vector = embeddings[0];
       if (!vector?.length) {
         return [];

@@ -1,9 +1,11 @@
 import {
   BadGatewayException,
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
   OnModuleInit,
+  forwardRef,
 } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -28,6 +30,8 @@ import {
   RELATION_EVENT_SELECTED_MAX_COUNT,
   RELATION_EVENT_SUMMARY_MAX_LENGTH,
 } from './relation-event.util';
+import type { ChapterStructuredInfoPersisted } from './persisted-workspace.types';
+import { DocumentsService } from '../documents/documents.service';
 import {
   CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
@@ -108,6 +112,8 @@ export interface ChapterRecord {
   summarySource?: ChapterSummarySource;
   summaryUpdatedAt?: Date;
   updatedAt: Date;
+  /** 用于知识库标题匹配的结构化解析结果（AQ-124+） */
+  structuredInfo?: ChapterStructuredInfoPersisted;
 }
 
 export interface KnowledgeRecord {
@@ -247,7 +253,11 @@ export class ProjectsService implements OnModuleInit {
   private persistenceResolve!: () => void;
   readonly persistenceReady: Promise<void>;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => DocumentsService))
+    private readonly documentsService: DocumentsService
+  ) {
     this.persistenceReady = new Promise<void>((resolve) => {
       this.persistenceResolve = resolve;
     });
@@ -670,6 +680,103 @@ export class ProjectsService implements OnModuleInit {
     this.persistState();
     await this.updateActivePersonaStateFromChapter(projectId, chapterNo, payload.content);
     return targetChapter;
+  }
+
+  async parseChapterStructuredInfo(
+    projectId: string,
+    chapterNo: number,
+    body:
+      | {
+          mode: 'workbench';
+          goal?: string;
+          pov?: string;
+          mustInclude?: string[];
+          avoid?: string[];
+        }
+      | { mode: 'chapter' },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    let chapter = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
+
+    if (!chapter) {
+      if (body.mode !== 'workbench') {
+        throw new NotFoundException(`未找到第 ${chapterNo} 章`);
+      }
+      const now = new Date();
+      chapter = {
+        chapterNo,
+        title: `第${chapterNo}章`,
+        content: '',
+        summary: '',
+        summarySource: 'fallback',
+        summaryUpdatedAt: now,
+        updatedAt: now,
+      };
+      knowledge.chapters.push(chapter);
+      knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
+    }
+
+    let sourceText = '';
+    if (body.mode === 'workbench') {
+      const parts = [
+        body.goal?.trim(),
+        body.pov?.trim(),
+        ...(body.mustInclude ?? []).map(String).filter(Boolean),
+        ...(body.avoid ?? []).map((a) => `避免:${String(a).trim()}`).filter(Boolean),
+      ].filter(Boolean);
+      sourceText = parts.join('\n');
+    } else {
+      sourceText = chapter.content ?? '';
+    }
+
+    if (!sourceText.trim()) {
+      throw new BadRequestException(
+        '解析源文本为空：请先填写本章目标（工作台）或章节正文（章节模块）。'
+      );
+    }
+
+    try {
+      const { data } = await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/parse/structured-info`,
+        {
+          mode: body.mode,
+          sourceText: sourceText.slice(0, 50000),
+        },
+        { timeout: 120000 }
+      );
+
+      const matchingText =
+        typeof data?.matchingText === 'string' ? data.matchingText.trim().slice(0, 2000) : '';
+      const rawKeywords: unknown[] = Array.isArray(data?.keywords) ? data.keywords : [];
+      const keywords = rawKeywords
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter((s): s is string => Boolean(s))
+        .slice(0, 40);
+      const narrativeSummary =
+        typeof data?.narrativeSummary === 'string' ? data.narrativeSummary.trim() : undefined;
+
+      chapter.structuredInfo = {
+        matchingText,
+        keywords: [...new Set(keywords)],
+        narrativeSummary: narrativeSummary || undefined,
+        parseSource: body.mode,
+        parsedAt: new Date().toISOString(),
+      };
+      chapter.updatedAt = new Date();
+      this.persistState();
+
+      return { chapter, structuredInfo: chapter.structuredInfo };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '结构化信息解析失败';
+      throw new BadGatewayException(message);
+    }
   }
 
   createIndexJob(projectId: string, payload: { mode?: IndexMode }, userId?: string) {
@@ -1147,7 +1254,7 @@ export class ProjectsService implements OnModuleInit {
     return {
       draftText,
       reasoningBrief:
-        '已由 RAG Orchestrator 注入【叙事上下文】与向量【检索证据】（TopK→TopN），并完成章节草稿生成。',
+        '已由 RAG Orchestrator 注入【叙事上下文】；知识库证据在已解析「结构化信息」时按文档标题匹配注入 Top10 篇全文，否则跳过知识库匹配。',
       citations,
       consistencyNotes,
       usedRelationEvents,
@@ -2215,6 +2322,8 @@ export class ProjectsService implements OnModuleInit {
       personas.find((item) => item.status === 'published') ||
       null;
 
+    const docs = this.documentsService.findAll(projectId);
+
     await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
       systemPromptText: settings.systemPromptText,
       personaProfile: activePersona
@@ -2225,6 +2334,12 @@ export class ProjectsService implements OnModuleInit {
         chapterNo: chapter.chapterNo,
         title: chapter.title,
         summary: chapter.summary || chapter.content.slice(0, 160),
+        structuredMatchingText: chapter.structuredInfo?.matchingText?.trim(),
+      })),
+      knowledgeDocuments: docs.map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        content: doc.content,
       })),
       selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
       usedRelationEvents,

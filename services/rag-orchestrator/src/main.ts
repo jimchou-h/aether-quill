@@ -11,6 +11,8 @@ import {
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
   DraftCitation,
+  buildStructuredKnowledgeEvidence,
+  resolveChapterScopedEmbeddingQuery,
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
@@ -53,6 +55,14 @@ interface ContextChapter {
   chapterNo: number;
   title: string;
   summary: string;
+  /** 由 API 同步：章节已解析的结构化匹配文本，用于知识库标题匹配 */
+  structuredMatchingText?: string;
+}
+
+interface KnowledgeDocumentPayload {
+  id: string;
+  title: string;
+  content: string;
 }
 
 interface ProjectContext {
@@ -60,6 +70,8 @@ interface ProjectContext {
   personaProfile: string;
   outlineSummary: string;
   chapters: ContextChapter[];
+  /** 项目知识库文档全文列表，用于标题匹配后整文注入 */
+  knowledgeDocuments?: KnowledgeDocumentPayload[];
   selectedRelationMemory?: string;
   usedRelationEvents?: Array<{
     id: string;
@@ -227,6 +239,32 @@ app.post('/api/extract/relation-events', async (req, res) => {
   }
 });
 
+app.post('/api/parse/structured-info', async (req, res) => {
+  const mode = req.body?.mode;
+  const sourceText = typeof req.body?.sourceText === 'string' ? req.body.sourceText : '';
+
+  if (mode !== 'workbench' && mode !== 'chapter') {
+    res.status(400).json({ message: 'mode 必须为 workbench 或 chapter' });
+    return;
+  }
+
+  if (!sourceText.trim()) {
+    res.status(400).json({ message: 'sourceText 不能为空' });
+    return;
+  }
+
+  try {
+    const parsed = await generationService.extractStructuredInfo({
+      mode,
+      sourceText,
+    });
+    res.json(parsed);
+  } catch (error) {
+    console.error('Structured info parse failed:', error);
+    res.status(502).json({ message: '结构化信息解析失败' });
+  }
+});
+
 app.post('/api/projects/:projectId/context', (req, res) => {
   const projectId = req.params.projectId;
   const context = getOrCreateContext(projectId);
@@ -249,6 +287,23 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
   if (Array.isArray(payload.usedRelationEvents)) {
     context.usedRelationEvents = payload.usedRelationEvents;
+  }
+  if (Array.isArray(payload.knowledgeDocuments)) {
+    context.knowledgeDocuments = payload.knowledgeDocuments
+      .map((row: unknown) => {
+        if (!row || typeof row !== 'object') {
+          return null;
+        }
+        const r = row as Record<string, unknown>;
+        const id = typeof r.id === 'string' ? r.id.trim() : '';
+        const title = typeof r.title === 'string' ? r.title : '';
+        const content = typeof r.content === 'string' ? r.content : '';
+        if (!id) {
+          return null;
+        }
+        return { id, title, content };
+      })
+      .filter((x): x is KnowledgeDocumentPayload => Boolean(x));
   }
 
   context.updatedAt = new Date().toISOString();
@@ -423,22 +478,65 @@ app.post('/api/generate', async (req, res) => {
     retrievalQuery = buildGenerationRetrievalQuery(String(prompt), projectCtx, extra);
   }
 
+  const taskRecord =
+    extra && typeof extra.task === 'object' && extra.task !== null && !Array.isArray(extra.task)
+      ? (extra.task as Record<string, unknown>)
+      : null;
+  const draftChapterFromTask = taskRecord ? Number(taskRecord.chapterNo) : NaN;
+  const extraChapterNo = Number.isFinite(chapterNo) && chapterNo > 0 ? chapterNo : 0;
+  const structuredChapterNo =
+    Number.isFinite(draftChapterFromTask) && draftChapterFromTask > 0
+      ? draftChapterFromTask
+      : extraChapterNo;
+  const useStructuredChapterKb = structuredChapterNo > 0;
+  const chapterScopedEmbeddingQuery = resolveChapterScopedEmbeddingQuery(
+    projectCtx,
+    draftChapterFromTask,
+    extraChapterNo
+  );
+
+  let structuredKbTrace: {
+    titleMatchedDocumentIds: string[];
+    retrievalSkippedNoStructured?: boolean;
+  } | null = null;
+
   let retrievedChunkIds: string[] = [];
   let retrievedEvidence = '';
   try {
-    const retrieval = await retrieveKnowledgeForDraft(
-      vectorStore,
-      reranker,
-      projectId,
-      retrievalQuery,
-      {
-        topK: ragEnv.retrievalTopK,
-        topN: ragEnv.rerankTopN,
-        minScore: ragEnv.retrievalMinScore,
-      }
-    );
-    retrievedEvidence = retrieval.evidenceText;
-    retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+    if (useStructuredChapterKb) {
+      const sr = buildStructuredKnowledgeEvidence(structuredChapterNo, {
+        chapterNo: structuredChapterNo,
+        chapters: projectCtx.chapters.map((c) => ({
+          chapterNo: c.chapterNo,
+          structuredMatchingText: c.structuredMatchingText,
+        })),
+        knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
+      });
+      structuredKbTrace = {
+        titleMatchedDocumentIds: sr.titleMatchedDocumentIds,
+        retrievalSkippedNoStructured: sr.retrievalSkippedNoStructured,
+      };
+      retrievalQuery = sr.query.trim() ? sr.query : retrievalQuery;
+      retrievedEvidence = sr.evidenceText;
+      retrievedChunkIds = sr.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+    } else {
+      const retrieval = await retrieveKnowledgeForDraft(
+        vectorStore,
+        reranker,
+        projectId,
+        retrievalQuery,
+        {
+          topK: ragEnv.retrievalTopK,
+          topN: ragEnv.rerankTopN,
+          minScore: ragEnv.retrievalMinScore,
+          ...(chapterScopedEmbeddingQuery !== undefined
+            ? { embeddingQuery: chapterScopedEmbeddingQuery }
+            : {}),
+        }
+      );
+      retrievedEvidence = retrieval.evidenceText;
+      retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+    }
   } catch (error) {
     console.error('Generate retrieval failed:', error);
   }
@@ -454,6 +552,12 @@ app.post('/api/generate', async (req, res) => {
   const traceContext: Record<string, unknown> = {
     retrieval_query: retrievalQuery,
     retrieved_chunk_ids: retrievedChunkIds,
+    ...(structuredKbTrace
+      ? {
+          title_matched_document_ids: structuredKbTrace.titleMatchedDocumentIds,
+          retrieval_skipped_no_structured: structuredKbTrace.retrievalSkippedNoStructured === true,
+        }
+      : {}),
     ...(extra || {}),
     ...(templateKey ? { templateKey } : {}),
   };
@@ -553,30 +657,33 @@ app.post('/api/generate/draft', async (req, res) => {
   const chapterNo = Number(task.chapterNo || 1);
   const goal = task.goal || '推进主线并保持人物一致性';
   const pov = task.pov || '第三人称';
-  const ragEnv = getResolvedRagInfrastructureEnv();
 
   const taskRecord = task as Record<string, unknown>;
-  const retrievalQuery = buildRetrievalQuery(taskRecord, context);
+  const fallbackQuery = buildRetrievalQuery(taskRecord, context);
+  const kbCtx = {
+    chapterNo,
+    chapters: context.chapters.map((c) => ({
+      chapterNo: c.chapterNo,
+      structuredMatchingText: c.structuredMatchingText,
+    })),
+    knowledgeDocuments: context.knowledgeDocuments ?? [],
+  };
+  const structuredRetrieval = buildStructuredKnowledgeEvidence(chapterNo, kbCtx);
+  const retrievalQuery = structuredRetrieval.retrievalSkippedNoStructured
+    ? fallbackQuery
+    : structuredRetrieval.query.trim() || fallbackQuery;
+
   let resolvedCitations: DraftCitation[] = Array.isArray(citations) ? [...citations] : [];
   let retrievedEvidence = '';
   let retrievedChunkIds: string[] = [];
 
   try {
-    const retrieval = await retrieveKnowledgeForDraft(
-      vectorStore,
-      reranker,
-      projectId,
-      retrievalQuery,
-      {
-        topK: ragEnv.retrievalTopK,
-        topN: ragEnv.rerankTopN,
-        minScore: ragEnv.retrievalMinScore,
-      }
-    );
-    retrievedEvidence = retrieval.evidenceText;
-    retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+    retrievedEvidence = structuredRetrieval.evidenceText;
+    retrievedChunkIds = structuredRetrieval.chunks
+      .map((c) => c.id)
+      .filter((id) => Boolean(id?.trim()));
     if (resolvedCitations.length === 0) {
-      resolvedCitations = retrieval.citations;
+      resolvedCitations = structuredRetrieval.citations;
     }
   } catch (error) {
     console.error('Knowledge retrieval failed:', error);
@@ -607,6 +714,8 @@ app.post('/api/generate/draft', async (req, res) => {
       citations: resolvedCitations,
       retrieval_query: retrievalQuery,
       retrieved_chunk_ids: retrievedChunkIds,
+      title_matched_document_ids: structuredRetrieval.titleMatchedDocumentIds,
+      retrieval_skipped_no_structured: structuredRetrieval.retrievalSkippedNoStructured === true,
     },
     useSSE: true,
   });
@@ -641,6 +750,14 @@ app.post('/api/generate/draft', async (req, res) => {
     endSpan(streamSpanId);
 
     let consistencyNotes: Array<{ level: string; message: string }> = [];
+
+    if (structuredRetrieval.retrievalSkippedNoStructured) {
+      consistencyNotes.push({
+        level: 'warning',
+        message:
+          '未生成结构化信息，无法匹配知识库；请在工作台或章节模块点击「解析结构化信息」后再生成，以便注入知识库文档。',
+      });
+    }
 
     if (fullDraftText.trim()) {
       const consistencySpanId = startSpan(

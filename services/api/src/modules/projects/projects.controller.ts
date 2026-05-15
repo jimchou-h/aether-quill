@@ -201,6 +201,25 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/structured-info/parse')
+  parseChapterStructuredInfo(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      mode: 'workbench' | 'chapter';
+      goal?: string;
+      pov?: string;
+      mustInclude?: string[];
+      avoid?: string[];
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.parseChapterStructuredInfo(id, Number(chapterNo), data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/relation-events/generate')
   generateChapterRelationEvents(
     @Param('id') id: string,

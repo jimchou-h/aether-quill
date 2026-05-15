@@ -38,6 +38,8 @@ export class GenerationService {
       sections.push(`【检索证据】\n${context.retrievedEvidence.trim()}`);
     }
 
+    console.log(context.retrievedEvidence);
+
     sections.push(`【用户需求】\n${userPrompt}`);
 
     return sections.join('\n\n');
@@ -300,6 +302,115 @@ export class GenerationService {
       temperature: 0.2,
     });
     return this.parseRelationEventsFromModelContent(result.content);
+  }
+
+  buildStructuredInfoExtractPrompt(input: {
+    mode: 'workbench' | 'chapter';
+    sourceText: string;
+  }): string {
+    const modeHint =
+      input.mode === 'workbench'
+        ? '输入为「本章写作目标」相关字段（目标、视角、必须包含、避免等），请提炼用于知识库**文档标题**匹配的短语文本。'
+        : '输入为「章节正文」节选，请提炼情节要素用于知识库**文档标题**匹配的短语文本。';
+    return [
+      '你是小说创作辅助系统中的信息抽取器。',
+      modeHint,
+      '要求：',
+      '1. 只输出 JSON 对象，不要 Markdown 或解释',
+      '2. 字段：matchingText（字符串，50~300 字，中文，尽量包含可能出现在设定文档标题中的实体与主题词，用顿号或空格分隔多个概念）',
+      '3. 字段：keywords（字符串数组，5~20 个短词或专有名词）',
+      '4. 字段：narrativeSummary（可选，≤120 字，概括输入核心意图，供作者核对）',
+      '5. 若输入几乎为空，matchingText 可为空字符串，keywords 为空数组',
+      '',
+      '输入：',
+      input.sourceText.trim().slice(0, 24000),
+    ].join('\n');
+  }
+
+  private parseStructuredInfoFromModelContent(content: string): {
+    matchingText: string;
+    keywords: string[];
+    narrativeSummary?: string;
+  } {
+    const trimmed = content.trim();
+    if (!trimmed) {
+      return { matchingText: '', keywords: [] };
+    }
+
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const jsonText = fenced ? fenced[1].trim() : trimmed;
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(jsonText);
+    } catch {
+      return { matchingText: '', keywords: [] };
+    }
+
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { matchingText: '', keywords: [] };
+    }
+
+    const record = payload as Record<string, unknown>;
+    const matchingText =
+      typeof record.matchingText === 'string' ? record.matchingText.trim().slice(0, 2000) : '';
+    const keywords = Array.isArray(record.keywords)
+      ? record.keywords
+          .map((k) => (typeof k === 'string' ? k.trim() : ''))
+          .filter(Boolean)
+          .slice(0, 40)
+      : [];
+    const narrativeSummary =
+      typeof record.narrativeSummary === 'string'
+        ? record.narrativeSummary.trim().slice(0, 200)
+        : undefined;
+
+    return {
+      matchingText,
+      keywords: [...new Set(keywords)],
+      narrativeSummary: narrativeSummary || undefined,
+    };
+  }
+
+  /**
+   * 容错：模型失败或 JSON 无效时，用输入前 400 字作为 matchingText。
+   */
+  fallbackStructuredInfoFromSourceText(sourceText: string): {
+    matchingText: string;
+    keywords: string[];
+    narrativeSummary?: string;
+  } {
+    const t = sourceText.replace(/\s+/g, ' ').trim();
+    return {
+      matchingText: t.slice(0, 400),
+      keywords: [],
+      narrativeSummary: '（解析降级：已使用原文前缀作为匹配文本）',
+    };
+  }
+
+  async extractStructuredInfo(input: {
+    mode: 'workbench' | 'chapter';
+    sourceText: string;
+  }): Promise<{
+    matchingText: string;
+    keywords: string[];
+    narrativeSummary?: string;
+  }> {
+    const raw = input.sourceText.trim();
+    if (!raw) {
+      return { matchingText: '', keywords: [] };
+    }
+
+    const prompt = this.buildStructuredInfoExtractPrompt(input);
+    const result = await this.callProviderApi(prompt, {
+      maxTokens: 1024,
+      temperature: 0.2,
+    });
+    const parsed = this.parseStructuredInfoFromModelContent(result.content);
+    if (!parsed.matchingText.trim() && parsed.keywords.length === 0) {
+      return this.fallbackStructuredInfoFromSourceText(raw);
+    }
+    return parsed;
   }
 
   private async callProviderApi(

@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
+import type { ChapterStructuredInfo } from '../services/api';
+
 /**
  * 章节条目接口定义
  * @interface ChapterEntry
@@ -16,6 +18,7 @@ export interface ChapterEntry {
   content: string;
   summary: string;
   updatedAt: string;
+  structuredInfo?: ChapterStructuredInfo;
 }
 
 /**
@@ -72,7 +75,11 @@ export const useEditorStore = defineStore('editor', () => {
   function addOrUpdateChapter(chapter: ChapterEntry) {
     const index = chapters.value.findIndex((ch) => ch.chapterNo === chapter.chapterNo);
     if (index >= 0) {
-      chapters.value[index] = chapter;
+      const prev = chapters.value[index];
+      chapters.value[index] = {
+        ...chapter,
+        structuredInfo: chapter.structuredInfo ?? prev?.structuredInfo,
+      };
     } else {
       chapters.value.push(chapter);
     }

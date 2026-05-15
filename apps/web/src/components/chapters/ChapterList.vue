@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import type { ChapterItem } from '../../services/api';
+import type { ChapterItem, ChapterStructuredInfo } from '../../services/api';
 
 const props = defineProps<{
   chapters: ChapterItem[];
@@ -10,6 +10,7 @@ const props = defineProps<{
   generatingRelationChapterNo: number | null;
   optimizingChapterNo: number | null;
   savingChapterNo: number | null;
+  parsingStructuredChapterNo: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -18,6 +19,7 @@ const emit = defineEmits<{
   generateRelationEvents: [chapterNo: number];
   optimize: [chapter: ChapterItem];
   save: [payload: { chapterNo: number; title: string; content: string }];
+  parseStructured: [chapterNo: number];
 }>();
 
 const editingChapterNo = ref<number | null>(null);
@@ -43,6 +45,27 @@ function summarySourceText(source?: ChapterItem['summarySource']) {
   return '未标注';
 }
 
+function hasStructuredPanel(info: ChapterStructuredInfo | undefined) {
+  if (!info) {
+    return false;
+  }
+  return Boolean(
+    info.matchingText?.trim() ||
+    (info.keywords && info.keywords.length > 0) ||
+    info.narrativeSummary?.trim()
+  );
+}
+
+function structuredParseSourceLabel(source?: ChapterStructuredInfo['parseSource']) {
+  if (source === 'workbench') {
+    return '写作工作台';
+  }
+  if (source === 'chapter') {
+    return '章节正文';
+  }
+  return '';
+}
+
 function isEditing(chapterNo: number) {
   return editingChapterNo.value === chapterNo;
 }
@@ -53,6 +76,7 @@ function isBusy(chapterNo: number) {
     props.generatingRelationChapterNo === chapterNo ||
     props.optimizingChapterNo === chapterNo ||
     props.savingChapterNo === chapterNo ||
+    props.parsingStructuredChapterNo === chapterNo ||
     (editingChapterNo.value !== null && editingChapterNo.value !== chapterNo)
   );
 }
@@ -216,6 +240,17 @@ defineExpose({ clearEditing });
                   props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '优化章节'
                 }}
               </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                @click="emit('parseStructured', selectedChapter.chapterNo)"
+              >
+                {{
+                  props.parsingStructuredChapterNo === selectedChapter.chapterNo
+                    ? '解析中...'
+                    : '解析结构化信息'
+                }}
+              </button>
             </template>
           </div>
         </header>
@@ -228,8 +263,79 @@ defineExpose({ clearEditing });
           </p>
         </section>
 
+        <section
+          v-if="hasStructuredPanel(selectedChapter.structuredInfo)"
+          class="chapter-section structured-section"
+        >
+          <h5 class="section-title">结构化匹配（知识库）</h5>
+          <p class="structured-hint text-muted">
+            以下用于与知识库「文档标题」匹配与检索，不等同于上方章节摘要。
+          </p>
+
+          <div class="structured-block">
+            <h6 class="structured-subtitle">匹配文本</h6>
+            <p
+              v-if="selectedChapter.structuredInfo?.matchingText?.trim()"
+              class="summary-text structured-matching"
+            >
+              {{ selectedChapter.structuredInfo.matchingText }}
+            </p>
+            <p v-else class="summary-text text-muted">
+              暂无匹配文本，可点击上方「解析结构化信息」重新生成。
+            </p>
+          </div>
+
+          <div v-if="selectedChapter.structuredInfo?.keywords?.length" class="structured-block">
+            <h6 class="structured-subtitle">关键词</h6>
+            <ul class="keyword-list" aria-label="结构化关键词">
+              <li
+                v-for="(kw, kwIndex) in selectedChapter.structuredInfo.keywords"
+                :key="`${kwIndex}-${kw}`"
+                class="keyword-tag"
+              >
+                {{ kw }}
+              </li>
+            </ul>
+          </div>
+
+          <p
+            v-if="
+              selectedChapter.structuredInfo?.parsedAt ||
+              structuredParseSourceLabel(selectedChapter.structuredInfo?.parseSource)
+            "
+            class="structured-meta text-muted"
+          >
+            <template v-if="selectedChapter.structuredInfo?.parsedAt">
+              解析于 {{ formatTime(selectedChapter.structuredInfo.parsedAt) }}
+            </template>
+            <template
+              v-if="structuredParseSourceLabel(selectedChapter.structuredInfo?.parseSource)"
+            >
+              {{ selectedChapter.structuredInfo?.parsedAt ? ' · ' : '' }}来源：{{
+                structuredParseSourceLabel(selectedChapter.structuredInfo?.parseSource)
+              }}
+            </template>
+          </p>
+
+          <details
+            v-if="selectedChapter.structuredInfo?.narrativeSummary?.trim()"
+            class="structured-details"
+          >
+            <summary>核对用概要（可能与章节摘要表述相近，可展开查看）</summary>
+            <p class="summary-text text-muted structured-narrative">
+              {{ selectedChapter.structuredInfo.narrativeSummary }}
+            </p>
+          </details>
+        </section>
+
         <section class="chapter-section">
           <h5 class="section-title">正文</h5>
+          <p
+            v-if="!selectedChapter.structuredInfo?.matchingText?.trim()"
+            class="message message-warn"
+          >
+            未生成结构化信息，无法匹配知识库。可点击上方「解析结构化信息」基于正文生成。
+          </p>
           <textarea
             v-if="isEditing(selectedChapter.chapterNo)"
             v-model="editContent"
@@ -280,6 +386,106 @@ defineExpose({ clearEditing });
   border-radius: 6px;
   background: #fef2f2;
   color: #991b1b;
+}
+
+.message-warn {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.text-muted {
+  color: #6b7280;
+}
+
+.structured-section {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e2e8f0;
+}
+
+.structured-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.structured-block {
+  margin-top: 0.65rem;
+}
+
+.structured-block:first-of-type {
+  margin-top: 0;
+}
+
+.structured-subtitle {
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.structured-matching {
+  margin: 0;
+  padding: 0.5rem 0.55rem;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+}
+
+.keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.keyword-tag {
+  display: inline-block;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: #334155;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+}
+
+.structured-meta {
+  margin: 0.55rem 0 0;
+  font-size: 0.72rem;
+}
+
+.structured-details {
+  margin-top: 0.65rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  font-size: 0.8rem;
+}
+
+.structured-details summary {
+  cursor: pointer;
+  color: #475569;
+  user-select: none;
+}
+
+.structured-details summary:hover {
+  color: #1e293b;
+}
+
+.structured-narrative {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
 }
 
 .chapter-tabs {

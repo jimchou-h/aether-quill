@@ -108,11 +108,11 @@ function shouldSkipSessionRefresh(url: string): boolean {
 }
 
 function redirectToLogin() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('refreshToken');
-  if (window.location.pathname !== '/login') {
-    window.location.href = '/login';
-  }
+  // localStorage.removeItem('token');
+  // localStorage.removeItem('refreshToken');
+  // if (window.location.pathname !== '/login') {
+  //   window.location.href = '/login';
+  // }
 }
 
 // Request interceptor for auth
@@ -272,6 +272,24 @@ export const apiClient = {
   ) {
     const response = await http.post(`/api/projects/${projectId}/knowledge/chapters`, payload);
     return this.unwrapPayload<ChapterItem>(response.data);
+  },
+
+  async parseChapterStructuredInfo(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      mode: 'workbench' | 'chapter';
+      goal?: string;
+      pov?: string;
+      mustInclude?: string[];
+      avoid?: string[];
+    }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/structured-info/parse`,
+      payload
+    );
+    return this.unwrapPayload<StructuredInfoParseResult>(response.data);
   },
 
   async createReindexJob(projectId: string, payload: { mode?: 'full' | 'incremental' } = {}) {
@@ -547,6 +565,9 @@ export const apiClient = {
       ? await this.resolveSelectedRelationEvents(projectId, options.selectedEventIds)
       : [];
 
+    const docRes = await http.get(`/api/projects/${projectId}/documents`);
+    const docList = this.unwrapPayload<DocumentItem[]>(docRes.data);
+
     const ragBaseURL = getRagOrchestratorBaseURL();
     const contextUrl = ragBaseURL
       ? `${ragBaseURL}/api/projects/${projectId}/context`
@@ -567,6 +588,12 @@ export const apiClient = {
           chapterNo: chapter.chapterNo,
           title: chapter.title,
           summary: chapter.summary || chapter.content.slice(0, 160),
+          structuredMatchingText: chapter.structuredInfo?.matchingText?.trim(),
+        })),
+        knowledgeDocuments: docList.map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          content: doc.content,
         })),
         selectedRelationMemory: buildRelationMemoryBlock(selectedEvents),
         usedRelationEvents: selectedEvents,
@@ -1010,6 +1037,21 @@ export interface ChapterItem {
   summarySource?: ChapterSummarySource;
   summaryUpdatedAt?: string;
   updatedAt: string;
+  structuredInfo?: ChapterStructuredInfo;
+}
+
+export interface ChapterStructuredInfo {
+  matchingText: string;
+  keywords?: string[];
+  narrativeSummary?: string;
+  parseSource?: 'workbench' | 'chapter';
+  parsedAt?: string;
+  lastError?: string;
+}
+
+export interface StructuredInfoParseResult {
+  chapter: ChapterItem;
+  structuredInfo?: ChapterStructuredInfo;
 }
 
 export interface ChapterOptimizationBasis {

@@ -1,6 +1,9 @@
 import { Prisma } from '@prisma/client';
 import type { PrismaClient } from '@prisma/client';
-import type { PersistedProjectState } from '../modules/projects/persisted-workspace.types';
+import type {
+  ChapterStructuredInfoPersisted,
+  PersistedProjectState,
+} from '../modules/projects/persisted-workspace.types';
 
 export async function loadWorkspaceFromPostgres(
   prisma: PrismaClient
@@ -78,6 +81,12 @@ export async function loadWorkspaceFromPostgres(
         summary: ch.summary,
         summarySource: (ch.summarySource as 'llm' | 'fallback' | undefined) ?? undefined,
         summaryUpdatedAt: ch.summaryUpdatedAt ? ch.summaryUpdatedAt.toISOString() : undefined,
+        structuredInfo:
+          ch.structuredInfo &&
+          typeof ch.structuredInfo === 'object' &&
+          !Array.isArray(ch.structuredInfo)
+            ? (ch.structuredInfo as unknown as ChapterStructuredInfoPersisted)
+            : undefined,
         updatedAt: ch.updatedAt.toISOString(),
       })),
       indexVersion: p.indexVersion,
@@ -261,6 +270,9 @@ export async function syncWorkspaceToPostgres(
           summary: ch.summary ?? '',
           summarySource: ch.summarySource ?? null,
           summaryUpdatedAt: ch.summaryUpdatedAt ? new Date(ch.summaryUpdatedAt) : null,
+          ...(ch.structuredInfo !== undefined && ch.structuredInfo !== null
+            ? { structuredInfo: ch.structuredInfo as unknown as Prisma.InputJsonValue }
+            : {}),
           updatedAt: new Date(ch.updatedAt),
         });
       }

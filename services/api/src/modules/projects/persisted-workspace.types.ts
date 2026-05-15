@@ -1,6 +1,17 @@
 /**
  * 与 `data/project-workspaces.json` 落盘结构一致（供 PG 同步与迁移脚本共用）。
  */
+
+/** 章节侧持久化的结构化匹配信息（与 Prisma `Chapter.structuredInfo` 对齐） */
+export interface ChapterStructuredInfoPersisted {
+  matchingText: string;
+  keywords?: string[];
+  narrativeSummary?: string;
+  parseSource?: 'workbench' | 'chapter';
+  parsedAt?: string;
+  lastError?: string;
+}
+
 export interface PersistedProjectState {
   projects: Array<{
     id: string;
@@ -44,6 +55,7 @@ export interface PersistedProjectState {
         summary: string;
         summarySource?: string;
         summaryUpdatedAt?: string;
+        structuredInfo?: ChapterStructuredInfoPersisted;
         updatedAt: string;
       }>;
       indexVersion: number;
