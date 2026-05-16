@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { diffChars as computeDiff, type Change } from 'diff';
 import {
   apiClient,
   type ChapterItem,
@@ -14,6 +15,18 @@ import {
 } from '../../utils/pageFeedback';
 
 type Step = 'instruction' | 'plan' | 'draft';
+
+interface DiffSegment {
+  text: string;
+  added?: boolean;
+  removed?: boolean;
+}
+
+interface DiffLineResult {
+  originalSegments: DiffSegment[];
+  draftSegments: DiffSegment[];
+  type: 'unchanged' | 'added' | 'removed' | 'modified';
+}
 
 const props = defineProps<{
   visible: boolean;
@@ -31,6 +44,7 @@ const instruction = ref('');
 const plan = ref<ChapterOptimizationPlanResult | null>(null);
 const draftText = ref('');
 const draftTraceId = ref('');
+const originalTextSnapshot = ref('');
 
 const generatingPlan = ref(false);
 const generatingDraft = ref(false);
@@ -43,6 +57,10 @@ const typoAutoCorrected = ref(false);
 const errorMessage = ref('');
 
 const chapterUpdatedAtSnapshot = ref<string>('');
+
+const originalScrollRef = ref<HTMLDivElement | null>(null);
+const draftTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const isScrolling = ref(false);
 
 const stepIndex = computed(() => {
   switch (step.value) {
@@ -66,6 +84,142 @@ const isBusy = computed(
     fixingTypos.value
 );
 
+const hasDraftDiff = computed(() => originalTextSnapshot.value.trim() !== draftText.value.trim());
+
+const diffLines = computed<DiffLineResult[]>(() => {
+  if (
+    step.value !== 'draft' ||
+    generatingDraft.value ||
+    !originalTextSnapshot.value ||
+    !draftText.value
+  ) {
+    return [];
+  }
+
+  const changes: Change[] = computeDiff(originalTextSnapshot.value, draftText.value);
+  const origLines: DiffSegment[][] = [];
+  const draftLines: DiffSegment[][] = [];
+
+  let currentOrigLine: DiffSegment[] = [];
+  let currentDraftLine: DiffSegment[] = [];
+
+  function flushOrigLine() {
+    if (currentOrigLine.length > 0) {
+      origLines.push(currentOrigLine);
+      currentOrigLine = [];
+    }
+  }
+
+  function flushDraftLine() {
+    if (currentDraftLine.length > 0) {
+      draftLines.push(currentDraftLine);
+      currentDraftLine = [];
+    }
+  }
+
+  for (const change of changes) {
+    const parts = change.value.split('\n');
+
+    for (let i = 0; i < parts.length; i++) {
+      const text = parts[i];
+      const isLast = i === parts.length - 1;
+
+      if (change.added) {
+        if (!change.removed) {
+          currentDraftLine.push({ text, added: true });
+          if (!isLast) {
+            flushDraftLine();
+            currentOrigLine = [{ text: '', removed: false }];
+            flushOrigLine();
+            currentOrigLine = [];
+          }
+        } else {
+          currentDraftLine.push({ text, added: true });
+          if (!isLast) {
+            flushDraftLine();
+          }
+        }
+      }
+
+      if (change.removed) {
+        if (!change.added) {
+          currentOrigLine.push({ text, removed: true });
+          if (!isLast) {
+            flushOrigLine();
+            currentDraftLine = [{ text: '', added: false }];
+            flushDraftLine();
+            currentDraftLine = [];
+          }
+        } else {
+          currentOrigLine.push({ text, removed: true });
+          if (!isLast) {
+            flushOrigLine();
+          }
+        }
+      }
+
+      if (!change.added && !change.removed) {
+        currentOrigLine.push({ text });
+        currentDraftLine.push({ text });
+        if (!isLast) {
+          flushOrigLine();
+          flushDraftLine();
+        }
+      }
+    }
+  }
+
+  flushOrigLine();
+  flushDraftLine();
+
+  const maxLen = Math.max(origLines.length, draftLines.length);
+  const results: DiffLineResult[] = [];
+
+  for (let i = 0; i < maxLen; i++) {
+    const oSegs = origLines[i] ?? [{ text: '' }];
+    const dSegs = draftLines[i] ?? [{ text: '' }];
+
+    if (i < origLines.length && i < draftLines.length) {
+      const oText = oSegs.map((s) => s.text).join('');
+      const dText = dSegs.map((s) => s.text).join('');
+      const hasRemoved = oSegs.some((s) => s.removed);
+      const hasAdded = dSegs.some((s) => s.added);
+
+      if (hasRemoved || hasAdded || oText !== dText) {
+        results.push({
+          type: 'modified',
+          originalSegments: oSegs,
+          draftSegments: dSegs,
+        });
+      } else {
+        results.push({
+          type: 'unchanged',
+          originalSegments: oSegs,
+          draftSegments: dSegs,
+        });
+      }
+    } else if (i >= origLines.length) {
+      results.push({
+        type: 'added',
+        originalSegments: [{ text: '' }],
+        draftSegments: dSegs,
+      });
+    } else {
+      results.push({
+        type: 'removed',
+        originalSegments: oSegs,
+        draftSegments: [{ text: '' }],
+      });
+    }
+  }
+
+  return results;
+});
+
+const addedCount = computed(() => diffLines.value.filter((r) => r.type === 'added').length);
+const removedCount = computed(() => diffLines.value.filter((r) => r.type === 'removed').length);
+const modifiedCount = computed(() => diffLines.value.filter((r) => r.type === 'modified').length);
+
 watch(
   () => props.visible,
   (next) => {
@@ -86,6 +240,7 @@ function resetState() {
   typoCheckTraceId.value = '';
   typoAutoCorrected.value = false;
   errorMessage.value = '';
+  originalTextSnapshot.value = props.chapter?.content || '';
   chapterUpdatedAtSnapshot.value = props.chapter?.updatedAt || '';
 }
 
@@ -94,6 +249,36 @@ function close() {
     return;
   }
   emit('close');
+}
+
+function onOriginalScroll() {
+  if (isScrolling.value) return;
+  syncScroll('original');
+}
+
+function onDraftScroll() {
+  if (isScrolling.value) return;
+  syncScroll('draft');
+}
+
+function syncScroll(source: 'original' | 'draft') {
+  const sourceEl = source === 'original' ? originalScrollRef.value : draftTextareaRef.value;
+  const targetEl = source === 'original' ? draftTextareaRef.value : originalScrollRef.value;
+
+  if (!sourceEl || !targetEl) return;
+
+  const sourceScrollHeight = sourceEl.scrollHeight - sourceEl.clientHeight;
+  if (sourceScrollHeight <= 0) return;
+
+  const scrollRatio = sourceEl.scrollTop / sourceScrollHeight;
+  const targetScrollHeight = targetEl.scrollHeight - targetEl.clientHeight;
+
+  isScrolling.value = true;
+  targetEl.scrollTop = scrollRatio * targetScrollHeight;
+
+  setTimeout(() => {
+    isScrolling.value = false;
+  }, 50);
 }
 
 async function handleGeneratePlan() {
@@ -356,6 +541,7 @@ async function handleApply() {
   <div v-if="props.visible" class="modal-overlay" role="presentation" @click.self="close">
     <section
       class="modal-dialog"
+      :class="{ 'fullscreen-draft': step === 'draft' }"
       role="dialog"
       aria-modal="true"
       aria-labelledby="optimize-modal-title"
@@ -467,21 +653,53 @@ async function handleApply() {
         </div>
       </section>
 
-      <section v-else-if="step === 'draft'" class="step-section">
+      <section v-else-if="step === 'draft'" class="step-section draft-section">
         <h4 class="section-title">优化正文</h4>
         <p v-if="typoAutoCorrected" class="message message-info">
           正文已自动修正错字，请确认后再覆盖原章节。
         </p>
-        <label class="field-label" for="optimize-draft-text">正文内容（可直接编辑）</label>
-        <textarea
-          id="optimize-draft-text"
-          v-model="draftText"
-          class="field-textarea draft-text-editor"
-          :readonly="generatingDraft || fixingTypos"
-          :placeholder="
-            generatingDraft ? '正在生成正文...' : '生成完成后可在此修改，再确认覆盖原章节'
-          "
-        />
+        <div v-if="hasDraftDiff && !generatingDraft" class="diff-summary">
+          <span class="diff-badge diff-added">+{{ addedCount }} 行新增</span>
+          <span class="diff-badge diff-removed">-{{ removedCount }} 行删除</span>
+          <span class="diff-badge diff-modified">~{{ modifiedCount }} 行改动</span>
+        </div>
+        <div class="draft-compare-grid">
+          <div class="compare-pane">
+            <label class="field-label">原文（快照，只读）</label>
+            <div ref="originalScrollRef" class="scroll-pane" @scroll="onOriginalScroll">
+              <div
+                v-for="(row, idx) in diffLines"
+                :key="'orig-' + idx"
+                class="diff-line"
+                :class="{
+                  'line-removed': row.type === 'removed',
+                  'line-modified': row.type === 'modified',
+                }"
+              >
+                <span
+                  v-for="(seg, si) in row.originalSegments"
+                  :key="si"
+                  :class="{ 'diff-removed-text': seg.removed }"
+                  >{{ seg.text }}</span
+                >
+              </div>
+            </div>
+          </div>
+          <div class="compare-pane">
+            <label class="field-label" for="optimize-draft-text">优化正文（可直接编辑）</label>
+            <textarea
+              id="optimize-draft-text"
+              ref="draftTextareaRef"
+              v-model="draftText"
+              class="scroll-pane draft-textarea"
+              :readonly="generatingDraft || fixingTypos"
+              :placeholder="
+                generatingDraft ? '正在生成正文...' : '生成完成后可在此修改，再确认覆盖原章节'
+              "
+              @scroll="onDraftScroll"
+            />
+          </div>
+        </div>
         <p v-if="draftTraceId" class="meta-line">trace: {{ draftTraceId }}</p>
         <div v-if="typoIssues.length > 0" class="typo-panel">
           <h5 class="typo-title">错字检查结果（{{ typoIssues.length }} 处）</h5>
@@ -567,6 +785,15 @@ async function handleApply() {
   background: #fff;
   padding: 1.25rem 1.4rem;
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+}
+
+.modal-dialog.fullscreen-draft {
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  max-width: 100vw;
+  padding: 1rem 1.25rem;
+  border-radius: 0;
 }
 
 .modal-header {
@@ -671,6 +898,13 @@ async function handleApply() {
   gap: 0.7rem;
 }
 
+.draft-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .section-title {
   margin: 0;
   font-size: 0.95rem;
@@ -705,16 +939,114 @@ async function handleApply() {
   cursor: wait;
 }
 
-.draft-text-editor {
-  min-height: 220px;
-  max-height: 420px;
-  line-height: 1.6;
-  white-space: pre-wrap;
+.draft-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
 }
 
-.draft-text-editor:read-only {
+.compare-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 0;
+}
+
+.scroll-pane {
+  flex: 1;
+  min-height: 200px;
+  max-height: calc(100vh - 380px);
+  overflow-y: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
   background: #f9fafb;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.draft-textarea {
+  font-family: inherit;
+  resize: none;
+  color: #111827;
+  caret-color: #111827;
+}
+
+.draft-textarea::placeholder {
+  color: #9ca3af;
+}
+
+.draft-textarea:focus {
+  outline: none;
+}
+
+.draft-textarea:read-only {
   cursor: wait;
+}
+
+.diff-line {
+  min-height: 1.6em;
+}
+
+.line-added,
+.line-removed,
+.line-modified {
+  padding-left: 0.65rem;
+  border-left: 3px solid transparent;
+  margin-left: -3px;
+}
+
+.line-added {
+  background: #dcfce7;
+  border-left-color: #22c55e;
+}
+
+.line-removed {
+  background: #fee2e2;
+  border-left-color: #ef4444;
+}
+
+.line-modified {
+  background: #fef9c3;
+  border-left-color: #eab308;
+}
+
+.diff-removed-text {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.diff-summary {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.diff-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.diff-added {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.diff-removed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.diff-modified {
+  background: #fef9c3;
+  color: #854d0e;
 }
 
 .message-info {
@@ -806,5 +1138,19 @@ async function handleApply() {
 .secondary-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .draft-compare-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-dialog.fullscreen-draft {
+    padding: 0.75rem;
+  }
+
+  .scroll-pane {
+    max-height: 300px;
+  }
 }
 </style>

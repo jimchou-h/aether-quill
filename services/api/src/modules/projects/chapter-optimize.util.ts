@@ -152,7 +152,7 @@ export function buildDraftUserPrompt(input: {
   );
 
   sections.push(
-    '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。'
+    '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。必须基于 <chapter-original> 逐段改写并完整覆盖原文信息，不得遗漏关键情节、对白、人物动作与指代关系；若某段无需修改请保留原意并输出该段。除非优化方案明确要求删减，输出总字数应不低于原文的95%，段落数不得少于原文。'
   );
 
   return sections.join('\n\n');
