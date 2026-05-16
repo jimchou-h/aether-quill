@@ -16,6 +16,7 @@ model User {
   createdAt DateTime        @map("created_at")
   updatedAt DateTime        @map("updated_at")
   members   ProjectMember[]
+  sessions  Session[]
 
   @@map("users")
 }
