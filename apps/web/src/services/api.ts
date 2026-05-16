@@ -953,6 +953,135 @@ export const apiClient = {
     return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
   },
 
+  async checkChapterOptimizationTypos(
+    projectId: string,
+    chapterNo: number,
+    payload: { draftText: string }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/typo-check`,
+      payload
+    );
+    return this.unwrapPayload<ChapterOptimizationTypoCheckResult>(response.data);
+  },
+
+  async fixChapterOptimizationTyposSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: { draftText: string; issues?: ChapterTypoIssue[] },
+    callbacks: ChapterOptimizeTypoFixCallbacks
+  ): Promise<void> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
+    const token = localStorage.getItem('token');
+    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/typo-fix`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `错字自动修正失败: ${response.statusText}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let reading = true;
+
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const segments = buffer.split('\n\n');
+      buffer = segments.pop() || '';
+
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        const dataPart = trimmed.replace(/^data:\s*/, '');
+        if (!dataPart) {
+          continue;
+        }
+
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error';
+            data?: string;
+            traceId?: string;
+            appliedIssueCount?: number;
+            autoCorrected?: boolean;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.(event.traceId || '');
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId || '',
+                appliedIssueCount: event.appliedIssueCount ?? 0,
+                autoCorrected: event.autoCorrected ?? true,
+              });
+              reading = false;
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || '错字自动修正失败');
+              reading = false;
+              break;
+          }
+        } catch {
+          // skip malformed SSE events
+        }
+      }
+    }
+  },
+
+  async exportProjectChaptersTxt(projectId: string): Promise<Blob> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
+    const token = localStorage.getItem('token');
+    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/export?format=txt`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `导出章节失败: ${response.statusText}`);
+    }
+
+    return response.blob();
+  },
+
   // Document helper methods
   async getDocument(id: string) {
     const response = await http.get(`/api/documents/${id}`);
@@ -1090,6 +1219,27 @@ export interface ChapterOptimizeDraftCallbacks {
   onStart?: (traceId: string, chapterNo: number) => void;
   onContent?: (text: string) => void;
   onEnd?: (traceId: string) => void;
+  onError?: (message: string) => void;
+}
+
+export interface ChapterTypoIssue {
+  id: string;
+  original: string;
+  suggestion: string;
+  context?: string;
+  reason?: string;
+}
+
+export interface ChapterOptimizationTypoCheckResult {
+  issues: ChapterTypoIssue[];
+  traceId: string;
+  issueCount: number;
+}
+
+export interface ChapterOptimizeTypoFixCallbacks {
+  onStart?: (traceId: string) => void;
+  onContent?: (text: string) => void;
+  onEnd?: (payload: { traceId: string; appliedIssueCount: number; autoCorrected: boolean }) => void;
   onError?: (message: string) => void;
 }
 

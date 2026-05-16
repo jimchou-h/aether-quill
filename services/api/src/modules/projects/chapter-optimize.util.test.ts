@@ -11,6 +11,9 @@ import {
   makeOptimizationId,
   normalizeInstruction,
   parseExpectedUpdatedAt,
+  parseTypoCheckIssues,
+  buildTypoCheckUserPrompt,
+  buildTypoFixUserPrompt,
 } from './chapter-optimize.util';
 
 const sampleChapter = {
@@ -122,4 +125,26 @@ test('makeOptimizationId generates prefixed ids', () => {
   assert.match(planId, /^plan-/);
   assert.match(draftId, /^draft-/);
   assert.notEqual(planId, draftId);
+});
+
+test('parseTypoCheckIssues parses fenced JSON and filters invalid items', () => {
+  const raw =
+    '```json\n{"issues":[{"id":"issue-1","original":"错字","suggestion":"错字改","reason":"同音"}]}\n```';
+  const issues = parseTypoCheckIssues(raw);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0]?.original, '错字');
+  assert.equal(issues[0]?.suggestion, '错字改');
+});
+
+test('buildTypoCheckUserPrompt wraps draft in draft-text tag', () => {
+  const prompt = buildTypoCheckUserPrompt('待检查正文');
+  assert.match(prompt, /<draft-text>[\s\S]*待检查正文[\s\S]*<\/draft-text>/);
+});
+
+test('buildTypoFixUserPrompt lists all issues', () => {
+  const prompt = buildTypoFixUserPrompt('正文', [
+    { id: 'issue-1', original: 'A', suggestion: 'B', reason: '错字' },
+  ]);
+  assert.match(prompt, /<typo-issues>/);
+  assert.match(prompt, /「A」→「B」/);
 });

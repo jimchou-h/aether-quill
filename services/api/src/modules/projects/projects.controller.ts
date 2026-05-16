@@ -360,6 +360,100 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/typo-check')
+  checkChapterOptimizationTypos(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body() data: { draftText?: string },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.checkChapterOptimizationTypos(id, Number(chapterNo), data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/typo-fix')
+  async fixChapterOptimizationTypos(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      draftText?: string;
+      issues?: Array<{
+        id: string;
+        original: string;
+        suggestion: string;
+        context?: string;
+        reason?: string;
+      }>;
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(': keep-alive\n\n');
+
+    const writeEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    try {
+      await this.projectsService.fixChapterOptimizationTyposStream(
+        id,
+        Number(chapterNo),
+        data,
+        userId,
+        {
+          onStart: ({ traceId }) => {
+            writeEvent({ event: 'start', traceId });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: ({ traceId, appliedIssueCount, autoCorrected }) => {
+            writeEvent({ event: 'end', traceId, appliedIssueCount, autoCorrected });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '错字自动修正失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/knowledge/chapters/export')
+  exportChaptersTxt(
+    @Param('id') id: string,
+    @Query('format') format: string | undefined,
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+    if (format && format !== 'txt') {
+      res.status(400).json({ code: 1316, msg: '仅支持 format=txt 导出' });
+      return;
+    }
+
+    const { filename, body } = this.projectsService.exportProjectChaptersTxt(id, userId);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(body);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':id/relation-events')
   getRelationEvents(
     @Param('id') id: string,

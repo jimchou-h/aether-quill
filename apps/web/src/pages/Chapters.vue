@@ -36,6 +36,7 @@ const parsingStructuredChapterNo = ref<number | null>(null);
 const showImportModal = ref(false);
 const showOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
+const exportingChapters = ref(false);
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
 const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
@@ -258,6 +259,27 @@ async function handleOptimizeApplied(updated: ChapterItem) {
   selectedChapterNo.value = updated.chapterNo;
 }
 
+async function handleExportChapters() {
+  exportingChapters.value = true;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    const blob = await apiClient.exportProjectChaptersTxt(projectId.value);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    anchor.href = url;
+    anchor.download = `chapters-${projectId.value}-${date}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    message.value = presentSuccess('全部章节已导出为 txt 文件');
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '导出章节失败');
+  } finally {
+    exportingChapters.value = false;
+  }
+}
+
 async function handleGenerateSummaries() {
   batchSummarizing.value = true;
   errorMessage.value = '';
@@ -310,7 +332,17 @@ onMounted(() => {
           生成章节草稿时依赖「结构化信息」做知识库标题匹配；若未解析，将无法注入知识库文档。请在本页或写作工作台使用「解析结构化信息」。
         </p>
       </div>
-      <button class="primary-button" type="button" @click="openImportModal">新增章节</button>
+      <div class="header-actions">
+        <button
+          class="secondary-button"
+          type="button"
+          :disabled="exportingChapters || chapters.length === 0"
+          @click="handleExportChapters"
+        >
+          {{ exportingChapters ? '导出中...' : '导出全部章节' }}
+        </button>
+        <button class="primary-button" type="button" @click="openImportModal">新增章节</button>
+      </div>
     </div>
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
@@ -482,17 +514,36 @@ onMounted(() => {
   color: #111827;
 }
 
-.primary-button {
-  background: #111827;
-  color: #fff;
-  border: none;
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.primary-button,
+.secondary-button {
   border-radius: 6px;
   padding: 0.5rem 0.9rem;
   cursor: pointer;
   white-space: nowrap;
+  font-size: 0.85rem;
 }
 
-.primary-button:disabled {
+.primary-button {
+  background: #111827;
+  color: #fff;
+  border: none;
+}
+
+.secondary-button {
+  background: #fff;
+  color: #111827;
+  border: 1px solid #d1d5db;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

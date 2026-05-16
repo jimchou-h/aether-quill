@@ -32,22 +32,31 @@ import {
 } from './relation-event.util';
 import type { ChapterStructuredInfoPersisted } from './persisted-workspace.types';
 import { DocumentsService } from '../documents/documents.service';
+import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
 import {
   CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_TYPO_CHECK_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_TYPO_FIX_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY,
   ChapterVersionConflictError,
   assertDraftText,
   assertInstruction,
   assertPlanText,
   buildDraftUserPrompt,
   buildPlanUserPrompt,
+  buildTypoCheckUserPrompt,
+  buildTypoFixUserPrompt,
   ensureChapterVersionMatches,
   makeOptimizationId,
   normalizeInstruction,
   parseExpectedUpdatedAt,
+  parseTypoCheckIssues,
   type ChapterOptimizeUsedRelationEvent,
+  type ChapterTypoIssueRecord,
 } from './chapter-optimize.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { usePostgresPersistence } from '../../persistence/use-postgres';
@@ -1765,6 +1774,231 @@ export class ProjectsService implements OnModuleInit {
         summaryUpdatedAt: chapter.summaryUpdatedAt,
         updatedAt: chapter.updatedAt,
       },
+    };
+  }
+
+  async checkChapterOptimizationTypos(
+    projectId: string,
+    chapterNo: number,
+    payload: { draftText?: string },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
+    assertDraftText(draftText);
+
+    const userPrompt = buildTypoCheckUserPrompt(draftText);
+    const traceId = makeOptimizationId('typo-check');
+
+    try {
+      const { data } = await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/generate`,
+        {
+          projectId,
+          prompt: userPrompt,
+          useSSE: false,
+          systemPromptOverride: CHAPTER_OPTIMIZE_TYPO_CHECK_SYSTEM_PROMPT,
+          templateKey: CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY,
+          context: {
+            task: 'chapter.optimize.typo-check',
+            chapterNo: normalizedChapterNo,
+            traceId,
+          },
+        },
+        { timeout: 120000 }
+      );
+
+      const issues = parseTypoCheckIssues(data?.content ?? data);
+      return {
+        issues,
+        traceId,
+        issueCount: issues.length,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '错字检查失败';
+      throw new BadGatewayException({
+        code: 1314,
+        msg: message,
+      });
+    }
+  }
+
+  async fixChapterOptimizationTyposStream(
+    projectId: string,
+    chapterNo: number,
+    payload: { draftText?: string; issues?: ChapterTypoIssueRecord[] },
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: { traceId: string }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: {
+        traceId: string;
+        appliedIssueCount: number;
+        autoCorrected: boolean;
+      }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
+    assertDraftText(draftText);
+
+    let issues = Array.isArray(payload.issues) ? payload.issues : [];
+    if (issues.length === 0) {
+      const checkResult = await this.checkChapterOptimizationTypos(
+        projectId,
+        normalizedChapterNo,
+        { draftText },
+        userId
+      );
+      issues = checkResult.issues;
+    }
+
+    const traceId = makeOptimizationId('typo-fix');
+    const userPrompt = buildTypoFixUserPrompt(draftText, issues);
+
+    let response;
+    try {
+      response = await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/generate`,
+        {
+          projectId,
+          prompt: userPrompt,
+          useSSE: true,
+          systemPromptOverride: CHAPTER_OPTIMIZE_TYPO_FIX_SYSTEM_PROMPT,
+          templateKey: CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY,
+          context: {
+            task: 'chapter.optimize.typo-fix',
+            chapterNo: normalizedChapterNo,
+            traceId,
+            appliedIssueCount: issues.length,
+          },
+        },
+        { responseType: 'stream' }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '错字自动修正失败';
+      throw new BadGatewayException({
+        code: 1315,
+        msg: message,
+      });
+    }
+
+    let firstStartEmitted = false;
+    let buffer = '';
+
+    await new Promise<void>((resolveStream, rejectStream) => {
+      const stream = response.data as NodeJS.ReadableStream;
+
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf-8');
+        const segments = buffer.split('\n\n');
+        buffer = segments.pop() || '';
+
+        for (const segment of segments) {
+          const trimmedSegment = segment.trim();
+          if (!trimmedSegment.startsWith('data:')) {
+            continue;
+          }
+          const dataPart = trimmedSegment.replace(/^data:\s*/, '');
+          if (!dataPart) {
+            continue;
+          }
+          let event: { event?: string; data?: string; traceId?: string };
+          try {
+            event = JSON.parse(dataPart);
+          } catch {
+            continue;
+          }
+
+          switch (event.event) {
+            case 'start': {
+              const eventTraceId = typeof event.traceId === 'string' ? event.traceId : traceId;
+              if (!firstStartEmitted) {
+                callbacks.onStart({ traceId: eventTraceId });
+                firstStartEmitted = true;
+              }
+              break;
+            }
+            case 'content': {
+              const raw = typeof event.data === 'string' ? event.data : '';
+              callbacks.onContent(raw.replace(/\\n/g, '\n'));
+              break;
+            }
+            case 'end': {
+              const eventTraceId = typeof event.traceId === 'string' ? event.traceId : traceId;
+              callbacks.onEnd({
+                traceId: eventTraceId,
+                appliedIssueCount: issues.length,
+                autoCorrected: true,
+              });
+              break;
+            }
+            case 'error': {
+              const message = typeof event.data === 'string' ? event.data : '错字自动修正失败';
+              callbacks.onError(message);
+              break;
+            }
+          }
+        }
+      });
+
+      stream.on('end', () => resolveStream());
+      stream.on('error', (error: unknown) => rejectStream(error));
+    });
+  }
+
+  exportProjectChaptersTxt(projectId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor', 'viewer']);
+    }
+    const project = this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapters = knowledge.chapters.filter((item) => item.content?.trim());
+    if (chapters.length === 0) {
+      throw new BadRequestException({
+        code: 1316,
+        msg: '当前项目暂无可导出的章节正文',
+      });
+    }
+
+    const body = buildChaptersTxtExport(
+      chapters.map((chapter) => ({
+        chapterNo: chapter.chapterNo,
+        title: chapter.title,
+        content: chapter.content,
+      }))
+    );
+
+    return {
+      filename: buildChaptersExportFilename(project.name || projectId),
+      body,
     };
   }
 

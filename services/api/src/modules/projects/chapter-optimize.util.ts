@@ -193,6 +193,120 @@ export function ensureChapterVersionMatches(chapterNo: number, expected: Date, a
 /**
  * 用稳定的伪随机生成 planId / draftId，便于 trace 关联。
  */
-export function makeOptimizationId(prefix: 'plan' | 'draft'): string {
+export function makeOptimizationId(prefix: 'plan' | 'draft' | 'typo-check' | 'typo-fix'): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export interface ChapterTypoIssueRecord {
+  id: string;
+  original: string;
+  suggestion: string;
+  context?: string;
+  reason?: string;
+}
+
+export const CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY = 'chapter.optimize.typo-check';
+export const CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY = 'chapter.optimize.typo-fix';
+
+export const CHAPTER_OPTIMIZE_TYPO_CHECK_SYSTEM_PROMPT = [
+  '你是一位资深中文小说校对编辑，专门检查章节正文中的错别字、同音误用、标点错误和明显语病。',
+  '本步骤只输出 JSON，不要输出任何解释、Markdown 或代码块标记。',
+  'JSON 结构必须为：',
+  '{"issues":[{"id":"issue-1","original":"原文片段","suggestion":"建议修改","context":"上下文","reason":"原因"}]}',
+  '规则：',
+  '1) issues 数组可为空（表示未发现错字）；',
+  '2) original 必须是 draft 中真实存在的连续片段；',
+  '3) suggestion 为替换 original 后的正确写法；',
+  '4) 不要编造不存在的错字，不要修改专有名词除非明显错误；',
+  '5) id 使用 issue-1、issue-2 递增。',
+].join('\n');
+
+export const CHAPTER_OPTIMIZE_TYPO_FIX_SYSTEM_PROMPT = [
+  '你是一位资深中文小说校对编辑，正在将错字修正建议全部应用到章节草稿正文中。',
+  '本步骤需要直接输出「修正后的完整正文」纯文本，不要输出 JSON、方案、说明或 Markdown。',
+  '硬约束：',
+  '1) 必须应用 <typo-issues> 中的全部修正建议；',
+  '2) 除错字修正外，不得擅自改写情节、人物对白或段落结构；',
+  '3) 不得使用占位语；',
+  '4) 保持原文语言风格、人称与时态。',
+].join('\n');
+
+export function buildTypoCheckUserPrompt(draftText: string): string {
+  return [
+    '【待检查正文】',
+    `<draft-text>\n${draftText.trim()}\n</draft-text>`,
+    '请检查以上正文中的错别字与明显语病，按约定 JSON 格式输出 issues 列表。',
+  ].join('\n\n');
+}
+
+export function buildTypoFixUserPrompt(
+  draftText: string,
+  issues: ChapterTypoIssueRecord[]
+): string {
+  const issueLines =
+    issues.length > 0
+      ? issues
+          .map(
+            (issue, index) =>
+              `${index + 1}. [${issue.id}] 「${issue.original}」→「${issue.suggestion}」${issue.reason ? `（${issue.reason}）` : ''}`
+          )
+          .join('\n')
+      : '（无待修正项，请原样输出正文）';
+
+  return [
+    '【修正要求】请将以下全部错字建议应用到正文，并输出修正后的完整正文。',
+    `<typo-issues>\n${issueLines}\n</typo-issues>`,
+    `<draft-text>\n${draftText.trim()}\n</draft-text>`,
+    '请直接输出修正后的完整正文纯文本。',
+  ].join('\n\n');
+}
+
+export function parseTypoCheckIssues(raw: unknown): ChapterTypoIssueRecord[] {
+  let payload = raw;
+  if (typeof payload === 'string') {
+    const trimmed = payload.trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const jsonText = fenced ? fenced[1].trim() : trimmed;
+    try {
+      payload = JSON.parse(jsonText);
+    } catch {
+      return [];
+    }
+  }
+
+  const items = Array.isArray(payload)
+    ? payload
+    : payload &&
+        typeof payload === 'object' &&
+        Array.isArray((payload as { issues?: unknown[] }).issues)
+      ? (payload as { issues: unknown[] }).issues
+      : [];
+
+  const issues: ChapterTypoIssueRecord[] = [];
+  let index = 0;
+  for (const item of items) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const original = typeof record.original === 'string' ? record.original.trim() : '';
+    const suggestion = typeof record.suggestion === 'string' ? record.suggestion.trim() : '';
+    if (!original || !suggestion || original === suggestion) {
+      continue;
+    }
+    index += 1;
+    const id =
+      typeof record.id === 'string' && record.id.trim() ? record.id.trim() : `issue-${index}`;
+    const context = typeof record.context === 'string' ? record.context.trim() : undefined;
+    const reason = typeof record.reason === 'string' ? record.reason.trim() : undefined;
+    issues.push({
+      id,
+      original,
+      suggestion,
+      context: context || undefined,
+      reason: reason || undefined,
+    });
+  }
+
+  return issues;
 }
