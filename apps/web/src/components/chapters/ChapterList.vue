@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue';
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import type { ChapterItem, ChapterStructuredInfo } from '../../services/api';
 
 const props = defineProps<{
@@ -48,6 +48,8 @@ const editingChapterNo = ref<number | null>(null);
 const editTitle = ref('');
 const editContent = ref('');
 const localError = ref('');
+const showMoreActions = ref(false);
+
 const searchQuery = ref('');
 const jumpToChapterNo = ref('');
 const chapterTabsRef = ref<HTMLElement | null>(null);
@@ -175,6 +177,32 @@ function scrollToSelectedChapter() {
 function clearEditing() {
   cancelEdit();
 }
+
+function toggleMoreActions() {
+  showMoreActions.value = !showMoreActions.value;
+}
+
+function handleClickOutside(event: MouseEvent) {
+  if (showMoreActions.value) {
+    const target = event.target as Node;
+    const moreBtn = document.querySelector('.more-actions-trigger');
+    const menu = document.querySelector('.more-actions-menu');
+    if (
+      moreBtn && !moreBtn.contains(target) &&
+      menu && !menu.contains(target)
+    ) {
+      showMoreActions.value = false;
+    }
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside);
+});
 
 watch(
   () => props.selectedChapterNo,
@@ -315,7 +343,7 @@ defineExpose({ clearEditing });
                 编辑
               </button>
               <button
-                class="secondary-button"
+                class="primary-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
                 @click="emit('summarize', selectedChapter.chapterNo)"
               >
@@ -325,37 +353,53 @@ defineExpose({ clearEditing });
                     : '生成摘要'
                 }}
               </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('generateRelationEvents', selectedChapter.chapterNo)"
-              >
-                {{
-                  props.generatingRelationChapterNo === selectedChapter.chapterNo
-                    ? '生成中...'
-                    : '生成关系事件'
-                }}
-              </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('optimize', selectedChapter)"
-              >
-                {{
-                  props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '优化章节'
-                }}
-              </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('parseStructured', selectedChapter.chapterNo)"
-              >
-                {{
-                  props.parsingStructuredChapterNo === selectedChapter.chapterNo
-                    ? '解析中...'
-                    : '解析结构化信息'
-                }}
-              </button>
+              <div class="dropdown-container">
+                <button
+                  class="secondary-button more-actions-trigger"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="toggleMoreActions"
+                >
+                  更多
+                  <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" style="margin-left:0.25rem;">
+                    <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('generateRelationEvents', selectedChapter.chapterNo)"
+                  >
+                    {{
+                      props.generatingRelationChapterNo === selectedChapter.chapterNo
+                        ? '生成中...'
+                        : '生成关系事件'
+                    }}
+                  </button>
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('optimize', selectedChapter)"
+                  >
+                    {{
+                      props.optimizingChapterNo === selectedChapter.chapterNo
+                        ? '优化中...'
+                        : '优化章节'
+                    }}
+                  </button>
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('parseStructured', selectedChapter.chapterNo)"
+                  >
+                    {{
+                      props.parsingStructuredChapterNo === selectedChapter.chapterNo
+                        ? '解析中...'
+                        : '解析结构化信息'
+                    }}
+                  </button>
+                </div>
+              </div>
               <button
                 class="delete-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
@@ -864,6 +908,49 @@ defineExpose({ clearEditing });
 
 .delete-button:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dropdown-container {
+  position: relative;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 0.35rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: none;
+  background: transparent;
+  color: #111827;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.dropdown-item:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
