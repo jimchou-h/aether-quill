@@ -4,6 +4,8 @@ export interface ChapterExportItem {
   content: string;
 }
 
+const CHAPTER_PREFIX_REGEX = /^第\d+章|^第[一二三四五六七八九十百千万]+章/;
+
 /**
  * 将章节列表格式化为可下载的纯文本（按 chapterNo 升序）。
  */
@@ -12,7 +14,8 @@ export function buildChaptersTxtExport(chapters: ChapterExportItem[]): string {
   const blocks = sorted.map((chapter) => {
     const title = chapter.title?.trim() || `第${chapter.chapterNo}章`;
     const content = chapter.content?.trim() || '';
-    return `第${chapter.chapterNo}章 ${title}\n\n${content}`;
+    const header = CHAPTER_PREFIX_REGEX.test(title) ? title : `第${chapter.chapterNo}章 ${title}`;
+    return `${header}\n\n${content}`;
   });
   return blocks.join('\n\n\n');
 }

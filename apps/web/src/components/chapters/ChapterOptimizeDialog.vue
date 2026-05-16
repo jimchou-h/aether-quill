@@ -61,6 +61,7 @@ const chapterUpdatedAtSnapshot = ref<string>('');
 const originalScrollRef = ref<HTMLDivElement | null>(null);
 const draftTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const isScrolling = ref(false);
+const syncScrollEnabled = ref(true);
 
 const stepIndex = computed(() => {
   switch (step.value) {
@@ -257,12 +258,12 @@ function close() {
 }
 
 function onOriginalScroll() {
-  if (isScrolling.value) return;
+  if (isScrolling.value || !syncScrollEnabled.value) return;
   syncScroll('original');
 }
 
 function onDraftScroll() {
-  if (isScrolling.value) return;
+  if (isScrolling.value || !syncScrollEnabled.value) return;
   syncScroll('draft');
 }
 
@@ -668,6 +669,12 @@ async function handleApply() {
           <span class="diff-badge diff-removed">-{{ removedCount }} 行删除</span>
           <span class="diff-badge diff-modified">~{{ modifiedCount }} 行改动</span>
         </div>
+        <div class="sync-scroll-toggle">
+          <label class="sync-scroll-label">
+            <input type="checkbox" v-model="syncScrollEnabled" class="sync-scroll-checkbox" />
+            <span class="sync-scroll-text">同步滚动</span>
+          </label>
+        </div>
         <div class="draft-compare-grid">
           <div class="compare-pane">
             <label class="field-label">原文（快照，只读）</label>
@@ -951,6 +958,36 @@ async function handleApply() {
   gap: 0.75rem;
   flex: 1;
   min-height: 0;
+}
+
+.sync-scroll-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.sync-scroll-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.82rem;
+  color: #6b7280;
+}
+
+.sync-scroll-label:hover {
+  color: #374151;
+}
+
+.sync-scroll-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #111827;
+}
+
+.sync-scroll-text {
+  line-height: 1;
 }
 
 .compare-pane {
