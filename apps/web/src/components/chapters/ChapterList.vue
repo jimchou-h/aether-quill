@@ -20,7 +20,29 @@ const emit = defineEmits<{
   optimize: [chapter: ChapterItem];
   save: [payload: { chapterNo: number; title: string; content: string }];
   parseStructured: [chapterNo: number];
+  delete: [chapterNo: number];
 }>();
+
+const showDeleteConfirm = ref(false);
+const deletingChapterNo = ref<number | null>(null);
+
+function confirmDelete(chapterNo: number) {
+  deletingChapterNo.value = chapterNo;
+  showDeleteConfirm.value = true;
+}
+
+function cancelDelete() {
+  showDeleteConfirm.value = false;
+  deletingChapterNo.value = null;
+}
+
+function handleDelete() {
+  if (deletingChapterNo.value !== null) {
+    emit('delete', deletingChapterNo.value);
+    showDeleteConfirm.value = false;
+    deletingChapterNo.value = null;
+  }
+}
 
 const editingChapterNo = ref<number | null>(null);
 const editTitle = ref('');
@@ -334,6 +356,13 @@ defineExpose({ clearEditing });
                     : '解析结构化信息'
                 }}
               </button>
+              <button
+                class="delete-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                @click="confirmDelete(selectedChapter.chapterNo)"
+              >
+                删除章节
+              </button>
             </template>
           </div>
         </header>
@@ -430,6 +459,21 @@ defineExpose({ clearEditing });
       </template>
     </div>
   </section>
+
+  <Teleport to="body">
+    <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="cancelDelete">
+      <div class="modal-content">
+        <h3 class="modal-title">确认删除章节</h3>
+        <p class="modal-message">
+          确定要删除第 {{ deletingChapterNo }} 章吗？删除后将无法恢复，且后续章节号将自动调整。
+        </p>
+        <div class="modal-actions">
+          <button class="secondary-button" @click="cancelDelete">取消</button>
+          <button class="delete-button modal-delete" @click="handleDelete">确认删除</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -803,6 +847,26 @@ defineExpose({ clearEditing });
   border: 1px solid #d1d5db;
 }
 
+.delete-button {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.delete-button:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .primary-button:disabled,
 .secondary-button:disabled {
   opacity: 0.6;
@@ -854,5 +918,51 @@ defineExpose({ clearEditing });
     border-right: none;
     border-bottom: 1px solid #e5e7eb;
   }
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 400px;
+  width: 90%;
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.modal-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  color: #111827;
+}
+
+.modal-message {
+  margin: 0 0 1rem;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.modal-delete {
+  padding: 0.5rem 1rem;
 }
 </style>
