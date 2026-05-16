@@ -49,9 +49,37 @@ export class AuthService implements OnModuleInit {
           updatedAt: u.updatedAt.toISOString(),
         });
       }
+
+      await this.loadSessionsFromDatabase();
     } catch (err) {
       console.error('[persistence] users PG 加载失败，回退到内存种子', err);
       this.initializeMockUser();
+    }
+  }
+
+  private async loadSessionsFromDatabase() {
+    try {
+      const now = new Date();
+      const dbSessions = await (this.prisma as any).session.findMany({
+        where: {
+          expiresAt: {
+            gte: now,
+          },
+        },
+      });
+
+      for (const dbSession of dbSessions) {
+        this.sessions.set(dbSession.token, {
+          id: dbSession.id,
+          userId: dbSession.userId,
+          token: dbSession.token,
+          expiresAt: dbSession.expiresAt.toISOString(),
+          createdAt: dbSession.createdAt.toISOString(),
+        });
+      }
+      console.log(`[persistence] 已从数据库加载 ${dbSessions.length} 个有效 sessions`);
+    } catch (err) {
+      console.error('[persistence] sessions PG 加载失败', err);
     }
   }
 
@@ -112,7 +140,7 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('User not found');
     }
 
-    this.sessions.delete(refreshToken);
+    await this.deleteSession(refreshToken);
 
     const { accessToken, refreshToken: newRefreshToken } = await this.generateTokens(user);
     await this.createSession(user.id, newRefreshToken);
@@ -143,7 +171,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async logout(refreshToken: string): Promise<void> {
-    this.sessions.delete(refreshToken);
+    await this.deleteSession(refreshToken);
   }
 
   private async generateTokens(user: User) {
@@ -162,14 +190,49 @@ export class AuthService implements OnModuleInit {
 
   private async createSession(userId: string, refreshToken: string) {
     const decoded = this.jwtService.decode(refreshToken) as { exp: number };
+    const expiresAt = new Date(decoded.exp * 1000);
+
     const session: Session = {
       id: crypto.randomUUID(),
       userId,
       token: refreshToken,
-      expiresAt: new Date(decoded.exp * 1000).toISOString(),
+      expiresAt: expiresAt.toISOString(),
       createdAt: new Date().toISOString(),
     };
+
     this.sessions.set(refreshToken, session);
+
+    if (usePostgresPersistence()) {
+      try {
+        await (this.prisma as any).session.create({
+          data: {
+            id: session.id,
+            userId: session.userId,
+            token: session.token,
+            expiresAt: expiresAt,
+            createdAt: new Date(session.createdAt),
+          },
+        });
+      } catch (err) {
+        console.error('[persistence] session 创建失败', err);
+      }
+    }
+  }
+
+  private async deleteSession(refreshToken: string) {
+    this.sessions.delete(refreshToken);
+
+    if (usePostgresPersistence()) {
+      try {
+        await (this.prisma as any).session.delete({
+          where: {
+            token: refreshToken,
+          },
+        });
+      } catch (err) {
+        console.error('[persistence] session 删除失败', err);
+      }
+    }
   }
 
   getSession(refreshToken: string): Session | undefined {
