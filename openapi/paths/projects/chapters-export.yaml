@@ -1,0 +1,52 @@
+get:
+  tags:
+    - Projects
+  summary: Export all chapters as plain text
+  description: |
+    Export every chapter in the project as a single UTF-8 text file.
+    Chapters are ordered by `chapterNo`. Only `format=txt` is supported in V1.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: format
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [txt]
+        default: txt
+  responses:
+    '200':
+      description: Plain-text export of all chapters
+      headers:
+        Content-Disposition:
+          schema:
+            type: string
+            example: attachment; filename="chapters-export.txt"
+      content:
+        text/plain; charset=utf-8:
+          schema:
+            type: string
+    '400':
+      description: Unsupported export format or no chapters to export
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

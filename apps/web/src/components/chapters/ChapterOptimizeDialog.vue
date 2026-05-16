@@ -4,6 +4,7 @@ import {
   apiClient,
   type ChapterItem,
   type ChapterOptimizationPlanResult,
+  type ChapterTypoIssue,
 } from '../../services/api';
 import {
   presentError,
@@ -34,6 +35,11 @@ const draftTraceId = ref('');
 const generatingPlan = ref(false);
 const generatingDraft = ref(false);
 const applying = ref(false);
+const checkingTypos = ref(false);
+const fixingTypos = ref(false);
+const typoIssues = ref<ChapterTypoIssue[]>([]);
+const typoCheckTraceId = ref('');
+const typoAutoCorrected = ref(false);
 const errorMessage = ref('');
 
 const chapterUpdatedAtSnapshot = ref<string>('');
@@ -51,7 +57,14 @@ const stepIndex = computed(() => {
   }
 });
 
-const isBusy = computed(() => generatingPlan.value || generatingDraft.value || applying.value);
+const isBusy = computed(
+  () =>
+    generatingPlan.value ||
+    generatingDraft.value ||
+    applying.value ||
+    checkingTypos.value ||
+    fixingTypos.value
+);
 
 watch(
   () => props.visible,
@@ -69,6 +82,9 @@ function resetState() {
   plan.value = null;
   draftText.value = '';
   draftTraceId.value = '';
+  typoIssues.value = [];
+  typoCheckTraceId.value = '';
+  typoAutoCorrected.value = false;
   errorMessage.value = '';
   chapterUpdatedAtSnapshot.value = props.chapter?.updatedAt || '';
 }
@@ -228,6 +244,85 @@ function handleBackToPlan() {
   step.value = 'plan';
 }
 
+async function handleCheckTypos() {
+  if (!props.chapter || !draftText.value.trim()) {
+    errorMessage.value = presentError('请先生成或填写待检查的正文');
+    return;
+  }
+
+  checkingTypos.value = true;
+  typoIssues.value = [];
+  typoAutoCorrected.value = false;
+  errorMessage.value = '';
+
+  try {
+    const result = await apiClient.checkChapterOptimizationTypos(
+      props.projectId,
+      props.chapter.chapterNo,
+      { draftText: draftText.value.trim() }
+    );
+    typoIssues.value = result.issues;
+    typoCheckTraceId.value = result.traceId;
+    if (result.issueCount === 0) {
+      presentInfo('未发现错字或明显语病');
+    } else {
+      presentInfo(`发现 ${result.issueCount} 处待修正问题`);
+    }
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '错字检查失败');
+  } finally {
+    checkingTypos.value = false;
+  }
+}
+
+async function handleAutoFixTypos() {
+  if (!props.chapter || !draftText.value.trim()) {
+    errorMessage.value = presentError('请先生成或填写待修正的正文');
+    return;
+  }
+
+  fixingTypos.value = true;
+  errorMessage.value = '';
+  const previousText = draftText.value;
+  draftText.value = '';
+
+  try {
+    await apiClient.fixChapterOptimizationTyposSSE(
+      props.projectId,
+      props.chapter.chapterNo,
+      {
+        draftText: previousText.trim(),
+        issues: typoIssues.value.length > 0 ? typoIssues.value : undefined,
+      },
+      {
+        onStart: (traceId) => {
+          draftTraceId.value = traceId;
+        },
+        onContent: (text) => {
+          draftText.value += text;
+        },
+        onEnd: ({ appliedIssueCount, autoCorrected }) => {
+          typoAutoCorrected.value = autoCorrected;
+          presentSuccess(
+            appliedIssueCount > 0
+              ? `已自动修正 ${appliedIssueCount} 处问题并回填正文`
+              : '已完成自动修正，正文已回填'
+          );
+        },
+        onError: (message) => {
+          draftText.value = previousText;
+          errorMessage.value = presentError(message || '自动修正重生成失败');
+        },
+      }
+    );
+  } catch (error) {
+    draftText.value = previousText;
+    errorMessage.value = presentErrorFromCaught(error, '自动修正重生成失败');
+  } finally {
+    fixingTypos.value = false;
+  }
+}
+
 async function handleApply() {
   if (!props.chapter || !draftText.value.trim()) {
     errorMessage.value = presentError('暂无可应用的优化正文');
@@ -374,8 +469,50 @@ async function handleApply() {
 
       <section v-else-if="step === 'draft'" class="step-section">
         <h4 class="section-title">优化正文</h4>
-        <pre class="result-text">{{ draftText || '正在等待生成...' }}</pre>
+        <p v-if="typoAutoCorrected" class="message message-info">
+          正文已自动修正错字，请确认后再覆盖原章节。
+        </p>
+        <label class="field-label" for="optimize-draft-text">正文内容（可直接编辑）</label>
+        <textarea
+          id="optimize-draft-text"
+          v-model="draftText"
+          class="field-textarea draft-text-editor"
+          :readonly="generatingDraft || fixingTypos"
+          :placeholder="
+            generatingDraft ? '正在生成正文...' : '生成完成后可在此修改，再确认覆盖原章节'
+          "
+        />
         <p v-if="draftTraceId" class="meta-line">trace: {{ draftTraceId }}</p>
+        <div v-if="typoIssues.length > 0" class="typo-panel">
+          <h5 class="typo-title">错字检查结果（{{ typoIssues.length }} 处）</h5>
+          <ul class="typo-list">
+            <li v-for="issue in typoIssues" :key="issue.id">
+              <span class="typo-original">「{{ issue.original }}」</span>
+              <span class="typo-arrow">→</span>
+              <span class="typo-suggestion">「{{ issue.suggestion }}」</span>
+              <span v-if="issue.reason" class="typo-reason">（{{ issue.reason }}）</span>
+            </li>
+          </ul>
+          <p v-if="typoCheckTraceId" class="meta-line">typo-check trace: {{ typoCheckTraceId }}</p>
+        </div>
+        <div class="step-actions typo-actions">
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="!draftText.trim() || isBusy"
+            @click="handleCheckTypos"
+          >
+            {{ checkingTypos ? '检查中...' : '检验错字' }}
+          </button>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="!draftText.trim() || isBusy"
+            @click="handleAutoFixTypos"
+          >
+            {{ fixingTypos ? '修正中...' : '自动修正重生成' }}
+          </button>
+        </div>
         <div class="step-actions">
           <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
             取消优化
@@ -391,7 +528,7 @@ async function handleApply() {
           <button
             class="secondary-button"
             type="button"
-            :disabled="generatingDraft || applying"
+            :disabled="generatingDraft || applying || fixingTypos"
             @click="handleRegenerateDraft"
           >
             {{ generatingDraft ? '生成中...' : '重新生成正文' }}
@@ -568,19 +705,66 @@ async function handleApply() {
   cursor: wait;
 }
 
-.result-text {
-  margin: 0;
-  padding: 0.85rem;
-  border-radius: 8px;
-  background: #fafafa;
-  border: 1px solid #e5e7eb;
-  white-space: pre-wrap;
-  color: #1f2937;
+.draft-text-editor {
   min-height: 220px;
   max-height: 420px;
-  overflow: auto;
-  font-size: 0.9rem;
   line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.draft-text-editor:read-only {
+  background: #f9fafb;
+  cursor: wait;
+}
+
+.message-info {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.typo-panel {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+}
+
+.typo-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
+  color: #92400e;
+}
+
+.typo-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: #78350f;
+}
+
+.typo-list li {
+  margin-bottom: 0.25rem;
+}
+
+.typo-original {
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+.typo-arrow {
+  margin: 0 0.2rem;
+}
+
+.typo-suggestion {
+  font-weight: 600;
+}
+
+.typo-reason {
+  color: #a16207;
+}
+
+.typo-actions {
+  justify-content: flex-start;
 }
 
 .meta-line {

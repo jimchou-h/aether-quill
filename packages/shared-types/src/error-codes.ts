@@ -54,6 +54,9 @@ export const GenerationErrorCodes = {
   RetrievalTimeout: 1311,
   RerankFailed: 1312,
   IngestionChunkingFailed: 1313,
+  ChapterTypoCheckFailed: 1314,
+  ChapterTypoFixFailed: 1315,
+  ChapterExportFailed: 1316,
 } as const;
 
 /**
@@ -100,7 +103,8 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     if (errorCode === 1205) return 413;
     if (errorCode === 1304) return 429;
     if (errorCode === 1303) return 408;
-    if (errorCode === 1305 || errorCode === 1306) return 502;
+    if (errorCode === 1305 || errorCode === 1306 || errorCode === 1314 || errorCode === 1315)
+      return 502;
     if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
     if (errorCode === 1311) return 504;
     if (errorCode === 1313) return 500;
@@ -153,6 +157,9 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1311: 'Retrieval timeout',
     1312: 'Rerank failed',
     1313: 'Ingestion chunking failed',
+    1314: 'Chapter typo check failed',
+    1315: 'Chapter typo fix failed',
+    1316: 'Chapter export failed',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

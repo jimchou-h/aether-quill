@@ -1,0 +1,64 @@
+post:
+  tags:
+    - Projects
+  summary: Auto-fix typos and stream corrected draft (SSE)
+  description: |
+    Apply all typo correction suggestions (from a prior check or an internal re-check)
+    and stream the corrected chapter draft via Server-Sent Events.
+
+    SSE event sequence:
+      - `data: {"event":"start","traceId":"..."}`
+      - `data: {"event":"content","data":"...","traceId":"..."}` (multiple)
+      - `data: {"event":"end","traceId":"...","appliedIssueCount":N,"autoCorrected":true}`
+      - `data: {"event":"error","data":"...","traceId":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizationTypoFixRequest'
+  responses:
+    '200':
+      description: SSE stream of corrected draft
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Typo fix regeneration failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

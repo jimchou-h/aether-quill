@@ -87,6 +87,12 @@ paths:
     $ref: './paths/projects/chapter-optimize-draft.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/apply:
     $ref: './paths/projects/chapter-optimize-apply.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-check:
+    $ref: './paths/projects/chapter-optimize-typo-check.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-fix:
+    $ref: './paths/projects/chapter-optimize-typo-fix.yaml'
+  /api/projects/{id}/knowledge/chapters/export:
+    $ref: './paths/projects/chapters-export.yaml'
   /api/projects/{id}/knowledge/summarize/{jobId}:
     $ref: './paths/projects/chapter-summarize-job.yaml'
   /api/consistency/check:
@@ -892,6 +898,82 @@ components:
       properties:
         chapter:
           $ref: '#/components/schemas/ChapterItem'
+    ChapterTypoIssue:
+      type: object
+      required:
+        - id
+        - original
+        - suggestion
+      properties:
+        id:
+          type: string
+          description: Stable issue id for trace correlation.
+        original:
+          type: string
+          description: Original typo or problematic wording in the draft.
+        suggestion:
+          type: string
+          description: Suggested correction.
+        context:
+          type: string
+          description: Short surrounding context snippet.
+        reason:
+          type: string
+          description: Human-readable explanation of the issue.
+    ChapterOptimizationTypoCheckRequest:
+      type: object
+      required:
+        - draftText
+      properties:
+        draftText:
+          type: string
+          minLength: 1
+          description: Draft text from the optimization step to check.
+    ChapterOptimizationTypoCheckResult:
+      type: object
+      required:
+        - issues
+        - traceId
+      properties:
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterTypoIssue'
+        traceId:
+          type: string
+        issueCount:
+          type: integer
+          minimum: 0
+    ChapterOptimizationTypoFixRequest:
+      type: object
+      required:
+        - draftText
+      properties:
+        draftText:
+          type: string
+          minLength: 1
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterTypoIssue'
+          description: |
+            Optional issues from a prior typo-check call. When omitted, the server
+            runs an internal check and applies all suggestions automatically.
+    ChapterOptimizationTypoFixEndEvent:
+      type: object
+      required:
+        - traceId
+        - appliedIssueCount
+        - autoCorrected
+      properties:
+        traceId:
+          type: string
+        appliedIssueCount:
+          type: integer
+          minimum: 0
+        autoCorrected:
+          type: boolean
+          description: Always true in V1 — all suggestions are applied automatically.
     ChapterItem:
       type: object
       required:
