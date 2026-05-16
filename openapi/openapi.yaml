@@ -91,6 +91,10 @@ paths:
     $ref: './paths/projects/chapter-optimize-typo-check.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-fix:
     $ref: './paths/projects/chapter-optimize-typo-fix.yaml'
+  /api/projects/{id}/knowledge/chapters/import/preview:
+    $ref: './paths/projects/chapter-import-preview.yaml'
+  /api/projects/{id}/knowledge/chapters/import/confirm:
+    $ref: './paths/projects/chapter-import-confirm.yaml'
   /api/projects/{id}/knowledge/chapters/export:
     $ref: './paths/projects/chapters-export.yaml'
   /api/projects/{id}/knowledge/summarize/{jobId}:
@@ -1001,6 +1005,76 @@ components:
         updatedAt:
           type: string
           format: date-time
+    ChapterImportPreviewItem:
+      type: object
+      required:
+        - chapterNo
+        - title
+        - contentLength
+        - contentPreview
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+          description: 自动识别的章节序号（从 1 开始递增）
+        title:
+          type: string
+          description: 章节标题（从原文识别，未识别到则用默认标题）
+        contentLength:
+          type: integer
+          minimum: 0
+          description: 该章节内容的字符数
+        contentPreview:
+          type: string
+          description: 章节内容前 200 字符预览
+    ChapterImportPreviewResult:
+      type: object
+      required:
+        - totalChars
+        - detectedCount
+        - chapters
+      properties:
+        totalChars:
+          type: integer
+          description: 原文总字符数
+        detectedCount:
+          type: integer
+          minimum: 0
+          description: 识别到的章节总数
+        chapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterImportPreviewItem'
+    ChapterImportItem:
+      type: object
+      required:
+        - chapterNo
+        - title
+        - content
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+    ChapterImportResult:
+      type: object
+      required:
+        - importedCount
+        - chapters
+      properties:
+        importedCount:
+          type: integer
+          minimum: 0
+          description: 实际导入的章节数
+        chapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterItem'
 
 security:
   - BearerAuth: []

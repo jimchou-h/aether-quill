@@ -8,6 +8,7 @@ import {
   type SummaryJob,
 } from '../services/api';
 import ChapterImportForm from '../components/chapters/ChapterImportForm.vue';
+import ChapterImportDialog from '../components/chapters/ChapterImportDialog.vue';
 import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
 import {
@@ -34,6 +35,7 @@ const errorMessage = ref('');
 const selectedChapterNo = ref<number | null>(null);
 const parsingStructuredChapterNo = ref<number | null>(null);
 const showImportModal = ref(false);
+const showImportNovelModal = ref(false);
 const showOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
 const exportingChapters = ref(false);
@@ -61,6 +63,19 @@ function openImportModal() {
 
 function closeImportModal() {
   showImportModal.value = false;
+}
+
+function openImportNovelModal() {
+  showImportNovelModal.value = true;
+}
+
+function closeImportNovelModal() {
+  showImportNovelModal.value = false;
+}
+
+async function handleImportNovelDone() {
+  showImportNovelModal.value = false;
+  await loadWorkspace();
 }
 
 function sortByChapterNo(items: ChapterItem[]) {
@@ -341,6 +356,9 @@ onMounted(() => {
         >
           {{ exportingChapters ? '导出中...' : '导出全部章节' }}
         </button>
+        <button class="secondary-button" type="button" @click="openImportNovelModal">
+          导入小说
+        </button>
         <button class="primary-button" type="button" @click="openImportModal">新增章节</button>
       </div>
     </div>
@@ -380,6 +398,13 @@ onMounted(() => {
       @optimize="handleOpenOptimizeDialog"
       @save="handleSaveChapter"
       @parse-structured="handleParseStructuredChapter"
+    />
+
+    <ChapterImportDialog
+      v-if="showImportNovelModal"
+      :project-id="projectId"
+      @imported="handleImportNovelDone"
+      @close="closeImportNovelModal"
     />
 
     <ChapterOptimizeDialog

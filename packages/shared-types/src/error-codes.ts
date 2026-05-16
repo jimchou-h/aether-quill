@@ -57,6 +57,9 @@ export const GenerationErrorCodes = {
   ChapterTypoCheckFailed: 1314,
   ChapterTypoFixFailed: 1315,
   ChapterExportFailed: 1316,
+  ChapterImportContentTooLarge: 1317,
+  ChapterImportNoValidChapters: 1318,
+  ChapterImportParsingFailed: 1319,
 } as const;
 
 /**
@@ -108,6 +111,8 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
     if (errorCode === 1311) return 504;
     if (errorCode === 1313) return 500;
+    if (errorCode === 1317) return 413;
+    if (errorCode === 1318 || errorCode === 1319) return 400;
     if (errorCode === 1100 || errorCode === 1200 || errorCode === 1400) return 404;
     return 400;
   }
@@ -160,6 +165,9 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1314: 'Chapter typo check failed',
     1315: 'Chapter typo fix failed',
     1316: 'Chapter export failed',
+    1317: 'Chapter import content too large',
+    1318: 'No valid chapters found in import content',
+    1319: 'Chapter import parsing failed',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

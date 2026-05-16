@@ -1,0 +1,59 @@
+post:
+  tags:
+    - Projects
+  summary: Preview novel import - parse file content and detect chapters
+  description: |
+    传入小说原文文本（纯文本），按标题规则自动识别章节切分点并生成预览列表。
+    预览结果包含章节序号、标题（如果可识别）、内容字数，便于用户确认后再执行导入。
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - content
+          properties:
+            content:
+              type: string
+              description: 小说原文文本（txt/md 文本内容）
+              minLength: 1
+              maxLength: 5242880
+  responses:
+    '200':
+      description: Import preview generated successfully
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterImportPreviewResult'
+    '400':
+      description: Invalid request (empty content, content too large)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

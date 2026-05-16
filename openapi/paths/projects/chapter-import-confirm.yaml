@@ -1,0 +1,65 @@
+post:
+  tags:
+    - Projects
+  summary: Confirm novel import - batch create chapters from parsed data
+  description: |
+    接收用户确认后的章节列表（来自预览结果），批量创建/追加到项目章节中。
+    同名章节（相同 chapterNo）采用追加保留策略，不覆盖原有章节。
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - content
+          properties:
+            content:
+              type: string
+              description: 原始小说原文文本（与预览时一致）
+              minLength: 1
+              maxLength: 5242880
+  responses:
+    '200':
+      description: Chapters imported successfully
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterImportResult'
+    '400':
+      description: Invalid request (no chapters, invalid chapter data)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '409':
+      description: Chapter number conflict with existing
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

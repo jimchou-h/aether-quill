@@ -545,6 +545,31 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/import/preview')
+  importChapterPreview(
+    @Param('id') id: string,
+    @Body() data: { content: string },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.importChapterPreview(id, data.content, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/import/confirm')
+  importChapterConfirm(
+    @Param('id') id: string,
+    @Body()
+    data: {
+      content: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.importChapterConfirm(id, data.content, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/reindex')
   createIndexJob(
     @Param('id') id: string,

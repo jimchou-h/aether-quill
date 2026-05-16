@@ -251,3 +251,15 @@ model GenerationTrace {
 
   @@map("generation_traces")
 }
+
+model Session {
+  id        String    @id @default(cuid()) @map("id")
+  userId    String    @map("user_id")
+  token     String    @unique @map("token")
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "sessions_user_id_idx")
+  @@map("sessions")
+}

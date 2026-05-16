@@ -1082,6 +1082,34 @@ export const apiClient = {
     return response.blob();
   },
 
+  async importChapterPreview(projectId: string, content: string) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/import/preview`,
+      { content }
+    );
+    return this.unwrapPayload<{
+      totalChars: number;
+      detectedCount: number;
+      chapters: Array<{
+        chapterNo: number;
+        title: string;
+        contentLength: number;
+        contentPreview: string;
+      }>;
+    }>(response.data);
+  },
+
+  async importChapterConfirm(projectId: string, content: string) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/import/confirm`,
+      { content }
+    );
+    return this.unwrapPayload<{
+      importedCount: number;
+      chapters: ChapterItem[];
+    }>(response.data);
+  },
+
   // Document helper methods
   async getDocument(id: string) {
     const response = await http.get(`/api/documents/${id}`);

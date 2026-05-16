@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -33,6 +34,7 @@ import {
 import type { ChapterStructuredInfoPersisted } from './persisted-workspace.types';
 import { DocumentsService } from '../documents/documents.service';
 import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
+import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
   CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
@@ -721,6 +723,96 @@ export class ProjectsService implements OnModuleInit {
     this.persistState();
     await this.updateActivePersonaStateFromChapter(projectId, chapterNo, payload.content);
     return targetChapter;
+  }
+
+  async importChapterPreview(projectId: string, content: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+
+    if (!content || content.trim().length === 0) {
+      throw new BadRequestException({ code: 1319, msg: '导入内容不能为空' });
+    }
+
+    try {
+      return previewChapterImport(content);
+    } catch (error: unknown) {
+      const err = error as { code?: number; message?: string };
+      if (err.code === 1317) {
+        throw new HttpException({ code: 1317, msg: '导入内容过大，请控制在 5MB 以内' }, 413);
+      }
+      throw new BadRequestException({
+        code: err.code || 1319,
+        msg: err.message || '导入内容解析失败',
+      });
+    }
+  }
+
+  async importChapterConfirm(projectId: string, content: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    if (!content || content.trim().length === 0) {
+      throw new BadRequestException({ code: 1319, msg: '导入内容不能为空' });
+    }
+
+    const chapters = parseNovelContent(content);
+
+    if (chapters.length === 0) {
+      throw new BadRequestException({ code: 1318, msg: '导入内容中未识别到有效章节' });
+    }
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const imported: ChapterRecord[] = [];
+    const now = new Date();
+
+    for (const chapter of chapters) {
+      const existing = knowledge.chapters.find((item) => item.chapterNo === chapter.chapterNo);
+
+      const nextSummary = buildFallbackChapterSummary(chapter.content);
+
+      if (existing) {
+        existing.title = chapter.title.trim();
+        existing.content = chapter.content;
+        existing.summary = nextSummary;
+        existing.summarySource = 'fallback';
+        existing.summaryUpdatedAt = now;
+        existing.updatedAt = now;
+        imported.push(existing);
+      } else {
+        const newChapter: ChapterRecord = {
+          chapterNo: chapter.chapterNo,
+          title: chapter.title.trim(),
+          content: chapter.content,
+          summary: nextSummary,
+          summarySource: 'fallback',
+          summaryUpdatedAt: now,
+          updatedAt: now,
+        };
+        knowledge.chapters.push(newChapter);
+        imported.push(newChapter);
+      }
+    }
+
+    knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
+    this.persistState();
+
+    return {
+      importedCount: imported.length,
+      chapters: imported.map((chapter) => ({
+        chapterNo: chapter.chapterNo,
+        title: chapter.title,
+        content: chapter.content,
+        summary: chapter.summary,
+        summarySource: chapter.summarySource,
+        summaryUpdatedAt: chapter.summaryUpdatedAt,
+        updatedAt: chapter.updatedAt,
+      })),
+    };
   }
 
   async parseChapterStructuredInfo(
