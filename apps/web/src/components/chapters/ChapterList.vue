@@ -353,6 +353,28 @@ defineExpose({ clearEditing });
                     : '生成摘要'
                 }}
               </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                @click="emit('parseStructured', selectedChapter.chapterNo)"
+              >
+                {{
+                  props.parsingStructuredChapterNo === selectedChapter.chapterNo
+                    ? '解析中...'
+                    : '解析结构化信息'
+                }}
+              </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                @click="emit('optimize', selectedChapter)"
+              >
+                {{
+                  props.optimizingChapterNo === selectedChapter.chapterNo
+                    ? '优化中...'
+                    : '优化章节'
+                }}
+              </button>
               <div class="dropdown-container">
                 <button
                   class="secondary-button more-actions-trigger"
@@ -374,28 +396,6 @@ defineExpose({ clearEditing });
                       props.generatingRelationChapterNo === selectedChapter.chapterNo
                         ? '生成中...'
                         : '生成关系事件'
-                    }}
-                  </button>
-                  <button
-                    class="dropdown-item"
-                    :disabled="isBusy(selectedChapter.chapterNo)"
-                    @click="emit('optimize', selectedChapter)"
-                  >
-                    {{
-                      props.optimizingChapterNo === selectedChapter.chapterNo
-                        ? '优化中...'
-                        : '优化章节'
-                    }}
-                  </button>
-                  <button
-                    class="dropdown-item"
-                    :disabled="isBusy(selectedChapter.chapterNo)"
-                    @click="emit('parseStructured', selectedChapter.chapterNo)"
-                  >
-                    {{
-                      props.parsingStructuredChapterNo === selectedChapter.chapterNo
-                        ? '解析中...'
-                        : '解析结构化信息'
                     }}
                   </button>
                 </div>
