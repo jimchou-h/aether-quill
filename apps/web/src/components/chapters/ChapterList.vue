@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import type { ChapterItem, ChapterStructuredInfo } from '../../services/api';
 
 const props = defineProps<{
@@ -26,10 +26,24 @@ const editingChapterNo = ref<number | null>(null);
 const editTitle = ref('');
 const editContent = ref('');
 const localError = ref('');
+const searchQuery = ref('');
+const jumpToChapterNo = ref('');
+const chapterTabsRef = ref<HTMLElement | null>(null);
 
 const selectedChapter = computed(
   () => props.chapters.find((chapter) => chapter.chapterNo === props.selectedChapterNo) ?? null
 );
+
+const filteredChapters = computed(() => {
+  if (!searchQuery.value.trim()) {
+    return props.chapters;
+  }
+  const query = searchQuery.value.toLowerCase();
+  return props.chapters.filter(
+    (chapter) =>
+      chapter.title.toLowerCase().includes(query) || chapter.chapterNo.toString().includes(query)
+  );
+});
 
 function formatTime(value: string) {
   return new Date(value).toLocaleString();
@@ -112,6 +126,30 @@ function handleSave(chapterNo: number) {
   emit('save', { chapterNo, title, content });
 }
 
+function handleJumpToChapter() {
+  const chapterNo = parseInt(jumpToChapterNo.value, 10);
+  if (isNaN(chapterNo)) {
+    localError.value = '请输入有效的章节号';
+    return;
+  }
+  const maxChapterNo = props.chapters.length;
+  const validChapterNo = Math.max(1, Math.min(chapterNo, maxChapterNo));
+  jumpToChapterNo.value = '';
+  localError.value = '';
+  emit('select', validChapterNo);
+}
+
+function scrollToSelectedChapter() {
+  nextTick(() => {
+    if (chapterTabsRef.value && props.selectedChapterNo !== null) {
+      const activeTab = chapterTabsRef.value.querySelector('.chapter-tab.active');
+      if (activeTab) {
+        activeTab.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  });
+}
+
 function clearEditing() {
   cancelEdit();
 }
@@ -121,6 +159,18 @@ watch(
   (nextChapterNo, previousChapterNo) => {
     if (nextChapterNo !== previousChapterNo && editingChapterNo.value !== null) {
       cancelEdit();
+    }
+    if (nextChapterNo !== null) {
+      scrollToSelectedChapter();
+    }
+  }
+);
+
+watch(
+  () => props.chapters,
+  () => {
+    if (props.selectedChapterNo !== null) {
+      scrollToSelectedChapter();
     }
   }
 );
@@ -136,21 +186,54 @@ defineExpose({ clearEditing });
       <p v-if="props.loading" class="message">正在加载章节...</p>
       <p v-else-if="props.chapters.length === 0" class="message">暂无章节，请先新增章节。</p>
 
-      <div v-else class="chapter-tabs" role="tablist" aria-label="章节列表">
-        <button
-          v-for="chapter in props.chapters"
-          :key="chapter.chapterNo"
-          type="button"
-          class="chapter-tab"
-          :class="{ active: chapter.chapterNo === props.selectedChapterNo }"
-          role="tab"
-          :aria-selected="chapter.chapterNo === props.selectedChapterNo"
-          @click="emit('select', chapter.chapterNo)"
-        >
-          <span class="chapter-tab-no">第{{ chapter.chapterNo }}章</span>
-          <span class="chapter-tab-title">{{ chapter.title }}</span>
-        </button>
-      </div>
+      <template v-else>
+        <div class="sidebar-controls">
+          <div class="search-box">
+            <input
+              v-model="searchQuery"
+              type="text"
+              class="search-input"
+              placeholder="搜索章节标题..."
+            />
+            <span v-if="searchQuery" class="search-clear" @click="searchQuery = ''">×</span>
+          </div>
+          <div class="jump-box">
+            <input
+              v-model="jumpToChapterNo"
+              type="number"
+              class="jump-input"
+              placeholder="章节号"
+              min="1"
+              :max="props.chapters.length"
+              @keydown.enter="handleJumpToChapter"
+            />
+            <button class="jump-button" @click="handleJumpToChapter">跳转</button>
+          </div>
+        </div>
+
+        <p v-if="filteredChapters.length === 0" class="message">
+          未找到匹配的章节（共 {{ props.chapters.length }} 章）
+        </p>
+        <p v-else-if="searchQuery" class="message search-result">
+          找到 {{ filteredChapters.length }} 个匹配章节
+        </p>
+
+        <div ref="chapterTabsRef" class="chapter-tabs" role="tablist" aria-label="章节列表">
+          <button
+            v-for="chapter in filteredChapters"
+            :key="chapter.chapterNo"
+            type="button"
+            class="chapter-tab"
+            :class="{ active: chapter.chapterNo === props.selectedChapterNo }"
+            role="tab"
+            :aria-selected="chapter.chapterNo === props.selectedChapterNo"
+            @click="emit('select', chapter.chapterNo)"
+          >
+            <span class="chapter-tab-no">第{{ chapter.chapterNo }}章</span>
+            <span class="chapter-tab-title">{{ chapter.title }}</span>
+          </button>
+        </div>
+      </template>
     </aside>
 
     <div class="chapter-detail">
@@ -367,6 +450,9 @@ defineExpose({ clearEditing });
   border-right: 1px solid #e5e7eb;
   padding: 1rem;
   background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 200px);
 }
 
 .panel-title {
@@ -488,10 +574,101 @@ defineExpose({ clearEditing });
   font-size: 0.82rem;
 }
 
+.sidebar-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.search-box {
+  position: relative;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.45rem 1.75rem 0.45rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+.search-clear {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  color: #6b7280;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  color: #1f2937;
+}
+
+.jump-box {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.jump-input {
+  flex: 1;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  width: 60px;
+}
+
+.jump-button {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.jump-button:hover {
+  background: #f3f4f6;
+}
+
+.search-result {
+  margin-bottom: 0.5rem;
+  font-size: 0.78rem;
+  color: #4b5563;
+}
+
 .chapter-tabs {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+  overflow-y: auto;
+  flex: 1;
+  padding-right: 2px;
+}
+
+.chapter-tabs::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chapter-tabs::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.chapter-tabs::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.chapter-tabs::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
 }
 
 .chapter-tab {
