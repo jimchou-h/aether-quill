@@ -674,6 +674,85 @@ export class ProjectsService implements OnModuleInit {
     return knowledge;
   }
 
+  deleteChapter(projectId: string, chapterNo: number, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const normalizedChapterNo = Number(chapterNo);
+
+    if (!Number.isFinite(normalizedChapterNo) || normalizedChapterNo <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+
+    const index = knowledge.chapters.findIndex((item) => item.chapterNo === normalizedChapterNo);
+    if (index === -1) {
+      throw new NotFoundException(`未找到第 ${normalizedChapterNo} 章`);
+    }
+
+    const deletedChapter = knowledge.chapters.splice(index, 1)[0];
+
+    knowledge.chapters.forEach((chapter) => {
+      if (chapter.chapterNo > normalizedChapterNo) {
+        chapter.chapterNo -= 1;
+      }
+    });
+
+    const events = this.relationEventsStore.get(projectId)!;
+    events.forEach((event) => {
+      if (event.chapterNo === normalizedChapterNo) {
+        event.chapterNo = null;
+      } else if (event.chapterNo !== null && event.chapterNo > normalizedChapterNo) {
+        event.chapterNo -= 1;
+      }
+    });
+
+    this.persistState();
+    return { id: deletedChapter.chapterNo };
+  }
+
+  renumberChapters(projectId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const sorted = [...knowledge.chapters].sort((a, b) => a.chapterNo - b.chapterNo);
+
+    const oldToNew = new Map<number, number>();
+    sorted.forEach((ch, index) => {
+      const newNo = index + 1;
+      if (ch.chapterNo !== newNo) {
+        oldToNew.set(ch.chapterNo, newNo);
+        ch.chapterNo = newNo;
+      }
+    });
+
+    if (oldToNew.size === 0) {
+      return { renumberedCount: 0 };
+    }
+
+    const events = this.relationEventsStore.get(projectId);
+    if (events) {
+      events.forEach((event) => {
+        if (event.chapterNo !== null) {
+          const mapped = oldToNew.get(event.chapterNo);
+          if (mapped !== undefined) {
+            event.chapterNo = mapped;
+          }
+        }
+      });
+    }
+
+    this.persistState();
+    return { renumberedCount: oldToNew.size };
+  }
+
   async upsertChapter(
     projectId: string,
     payload: { chapterNo: number; title: string; content: string },
@@ -694,31 +773,25 @@ export class ProjectsService implements OnModuleInit {
 
     const nextSummary = buildFallbackChapterSummary(payload.content);
     const now = new Date();
-    const existing = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
 
-    let targetChapter: ChapterRecord;
-    if (existing) {
-      existing.title = payload.title.trim();
-      existing.content = payload.content;
-      existing.summary = nextSummary;
-      existing.summarySource = 'fallback';
-      existing.summaryUpdatedAt = now;
-      existing.updatedAt = now;
-      targetChapter = existing;
-    } else {
-      targetChapter = {
-        chapterNo,
-        title: payload.title.trim(),
-        content: payload.content,
-        summary: nextSummary,
-        summarySource: 'fallback',
-        summaryUpdatedAt: now,
-        updatedAt: now,
-      };
+    const targetChapter: ChapterRecord = {
+      chapterNo,
+      title: payload.title.trim(),
+      content: payload.content,
+      summary: nextSummary,
+      summarySource: 'fallback',
+      summaryUpdatedAt: now,
+      updatedAt: now,
+    };
 
-      knowledge.chapters.push(targetChapter);
-      knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
-    }
+    knowledge.chapters.forEach((ch) => {
+      if (ch.chapterNo >= chapterNo) {
+        ch.chapterNo += 1;
+      }
+    });
+
+    knowledge.chapters.push(targetChapter);
+    knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
 
     this.persistState();
     await this.updateActivePersonaStateFromChapter(projectId, chapterNo, payload.content);

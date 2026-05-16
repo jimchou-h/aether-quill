@@ -187,7 +187,12 @@ const diffLines = computed<DiffLineResult[]>(() => {
 
       if (hasRemoved || hasAdded || oText !== dText) {
         results.push({
-          type: 'modified',
+          type:
+            hasRemoved && !hasAdded && oText && !dText.trim()
+              ? 'removed'
+              : hasAdded && !hasRemoved && !oText.trim() && dText
+                ? 'added'
+                : 'modified',
           originalSegments: oSegs,
           draftSegments: dSegs,
         });
@@ -673,7 +678,8 @@ async function handleApply() {
                 class="diff-line"
                 :class="{
                   'line-removed': row.type === 'removed',
-                  'line-modified': row.type === 'modified',
+                  'line-modified-original':
+                    row.type === 'modified' && row.originalSegments.some((s) => s.removed),
                 }"
               >
                 <span
@@ -994,7 +1000,8 @@ async function handleApply() {
 
 .line-added,
 .line-removed,
-.line-modified {
+.line-modified,
+.line-modified-original {
   padding-left: 0.65rem;
   border-left: 3px solid transparent;
   margin-left: -3px;
@@ -1015,9 +1022,15 @@ async function handleApply() {
   border-left-color: #eab308;
 }
 
+.line-modified-original {
+  background: #fee2e2;
+  border-left-color: #ef4444;
+}
+
 .diff-removed-text {
   text-decoration: line-through;
-  opacity: 0.7;
+  color: #dc2626;
+  opacity: 0.9;
 }
 
 .diff-summary {

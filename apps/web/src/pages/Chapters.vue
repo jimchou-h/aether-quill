@@ -39,6 +39,7 @@ const showImportNovelModal = ref(false);
 const showOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
 const exportingChapters = ref(false);
+const renumbering = ref(false);
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
 const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
@@ -274,6 +275,33 @@ async function handleOptimizeApplied(updated: ChapterItem) {
   selectedChapterNo.value = updated.chapterNo;
 }
 
+async function handleDeleteChapter(chapterNo: number) {
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    await apiClient.deleteChapter(projectId.value, chapterNo);
+    message.value = presentSuccess(`第${chapterNo}章已删除`);
+    await loadWorkspace();
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '删除章节失败');
+  }
+}
+
+async function handleRenumberChapters() {
+  renumbering.value = true;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    const result = await apiClient.renumberChapters(projectId.value);
+    message.value = presentSuccess(`章节已重新编号，共调整 ${result.renumberedCount} 个章节`);
+    await loadWorkspace();
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '章节重新编号失败');
+  } finally {
+    renumbering.value = false;
+  }
+}
+
 async function handleExportChapters() {
   exportingChapters.value = true;
   errorMessage.value = '';
@@ -351,6 +379,14 @@ onMounted(() => {
         <button
           class="secondary-button"
           type="button"
+          :disabled="renumbering || chapters.length < 2"
+          @click="handleRenumberChapters"
+        >
+          {{ renumbering ? '编号中...' : '重新编号' }}
+        </button>
+        <button
+          class="secondary-button"
+          type="button"
           :disabled="exportingChapters || chapters.length === 0"
           @click="handleExportChapters"
         >
@@ -398,6 +434,7 @@ onMounted(() => {
       @optimize="handleOpenOptimizeDialog"
       @save="handleSaveChapter"
       @parse-structured="handleParseStructuredChapter"
+      @delete="handleDeleteChapter"
     />
 
     <ChapterImportDialog

@@ -545,6 +545,24 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Delete(':id/knowledge/chapters/:chapterNo')
+  deleteChapter(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.deleteChapter(id, Number(chapterNo), userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/renumber')
+  renumberChapters(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
+    const userId = req.user?.userId;
+    return this.projectsService.renumberChapters(id, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/import/preview')
   importChapterPreview(
     @Param('id') id: string,

@@ -274,6 +274,20 @@ export const apiClient = {
     return this.unwrapPayload<ChapterItem>(response.data);
   },
 
+  async deleteChapter(projectId: string, chapterNo: number) {
+    const response = await http.delete(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}`
+    );
+    return this.unwrapPayload<{ id: number }>(response.data);
+  },
+
+  async renumberChapters(projectId: string) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/renumber`
+    );
+    return this.unwrapPayload<{ renumberedCount: number }>(response.data);
+  },
+
   async parseChapterStructuredInfo(
     projectId: string,
     chapterNo: number,
