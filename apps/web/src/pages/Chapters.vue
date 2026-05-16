@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   apiClient,
@@ -40,6 +40,9 @@ const showOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
 const exportingChapters = ref(false);
 const renumbering = ref(false);
+const showHint = ref(true);
+const showMoreMenu = ref(false);
+const moreMenuRef = ref<HTMLElement | null>(null);
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
 const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
@@ -60,6 +63,7 @@ function syncSelectedChapter() {
 
 function openImportModal() {
   showImportModal.value = true;
+  showMoreMenu.value = false;
 }
 
 function closeImportModal() {
@@ -77,6 +81,33 @@ function closeImportNovelModal() {
 async function handleImportNovelDone() {
   showImportNovelModal.value = false;
   await loadWorkspace();
+}
+
+const summaryJobDotClass = computed(() => {
+  const job = latestSummaryJob.value;
+  if (!job) return 'dot-idle';
+  if (job.status === 'processing') return 'dot-processing';
+  if (job.status === 'completed') return 'dot-completed';
+  if (job.status === 'failed') return 'dot-failed';
+  return 'dot-idle';
+});
+
+function toggleMoreMenu() {
+  showMoreMenu.value = !showMoreMenu.value;
+}
+
+function handleOpenImportNovel() {
+  showMoreMenu.value = false;
+  openImportNovelModal();
+}
+
+function handleClickOutside(event: MouseEvent) {
+  if (showMoreMenu.value && moreMenuRef.value && !moreMenuRef.value.contains(event.target as Node)) {
+    const menuEl = document.querySelector('.dropdown-menu');
+    if (menuEl && !menuEl.contains(event.target as Node)) {
+      showMoreMenu.value = false;
+    }
+  }
 }
 
 function sortByChapterNo(items: ChapterItem[]) {
@@ -360,63 +391,94 @@ async function handleGenerateSummaries() {
 
 onMounted(() => {
   void loadWorkspace();
+  document.addEventListener('click', handleClickOutside);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside);
 });
 </script>
 
 <template>
   <div class="chapters-page">
     <div class="page-header">
-      <div>
-        <h2 class="page-title">章节模块</h2>
+      <div class="page-heading">
+        <div class="page-title-row">
+          <h2 class="page-title">章节模块</h2>
+          <span class="chapter-count-badge">{{ chapters.length }} 章</span>
+        </div>
         <p class="page-subtitle">
           查看小说正文与摘要，补录历史章节，并按章生成语义摘要或关系事件。
         </p>
-        <p class="page-hint page-hint-warn">
-          生成章节草稿时依赖「结构化信息」做知识库标题匹配；若未解析，将无法注入知识库文档。请在本页或写作工作台使用「解析结构化信息」。
-        </p>
       </div>
       <div class="header-actions">
+        <div class="summary-status-inline">
+          <span class="summary-status-dot" :class="summaryJobDotClass"></span>
+          <span class="summary-status-text">{{ jobStatusText(latestSummaryJob) }}</span>
+        </div>
         <button
           class="secondary-button"
-          type="button"
-          :disabled="renumbering || chapters.length < 2"
-          @click="handleRenumberChapters"
+          :disabled="batchSummarizing"
+          @click="handleGenerateSummaries"
         >
-          {{ renumbering ? '编号中...' : '重新编号' }}
+          {{ batchSummarizing ? '生成中...' : '批量摘要' }}
         </button>
-        <button
-          class="secondary-button"
-          type="button"
-          :disabled="exportingChapters || chapters.length === 0"
-          @click="handleExportChapters"
-        >
-          {{ exportingChapters ? '导出中...' : '导出全部章节' }}
-        </button>
-        <button class="secondary-button" type="button" @click="openImportNovelModal">
-          导入小说
-        </button>
+        <div class="dropdown-container">
+          <button
+            ref="moreMenuRef"
+            class="secondary-button icon-button"
+            type="button"
+            @click="toggleMoreMenu"
+            aria-label="更多操作"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="8" cy="3" r="1.5" />
+              <circle cx="8" cy="8" r="1.5" />
+              <circle cx="8" cy="13" r="1.5" />
+            </svg>
+          </button>
+          <div v-if="showMoreMenu" class="dropdown-menu dropdown-menu-right">
+            <button
+              class="dropdown-item"
+              type="button"
+              :disabled="renumbering || chapters.length < 2"
+              @click="handleRenumberChapters"
+            >
+              {{ renumbering ? '编号中...' : '重新编号' }}
+            </button>
+            <button
+              class="dropdown-item"
+              type="button"
+              :disabled="exportingChapters || chapters.length === 0"
+              @click="handleExportChapters"
+            >
+              {{ exportingChapters ? '导出中...' : '导出全部章节' }}
+            </button>
+            <button
+              class="dropdown-item"
+              type="button"
+              :disabled="showImportNovelModal"
+              @click="handleOpenImportNovel"
+            >
+              导入小说
+            </button>
+          </div>
+        </div>
         <button class="primary-button" type="button" @click="openImportModal">新增章节</button>
       </div>
     </div>
 
+    <div v-if="showHint" class="warning-banner">
+      <span class="warning-banner-text">
+        生成章节草稿时依赖「结构化信息」做知识库标题匹配；若未解析，将无法注入知识库文档。
+      </span>
+      <button class="warning-banner-close" @click="showHint = false" aria-label="关闭提示">
+        &times;
+      </button>
+    </div>
+
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
     <p v-if="message" class="message message-ok">{{ message }}</p>
-
-    <section class="panel summary-panel">
-      <div class="summary-row">
-        <div class="summary-meta">
-          <span class="meta-label">当前摘要任务</span>
-          <span class="meta-value">{{ jobStatusText(latestSummaryJob) }}</span>
-        </div>
-        <button
-          class="primary-button"
-          :disabled="batchSummarizing"
-          @click="handleGenerateSummaries"
-        >
-          {{ batchSummarizing ? '生成中...' : '批量生成摘要' }}
-        </button>
-      </div>
-    </section>
 
     <ChapterList
       ref="chapterListRef"
@@ -489,7 +551,7 @@ onMounted(() => {
 .chapters-page {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.75rem;
 }
 
 .page-header {
@@ -499,30 +561,125 @@ onMounted(() => {
   gap: 1rem;
 }
 
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 .page-title {
   margin: 0;
   font-size: 1.25rem;
 }
 
+.chapter-count-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: #4b5563;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+}
+
 .page-subtitle {
-  margin: -0.2rem 0 0;
+  margin: 0;
   color: #6b7280;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
-.page-hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  max-width: 52rem;
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
-.page-hint-warn {
-  color: #92400e;
-  padding: 0.45rem 0.6rem;
+.summary-status-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  font-size: 0.78rem;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.summary-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.summary-status-dot.dot-idle {
+  background: #9ca3af;
+}
+
+.summary-status-dot.dot-processing {
+  background: #f59e0b;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.summary-status-dot.dot-completed {
+  background: #10b981;
+}
+
+.summary-status-dot.dot-failed {
+  background: #ef4444;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.summary-status-text {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
   border-radius: 6px;
   background: #fffbeb;
   border: 1px solid #fde68a;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #92400e;
+}
+
+.warning-banner-text {
+  flex: 1;
+}
+
+.warning-banner-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #92400e;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.warning-banner-close:hover {
+  opacity: 1;
 }
 
 .message {
@@ -542,51 +699,10 @@ onMounted(() => {
   color: #027a48;
 }
 
-.panel {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-  background: #fff;
-}
-
-.summary-panel {
-  margin-top: 0.2rem;
-}
-
-.summary-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.7rem;
-}
-
-.summary-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.meta-label {
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.meta-value {
-  font-size: 0.9rem;
-  color: #111827;
-}
-
-.header-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.primary-button,
-.secondary-button {
+.header-actions .primary-button,
+.header-actions .secondary-button {
   border-radius: 6px;
-  padding: 0.5rem 0.9rem;
+  padding: 0.45rem 0.8rem;
   cursor: pointer;
   white-space: nowrap;
   font-size: 0.85rem;
@@ -596,17 +712,77 @@ onMounted(() => {
   background: #111827;
   color: #fff;
   border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 0.85rem;
 }
 
 .secondary-button {
   background: #fff;
   color: #111827;
   border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 0.85rem;
 }
 
 .primary-button:disabled,
 .secondary-button:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.6rem;
+}
+
+.dropdown-container {
+  position: relative;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 0.35rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: none;
+  background: transparent;
+  color: #111827;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.dropdown-item:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
