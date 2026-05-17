@@ -294,6 +294,104 @@ export class GenerationService {
     return events;
   }
 
+  buildChapterPersonaStatesExtractPrompt(input: {
+    chapterNo: number;
+    title?: string;
+    content: string;
+    personas: Array<{ name: string; profile: string; state: string }>;
+  }): string {
+    const roster = input.personas
+      .map(
+        (persona, index) =>
+          `${index + 1}. ${persona.name}｜历史状态：${persona.state?.trim() || '暂无'}｜设定摘要：${persona.profile.trim().slice(0, 200)}`
+      )
+      .join('\n');
+
+    return [
+      '你是小说角色状态跟踪器。请根据章节正文，为名单中的每一位角色输出读完本章后的「当前状态」。',
+      '要求：',
+      '1. 只输出 JSON 对象，不要 Markdown 或解释',
+      '2. 格式：{"personas":[{"name":"角色名","appeared":true|false,"state":"一句中文状态"}]}',
+      '3. 必须覆盖名单中的每一个 name，不得新增名单外角色',
+      '4. state 为一句中文，<=60 字；appeared 表示本章是否实质出场（对白/行为/明确描写）',
+      '5. 若本章未出场，appeared 为 false，state 可写「本章未出场」并简要沿用历史状态',
+      '',
+      `章节：第${input.chapterNo}章${input.title ? ` ${input.title}` : ''}`,
+      '角色名单：',
+      roster,
+      '',
+      '正文：',
+      input.content.trim().slice(0, 24000),
+    ].join('\n');
+  }
+
+  private parseChapterPersonaStatesFromModelContent(content: string): Array<{
+    name: string;
+    appeared: boolean;
+    state: string;
+  }> {
+    const trimmed = content.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const jsonText = fenced ? fenced[1].trim() : trimmed;
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(jsonText);
+    } catch {
+      return [];
+    }
+
+    const items = Array.isArray(payload)
+      ? payload
+      : payload &&
+          typeof payload === 'object' &&
+          Array.isArray((payload as { personas?: unknown[] }).personas)
+        ? (payload as { personas: unknown[] }).personas
+        : [];
+
+    const personas: Array<{ name: string; appeared: boolean; state: string }> = [];
+    for (const item of items) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const record = item as Record<string, unknown>;
+      const name = typeof record.name === 'string' ? record.name.trim() : '';
+      const state = typeof record.state === 'string' ? record.state.trim().slice(0, 60) : '';
+      if (!name || !state) {
+        continue;
+      }
+      personas.push({
+        name,
+        appeared: record.appeared === true,
+        state,
+      });
+    }
+
+    return personas;
+  }
+
+  async extractChapterPersonaStates(input: {
+    chapterNo: number;
+    title?: string;
+    content: string;
+    personas: Array<{ name: string; profile: string; state: string }>;
+  }): Promise<Array<{ name: string; appeared: boolean; state: string }>> {
+    if (input.personas.length === 0) {
+      return [];
+    }
+
+    const prompt = this.buildChapterPersonaStatesExtractPrompt(input);
+    const result = await this.callProviderApi(prompt, {
+      maxTokens: 2048,
+      temperature: 0.2,
+    });
+    return this.parseChapterPersonaStatesFromModelContent(result.content);
+  }
+
   async extractChapterRelationEvents(input: {
     chapterNo: number;
     title: string;

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFallbackPersonaState,
+  clampPersonaStateText,
   normalizePersonaStateOutput,
+  parseChapterPersonaStatesFromModelContent,
   trimForPrompt,
 } from './persona-state.util';
 
@@ -31,4 +33,33 @@ test('normalizePersonaStateOutput strips label and blank lines', () => {
   assert.equal(normalizePersonaStateOutput('人物状态：已饮酒，情绪失控'), '已饮酒，情绪失控');
   assert.equal(normalizePersonaStateOutput('\n\n  清醒，尚未饮酒  \n'), '清醒，尚未饮酒');
   assert.equal(normalizePersonaStateOutput('   '), null);
+});
+
+test('clampPersonaStateText truncates long state', () => {
+  const longState = '状'.repeat(80);
+  assert.equal(clampPersonaStateText(longState).length, 60);
+});
+
+test('parseChapterPersonaStatesFromModelContent parses fenced json array', () => {
+  const raw = '```json\n[{"name":"叶辰","appeared":true,"state":"重伤昏迷"},{"name":"清歌","appeared":false,"state":"未出场"}]\n```';
+  const items = parseChapterPersonaStatesFromModelContent(raw);
+  assert.equal(items.length, 2);
+  assert.deepEqual(items[0], { name: '叶辰', appeared: true, state: '重伤昏迷' });
+  assert.deepEqual(items[1], { name: '清歌', appeared: false, state: '未出场' });
+});
+
+test('parseChapterPersonaStatesFromModelContent parses personas wrapper', () => {
+  const items = parseChapterPersonaStatesFromModelContent({
+    personas: [{ name: '林月', appeared: true, state: '已离开宗门' }],
+  });
+  assert.deepEqual(items, [{ name: '林月', appeared: true, state: '已离开宗门' }]);
+});
+
+test('parseChapterPersonaStatesFromModelContent skips invalid entries', () => {
+  const items = parseChapterPersonaStatesFromModelContent([
+    { name: '', appeared: true, state: '无效' },
+    { name: '有效', appeared: false, state: '' },
+    { name: '有效', appeared: true, state: '有效状态' },
+  ]);
+  assert.deepEqual(items, [{ name: '有效', appeared: true, state: '有效状态' }]);
 });
