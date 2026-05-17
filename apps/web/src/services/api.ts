@@ -1121,6 +1121,7 @@ export const apiClient = {
     return this.unwrapPayload<{
       importedCount: number;
       chapters: ChapterItem[];
+      personaBootstrap: ChapterImportPersonaBootstrap;
     }>(response.data);
   },
 
@@ -1200,6 +1201,9 @@ export interface PersonaItem {
   profile: string;
   state: string;
   status: 'draft' | 'published';
+  relationEventIds: string[];
+  appearedChapterNos: number[];
+  lastAppearedChapterNo: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1395,9 +1399,18 @@ export interface RelationEventItem {
   summary: string;
   evidenceSnippet?: string;
   chapterNo: number | null;
+  protagonistPersonaId: string | null;
+  counterpartyPersonaId: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+}
+
+export interface ChapterImportPersonaBootstrap {
+  createdPersonaCount: number;
+  createdRelationEventCount: number;
+  suspectedNameConflicts: string[];
+  createdPersonas: Array<{ id: string; name: string }>;
 }
 
 export interface RelationEventInput {

@@ -505,6 +505,20 @@ components:
         updatedAt:
           type: string
           format: date-time
+        relationEventIds:
+          type: array
+          items:
+            type: string
+          description: Relation events linked to this persona (auto-maintained)
+        appearedChapterNos:
+          type: array
+          items:
+            type: integer
+          description: Chapter numbers where this persona appears in body text
+        lastAppearedChapterNo:
+          type: integer
+          nullable: true
+          description: Latest chapter number where this persona appeared
     PromptConfig:
       type: object
       required:
@@ -572,6 +586,14 @@ components:
           type: string
           format: date-time
           nullable: true
+        protagonistPersonaId:
+          type: string
+          nullable: true
+          description: Linked persona id for protagonist
+        counterpartyPersonaId:
+          type: string
+          nullable: true
+          description: Linked persona id for counterparty
     RelationEventInput:
       type: object
       required:
@@ -1066,6 +1088,7 @@ components:
       required:
         - importedCount
         - chapters
+        - personaBootstrap
       properties:
         importedCount:
           type: integer
@@ -1075,6 +1098,38 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChapterItem'
+        personaBootstrap:
+          $ref: '#/components/schemas/ChapterImportPersonaBootstrap'
+    ChapterImportPersonaBootstrap:
+      type: object
+      required:
+        - createdPersonaCount
+        - createdRelationEventCount
+        - suspectedNameConflicts
+        - createdPersonas
+      properties:
+        createdPersonaCount:
+          type: integer
+          minimum: 0
+        createdRelationEventCount:
+          type: integer
+          minimum: 0
+        suspectedNameConflicts:
+          type: array
+          items:
+            type: string
+        createdPersonas:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+            properties:
+              id:
+                type: string
+              name:
+                type: string
 
 security:
   - BearerAuth: []
