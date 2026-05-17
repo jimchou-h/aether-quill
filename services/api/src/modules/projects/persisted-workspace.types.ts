@@ -33,6 +33,8 @@ export interface PersistedProjectState {
       activePersonaId: string | null;
       chapterSummaryPromptCount?: number;
       generationTemperature?: number;
+      updatePersonaOnSave?: boolean;
+      generateRelationEventsOnSave?: boolean;
       updatedAt: string;
     }
   >;
