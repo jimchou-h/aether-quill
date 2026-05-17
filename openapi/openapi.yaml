@@ -433,6 +433,8 @@ components:
         - activePersonaId
         - chapterSummaryPromptCount
         - generationTemperature
+        - updatePersonaOnSave
+        - generateRelationEventsOnSave
         - updatedAt
       properties:
         systemPromptText:
@@ -455,6 +457,14 @@ components:
           maximum: 2
           default: 0.7
           description: 章节生成等主链路的采样温度（项目级）
+        updatePersonaOnSave:
+          type: boolean
+          default: true
+          description: 保存章节时自动更新人物出场状态
+        generateRelationEventsOnSave:
+          type: boolean
+          default: true
+          description: 保存章节时自动生成关系事件
         updatedAt:
           type: string
           format: date-time
@@ -475,6 +485,12 @@ components:
           format: float
           minimum: 0
           maximum: 2
+        updatePersonaOnSave:
+          type: boolean
+          description: 保存章节时自动更新人物出场状态
+        generateRelationEventsOnSave:
+          type: boolean
+          description: 保存章节时自动生成关系事件
     Persona:
       type: object
       required:

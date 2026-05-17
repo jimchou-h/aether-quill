@@ -1930,6 +1930,10 @@ export interface components {
       chapterSummaryPromptCount: number;
       /** @description 主生成链路采样温度 */
       generationTemperature: number;
+      /** @description 保存章节时自动更新人物出场状态 */
+      updatePersonaOnSave: boolean;
+      /** @description 保存章节时自动生成关系事件 */
+      generateRelationEventsOnSave: boolean;
       /** Format: date-time */
       updatedAt: string;
     };
@@ -1938,6 +1942,8 @@ export interface components {
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
       generationTemperature?: number;
+      updatePersonaOnSave?: boolean;
+      generateRelationEventsOnSave?: boolean;
     };
     Document: {
       /** Format: uuid */

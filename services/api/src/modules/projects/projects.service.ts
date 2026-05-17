@@ -133,6 +133,10 @@ export interface ProjectSettings {
   chapterSummaryPromptCount: number;
   /** 主生成链路采样温度（0~2） */
   generationTemperature: number;
+  /** 保存章节时自动更新人物出场状态 */
+  updatePersonaOnSave: boolean;
+  /** 保存章节时自动生成关系事件 */
+  generateRelationEventsOnSave: boolean;
   updatedAt: Date;
 }
 
@@ -263,6 +267,8 @@ export interface ProjectExportBundle {
     activePersonaId: string | null;
     chapterSummaryPromptCount: number;
     generationTemperature: number;
+    updatePersonaOnSave: boolean;
+    generateRelationEventsOnSave: boolean;
     personas: PersonaRecord[];
   };
   summary: {
@@ -475,6 +481,8 @@ export class ProjectsService implements OnModuleInit {
         activePersonaId: settings.activePersonaId,
         chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
         generationTemperature: settings.generationTemperature,
+        updatePersonaOnSave: settings.updatePersonaOnSave,
+        generateRelationEventsOnSave: settings.generateRelationEventsOnSave,
         personas,
       },
       summary: {
@@ -508,6 +516,8 @@ export class ProjectsService implements OnModuleInit {
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
       generationTemperature?: number;
+      updatePersonaOnSave?: boolean;
+      generateRelationEventsOnSave?: boolean;
     },
     userId?: string
   ) {
@@ -545,6 +555,14 @@ export class ProjectsService implements OnModuleInit {
 
     if (payload.generationTemperature !== undefined) {
       settings.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
+    }
+
+    if (payload.updatePersonaOnSave !== undefined) {
+      settings.updatePersonaOnSave = payload.updatePersonaOnSave;
+    }
+
+    if (payload.generateRelationEventsOnSave !== undefined) {
+      settings.generateRelationEventsOnSave = payload.generateRelationEventsOnSave;
     }
 
     settings.updatedAt = new Date();
@@ -863,12 +881,24 @@ export class ProjectsService implements OnModuleInit {
     }
 
     this.persistState();
-    await this.syncPersonaGraphFromChapter(
-      projectId,
-      chapterNo,
-      payload.content,
-      targetChapter.title
-    );
+    if (knowledge.chapters.length > 0) {
+      const settings = this.settingsStore.get(projectId)!;
+      if (settings.updatePersonaOnSave !== false) {
+        await this.syncPersonaGraphFromChapter(
+          projectId,
+          chapterNo,
+          payload.content,
+          targetChapter.title
+        );
+      }
+      if (settings.generateRelationEventsOnSave !== false) {
+        try {
+          await this.generateChapterRelationEvents(projectId, chapterNo);
+        } catch {
+          // 自动生成失败不影响章节保存
+        }
+      }
+    }
     this.relinkRelationEventsForProject(projectId);
     this.persistState();
     return targetChapter;
@@ -895,11 +925,6 @@ export class ProjectsService implements OnModuleInit {
     const nextSummary = buildFallbackChapterSummary(payload.content);
     const now = new Date();
 
-    const existingIndex = knowledge.chapters.findIndex((item) => item.chapterNo === chapterNo);
-    if (existingIndex >= 0) {
-      knowledge.chapters.splice(existingIndex, 1);
-    }
-
     knowledge.chapters.forEach((ch) => {
       if (ch.chapterNo >= chapterNo) {
         ch.chapterNo += 1;
@@ -920,12 +945,24 @@ export class ProjectsService implements OnModuleInit {
     knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
 
     this.persistState();
-    await this.syncPersonaGraphFromChapter(
-      projectId,
-      chapterNo,
-      payload.content,
-      targetChapter.title
-    );
+    if (knowledge.chapters.length > 0) {
+      const settings = this.settingsStore.get(projectId)!;
+      if (settings.updatePersonaOnSave !== false) {
+        await this.syncPersonaGraphFromChapter(
+          projectId,
+          chapterNo,
+          payload.content,
+          targetChapter.title
+        );
+      }
+      if (settings.generateRelationEventsOnSave !== false) {
+        try {
+          await this.generateChapterRelationEvents(projectId, chapterNo);
+        } catch {
+          // 自动生成失败不影响章节保存
+        }
+      }
+    }
     this.relinkRelationEventsForProject(projectId);
     this.persistState();
     return targetChapter;
@@ -2080,12 +2117,15 @@ export class ProjectsService implements OnModuleInit {
     chapter.updatedAt = new Date();
     knowledge.indexVersion += 1;
 
-    await this.syncPersonaGraphFromChapter(
-      projectId,
-      normalizedChapterNo,
-      draftText,
-      chapter.title
-    );
+    const settingsForApply = this.settingsStore.get(projectId)!;
+    if (settingsForApply.updatePersonaOnSave !== false) {
+      await this.syncPersonaGraphFromChapter(
+        projectId,
+        normalizedChapterNo,
+        draftText,
+        chapter.title
+      );
+    }
     this.relinkRelationEventsForProject(projectId);
     this.persistState();
 
@@ -2524,6 +2564,8 @@ export class ProjectsService implements OnModuleInit {
               value.chapterSummaryPromptCount
             ),
             generationTemperature: clampGenerationTemperature(value.generationTemperature),
+            updatePersonaOnSave: value.updatePersonaOnSave ?? true,
+            generateRelationEventsOnSave: value.generateRelationEventsOnSave ?? true,
             updatedAt: new Date(value.updatedAt),
           },
         ])
@@ -2967,6 +3009,8 @@ export class ProjectsService implements OnModuleInit {
         activePersonaId: null,
         chapterSummaryPromptCount: DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
         generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
+        updatePersonaOnSave: true,
+        generateRelationEventsOnSave: true,
         updatedAt: new Date(),
       });
     } else {
@@ -3004,6 +3048,12 @@ export class ProjectsService implements OnModuleInit {
       settings.chapterSummaryPromptCount
     );
     settings.generationTemperature = clampGenerationTemperature(settings.generationTemperature);
+    if (settings.updatePersonaOnSave === undefined) {
+      settings.updatePersonaOnSave = true;
+    }
+    if (settings.generateRelationEventsOnSave === undefined) {
+      settings.generateRelationEventsOnSave = true;
+    }
   }
 
   private getProjectOrThrow(projectId: string) {

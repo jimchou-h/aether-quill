@@ -9,7 +9,14 @@ const props = defineProps<{
 
 const summaryCount = ref(3);
 const temperature = ref(0.7);
-const saved = ref<{ summaryCount: number; temperature: number } | null>(null);
+const updatePersonaOnSave = ref(true);
+const generateRelationEventsOnSave = ref(true);
+const saved = ref<{
+  summaryCount: number;
+  temperature: number;
+  updatePersonaOnSave: boolean;
+  generateRelationEventsOnSave: boolean;
+} | null>(null);
 
 const loading = ref(false);
 const saving = ref(false);
@@ -21,14 +28,24 @@ const isDirty = computed(() => {
     return false;
   }
   return (
-    summaryCount.value !== saved.value.summaryCount || temperature.value !== saved.value.temperature
+    summaryCount.value !== saved.value.summaryCount ||
+    temperature.value !== saved.value.temperature ||
+    updatePersonaOnSave.value !== saved.value.updatePersonaOnSave ||
+    generateRelationEventsOnSave.value !== saved.value.generateRelationEventsOnSave
   );
 });
 
 function applyFromSettings(s: ProjectSettings) {
   summaryCount.value = s.chapterSummaryPromptCount;
   temperature.value = s.generationTemperature;
-  saved.value = { summaryCount: s.chapterSummaryPromptCount, temperature: s.generationTemperature };
+  updatePersonaOnSave.value = s.updatePersonaOnSave ?? true;
+  generateRelationEventsOnSave.value = s.generateRelationEventsOnSave ?? true;
+  saved.value = {
+    summaryCount: s.chapterSummaryPromptCount,
+    temperature: s.generationTemperature,
+    updatePersonaOnSave: s.updatePersonaOnSave ?? true,
+    generateRelationEventsOnSave: s.generateRelationEventsOnSave ?? true,
+  };
 }
 
 async function load() {
@@ -52,6 +69,8 @@ async function handleSave() {
     const s = await apiClient.updateSettings(props.projectId, {
       chapterSummaryPromptCount: summaryCount.value,
       generationTemperature: temperature.value,
+      updatePersonaOnSave: updatePersonaOnSave.value,
+      generateRelationEventsOnSave: generateRelationEventsOnSave.value,
     });
     applyFromSettings(s);
     message.value = presentSuccess('生成偏好已保存');
@@ -116,6 +135,20 @@ onMounted(() => {
         />
       </div>
       <p class="field-hint inline-hint">范围 0~2；默认 0.7。数值越高，模型输出越发散。</p>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input type="checkbox" v-model="updatePersonaOnSave" class="toggle-checkbox" />
+          <span class="toggle-text">保存章节时自动更新人物出场状态</span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input type="checkbox" v-model="generateRelationEventsOnSave" class="toggle-checkbox" />
+          <span class="toggle-text">保存章节时自动生成关系事件</span>
+        </label>
+      </div>
 
       <div class="meta-bar">
         <span v-if="isDirty" class="dirty-badge">未保存</span>
@@ -212,6 +245,32 @@ onMounted(() => {
 .action-bar {
   display: flex;
   gap: 0.5rem;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.35rem;
+}
+
+.toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #111827;
+}
+
+.toggle-text {
+  font-size: 0.9rem;
+  color: #374151;
 }
 
 .primary-button {
