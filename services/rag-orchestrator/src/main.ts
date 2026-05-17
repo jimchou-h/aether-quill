@@ -231,6 +231,57 @@ app.post('/api/summarize', async (req, res) => {
   }
 });
 
+app.post('/api/extract/chapter-personas', async (req, res) => {
+  const chapterNo = Number(req.body?.chapterNo || 0);
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  const content = typeof req.body?.content === 'string' ? req.body.content : '';
+  const personas = Array.isArray(req.body?.personas) ? req.body.personas : [];
+
+  if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+    res.status(400).json({ message: 'chapterNo 必须为正整数' });
+    return;
+  }
+
+  if (!content.trim()) {
+    res.status(400).json({ message: 'content 不能为空' });
+    return;
+  }
+
+  const normalizedPersonas = personas
+    .map((item: unknown) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+      const record = item as Record<string, unknown>;
+      const name = typeof record.name === 'string' ? record.name.trim() : '';
+      const profile = typeof record.profile === 'string' ? record.profile.trim() : '';
+      const state = typeof record.state === 'string' ? record.state.trim() : '';
+      if (!name) {
+        return null;
+      }
+      return { name, profile, state };
+    })
+    .filter((item): item is { name: string; profile: string; state: string } => Boolean(item));
+
+  if (normalizedPersonas.length === 0) {
+    res.status(400).json({ message: 'personas 不能为空' });
+    return;
+  }
+
+  try {
+    const result = await generationService.extractChapterPersonaStates({
+      chapterNo,
+      title,
+      content,
+      personas: normalizedPersonas,
+    });
+    res.json({ personas: result });
+  } catch (error) {
+    console.error('Chapter persona state extraction failed:', error);
+    res.status(502).json({ message: '章节角色状态批量抽取失败' });
+  }
+});
+
 app.post('/api/extract/relation-events', async (req, res) => {
   const chapterNo = Number(req.body?.chapterNo || 0);
   const title = String(req.body?.title || '').trim();

@@ -274,6 +274,17 @@ export const apiClient = {
     return this.unwrapPayload<ChapterItem>(response.data);
   },
 
+  async insertChapter(
+    projectId: string,
+    payload: { chapterNo: number; title: string; content: string }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/insert`,
+      payload
+    );
+    return this.unwrapPayload<ChapterItem>(response.data);
+  },
+
   async deleteChapter(projectId: string, chapterNo: number) {
     const response = await http.delete(
       `/api/projects/${projectId}/knowledge/chapters/${chapterNo}`

@@ -14,7 +14,9 @@ import axios from 'axios';
 import { buildFallbackChapterSummary, type ChapterSummarySource } from './chapter-summary.util';
 import {
   buildFallbackPersonaState,
+  clampPersonaStateText,
   normalizePersonaStateOutput,
+  parseChapterPersonaStatesFromModelContent,
   trimForPrompt,
 } from './persona-state.util';
 import {
@@ -22,16 +24,20 @@ import {
   resolveActivePersonaIdAfterDelete,
 } from './persona-management.util';
 import {
+  addChapterAppearance,
   buildAbsentPersonaConsistencyNotes,
   clearPersonaFromRelationEvents,
+  computeLastAppearedChapterNo,
   createEmptyPersonaGraphFields,
   detectAbsentPersonaWarnings,
   findSimilarPersonaNameConflicts,
   IMPORT_AUTO_PERSONA_MIN_CHAPTER_COUNT,
   linkRelationEventToPersonas,
   normalizePersonaGraphFields,
+  personaAppearsInChapterContent,
   rebuildPersonaAppearancesFromChapters,
   relinkAllRelationEvents,
+  removeChapterFromAppearances,
   renumberAppearancesAfterDelete,
   renumberAppearancesAfterRenumber,
   unlinkRelationEventFromPersonas,
@@ -831,6 +837,74 @@ export class ProjectsService implements OnModuleInit {
 
     const nextSummary = buildFallbackChapterSummary(payload.content);
     const now = new Date();
+    const existing = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
+
+    let targetChapter: ChapterRecord;
+    if (existing) {
+      existing.title = payload.title.trim();
+      existing.content = payload.content;
+      existing.summary = nextSummary;
+      existing.summarySource = 'fallback';
+      existing.summaryUpdatedAt = now;
+      existing.updatedAt = now;
+      targetChapter = existing;
+    } else {
+      targetChapter = {
+        chapterNo,
+        title: payload.title.trim(),
+        content: payload.content,
+        summary: nextSummary,
+        summarySource: 'fallback',
+        summaryUpdatedAt: now,
+        updatedAt: now,
+      };
+      knowledge.chapters.push(targetChapter);
+      knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
+    }
+
+    this.persistState();
+    await this.syncPersonaGraphFromChapter(
+      projectId,
+      chapterNo,
+      payload.content,
+      targetChapter.title
+    );
+    this.relinkRelationEventsForProject(projectId);
+    this.persistState();
+    return targetChapter;
+  }
+
+  async insertChapter(
+    projectId: string,
+    payload: { chapterNo: number; title: string; content: string },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapterNo = Number(payload.chapterNo);
+
+    if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+
+    const nextSummary = buildFallbackChapterSummary(payload.content);
+    const now = new Date();
+
+    const existingIndex = knowledge.chapters.findIndex((item) => item.chapterNo === chapterNo);
+    if (existingIndex >= 0) {
+      knowledge.chapters.splice(existingIndex, 1);
+    }
+
+    knowledge.chapters.forEach((ch) => {
+      if (ch.chapterNo >= chapterNo) {
+        ch.chapterNo += 1;
+      }
+    });
 
     const targetChapter: ChapterRecord = {
       chapterNo,
@@ -842,20 +916,17 @@ export class ProjectsService implements OnModuleInit {
       updatedAt: now,
     };
 
-    knowledge.chapters.forEach((ch) => {
-      if (ch.chapterNo >= chapterNo) {
-        ch.chapterNo += 1;
-      }
-    });
-
     knowledge.chapters.push(targetChapter);
     knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
 
     this.persistState();
-    const personas = this.personasStore.get(projectId)!;
-    updateAppearancesForChapter(personas, chapterNo, payload.content);
+    await this.syncPersonaGraphFromChapter(
+      projectId,
+      chapterNo,
+      payload.content,
+      targetChapter.title
+    );
     this.relinkRelationEventsForProject(projectId);
-    await this.updateActivePersonaStateFromChapter(projectId, chapterNo, payload.content);
     this.persistState();
     return targetChapter;
   }
@@ -2008,6 +2079,14 @@ export class ProjectsService implements OnModuleInit {
     chapter.content = draftText;
     chapter.updatedAt = new Date();
     knowledge.indexVersion += 1;
+
+    await this.syncPersonaGraphFromChapter(
+      projectId,
+      normalizedChapterNo,
+      draftText,
+      chapter.title
+    );
+    this.relinkRelationEventsForProject(projectId);
     this.persistState();
 
     return {
@@ -2589,32 +2668,123 @@ export class ProjectsService implements OnModuleInit {
     );
   }
 
-  private async updateActivePersonaStateFromChapter(
+  private async syncPersonaGraphFromChapter(
     projectId: string,
+    chapterNo: number,
+    chapterContent: string,
+    chapterTitle?: string
+  ) {
+    const personas = this.personasStore.get(projectId)!;
+    if (personas.length === 0) {
+      return;
+    }
+
+    const roster = personas.map((persona) => ({ id: persona.id, name: persona.name }));
+    let batchApplied = false;
+
+    try {
+      const { data } = await axios.post<{ personas?: unknown }>(
+        `${this.getRagOrchestratorUrl()}/api/extract/chapter-personas`,
+        {
+          chapterNo,
+          title: chapterTitle?.trim() || undefined,
+          content: chapterContent,
+          personas: personas.map((persona) => ({
+            name: persona.name,
+            profile: persona.profile,
+            state: persona.state,
+          })),
+        },
+        { timeout: 120000 }
+      );
+
+      const items = parseChapterPersonaStatesFromModelContent(data?.personas ?? data);
+      if (items.length > 0) {
+        const byName = new Map(items.map((item) => [item.name.trim(), item]));
+        for (const persona of personas) {
+          const item = byName.get(persona.name.trim());
+          if (item) {
+            if (item.state) {
+              persona.state = item.state;
+            }
+            if (item.appeared) {
+              persona.appearedChapterNos = addChapterAppearance(
+                persona.appearedChapterNos,
+                chapterNo
+              );
+            } else {
+              persona.appearedChapterNos = removeChapterFromAppearances(
+                persona.appearedChapterNos,
+                chapterNo
+              );
+            }
+            persona.lastAppearedChapterNo = computeLastAppearedChapterNo(persona.appearedChapterNos);
+            persona.updatedAt = new Date();
+            continue;
+          }
+
+          await this.applyFallbackPersonaChapterSync(
+            projectId,
+            persona,
+            roster,
+            chapterNo,
+            chapterContent
+          );
+        }
+        batchApplied = true;
+      }
+    } catch {
+      batchApplied = false;
+    }
+
+    if (!batchApplied) {
+      updateAppearancesForChapter(personas, chapterNo, chapterContent);
+      for (const persona of personas) {
+        await this.applyFallbackPersonaChapterSync(
+          projectId,
+          persona,
+          roster,
+          chapterNo,
+          chapterContent
+        );
+      }
+    }
+  }
+
+  private async applyFallbackPersonaChapterSync(
+    projectId: string,
+    persona: PersonaRecord,
+    roster: Array<{ id: string; name: string }>,
     chapterNo: number,
     chapterContent: string
   ) {
-    const activePersona = this.resolveActivePersona(projectId);
-    if (!activePersona) {
-      return;
+    const appeared = personaAppearsInChapterContent(persona, roster, chapterContent);
+    if (appeared) {
+      persona.appearedChapterNos = addChapterAppearance(persona.appearedChapterNos, chapterNo);
+    } else {
+      persona.appearedChapterNos = removeChapterFromAppearances(
+        persona.appearedChapterNos,
+        chapterNo
+      );
     }
+    persona.lastAppearedChapterNo = computeLastAppearedChapterNo(persona.appearedChapterNos);
 
-    const nextState = await this.generatePersonaState({
-      projectId,
-      chapterNo,
-      chapterContent,
-      personaName: activePersona.name,
-      personaProfile: activePersona.profile,
-      currentState: activePersona.state,
-    });
+    if (appeared) {
+      const nextState = await this.generatePersonaState({
+        projectId,
+        chapterNo,
+        chapterContent,
+        personaName: persona.name,
+        personaProfile: persona.profile,
+        currentState: persona.state,
+      });
 
-    if (!nextState || nextState === activePersona.state) {
-      return;
+      const normalizedState = clampPersonaStateText(nextState);
+      if (normalizedState && normalizedState !== persona.state) {
+        persona.state = normalizedState;
+      }
     }
-
-    activePersona.state = nextState;
-    activePersona.updatedAt = new Date();
-    this.persistState();
+    persona.updatedAt = new Date();
   }
 
   private async generatePersonaState(input: {
@@ -2655,7 +2825,7 @@ export class ProjectsService implements OnModuleInit {
 
       const generated = normalizePersonaStateOutput(String(data?.content || ''));
 
-      return generated || fallbackState;
+      return clampPersonaStateText(generated || fallbackState);
     } catch {
       return fallbackState;
     }
@@ -3011,12 +3181,13 @@ export class ProjectsService implements OnModuleInit {
     }
 
     const createdPersonas: Array<{ id: string; name: string }> = [];
+    const roster = () => personas.map((persona) => ({ id: persona.id, name: persona.name }));
     for (const rawName of candidateNames) {
       const name = rawName.trim();
       if (!name || existingNames.some((item) => item.trim() === name)) {
         continue;
       }
-      const chapterHits = countChapterAppearancesForName(knowledge.chapters, name);
+      const chapterHits = countChapterAppearancesForName(knowledge.chapters, name, roster());
       if (chapterHits < IMPORT_AUTO_PERSONA_MIN_CHAPTER_COUNT) {
         continue;
       }

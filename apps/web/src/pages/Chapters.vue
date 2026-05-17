@@ -134,8 +134,8 @@ async function handleImportChapter(payload: { chapterNo: number; title: string; 
   errorMessage.value = '';
   message.value = '';
   try {
-    await apiClient.upsertChapter(projectId.value, payload);
-    message.value = presentSuccess(`第${payload.chapterNo}章已保存`);
+    await apiClient.insertChapter(projectId.value, payload);
+    message.value = presentSuccess(`第${payload.chapterNo}章已插入`);
     importFormRef.value?.resetForm();
     selectedChapterNo.value = payload.chapterNo;
     closeImportModal();

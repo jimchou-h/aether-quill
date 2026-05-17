@@ -27,6 +27,13 @@ function makePersona(id: string, name: string) {
 }
 
 describe('persona-graph.util', () => {
+  it('matches persona by distinctive two-character nickname suffix', () => {
+    const personas = [makePersona('p1', '叶凡'), makePersona('p2', '叶清歌')];
+    updateAppearancesForChapter(personas, 1, '清歌在雨中回头');
+    assert.deepEqual(personas[0]?.appearedChapterNos, []);
+    assert.deepEqual(personas[1]?.appearedChapterNos, [1]);
+  });
+
   it('tracks chapter appearances by exact substring match', () => {
     const personas = [makePersona('p1', '林月'), makePersona('p2', '陈默')];
     updateAppearancesForChapter(personas, 3, '林月与陈默在码头相遇');

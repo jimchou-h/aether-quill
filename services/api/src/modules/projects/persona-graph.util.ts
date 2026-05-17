@@ -113,17 +113,47 @@ export function computeLastAppearedChapterNo(appearedChapterNos: number[]): numb
   return Math.max(...appearedChapterNos);
 }
 
+/** 用于正文出场匹配：全名 + 无冲突时的后两字昵称（如「叶清歌」→「清歌」） */
+export function buildPersonaMatchTerms(
+  persona: { id: string; name: string },
+  allPersonas: Array<{ id: string; name: string }>
+): string[] {
+  const name = persona.name.trim();
+  if (!name) {
+    return [];
+  }
+
+  const terms = [name];
+  if (name.length >= 3) {
+    const suffix2 = name.slice(-2);
+    const othersShareSuffix = allPersonas.some(
+      (item) => item.id !== persona.id && item.name.trim().slice(-2) === suffix2
+    );
+    if (!othersShareSuffix) {
+      terms.push(suffix2);
+    }
+  }
+
+  return [...new Set(terms)];
+}
+
+export function personaAppearsInChapterContent(
+  persona: { id: string; name: string },
+  allPersonas: Array<{ id: string; name: string }>,
+  content: string
+): boolean {
+  const terms = buildPersonaMatchTerms(persona, allPersonas);
+  return terms.some((term) => term.length >= 2 && content.includes(term));
+}
+
 export function updateAppearancesForChapter(
   personas: PersonaGraphPersona[],
   chapterNo: number,
   content: string
 ): void {
+  const roster = personas.map((persona) => ({ id: persona.id, name: persona.name }));
   for (const persona of personas) {
-    const name = persona.name.trim();
-    if (!name) {
-      continue;
-    }
-    if (content.includes(name)) {
+    if (personaAppearsInChapterContent(persona, roster, content)) {
       persona.appearedChapterNos = addChapterAppearance(persona.appearedChapterNos, chapterNo);
     } else {
       persona.appearedChapterNos = removeChapterFromAppearances(
@@ -269,13 +299,17 @@ export function buildAbsentPersonaConsistencyNotes(
 
 export function countChapterAppearancesForName(
   chapters: Array<{ chapterNo: number; content: string }>,
-  name: string
+  name: string,
+  allPersonas: Array<{ id: string; name: string }> = []
 ): number {
-  const trimmed = name.trim();
-  if (!trimmed) {
+  const persona = allPersonas.find((item) => item.name.trim() === name.trim());
+  const roster = allPersonas.length > 0 ? allPersonas : persona ? [persona] : [{ id: name, name }];
+  const target = persona ?? { id: name, name: name.trim() };
+  if (!target.name.trim()) {
     return 0;
   }
-  return chapters.filter((chapter) => chapter.content.includes(trimmed)).length;
+  return chapters.filter((chapter) => personaAppearsInChapterContent(target, roster, chapter.content))
+    .length;
 }
 
 export function findSimilarPersonaNameConflicts(

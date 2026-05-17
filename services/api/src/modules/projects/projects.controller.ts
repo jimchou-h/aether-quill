@@ -545,6 +545,17 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/insert')
+  async insertChapter(
+    @Param('id') id: string,
+    @Body() data: { chapterNo: number; title: string; content: string },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.insertChapter(id, data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Delete(':id/knowledge/chapters/:chapterNo')
   deleteChapter(
     @Param('id') id: string,
