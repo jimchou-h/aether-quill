@@ -22,6 +22,23 @@ import {
   resolveActivePersonaIdAfterDelete,
 } from './persona-management.util';
 import {
+  buildAbsentPersonaConsistencyNotes,
+  clearPersonaFromRelationEvents,
+  createEmptyPersonaGraphFields,
+  detectAbsentPersonaWarnings,
+  findSimilarPersonaNameConflicts,
+  IMPORT_AUTO_PERSONA_MIN_CHAPTER_COUNT,
+  linkRelationEventToPersonas,
+  normalizePersonaGraphFields,
+  rebuildPersonaAppearancesFromChapters,
+  relinkAllRelationEvents,
+  renumberAppearancesAfterDelete,
+  renumberAppearancesAfterRenumber,
+  unlinkRelationEventFromPersonas,
+  updateAppearancesForChapter,
+  countChapterAppearancesForName,
+} from './persona-graph.util';
+import {
   buildRelationMemoryBlock,
   matchesRelationEventFilters,
   normalizeRelationEventDedupeKey,
@@ -121,6 +138,9 @@ export interface PersonaRecord {
   tone?: string;
   constraints?: string[];
   status: PersonaStatus;
+  relationEventIds: string[];
+  appearedChapterNos: number[];
+  lastAppearedChapterNo: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -197,9 +217,18 @@ export interface RelationEventRecord {
   summary: string;
   evidenceSnippet?: string;
   chapterNo: number | null;
+  protagonistPersonaId: string | null;
+  counterpartyPersonaId: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+}
+
+export interface ChapterImportPersonaBootstrap {
+  createdPersonaCount: number;
+  createdRelationEventCount: number;
+  suspectedNameConflicts: string[];
+  createdPersonas: Array<{ id: string; name: string }>;
 }
 
 export interface UsedRelationEventRecord {
@@ -551,6 +580,7 @@ export class ProjectsService implements OnModuleInit {
       profile,
       state: payload.state?.trim() || '待更新',
       status: 'draft',
+      ...createEmptyPersonaGraphFields(),
       createdAt: now,
       updatedAt: now,
     };
@@ -639,6 +669,8 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`未找到 persona: ${personaId}`);
     }
 
+    const events = this.relationEventsStore.get(projectId)!;
+    clearPersonaFromRelationEvents(personaId, events);
     personas.splice(index, 1);
 
     const settings = this.settingsStore.get(projectId)!;
@@ -710,6 +742,19 @@ export class ProjectsService implements OnModuleInit {
       }
     });
 
+    const personas = this.personasStore.get(projectId)!;
+    for (const persona of personas) {
+      const graph = normalizePersonaGraphFields(persona);
+      persona.appearedChapterNos = renumberAppearancesAfterDelete(
+        graph.appearedChapterNos,
+        normalizedChapterNo
+      );
+      persona.lastAppearedChapterNo = persona.appearedChapterNos.length
+        ? Math.max(...persona.appearedChapterNos)
+        : null;
+      persona.updatedAt = new Date();
+    }
+
     this.persistState();
     return { id: deletedChapter.chapterNo };
   }
@@ -747,6 +792,19 @@ export class ProjectsService implements OnModuleInit {
           }
         }
       });
+    }
+
+    const personas = this.personasStore.get(projectId)!;
+    for (const persona of personas) {
+      const graph = normalizePersonaGraphFields(persona);
+      persona.appearedChapterNos = renumberAppearancesAfterRenumber(
+        graph.appearedChapterNos,
+        oldToNew
+      );
+      persona.lastAppearedChapterNo = persona.appearedChapterNos.length
+        ? Math.max(...persona.appearedChapterNos)
+        : null;
+      persona.updatedAt = new Date();
     }
 
     this.persistState();
@@ -794,7 +852,11 @@ export class ProjectsService implements OnModuleInit {
     knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
 
     this.persistState();
+    const personas = this.personasStore.get(projectId)!;
+    updateAppearancesForChapter(personas, chapterNo, payload.content);
+    this.relinkRelationEventsForProject(projectId);
     await this.updateActivePersonaStateFromChapter(projectId, chapterNo, payload.content);
+    this.persistState();
     return targetChapter;
   }
 
@@ -872,6 +934,13 @@ export class ProjectsService implements OnModuleInit {
     }
 
     knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
+
+    const personas = this.personasStore.get(projectId)!;
+    rebuildPersonaAppearancesFromChapters(personas, knowledge.chapters);
+
+    const personaBootstrap = await this.bootstrapPersonasAfterImport(projectId, imported);
+
+    this.relinkRelationEventsForProject(projectId);
     this.persistState();
 
     return {
@@ -885,6 +954,7 @@ export class ProjectsService implements OnModuleInit {
         summaryUpdatedAt: chapter.summaryUpdatedAt,
         updatedAt: chapter.updatedAt,
       })),
+      personaBootstrap,
     };
   }
 
@@ -1225,12 +1295,15 @@ export class ProjectsService implements OnModuleInit {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         projectId,
         ...normalized,
+        protagonistPersonaId: null,
+        counterpartyPersonaId: null,
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
       };
 
       this.relationEventsStore.get(projectId)!.push(event);
+      linkRelationEventToPersonas(event, this.personasStore.get(projectId)!);
       existingKeys.add(dedupeKey);
       createdEvents.push(event);
     }
@@ -1315,12 +1388,15 @@ export class ProjectsService implements OnModuleInit {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       projectId,
       ...normalized,
+      protagonistPersonaId: null,
+      counterpartyPersonaId: null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
     };
 
     this.relationEventsStore.get(projectId)!.push(event);
+    linkRelationEventToPersonas(event, this.personasStore.get(projectId)!);
     this.persistState();
     return event;
   }
@@ -1350,8 +1426,10 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`未找到关系事件: ${eventId}`);
     }
 
+    unlinkRelationEventFromPersonas(eventId, this.personasStore.get(projectId)!);
     const normalized = this.normalizeRelationEventInput(projectId, payload, event.protagonist);
     Object.assign(event, normalized, { updatedAt: new Date() });
+    linkRelationEventToPersonas(event, this.personasStore.get(projectId)!);
     this.persistState();
     return event;
   }
@@ -1371,6 +1449,7 @@ export class ProjectsService implements OnModuleInit {
 
     event.deletedAt = new Date();
     event.updatedAt = new Date();
+    unlinkRelationEventFromPersonas(eventId, this.personasStore.get(projectId)!);
     this.persistState();
     return { id: event.id };
   }
@@ -1434,6 +1513,8 @@ export class ProjectsService implements OnModuleInit {
         message: '尚未填写大纲总结，连续性提示能力会受影响。',
       });
     }
+
+    consistencyNotes.push(...this.buildPersonaGraphConsistencyNotes(projectId, personas));
 
     const usedRelationEvents = this.resolveSelectedRelationEvents(
       projectId,
@@ -2371,13 +2452,19 @@ export class ProjectsService implements OnModuleInit {
       personas: Object.fromEntries(
         Object.entries(parsed.personas || {}).map(([projectId, personas]) => [
           projectId,
-          (personas || []).map((persona) => ({
-            ...persona,
-            state:
-              typeof persona.state === 'string' && persona.state.trim() ? persona.state : '待更新',
-            createdAt: new Date(persona.createdAt),
-            updatedAt: new Date(persona.updatedAt),
-          })),
+          (personas || []).map((persona) => {
+            const graph = normalizePersonaGraphFields(persona);
+            return {
+              ...persona,
+              ...graph,
+              state:
+                typeof persona.state === 'string' && persona.state.trim()
+                  ? persona.state
+                  : '待更新',
+              createdAt: new Date(persona.createdAt),
+              updatedAt: new Date(persona.updatedAt),
+            };
+          }),
         ])
       ),
       knowledge: Object.fromEntries(
@@ -2452,6 +2539,12 @@ export class ProjectsService implements OnModuleInit {
               chapterNo:
                 typeof event.chapterNo === 'number' && Number.isFinite(event.chapterNo)
                   ? event.chapterNo
+                  : null,
+              protagonistPersonaId:
+                typeof event.protagonistPersonaId === 'string' ? event.protagonistPersonaId : null,
+              counterpartyPersonaId:
+                typeof event.counterpartyPersonaId === 'string'
+                  ? event.counterpartyPersonaId
                   : null,
               createdAt: new Date(event.createdAt),
               updatedAt: new Date(event.updatedAt),
@@ -2770,6 +2863,8 @@ export class ProjectsService implements OnModuleInit {
 
     const docs = this.documentsService.findAll(projectId);
 
+    const personaConsistencyNotes = this.buildPersonaGraphConsistencyNotes(projectId, personas);
+
     await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
       systemPromptText: settings.systemPromptText,
       personaProfile: activePersona
@@ -2791,6 +2886,7 @@ export class ProjectsService implements OnModuleInit {
       })),
       selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
       usedRelationEvents,
+      personaConsistencyNotes,
     });
   }
 
@@ -2860,6 +2956,100 @@ export class ProjectsService implements OnModuleInit {
         `projectId 无效: ${projectId}。该值是前端页面路由名，不是项目 ID。请先调用 GET /api/projects 获取真实项目 ID。`
       );
     }
+  }
+
+  private relinkRelationEventsForProject(projectId: string) {
+    const personas = this.personasStore.get(projectId)!;
+    const events = this.relationEventsStore.get(projectId)!.filter((event) => !event.deletedAt);
+    relinkAllRelationEvents(personas, events);
+  }
+
+  private buildPersonaGraphConsistencyNotes(
+    projectId: string,
+    personas: PersonaRecord[]
+  ): Array<{ level: 'warning'; message: string }> {
+    const knowledge = this.knowledgeStore.get(projectId);
+    if (!knowledge || knowledge.chapters.length === 0) {
+      return [];
+    }
+    const maxChapterNo = Math.max(...knowledge.chapters.map((chapter) => chapter.chapterNo));
+    const warnings = detectAbsentPersonaWarnings(personas, maxChapterNo);
+    return buildAbsentPersonaConsistencyNotes(warnings);
+  }
+
+  private async bootstrapPersonasAfterImport(
+    projectId: string,
+    importedChapters: ChapterRecord[]
+  ): Promise<ChapterImportPersonaBootstrap> {
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const existingNames = personas.map((persona) => persona.name);
+    const candidateNames = new Set<string>();
+    let createdRelationEventCount = 0;
+
+    for (const chapter of importedChapters) {
+      if (!chapter.content.trim()) {
+        continue;
+      }
+      try {
+        const result = await this.generateChapterRelationEvents(
+          projectId,
+          chapter.chapterNo,
+          undefined
+        );
+        createdRelationEventCount += result.createdCount;
+        for (const event of result.events) {
+          candidateNames.add(event.protagonist);
+          candidateNames.add(event.counterparty);
+          for (const actor of event.actors) {
+            candidateNames.add(actor);
+          }
+        }
+      } catch {
+        // 导入流程不因单章抽取失败而中断
+      }
+    }
+
+    const createdPersonas: Array<{ id: string; name: string }> = [];
+    for (const rawName of candidateNames) {
+      const name = rawName.trim();
+      if (!name || existingNames.some((item) => item.trim() === name)) {
+        continue;
+      }
+      const chapterHits = countChapterAppearancesForName(knowledge.chapters, name);
+      if (chapterHits < IMPORT_AUTO_PERSONA_MIN_CHAPTER_COUNT) {
+        continue;
+      }
+
+      const now = new Date();
+      const persona: PersonaRecord = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        profile: '由导入小说自动创建，请补充详细设定',
+        state: '待更新',
+        status: 'draft',
+        ...createEmptyPersonaGraphFields(),
+        createdAt: now,
+        updatedAt: now,
+      };
+      personas.push(persona);
+      existingNames.push(name);
+      createdPersonas.push({ id: persona.id, name: persona.name });
+    }
+
+    rebuildPersonaAppearancesFromChapters(personas, knowledge.chapters);
+
+    const suspectedNameConflicts = findSimilarPersonaNameConflicts(
+      [...candidateNames],
+      personas.map((persona) => persona.name)
+    );
+
+    return {
+      createdPersonaCount: createdPersonas.length,
+      createdRelationEventCount,
+      suspectedNameConflicts,
+      createdPersonas,
+    };
   }
 
   private normalizeRelationEventInput(

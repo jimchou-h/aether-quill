@@ -46,6 +46,9 @@ export interface PersistedProjectState {
       tone?: string;
       constraints?: string[];
       status: 'draft' | 'published';
+      relationEventIds?: string[];
+      appearedChapterNos?: number[];
+      lastAppearedChapterNo?: number | null;
       createdAt: string;
       updatedAt: string;
     }>
@@ -114,6 +117,8 @@ export interface PersistedProjectState {
       summary: string;
       evidenceSnippet?: string;
       chapterNo: number | null;
+      protagonistPersonaId?: string | null;
+      counterpartyPersonaId?: string | null;
       createdAt: string;
       updatedAt: string;
       deletedAt: string | null;

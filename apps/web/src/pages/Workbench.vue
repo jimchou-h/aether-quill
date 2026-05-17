@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { apiClient } from '../services/api';
+import { apiClient, type PersonaItem } from '../services/api';
 import { useGenerationStore } from '../stores/generation';
 import { useEditorStore } from '../stores/editor';
 import KnowledgePanel from '../components/workbench/KnowledgePanel.vue';
@@ -38,6 +38,7 @@ const outlineSummary = ref('');
 
 /** 人物名称列表 */
 const personaNames = ref<string[]>([]);
+const personas = ref<PersonaItem[]>([]);
 /** 提示词控制台引用 */
 const promptConsoleRef = ref<InstanceType<typeof PromptConsole> | null>(null);
 
@@ -50,7 +51,13 @@ function applyWorkspaceSnapshot(workspace: Awaited<ReturnType<typeof apiClient.g
     workspace.personas.find(
       (item: { id: string; name: string }) => item.id === workspace.settings.activePersonaId
     )?.name || '未指定';
-  personaNames.value = workspace.personas.map((item: { name: string }) => item.name);
+  personas.value = workspace.personas.map((item) => ({
+    ...item,
+    relationEventIds: item.relationEventIds ?? [],
+    appearedChapterNos: item.appearedChapterNos ?? [],
+    lastAppearedChapterNo: item.lastAppearedChapterNo ?? null,
+  }));
+  personaNames.value = personas.value.map((item) => item.name);
   editorStore.setChapters(workspace.knowledge.chapters);
 }
 
@@ -184,6 +191,7 @@ onMounted(() => {
               :generating="generationStore.isStreaming"
               :project-id="projectId"
               :persona-names="personaNames"
+              :personas="personas"
               :knowledge-chapters="editorStore.chapters"
               @generate="handleGenerate"
               @structured-parsed="refreshWorkspaceData"

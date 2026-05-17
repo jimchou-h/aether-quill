@@ -1,9 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import { useRoute } from 'vue-router';
-import { apiClient, type PersonaItem } from '../services/api';
+import {
+  apiClient,
+  type DocumentItem,
+  type PersonaItem,
+  type RelationEventItem,
+} from '../services/api';
 import AppModal from '../components/common/AppModal.vue';
+import PersonaCardView from '../components/personas/PersonaCardView.vue';
+import PersonaRelationGraph from '../components/personas/PersonaRelationGraph.vue';
 import { presentError, presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
+
+type PersonaViewMode = 'table' | 'cards' | 'graph';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -17,6 +26,10 @@ const editingPersonaId = shallowRef<string | null>(null);
 const message = shallowRef('');
 const errorMessage = shallowRef('');
 const projectName = shallowRef('project');
+const viewMode = ref<PersonaViewMode>('table');
+const selectedPersonaId = ref<string | null>(null);
+const relationEvents = ref<RelationEventItem[]>([]);
+const documents = ref<DocumentItem[]>([]);
 
 const personaName = shallowRef('');
 const personaProfile = shallowRef('');
@@ -81,13 +94,45 @@ async function loadData() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const workspace = await apiClient.getWorkspace(projectId.value);
-    personas.value = workspace.personas;
+    const [workspace, events, docsResponse] = await Promise.all([
+      apiClient.getWorkspace(projectId.value),
+      apiClient.getRelationEvents(projectId.value),
+      apiClient.documents.list(projectId.value),
+    ]);
+    const docsPayload = (docsResponse as { data?: DocumentItem[] }).data ?? [];
+    personas.value = workspace.personas.map((persona) => ({
+      ...persona,
+      relationEventIds: persona.relationEventIds ?? [],
+      appearedChapterNos: persona.appearedChapterNos ?? [],
+      lastAppearedChapterNo: persona.lastAppearedChapterNo ?? null,
+    }));
+    relationEvents.value = events;
+    documents.value = docsPayload.map((doc) => ({
+      ...doc,
+      content: doc.content ?? '',
+      version: doc.version ?? 1,
+      createdAt: doc.createdAt ?? '',
+      updatedAt: doc.updatedAt ?? '',
+    }));
     projectName.value = workspace.project.name || 'project';
+    if (!selectedPersonaId.value && personas.value.length > 0) {
+      selectedPersonaId.value = personas.value[0]?.id ?? null;
+    }
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '加载人物设定失败');
   } finally {
     loading.value = false;
+  }
+}
+
+function setViewMode(mode: PersonaViewMode) {
+  viewMode.value = mode;
+}
+
+function handleSelectPersona(personaId: string) {
+  selectedPersonaId.value = personaId;
+  if (viewMode.value === 'graph') {
+    viewMode.value = 'cards';
   }
 }
 
@@ -232,9 +277,53 @@ onMounted(() => {
         <div class="table-toolbar">
           <h3 class="panel-title">人物清单</h3>
           <span class="table-count">共 {{ personas.length }} 条</span>
+          <div class="view-switch">
+            <button
+              type="button"
+              class="view-switch-button"
+              :class="{ active: viewMode === 'table' }"
+              @click="setViewMode('table')"
+            >
+              表格
+            </button>
+            <button
+              type="button"
+              class="view-switch-button"
+              :class="{ active: viewMode === 'cards' }"
+              @click="setViewMode('cards')"
+            >
+              卡片
+            </button>
+            <button
+              type="button"
+              class="view-switch-button"
+              :class="{ active: viewMode === 'graph' }"
+              @click="setViewMode('graph')"
+            >
+              关系图
+            </button>
+          </div>
         </div>
 
         <p v-if="personas.length === 0" class="empty-state">暂无人物设定，请点击右上角新增。</p>
+
+        <PersonaCardView
+          v-else-if="viewMode === 'cards'"
+          :project-id="projectId"
+          :personas="personas"
+          :relation-events="relationEvents"
+          :documents="documents"
+          :selected-persona-id="selectedPersonaId"
+          @select-persona="handleSelectPersona"
+        />
+
+        <PersonaRelationGraph
+          v-else-if="viewMode === 'graph'"
+          :personas="personas"
+          :relation-events="relationEvents"
+          :selected-persona-id="selectedPersonaId"
+          @select-persona="handleSelectPersona"
+        />
 
         <div v-else class="table-wrap">
           <table class="data-table">
@@ -408,6 +497,27 @@ onMounted(() => {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.view-switch {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.view-switch-button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.view-switch-button.active {
+  border-color: #4f46e5;
+  background: #eef2ff;
+  color: #312e81;
 }
 
 .panel-title {

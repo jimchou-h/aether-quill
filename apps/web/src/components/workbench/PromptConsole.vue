@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch, withDefaults } from 'vue';
-import { apiClient, type ChapterItem, type RelationEventItem } from '../../services/api';
+import {
+  apiClient,
+  type ChapterItem,
+  type PersonaItem,
+  type RelationEventItem,
+} from '../../services/api';
+import {
+  buildRecommendedRelationEventIds,
+  detectAbsentPersonaWarnings,
+  findUnselectedRelationSuggestions,
+} from '../../utils/personaGraph';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
 
 const props = withDefaults(
@@ -8,10 +18,12 @@ const props = withDefaults(
     generating: boolean;
     projectId: string;
     personaNames: string[];
+    personas: PersonaItem[];
     knowledgeChapters: ChapterItem[];
   }>(),
   {
     knowledgeChapters: () => [],
+    personas: () => [],
   }
 );
 
@@ -56,13 +68,45 @@ const currentStructured = computed(() => {
 
 const missingStructuredForKb = computed(() => !currentStructured.value?.matchingText?.trim());
 
+const maxChapterNo = computed(() => {
+  if (props.knowledgeChapters.length === 0) {
+    return 0;
+  }
+  return Math.max(...props.knowledgeChapters.map((chapter) => chapter.chapterNo));
+});
+
 const filteredEvents = computed(() => {
   if (appearingCharacters.value.length === 0) {
     return relationEvents.value;
   }
+  const recommended = new Set(
+    buildRecommendedRelationEventIds(relationEvents.value, appearingCharacters.value)
+  );
+  return relationEvents.value.filter((event) => recommended.has(event.id));
+});
 
-  const selected = new Set(appearingCharacters.value);
-  return relationEvents.value.filter((event) => event.actors.some((actor) => selected.has(actor)));
+const recommendedEventIds = computed(() =>
+  buildRecommendedRelationEventIds(relationEvents.value, appearingCharacters.value)
+);
+
+const relationSuggestions = computed(() =>
+  findUnselectedRelationSuggestions(
+    relationEvents.value,
+    appearingCharacters.value,
+    selectedEventIds.value
+  )
+);
+
+const absentWarnings = computed(() =>
+  detectAbsentPersonaWarnings(props.personas, maxChapterNo.value)
+);
+
+const personaStateByName = computed(() => {
+  const map = new Map<string, string>();
+  for (const persona of props.personas) {
+    map.set(persona.name, persona.state || '待更新');
+  }
+  return map;
 });
 
 const selectedPreviewLength = computed(() =>
@@ -81,9 +125,11 @@ function parseMultiLine(text: string): string[] {
 function toggleCharacter(name: string) {
   if (appearingCharacters.value.includes(name)) {
     appearingCharacters.value = appearingCharacters.value.filter((item) => item !== name);
+    applyRecommendedEvents();
     return;
   }
   appearingCharacters.value = [...appearingCharacters.value, name];
+  applyRecommendedEvents();
 }
 
 function addCustomCharacter() {
@@ -113,18 +159,27 @@ async function loadRelationEvents() {
   loadingEvents.value = true;
   eventError.value = '';
   try {
-    relationEvents.value = await apiClient.getRelationEvents(props.projectId, {
-      appearingCharacters:
-        appearingCharacters.value.length > 0 ? appearingCharacters.value : undefined,
-    });
+    relationEvents.value = await apiClient.getRelationEvents(props.projectId);
     selectedEventIds.value = selectedEventIds.value.filter((eventId) =>
       relationEvents.value.some((event) => event.id === eventId)
     );
+    applyRecommendedEvents();
   } catch (error) {
     eventError.value = error instanceof Error ? error.message : '加载关系事件失败';
   } finally {
     loadingEvents.value = false;
   }
+}
+
+function applyRecommendedEvents() {
+  if (appearingCharacters.value.length === 0) {
+    return;
+  }
+  const recommended = buildRecommendedRelationEventIds(
+    relationEvents.value,
+    appearingCharacters.value
+  );
+  selectedEventIds.value = [...new Set([...selectedEventIds.value, ...recommended])].slice(0, 30);
 }
 
 function handleGenerate() {
@@ -268,6 +323,14 @@ defineExpose({ resetForm });
 
     <section class="relation-section bordered-section">
       <h4 class="section-title">出场角色</h4>
+      <div v-if="absentWarnings.length > 0" class="hint-list">
+        <p v-for="warning in absentWarnings" :key="warning.personaId" class="message message-warn">
+          ⚠ {{ warning.name }} 已连续 {{ warning.absentChapterCount }} 章未出场
+          <template v-if="warning.lastAppearedChapterNo">
+            （最后出场：第{{ warning.lastAppearedChapterNo }}章）
+          </template>
+        </p>
+      </div>
       <div class="chip-list">
         <button
           v-for="name in availableCharacters"
@@ -277,7 +340,8 @@ defineExpose({ resetForm });
           :class="{ 'chip-button-active': appearingCharacters.includes(name) }"
           @click="toggleCharacter(name)"
         >
-          {{ name }}
+          <span>{{ name }}</span>
+          <span class="chip-meta">{{ personaStateByName.get(name) }}</span>
         </button>
       </div>
       <div class="custom-character-row">
@@ -293,11 +357,19 @@ defineExpose({ resetForm });
 
     <section class="relation-section bordered-section">
       <div class="section-header">
-        <h4 class="section-title">关系事件（手动勾选）</h4>
+        <h4 class="section-title">
+          {{ appearingCharacters.length > 0 ? '系统推荐关系事件' : '关系事件（手动勾选）' }}
+        </h4>
         <span class="section-meta">
           已选 {{ selectedEventIds.length }} 条 / 约 {{ selectedPreviewLength }} 字
         </span>
       </div>
+      <p v-if="appearingCharacters.length > 0" class="message">
+        已根据出场角色自动推荐 {{ recommendedEventIds.length }} 条，可取消勾选。
+      </p>
+      <p v-for="item in relationSuggestions" :key="item.id" class="message message-warn">
+        ☐ {{ item.label }}
+      </p>
       <p v-if="eventError" class="message message-error">{{ eventError }}</p>
       <p v-if="loadingEvents" class="message">正在加载关系事件...</p>
       <p v-else-if="filteredEvents.length === 0" class="message">暂无可选关系事件。</p>
@@ -495,6 +567,20 @@ defineExpose({ resetForm });
   border: 1px solid #d1d5db;
   background: #fff;
   color: #374151;
+}
+
+.chip-meta {
+  display: block;
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
+.message-warn {
+  color: #b45309;
+}
+
+.hint-list {
+  margin-bottom: 0.5rem;
 }
 
 .chip-button-active {

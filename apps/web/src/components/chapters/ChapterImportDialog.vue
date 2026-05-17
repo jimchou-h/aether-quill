@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { apiClient, type ChapterItem } from '../../services/api';
+import {
+  apiClient,
+  type ChapterImportPersonaBootstrap,
+  type ChapterItem,
+} from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
 
 const props = defineProps<{
@@ -34,6 +38,7 @@ const previewData = ref<{
 } | null>(null);
 const importing = ref(false);
 const importedChapters = ref<ChapterItem[]>([]);
+const importBootstrap = ref<ChapterImportPersonaBootstrap | null>(null);
 const importFileName = ref('');
 
 function readFileAsText(file: File): Promise<string> {
@@ -112,8 +117,12 @@ async function handleConfirmImport() {
   try {
     const fullChapters = await apiClient.importChapterConfirm(props.projectId, rawContent.value);
     importedChapters.value = fullChapters.chapters;
+    importBootstrap.value = fullChapters.personaBootstrap;
     step.value = ImportStep.Done;
-    presentSuccess(`成功导入 ${fullChapters.importedCount} 个章节`);
+    const bootstrap = fullChapters.personaBootstrap;
+    presentSuccess(
+      `成功导入 ${fullChapters.importedCount} 个章节；自动创建 ${bootstrap.createdPersonaCount} 个角色草稿、${bootstrap.createdRelationEventCount} 条关系事件`
+    );
   } catch (error) {
     localError.value = presentErrorFromCaught(error, '导入章节失败');
   } finally {
@@ -141,6 +150,7 @@ function resetToUpload() {
   rawContent.value = '';
   previewData.value = null;
   importedChapters.value = [];
+  importBootstrap.value = null;
   localError.value = '';
   importFileName.value = '';
 }
@@ -246,6 +256,23 @@ function resetToUpload() {
           <span class="done-icon">&#9989;</span>
           <p class="done-text">
             已成功导入 <strong>{{ importedChapters.length }}</strong> 个章节
+          </p>
+        </div>
+
+        <div v-if="importBootstrap" class="bootstrap-report">
+          <p>
+            自动创建角色草稿：<strong>{{ importBootstrap.createdPersonaCount }}</strong> 个
+          </p>
+          <p>
+            自动抽取关系事件：<strong>{{ importBootstrap.createdRelationEventCount }}</strong> 条
+          </p>
+          <p v-if="importBootstrap.createdPersonas.length > 0">
+            新增角色：{{ importBootstrap.createdPersonas.map((item) => item.name).join('、') }}
+          </p>
+          <p v-if="importBootstrap.suspectedNameConflicts.length > 0" class="message message-warn">
+            疑似同名冲突：{{
+              importBootstrap.suspectedNameConflicts.join('、')
+            }}（请前往人物设定页确认）
           </p>
         </div>
 
