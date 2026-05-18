@@ -4,6 +4,7 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { PromptTemplatesModule } from './modules/prompt-templates/prompt-templates.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { RagProxyModule } from './modules/rag-proxy/rag-proxy.module';
 import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -15,6 +16,7 @@ import { PrismaModule } from './prisma/prisma.module';
     DocumentsModule,
     PromptTemplatesModule,
     ObservabilityModule,
+    RagProxyModule,
   ],
   controllers: [HealthController],
 })

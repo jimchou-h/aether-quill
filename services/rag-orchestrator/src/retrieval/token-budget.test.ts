@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { trimTextsToTokenBudget } from './token-budget';
+import { trimTextsToTokenBudget, trimTextsToTokenBudgetDetailed } from './token-budget';
 
 describe('trimTextsToTokenBudget', () => {
   it('keeps blocks within budget', () => {
@@ -12,5 +12,11 @@ describe('trimTextsToTokenBudget', () => {
     const long = '这是一段很长的测试文本。'.repeat(200);
     const out = trimTextsToTokenBudget([long, '尾部'], 10);
     assert.equal(out.length, 0);
+  });
+
+  it('returns included indices', () => {
+    const { texts, includedIndices } = trimTextsToTokenBudgetDetailed(['A', 'B', 'C'], 500);
+    assert.equal(texts.length, 3);
+    assert.deepEqual(includedIndices, [0, 1, 2]);
   });
 });

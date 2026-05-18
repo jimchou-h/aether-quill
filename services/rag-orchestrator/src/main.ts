@@ -684,6 +684,7 @@ app.post('/api/generate', async (req, res) => {
 
   let structuredKbTrace: {
     titleMatchedDocumentIds: string[];
+    evidenceDocumentIds: string[];
     retrievalSkippedNoStructured?: boolean;
   } | null = null;
 
@@ -702,12 +703,19 @@ app.post('/api/generate', async (req, res) => {
       });
       structuredKbTrace = {
         titleMatchedDocumentIds: sr.titleMatchedDocumentIds,
+        evidenceDocumentIds: sr.evidenceDocumentIds,
         retrievalSkippedNoStructured: sr.retrievalSkippedNoStructured,
       };
       retrievalQuery = sr.query.trim() ? sr.query : retrievalQuery;
       retrievedEvidence = sr.evidenceText;
-      retrievedChunkIds = sr.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
-      retrievedFullDocuments = (sr.fullDocuments ?? []).map((d) => ({ ...d }));
+      retrievedChunkIds = sr.chunks
+        .filter((c) => sr.evidenceDocumentIds.includes(c.documentId))
+        .map((c) => c.id)
+        .filter((id) => Boolean(id?.trim()));
+      const evidenceDocSet = new Set(sr.evidenceDocumentIds);
+      retrievedFullDocuments = (sr.fullDocuments ?? [])
+        .filter((d) => evidenceDocSet.has(d.documentId))
+        .map((d) => ({ ...d }));
     } else {
       const retrieval = await retrieveKnowledgeForDraft(
         vectorStore,
@@ -751,6 +759,7 @@ app.post('/api/generate', async (req, res) => {
     ...(structuredKbTrace
       ? {
           title_matched_document_ids: structuredKbTrace.titleMatchedDocumentIds,
+          evidence_document_ids: structuredKbTrace.evidenceDocumentIds,
           retrieval_skipped_no_structured: structuredKbTrace.retrievalSkippedNoStructured === true,
         }
       : {}),
@@ -878,9 +887,13 @@ app.post('/api/generate/draft', async (req, res) => {
   try {
     retrievedEvidence = structuredRetrieval.evidenceText;
     retrievedChunkIds = structuredRetrieval.chunks
+      .filter((c) => structuredRetrieval.evidenceDocumentIds.includes(c.documentId))
       .map((c) => c.id)
       .filter((id) => Boolean(id?.trim()));
-    retrievedFullDocuments = (structuredRetrieval.fullDocuments ?? []).map((d) => ({ ...d }));
+    const evidenceDocSet = new Set(structuredRetrieval.evidenceDocumentIds);
+    retrievedFullDocuments = (structuredRetrieval.fullDocuments ?? [])
+      .filter((d) => evidenceDocSet.has(d.documentId))
+      .map((d) => ({ ...d }));
     if (resolvedCitations.length === 0) {
       resolvedCitations = structuredRetrieval.citations;
     }
@@ -916,6 +929,7 @@ app.post('/api/generate/draft', async (req, res) => {
       retrieved_chunk_ids: retrievedChunkIds,
       full_documents: retrievedFullDocuments,
       title_matched_document_ids: structuredRetrieval.titleMatchedDocumentIds,
+      evidence_document_ids: structuredRetrieval.evidenceDocumentIds,
       retrieval_skipped_no_structured: structuredRetrieval.retrievalSkippedNoStructured === true,
       generation_temperature: resolvedTemperature,
     },

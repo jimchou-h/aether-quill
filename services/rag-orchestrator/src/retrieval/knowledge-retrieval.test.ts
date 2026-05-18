@@ -128,11 +128,39 @@ describe('buildStructuredKnowledgeEvidence', () => {
     assert.equal(r.retrievalSkippedNoStructured, undefined);
     assert.ok(r.evidenceText.includes('document_id=d1'));
     assert.ok(r.evidenceText.includes('全文A'));
-    assert.ok(r.evidenceText.includes('document_id=d2'));
-    assert.ok(r.evidenceText.includes('知识裁剪'));
+    assert.ok(r.evidenceText.includes('canonical_character=林策'));
+    assert.ok(r.evidenceText.includes('角色卡·林策'));
     assert.ok(r.titleMatchedDocumentIds.includes('d1'));
     assert.ok(r.titleMatchedDocumentIds.includes('d2'));
     assert.equal(r.titleMatchedDocumentIds.includes('d3'), false);
+    for (const id of r.evidenceDocumentIds) {
+      assert.ok(r.titleMatchedDocumentIds.includes(id));
+    }
+  });
+
+  it('adds multi-persona preamble and canonical anchors for matched persona cards', () => {
+    const personaDocs = Array.from({ length: 4 }, (_, i) => ({
+      id: `p${i + 1}`,
+      title: `人物小传：角色${i + 1}`,
+      content: `角色${i + 1}设定，马甲：化名${i + 1}`,
+      docType: 'persona_card',
+    }));
+    const r = buildStructuredKnowledgeEvidence(
+      1,
+      {
+        chapterNo: 1,
+        chapters: [{ chapterNo: 1, structuredMatchingText: '角色1 角色2 角色3 角色4' }],
+        knowledgeDocuments: personaDocs,
+      },
+      { personaTopN: 10, otherTopN: 0 }
+    );
+    assert.equal(r.titleMatchedDocumentIds.length, 4);
+    assert.ok(r.evidenceText.includes('多角色设定须知'));
+    assert.ok(r.evidenceText.includes('canonical_character=角色2'));
+    assert.ok(r.evidenceText.includes('马甲：化名2'));
+    for (const id of r.evidenceDocumentIds) {
+      assert.ok(r.titleMatchedDocumentIds.includes(id));
+    }
   });
 });
 

@@ -61,7 +61,9 @@ function handleConfirm() {
     <div class="dialog" @click.stop>
       <header class="dialog-header">
         <h3 id="retrieval-preview-title">检索预览</h3>
-        <p class="dialog-subtitle">确认将注入生成上下文的条目，可取消勾选不需要的内容。</p>
+        <p class="dialog-subtitle">
+          已勾选条目将注入生成上下文。标题匹配但超出 Token 预算的条目会默认不勾选。
+        </p>
       </header>
 
       <p v-if="loading" class="message">正在执行检索预览...</p>
@@ -82,7 +84,16 @@ function handleConfirm() {
             />
             <span class="preview-body">
               <strong>{{ item.title }}</strong>
+              <span
+                v-if="typeof item.meta?.canonicalCharacter === 'string'"
+                class="canonical-name"
+              >
+                主名 {{ item.meta.canonicalCharacter }}
+              </span>
               <span v-if="item.score != null" class="score">分数 {{ item.score.toFixed(3) }}</span>
+              <span v-if="item.meta?.excludedByTokenBudget" class="budget-hint">
+                已匹配，超出 Token 预算未注入
+              </span>
               <p class="preview-text">{{ item.preview }}</p>
             </span>
           </label>
@@ -169,9 +180,19 @@ function handleConfirm() {
   gap: 0.25rem;
 }
 
+.canonical-name {
+  font-size: 0.75rem;
+  color: #1d4ed8;
+}
+
 .score {
   font-size: 0.75rem;
   color: #6b7280;
+}
+
+.budget-hint {
+  font-size: 0.75rem;
+  color: #b45309;
 }
 
 .preview-text {

@@ -369,27 +369,8 @@ export const apiClient = {
       extraContext?: Record<string, unknown>;
     }
   ): Promise<PreviewRetrievalResult> {
-    const ragBaseURL = getRagOrchestratorBaseURL();
-    const url = ragBaseURL ? `${ragBaseURL}/api/preview-retrieval` : '/api/preview-retrieval';
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-    const token = localStorage.getItem('token');
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ projectId, ...body }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(text || response.statusText);
-    }
-
-    return (await response.json()) as PreviewRetrievalResult;
+    const response = await http.post('/api/preview-retrieval', { projectId, ...body });
+    return this.unwrapPayload<PreviewRetrievalResult>(response.data);
   },
 
   async insertChapter(

@@ -1,6 +1,6 @@
 import { countTokens } from 'gpt-tokenizer';
 
-export const DEFAULT_EVIDENCE_TOKEN_BUDGET = 4096;
+export const DEFAULT_EVIDENCE_TOKEN_BUDGET = 16384;
 
 export function resolveEvidenceTokenBudget(): number {
   const raw = Number(process.env.EVIDENCE_TOKEN_BUDGET ?? DEFAULT_EVIDENCE_TOKEN_BUDGET);
@@ -18,15 +18,25 @@ export function countEvidenceTokens(text: string): number {
   return countTokens(trimmed);
 }
 
+export interface TrimTextsToTokenBudgetResult {
+  texts: string[];
+  /** 原 `texts` 数组中纳入预算的索引（与 `texts` 下标一一对应，跳过空串） */
+  includedIndices: number[];
+}
+
 /** 按顺序累加文本块，不超过 token 预算 */
-export function trimTextsToTokenBudget(texts: string[], maxTokens: number): string[] {
+export function trimTextsToTokenBudgetDetailed(
+  texts: string[],
+  maxTokens: number
+): TrimTextsToTokenBudgetResult {
   if (maxTokens <= 0) {
-    return [];
+    return { texts: [], includedIndices: [] };
   }
-  const out: string[] = [];
+  const textsOut: string[] = [];
+  const includedIndices: number[] = [];
   let used = 0;
-  for (const text of texts) {
-    const trimmed = text.trim();
+  for (let index = 0; index < texts.length; index += 1) {
+    const trimmed = texts[index]?.trim() ?? '';
     if (!trimmed) {
       continue;
     }
@@ -34,8 +44,13 @@ export function trimTextsToTokenBudget(texts: string[], maxTokens: number): stri
     if (used + cost > maxTokens) {
       break;
     }
-    out.push(trimmed);
+    textsOut.push(trimmed);
+    includedIndices.push(index);
     used += cost;
   }
-  return out;
+  return { texts: textsOut, includedIndices };
+}
+
+export function trimTextsToTokenBudget(texts: string[], maxTokens: number): string[] {
+  return trimTextsToTokenBudgetDetailed(texts, maxTokens).texts;
 }
