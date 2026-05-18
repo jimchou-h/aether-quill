@@ -1,0 +1,194 @@
+import { retrieveMemoryChapterSummaries } from '../context/chapter-summary-memory';
+import { pickPriorChapterSummariesForPrompt } from '../context/prior-chapter-summaries';
+import {
+  clampChapterSummaryMemoryCount,
+  clampChapterSummaryPromptCount,
+  clampKnowledgeDocQuota,
+} from '../context/generation-preferences';
+import {
+  buildStructuredKnowledgeEvidence,
+  retrieveKnowledgeForDraft,
+  buildGenerationRetrievalQuery,
+  type KnowledgeDocumentForMatch,
+} from './knowledge-retrieval';
+import { countEvidenceTokens, resolveEvidenceTokenBudget } from './token-budget';
+import type { ChunkWithEmbedding } from './types';
+import { Reranker } from './reranker';
+import { VectorStore } from './vector-store';
+
+export interface PreviewRetrievalRequest {
+  projectId: string;
+  prompt?: string;
+  chapterNo?: number;
+  useStructuredKb?: boolean;
+  projectCtx: {
+    outlineSummary: string;
+    personaProfile: string;
+    chapters: Array<{
+      chapterNo: number;
+      title: string;
+      summary: string;
+      structuredMatchingText?: string;
+    }>;
+    knowledgeDocuments?: KnowledgeDocumentForMatch[];
+    chapterSummaryPromptCount?: number;
+    chapterSummaryMemoryCount?: number;
+  };
+  extraContext?: Record<string, unknown>;
+}
+
+export interface PreviewRetrievalItem {
+  id: string;
+  pool: 'persona_card' | 'other_docs' | 'recent_chapters' | 'memory_chapters';
+  title: string;
+  preview: string;
+  score?: number;
+  selected: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export interface PreviewRetrievalResult {
+  items: PreviewRetrievalItem[];
+  tokenBudget: number;
+  tokenUsed: number;
+  query: string;
+}
+
+export async function runPreviewRetrieval(
+  vectorStore: VectorStore,
+  reranker: Reranker,
+  apiBaseUrl: string,
+  input: PreviewRetrievalRequest
+): Promise<PreviewRetrievalResult> {
+  const { projectId, projectCtx } = input;
+  const chapterNo = Number(input.chapterNo) || 0;
+  const prompt = String(input.prompt ?? '').trim();
+  const query = buildGenerationRetrievalQuery(prompt, projectCtx, input.extraContext);
+
+  const personaQuota = clampKnowledgeDocQuota(process.env.PERSONA_CARD_DOC_QUOTA);
+  const otherQuota = clampKnowledgeDocQuota(process.env.OTHER_DOC_QUOTA);
+  const items: PreviewRetrievalItem[] = [];
+
+  const useStructured =
+    input.useStructuredKb !== false && chapterNo > 0 && projectCtx.chapters.length > 0;
+
+  if (useStructured) {
+    const sr = buildStructuredKnowledgeEvidence(chapterNo, {
+      chapterNo,
+      chapters: projectCtx.chapters.map((c) => ({
+        chapterNo: c.chapterNo,
+        structuredMatchingText: c.structuredMatchingText,
+      })),
+      knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
+    }, { personaTopN: personaQuota, otherTopN: otherQuota });
+
+    for (const doc of sr.fullDocuments ?? []) {
+      const pool = doc.docType === 'persona_card' ? 'persona_card' : 'other_docs';
+      items.push({
+        id: doc.documentId,
+        pool,
+        title: doc.title,
+        preview: doc.content.trim().slice(0, 400),
+        score: doc.docScore,
+        selected: true,
+        meta: { docType: doc.docType, reason: doc.reason },
+      });
+    }
+  } else if (query.trim()) {
+    const retrieval = await retrieveKnowledgeForDraft(vectorStore, reranker, projectId, query, {
+      apiBaseUrl,
+      enrichFullDocuments: true,
+    });
+    for (const doc of retrieval.fullDocuments ?? []) {
+      const pool = doc.docType === 'persona_card' ? 'persona_card' : 'other_docs';
+      items.push({
+        id: doc.documentId,
+        pool,
+        title: doc.title,
+        preview: doc.content.trim().slice(0, 400),
+        selected: true,
+        meta: { docType: doc.docType },
+      });
+    }
+    const personaIds = new Set(
+      (retrieval.fullDocuments ?? [])
+        .filter((d) => d.docType === 'persona_card')
+        .map((d) => d.documentId)
+    );
+    const chunkGroups = new Map<string, ChunkWithEmbedding[]>();
+    for (const chunk of retrieval.chunks) {
+      if (personaIds.has(chunk.documentId)) {
+        continue;
+      }
+      const list = chunkGroups.get(chunk.documentId) ?? [];
+      list.push(chunk);
+      chunkGroups.set(chunk.documentId, list);
+    }
+    for (const [docId, chunks] of chunkGroups) {
+      if (items.some((i) => i.id === docId)) {
+        continue;
+      }
+      const title =
+        typeof chunks[0]?.metadata?.docTitle === 'string'
+          ? String(chunks[0].metadata.docTitle)
+          : docId;
+      items.push({
+        id: docId,
+        pool: 'other_docs',
+        title,
+        preview: chunks
+          .slice(0, 3)
+          .map((c) => c.content.trim())
+          .join('\n')
+          .slice(0, 400),
+        selected: true,
+        meta: { chunkIds: chunks.map((c) => c.id) },
+      });
+    }
+  }
+
+  const recentMax = clampChapterSummaryPromptCount(projectCtx.chapterSummaryPromptCount);
+  const recent = pickPriorChapterSummariesForPrompt(projectCtx.chapters, {
+    currentChapterNo: chapterNo > 0 ? chapterNo : undefined,
+    maxCount: recentMax,
+  });
+  for (const ch of recent) {
+    items.push({
+      id: `recent:${ch.chapterNo}`,
+      pool: 'recent_chapters',
+      title: `第${ch.chapterNo}章 ${ch.title}`,
+      preview: ch.summary.trim().slice(0, 400),
+      selected: true,
+      meta: { chapterNo: ch.chapterNo },
+    });
+  }
+
+  const memoryMax = clampChapterSummaryMemoryCount(projectCtx.chapterSummaryMemoryCount);
+  const memory = await retrieveMemoryChapterSummaries(projectId, query || prompt, {
+    currentChapterNo: chapterNo > 0 ? chapterNo : undefined,
+    maxCount: memoryMax,
+  });
+  for (const ch of memory) {
+    if (items.some((i) => i.id === `memory:${ch.chapterNo}`)) {
+      continue;
+    }
+    items.push({
+      id: `memory:${ch.chapterNo}`,
+      pool: 'memory_chapters',
+      title: `第${ch.chapterNo}章 ${ch.title}`,
+      preview: ch.summary.trim().slice(0, 400),
+      selected: true,
+      meta: { chapterNo: ch.chapterNo },
+    });
+  }
+
+  const tokenBudget = resolveEvidenceTokenBudget();
+  const tokenUsed = countEvidenceTokens(items.map((i) => i.preview).join('\n'));
+
+  return {
+    items,
+    tokenBudget,
+    tokenUsed,
+    query: query || prompt,
+  };
+}

@@ -85,7 +85,10 @@ export class ProjectsController {
       systemPromptText?: string;
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
+      chapterSummaryMemoryCount?: number;
       generationTemperature?: number;
+      updatePersonaOnSave?: boolean;
+      generateRelationEventsOnSave?: boolean;
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -548,6 +551,39 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
     return this.projectsService.upsertChapter(id, data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put(':id/knowledge/chapters/:chapterNo/after-save')
+  async chapterAfterSave(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body() body: { actions: Array<'persona' | 'relationEvents'> },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    try {
+      await this.projectsService.executeChapterAfterSave(
+        id,
+        Number(chapterNo),
+        body,
+        userId,
+        (event) => {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+      );
+      res.write(`data: ${JSON.stringify({ event: 'done' })}\n\n`);
+      res.end();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'after-save failed';
+      res.write(`data: ${JSON.stringify({ event: 'error', message })}\n\n`);
+      res.end();
+    }
   }
 
   @UseGuards(JwtAuthGuard)

@@ -57,7 +57,14 @@ export class IngestionProcessor {
 
     const content: string = doc.content || '';
     const env = getResolvedRagInfrastructureEnv();
-    const docType = inferDocType(documentTitle, content);
+    const storedDocType =
+      typeof doc.docType === 'string' && doc.docType.trim() ? doc.docType.trim() : '';
+    const docType =
+      storedDocType === 'persona_card'
+        ? 'persona_card'
+        : storedDocType === 'world_setting'
+          ? 'world_doc'
+          : inferDocType(documentTitle, content);
     const sections = sectionsForIngestion(documentTitle, content, docType);
 
     const draftChunks: Array<{

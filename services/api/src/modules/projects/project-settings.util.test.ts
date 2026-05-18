@@ -12,11 +12,11 @@ test('clampChapterSummaryPromptCount uses default for invalid', () => {
   assert.equal(clampChapterSummaryPromptCount('x'), DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT);
 });
 
-test('clampChapterSummaryPromptCount clamps to 0~20', () => {
+test('clampChapterSummaryPromptCount clamps to 0~10', () => {
   assert.equal(clampChapterSummaryPromptCount(-1), 0);
   assert.equal(clampChapterSummaryPromptCount(0), 0);
   assert.equal(clampChapterSummaryPromptCount(5.9), 5);
-  assert.equal(clampChapterSummaryPromptCount(21), 20);
+  assert.equal(clampChapterSummaryPromptCount(21), 10);
 });
 
 test('clampGenerationTemperature uses default for invalid', () => {

@@ -1,4 +1,4 @@
-/** AQ-133：按「当前章之前」选取最近 N 条有摘要的章节，用于叙事上下文拼接 */
+/** AQ-133 / AQ-206：近期连续性池 + 语义记忆池 */
 
 export type ChapterSummaryInput = {
   chapterNo: number;

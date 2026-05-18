@@ -1,9 +1,16 @@
+import { clampKnowledgeDocQuota } from '../context/generation-preferences';
 import { Reranker } from './reranker';
 import {
   enrichVectorRetrieval,
   buildFullDocumentsFromTitleMatches,
   type RetrievalFullDocument,
 } from './retrieval-enrichment';
+import {
+  formatCroppedDocumentContent,
+  pickTopParagraphs,
+} from './paragraph-crop';
+import { resolveEvidenceTokenBudget, trimTextsToTokenBudget } from './token-budget';
+import { scoreTitleAgainstMatchingText } from './title-match-score';
 import { ChunkWithEmbedding } from './types';
 import { VectorStore } from './vector-store';
 
@@ -243,31 +250,31 @@ export interface KnowledgeDocumentForMatch {
   id: string;
   title: string;
   content: string;
+  docType?: string;
 }
 
-/** 标题匹配后默认注入的文档篇数（本期固定 Top10） */
-export const TITLE_MATCHED_FULL_DOC_TOP_N = 10;
+export const PERSONA_CARD_DOC_TYPE = 'persona_card';
 
-export function scoreTitleAgainstMatchingText(matchingText: string, title: string): number {
-  const m = matchingText.trim().toLowerCase();
-  const t = title.trim().toLowerCase();
-  if (!m || !t) {
-    return 0;
-  }
+/** 标题匹配后角色卡 / 其他文档独立配额（默认各 10） */
+export const TITLE_MATCHED_PERSONA_DOC_TOP_N = clampKnowledgeDocQuota(
+  process.env.PERSONA_CARD_DOC_QUOTA
+);
+export const TITLE_MATCHED_OTHER_DOC_TOP_N = clampKnowledgeDocQuota(process.env.OTHER_DOC_QUOTA);
 
-  let score = 0;
-  const segments = m.split(/[\s\n，。、；：,.;:!?《》「」"'“”]+/).filter((s) => s.length > 0);
-  for (const seg of segments) {
-    if (seg.length >= 2 && t.includes(seg)) {
-      score += seg.length >= 4 ? 4 : 2;
-    }
-  }
-  const prefix = m.slice(0, Math.min(32, m.length));
-  if (prefix.length >= 2 && t.includes(prefix)) {
-    score += 8;
-  }
-  return score;
+/** @deprecated 使用独立配额；保留兼容 */
+export const TITLE_MATCHED_FULL_DOC_TOP_N =
+  TITLE_MATCHED_PERSONA_DOC_TOP_N + TITLE_MATCHED_OTHER_DOC_TOP_N;
+
+function normalizeKnowledgeDocType(docType: string | undefined): string {
+  const raw = (docType || 'other').trim();
+  return raw || 'other';
 }
+
+function isPersonaCardDoc(docType: string | undefined): boolean {
+  return normalizeKnowledgeDocType(docType) === PERSONA_CARD_DOC_TYPE;
+}
+
+export { scoreTitleAgainstMatchingText } from './title-match-score';
 
 export function pickTopTitleMatchedDocuments(
   matchingText: string,
@@ -333,7 +340,7 @@ export type StructuredKnowledgeRetrievalResult = KnowledgeRetrievalResult & {
 export function buildStructuredKnowledgeEvidence(
   chapterNo: number,
   kbCtx: ChapterKbContextInput,
-  topN = TITLE_MATCHED_FULL_DOC_TOP_N
+  quotas?: { personaTopN?: number; otherTopN?: number }
 ): StructuredKnowledgeRetrievalResult {
   const ch = kbCtx.chapters.find((c) => c.chapterNo === chapterNo);
   const matchingText = ch?.structuredMatchingText?.trim() ?? '';
@@ -349,26 +356,68 @@ export function buildStructuredKnowledgeEvidence(
     };
   }
 
-  const picked = pickTopTitleMatchedDocuments(matchingText, kbCtx.knowledgeDocuments, topN);
-  const fullDocuments = buildFullDocumentsFromTitleMatches(matchingText, picked);
-  const evidenceText =
-    fullDocuments.length > 0
-      ? fullDocuments
-          .map((d, index) => {
-            const sections =
-              d.matchedSections.length > 0 ? d.matchedSections.join(',') : 'title_match';
-            return `[知识全文${index + 1}] document_id=${d.documentId} title=${d.title} sections=${sections}\n命中理由：${d.reason}\n${d.content.trim()}`;
-          })
-          .join('\n\n')
-      : formatFullDocumentKnowledgeEvidence(picked);
-  const chunks: ChunkWithEmbedding[] = picked.map((d, i) => ({
-    id: `doc-full:${d.id}`,
-    documentId: d.id,
-    content: d.content,
-    embedding: [],
-    metadata: { docTitle: d.title, evidenceKind: 'full_document_by_title' },
-    score: 1 - i * 0.001,
-  }));
+  const personaTopN = quotas?.personaTopN ?? TITLE_MATCHED_PERSONA_DOC_TOP_N;
+  const otherTopN = quotas?.otherTopN ?? TITLE_MATCHED_OTHER_DOC_TOP_N;
+  const scanLimit = personaTopN + otherTopN + 20;
+
+  const ranked = pickTopTitleMatchedDocuments(matchingText, kbCtx.knowledgeDocuments, scanLimit);
+  const personaPicked = ranked
+    .filter((d) => isPersonaCardDoc(d.docType))
+    .slice(0, personaTopN);
+  const otherPicked = ranked
+    .filter((d) => !isPersonaCardDoc(d.docType))
+    .slice(0, otherTopN);
+  const picked = [...personaPicked, ...otherPicked];
+
+  const fullDocuments: RetrievalFullDocument[] = [
+    ...buildFullDocumentsFromTitleMatches(matchingText, personaPicked, PERSONA_CARD_DOC_TYPE),
+    ...otherPicked.map((d, index) => {
+      const paragraphs = pickTopParagraphs(d.content, matchingText, 3);
+      const cropped = paragraphs.join('\n\n') || d.content.trim().slice(0, 1200);
+      return {
+        documentId: d.id,
+        title: d.title,
+        content: cropped,
+        docType: normalizeKnowledgeDocType(d.docType),
+        matchedSections: paragraphs.length > 0 ? ['paragraph_crop'] : ['title_match'],
+        reason: `标题匹配后段落裁剪（排名第 ${index + 1}）`,
+        docScore: 0.8 - index * 0.001,
+        hitChunkIds: paragraphs.map((_, i) => `crop:${d.id}:${i}`),
+      };
+    }),
+  ];
+
+  const evidenceBlocks = [
+    ...fullDocuments.map((d, index) => {
+      const sections =
+        d.matchedSections.length > 0 ? d.matchedSections.join(',') : 'title_match';
+      const label = d.docType === PERSONA_CARD_DOC_TYPE ? '知识全文' : '知识裁剪';
+      return `[${label}${index + 1}] document_id=${d.documentId} title=${d.title} sections=${sections} doc_type=${d.docType}\n命中理由：${d.reason}\n${d.content.trim()}`;
+    }),
+  ];
+
+  const budget = resolveEvidenceTokenBudget();
+  const trimmedBlocks = trimTextsToTokenBudget(evidenceBlocks, budget);
+  const evidenceText = trimmedBlocks.join('\n\n');
+
+  const chunks: ChunkWithEmbedding[] = picked.map((d, i) => {
+    const isPersona = isPersonaCardDoc(d.docType);
+    const content = isPersona
+      ? d.content
+      : pickTopParagraphs(d.content, matchingText, 3).join('\n\n') || d.content.slice(0, 1200);
+    return {
+      id: isPersona ? `doc-full:${d.id}` : `doc-crop:${d.id}`,
+      documentId: d.id,
+      content,
+      embedding: [],
+      metadata: {
+        docTitle: d.title,
+        docType: normalizeKnowledgeDocType(d.docType),
+        evidenceKind: isPersona ? 'full_document_by_title' : 'paragraph_crop_by_title',
+      },
+      score: 1 - i * 0.001,
+    };
+  });
 
   return {
     chunks,
@@ -379,3 +428,5 @@ export function buildStructuredKnowledgeEvidence(
     fullDocuments,
   };
 }
+
+export { formatCroppedDocumentContent, pickTopParagraphs };

@@ -93,9 +93,12 @@ import {
   syncWorkspaceToPostgres,
 } from '../../persistence/workspace-pg-sync';
 import type { PersistedProjectState } from './persisted-workspace.types';
+import { hashChapterContent } from './chapter-content-hash.util';
 import {
+  clampChapterSummaryMemoryCount,
   clampChapterSummaryPromptCount,
   clampGenerationTemperature,
+  DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
   DEFAULT_GENERATION_TEMPERATURE,
 } from './project-settings.util';
@@ -134,6 +137,8 @@ export interface ProjectSettings {
   activePersonaId: string | null;
   /** 叙事上下文注入：当前章之前最近 N 章摘要，0 表示不注入 */
   chapterSummaryPromptCount: number;
+  /** 语义记忆池：向量检索历史章节摘要条数 */
+  chapterSummaryMemoryCount: number;
   /** 主生成链路采样温度（0~2） */
   generationTemperature: number;
   /** 保存章节时自动更新人物出场状态 */
@@ -158,10 +163,17 @@ export interface PersonaRecord {
   updatedAt: Date;
 }
 
+export interface ChapterPendingAction {
+  type: 'persona' | 'relationEvents';
+  label: string;
+  estimatedTokens: number;
+}
+
 export interface ChapterRecord {
   chapterNo: number;
   title: string;
   content: string;
+  contentHash?: string;
   summary: string;
   summarySource?: ChapterSummarySource;
   summaryUpdatedAt?: Date;
@@ -518,6 +530,7 @@ export class ProjectsService implements OnModuleInit {
       systemPromptText?: string;
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
+      chapterSummaryMemoryCount?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
@@ -553,6 +566,12 @@ export class ProjectsService implements OnModuleInit {
     if (payload.chapterSummaryPromptCount !== undefined) {
       settings.chapterSummaryPromptCount = clampChapterSummaryPromptCount(
         payload.chapterSummaryPromptCount
+      );
+    }
+
+    if (payload.chapterSummaryMemoryCount !== undefined) {
+      settings.chapterSummaryMemoryCount = clampChapterSummaryMemoryCount(
+        payload.chapterSummaryMemoryCount
       );
     }
 
@@ -841,7 +860,8 @@ export class ProjectsService implements OnModuleInit {
   async upsertChapter(
     projectId: string,
     payload: { chapterNo: number; title: string; content: string },
-    userId?: string
+    userId?: string,
+    options?: { postWriteMode?: 'auto' | 'defer' }
   ) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
@@ -856,14 +876,29 @@ export class ProjectsService implements OnModuleInit {
       throw new BadRequestException('chapterNo 必须为正整数');
     }
 
-    const nextSummary = buildFallbackChapterSummary(payload.content);
+    const nextHash = hashChapterContent(payload.content);
     const now = new Date();
     const existing = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
+    const contentChanged = !existing || existing.contentHash !== nextHash;
+    const postWriteMode = options?.postWriteMode ?? 'defer';
+
+    if (existing && !contentChanged) {
+      existing.updatedAt = now;
+      this.persistState();
+      return {
+        ...existing,
+        contentChanged: false,
+        pendingActions: [] as ChapterPendingAction[],
+      };
+    }
+
+    const nextSummary = buildFallbackChapterSummary(payload.content);
 
     let targetChapter: ChapterRecord;
     if (existing) {
       existing.title = payload.title.trim();
       existing.content = payload.content;
+      existing.contentHash = nextHash;
       existing.summary = nextSummary;
       existing.summarySource = 'fallback';
       existing.summaryUpdatedAt = now;
@@ -874,6 +909,7 @@ export class ProjectsService implements OnModuleInit {
         chapterNo,
         title: payload.title.trim(),
         content: payload.content,
+        contentHash: nextHash,
         summary: nextSummary,
         summarySource: 'fallback',
         summaryUpdatedAt: now,
@@ -884,27 +920,119 @@ export class ProjectsService implements OnModuleInit {
     }
 
     this.persistState();
-    if (knowledge.chapters.length > 0) {
-      const settings = this.settingsStore.get(projectId)!;
-      if (settings.updatePersonaOnSave !== false) {
-        await this.syncPersonaGraphFromChapter(
-          projectId,
-          chapterNo,
-          payload.content,
-          targetChapter.title
-        );
-      }
-      if (settings.generateRelationEventsOnSave !== false) {
-        try {
-          await this.generateChapterRelationEvents(projectId, chapterNo);
-        } catch {
-          // 自动生成失败不影响章节保存
-        }
-      }
+
+    const settings = this.settingsStore.get(projectId)!;
+    const pendingActions = this.buildChapterPendingActions(settings);
+
+    if (postWriteMode === 'auto') {
+      await this.runChapterPostWriteActions(projectId, chapterNo, payload.content, targetChapter.title, {
+        persona: settings.updatePersonaOnSave !== false,
+        relationEvents: settings.generateRelationEventsOnSave !== false,
+      });
+      this.relinkRelationEventsForProject(projectId);
+      this.persistState();
+      return {
+        ...targetChapter,
+        contentChanged: true,
+        pendingActions: [] as ChapterPendingAction[],
+      };
     }
+
     this.relinkRelationEventsForProject(projectId);
     this.persistState();
-    return targetChapter;
+    return {
+      ...targetChapter,
+      contentChanged: true,
+      pendingActions,
+    };
+  }
+
+  private buildChapterPendingActions(settings: ProjectSettings): ChapterPendingAction[] {
+    const actions: ChapterPendingAction[] = [];
+    if (settings.updatePersonaOnSave !== false) {
+      actions.push({
+        type: 'persona',
+        label: '更新人物出场与状态',
+        estimatedTokens: 800,
+      });
+    }
+    if (settings.generateRelationEventsOnSave !== false) {
+      actions.push({
+        type: 'relationEvents',
+        label: '生成本章关系事件',
+        estimatedTokens: 1200,
+      });
+    }
+    return actions;
+  }
+
+  private async runChapterPostWriteActions(
+    projectId: string,
+    chapterNo: number,
+    content: string,
+    title: string,
+    selected: { persona: boolean; relationEvents: boolean }
+  ) {
+    if (selected.persona) {
+      await this.syncPersonaGraphFromChapter(projectId, chapterNo, content, title);
+    }
+    if (selected.relationEvents) {
+      try {
+        await this.generateChapterRelationEvents(projectId, chapterNo);
+      } catch {
+        // 自动生成失败不影响章节保存
+      }
+    }
+  }
+
+  async executeChapterAfterSave(
+    projectId: string,
+    chapterNo: number,
+    payload: { actions: Array<'persona' | 'relationEvents'> },
+    userId?: string,
+    onProgress?: (event: { event: string; action: string; status: string }) => void
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((ch) => ch.chapterNo === chapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到章节: ${chapterNo}`);
+    }
+
+    const selected = {
+      persona: payload.actions.includes('persona'),
+      relationEvents: payload.actions.includes('relationEvents'),
+    };
+
+    if (selected.persona) {
+      onProgress?.({ event: 'progress', action: 'persona', status: 'started' });
+      await this.syncPersonaGraphFromChapter(
+        projectId,
+        chapterNo,
+        chapter.content,
+        chapter.title
+      );
+      onProgress?.({ event: 'progress', action: 'persona', status: 'completed' });
+    }
+
+    if (selected.relationEvents) {
+      onProgress?.({ event: 'progress', action: 'relationEvents', status: 'started' });
+      try {
+        await this.generateChapterRelationEvents(projectId, chapterNo);
+        onProgress?.({ event: 'progress', action: 'relationEvents', status: 'completed' });
+      } catch {
+        onProgress?.({ event: 'progress', action: 'relationEvents', status: 'failed' });
+      }
+    }
+
+    this.relinkRelationEventsForProject(projectId);
+    this.persistState();
+    return { chapterNo, completed: true };
   }
 
   async insertChapter(
@@ -2540,6 +2668,9 @@ export class ProjectsService implements OnModuleInit {
             chapterSummaryPromptCount: clampChapterSummaryPromptCount(
               value.chapterSummaryPromptCount
             ),
+            chapterSummaryMemoryCount: clampChapterSummaryMemoryCount(
+              value.chapterSummaryMemoryCount
+            ),
             generationTemperature: clampGenerationTemperature(value.generationTemperature),
             updatePersonaOnSave: value.updatePersonaOnSave ?? true,
             generateRelationEventsOnSave: value.generateRelationEventsOnSave ?? true,
@@ -2862,11 +2993,16 @@ export class ProjectsService implements OnModuleInit {
       ? `第${chapterNo}章：${goal.trim().slice(0, 24)}`
       : `第${chapterNo}章：自动续写草稿`;
 
-    await this.upsertChapter(projectId, {
-      chapterNo,
-      title: chapterTitle,
-      content: draftText,
-    });
+    await this.upsertChapter(
+      projectId,
+      {
+        chapterNo,
+        title: chapterTitle,
+        content: draftText,
+      },
+      undefined,
+      { postWriteMode: 'auto' }
+    );
 
     const knowledge = this.knowledgeStore.get(projectId)!;
     const updateLine = `第${chapterNo}章进展：${goal?.trim() || '完成续写并写入章节草稿'}`;
@@ -2928,6 +3064,7 @@ export class ProjectsService implements OnModuleInit {
         chapter.summarySource = result.summarySource;
         chapter.summaryUpdatedAt = new Date();
         chapter.updatedAt = new Date();
+        void this.indexChapterSummaryVector(projectId, chapter).catch(() => undefined);
         job.summaries.push({
           chapterNo: chapter.chapterNo,
           summary: result.summary,
@@ -2948,6 +3085,18 @@ export class ProjectsService implements OnModuleInit {
 
     this.persistState();
     return job;
+  }
+
+  private async indexChapterSummaryVector(projectId: string, chapter: ChapterRecord): Promise<void> {
+    const summary = chapter.summary?.trim();
+    if (!summary) {
+      return;
+    }
+    await axios.post(
+      `${this.getRagOrchestratorUrl()}/api/projects/${projectId}/chapters/${chapter.chapterNo}/index-summary`,
+      { title: chapter.title, summary },
+      { timeout: 30000 }
+    );
   }
 
   private async summarizeChapterContent(chapter: ChapterRecord): Promise<ChapterSummaryResult> {
@@ -2987,6 +3136,7 @@ export class ProjectsService implements OnModuleInit {
         systemPromptText: '你是一位专业的小说写作助手，请保持设定一致与剧情连贯。',
         activePersonaId: null,
         chapterSummaryPromptCount: DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+        chapterSummaryMemoryCount: DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
         generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
         updatePersonaOnSave: true,
         generateRelationEventsOnSave: true,
@@ -3025,6 +3175,9 @@ export class ProjectsService implements OnModuleInit {
   private patchSettingsDefaults(settings: ProjectSettings) {
     settings.chapterSummaryPromptCount = clampChapterSummaryPromptCount(
       settings.chapterSummaryPromptCount
+    );
+    settings.chapterSummaryMemoryCount = clampChapterSummaryMemoryCount(
+      settings.chapterSummaryMemoryCount
     );
     settings.generationTemperature = clampGenerationTemperature(settings.generationTemperature);
     if (settings.updatePersonaOnSave === undefined) {
@@ -3071,6 +3224,7 @@ export class ProjectsService implements OnModuleInit {
         : '未配置人物设定',
       outlineSummary: knowledge.outlineSummary,
       chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
+      chapterSummaryMemoryCount: settings.chapterSummaryMemoryCount,
       generationTemperature: settings.generationTemperature,
       chapters: knowledge.chapters.map((chapter) => ({
         chapterNo: chapter.chapterNo,
@@ -3082,6 +3236,7 @@ export class ProjectsService implements OnModuleInit {
         id: doc.id,
         title: doc.title,
         content: doc.content,
+        docType: doc.docType,
       })),
       selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
       usedRelationEvents,

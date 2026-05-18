@@ -271,7 +271,125 @@ export const apiClient = {
     payload: { chapterNo: number; title: string; content: string }
   ) {
     const response = await http.post(`/api/projects/${projectId}/knowledge/chapters`, payload);
-    return this.unwrapPayload<ChapterItem>(response.data);
+    return this.unwrapPayload<ChapterUpsertResult>(response.data);
+  },
+
+  async chapterAfterSaveSSE(
+    projectId: string,
+    chapterNo: number,
+    actions: Array<'persona' | 'relationEvents'>,
+    callbacks: {
+      onProgress?: (event: { event: string; action: string; status: string }) => void;
+      onDone?: () => void;
+      onError?: (message: string) => void;
+    }
+  ): Promise<void> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+    const token = localStorage.getItem('token');
+
+    const response = await fetch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/after-save`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ actions }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(body || response.statusText);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6)) as {
+            event: string;
+            action?: string;
+            status?: string;
+            message?: string;
+          };
+          if (data.event === 'progress' && data.action && data.status) {
+            callbacks.onProgress?.({
+              event: data.event,
+              action: data.action,
+              status: data.status,
+            });
+          } else if (data.event === 'done') {
+            callbacks.onDone?.();
+          } else if (data.event === 'error') {
+            callbacks.onError?.(data.message || 'after-save failed');
+          }
+        } catch {
+          // ignore malformed SSE
+        }
+      }
+    }
+  },
+
+  async previewRetrieval(
+    projectId: string,
+    body: {
+      prompt?: string;
+      chapterNo?: number;
+      useStructuredKb?: boolean;
+      projectCtx: {
+        outlineSummary: string;
+        personaProfile: string;
+        chapters: Array<{
+          chapterNo: number;
+          title: string;
+          summary: string;
+          structuredMatchingText?: string;
+        }>;
+        knowledgeDocuments?: Array<{
+          id: string;
+          title: string;
+          content: string;
+          docType?: string;
+        }>;
+        chapterSummaryPromptCount?: number;
+        chapterSummaryMemoryCount?: number;
+      };
+      extraContext?: Record<string, unknown>;
+    }
+  ): Promise<PreviewRetrievalResult> {
+    const ragBaseURL = getRagOrchestratorBaseURL();
+    const url = ragBaseURL ? `${ragBaseURL}/api/preview-retrieval` : '/api/preview-retrieval';
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+    const token = localStorage.getItem('token');
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ projectId, ...body }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || response.statusText);
+    }
+
+    return (await response.json()) as PreviewRetrievalResult;
   },
 
   async insertChapter(
@@ -622,11 +740,15 @@ export const apiClient = {
           structuredMatchingText: chapter.structuredInfo?.matchingText?.trim(),
         })),
         knowledgeDocuments: docList.map((doc) => ({
+          docType: doc.docType ?? 'other',
           id: doc.id,
           title: doc.title,
           content: doc.content,
         })),
         chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
+        chapterSummaryMemoryCount:
+          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
+          3,
         generationTemperature: workspace.settings.generationTemperature,
         selectedRelationMemory: buildRelationMemoryBlock(selectedEvents),
         usedRelationEvents: selectedEvents,
@@ -1152,7 +1274,10 @@ export const apiClient = {
     return response.data;
   },
 
-  async updateDocument(id: string, payload: { title?: string; content?: string }) {
+  async updateDocument(
+    id: string,
+    payload: { title?: string; content?: string; docType?: DocType }
+  ) {
     const response = await http.put(`/api/documents/${id}`, payload);
     return response.data;
   },
@@ -1188,15 +1313,46 @@ export interface ProjectItem {
   updatedAt?: string;
 }
 
+export type DocType = 'persona_card' | 'world_setting' | 'reference' | 'lore' | 'other';
+
 export interface DocumentItem {
   id: string;
   projectId: string;
   title: string;
   content: string;
+  docType?: DocType;
   indexStatus: 'pending' | 'indexing' | 'completed' | 'failed';
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ChapterPendingAction {
+  type: 'persona' | 'relationEvents';
+  label: string;
+  estimatedTokens: number;
+}
+
+export interface ChapterUpsertResult extends ChapterItem {
+  contentChanged?: boolean;
+  pendingActions?: ChapterPendingAction[];
+}
+
+export interface PreviewRetrievalItem {
+  id: string;
+  pool: 'persona_card' | 'other_docs' | 'recent_chapters' | 'memory_chapters';
+  title: string;
+  preview: string;
+  score?: number;
+  selected: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export interface PreviewRetrievalResult {
+  items: PreviewRetrievalItem[];
+  tokenBudget: number;
+  tokenUsed: number;
+  query: string;
 }
 
 export interface ChunkItem {

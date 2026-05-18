@@ -32,6 +32,7 @@ export interface PersistedProjectState {
       systemPromptText: string;
       activePersonaId: string | null;
       chapterSummaryPromptCount?: number;
+      chapterSummaryMemoryCount?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;

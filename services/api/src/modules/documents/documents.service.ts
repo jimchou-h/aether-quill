@@ -20,7 +20,11 @@ import {
   type PersistedDocumentsPayload,
   type RestoredDocumentsState,
 } from '../../persistence/documents-pg-sync';
-import { inferDocumentKnowledgeType } from './documents-type.util';
+import {
+  DEFAULT_USER_DOC_TYPE,
+  docTypeForIngestion,
+  normalizeDocType,
+} from './documents-type.util';
 
 interface PersistedDocumentState {
   documents: Array<{
@@ -28,6 +32,7 @@ interface PersistedDocumentState {
     projectId: string;
     title: string;
     content: string;
+    docType?: string;
     indexStatus: IndexStatus;
     version: number;
     createdAt: string;
@@ -131,7 +136,10 @@ export class DocumentsService implements OnModuleInit {
     return doc;
   }
 
-  create(projectId: string, payload: { title: string; content: string }): DocumentRecord {
+  create(
+    projectId: string,
+    payload: { title: string; content: string; docType?: string }
+  ): DocumentRecord {
     this.projectsService.findOne(projectId);
 
     const title = payload.title?.trim();
@@ -144,11 +152,14 @@ export class DocumentsService implements OnModuleInit {
     }
 
     const now = new Date();
+    const docType = normalizeDocType(payload.docType);
+
     const doc: DocumentRecord = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       projectId,
       title,
       content,
+      docType,
       indexStatus: 'pending',
       version: 1,
       createdAt: now,
@@ -168,7 +179,10 @@ export class DocumentsService implements OnModuleInit {
     return doc;
   }
 
-  update(documentId: string, payload: { title?: string; content?: string }): DocumentRecord {
+  update(
+    documentId: string,
+    payload: { title?: string; content?: string; docType?: string }
+  ): DocumentRecord {
     const doc = this.findById(documentId);
 
     const now = new Date();
@@ -177,6 +191,9 @@ export class DocumentsService implements OnModuleInit {
     }
     if (payload.content !== undefined) {
       doc.content = payload.content;
+    }
+    if (payload.docType !== undefined) {
+      doc.docType = normalizeDocType(payload.docType);
     }
 
     doc.version += 1;
@@ -258,24 +275,27 @@ export class DocumentsService implements OnModuleInit {
   batchGet(
     projectId: string,
     documentIds: string[]
-  ): Array<{ id: string; title: string; content: string; type: string }> {
+  ): Array<{ id: string; title: string; content: string; type: string; docType: string }> {
     this.projectsService.findOne(projectId);
     const uniqueIds = [...new Set(documentIds.map((id) => id.trim()).filter(Boolean))].slice(0, 50);
     if (uniqueIds.length === 0) {
       throw new BadRequestException('documentIds 不能为空');
     }
 
-    const out: Array<{ id: string; title: string; content: string; type: string }> = [];
+    const out: Array<{ id: string; title: string; content: string; type: string; docType: string }> =
+      [];
     for (const id of uniqueIds) {
       const doc = this.documents.find((d) => d.id === id && d.projectId === projectId);
       if (!doc) {
         continue;
       }
+      const docType = doc.docType ?? DEFAULT_USER_DOC_TYPE;
       out.push({
         id: doc.id,
         title: doc.title,
         content: doc.content,
-        type: inferDocumentKnowledgeType(doc.title, doc.content),
+        type: docTypeForIngestion(docType, doc.title, doc.content),
+        docType,
       });
     }
     return out;
@@ -399,6 +419,7 @@ export class DocumentsService implements OnModuleInit {
       return {
         documents: (parsed.documents || []).map((doc) => ({
           ...doc,
+          docType: normalizeDocType((doc as { docType?: string }).docType),
           createdAt: new Date(doc.createdAt),
           updatedAt: new Date(doc.updatedAt),
         })),

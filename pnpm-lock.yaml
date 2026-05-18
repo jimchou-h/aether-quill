@@ -228,6 +228,9 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
+      gpt-tokenizer:
+        specifier: ^2.8.0
+        version: 2.9.0
     devDependencies:
       '@types/express':
         specifier: ^5.0.6

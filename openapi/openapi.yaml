@@ -209,6 +209,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+    DocType:
+      type: string
+      enum: [persona_card, world_setting, reference, lore, other]
+      default: other
+      description: 文档类型。persona_card 角色卡走整文注入，其他类型走段落级检索裁剪
+
     Document:
       type: object
       required:
@@ -227,6 +233,8 @@ components:
           type: string
         content:
           type: string
+        docType:
+          $ref: '#/components/schemas/DocType'
         indexStatus:
           type: string
           enum: [pending, indexing, completed, failed]
@@ -432,6 +440,7 @@ components:
         - systemPromptText
         - activePersonaId
         - chapterSummaryPromptCount
+        - chapterSummaryMemoryCount
         - generationTemperature
         - updatePersonaOnSave
         - generateRelationEventsOnSave
@@ -447,9 +456,15 @@ components:
         chapterSummaryPromptCount:
           type: integer
           minimum: 0
-          maximum: 20
+          maximum: 10
           default: 3
           description: 叙事上下文中注入的「当前章之前」章节摘要条数；0 表示不注入
+        chapterSummaryMemoryCount:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+          description: 语义记忆池：向量检索历史章节摘要条数；0 表示不注入
         generationTemperature:
           type: number
           format: float
@@ -479,7 +494,11 @@ components:
         chapterSummaryPromptCount:
           type: integer
           minimum: 0
-          maximum: 20
+          maximum: 10
+        chapterSummaryMemoryCount:
+          type: integer
+          minimum: 0
+          maximum: 10
         generationTemperature:
           type: number
           format: float

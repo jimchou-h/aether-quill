@@ -5,6 +5,7 @@ import type {
   DocumentRecord,
   DocumentVersion,
 } from '../modules/documents/documents.entity';
+import { normalizeDocType } from '../modules/documents/documents-type.util';
 
 export interface PersistedDocumentsPayload {
   documents: Array<{
@@ -12,6 +13,7 @@ export interface PersistedDocumentsPayload {
     projectId: string;
     title: string;
     content: string;
+    docType?: string;
     indexStatus: string;
     version: number;
     createdAt: string;
@@ -60,6 +62,7 @@ export async function loadDocumentsFromPostgres(
     projectId: d.projectId,
     title: d.title,
     content: d.content,
+    docType: normalizeDocType(d.docType),
     indexStatus: d.indexStatus as DocumentRecord['indexStatus'],
     version: d.version,
     createdAt: d.createdAt,
@@ -113,6 +116,7 @@ export async function syncDocumentsToPostgres(
           projectId: d.projectId,
           title: d.title,
           content: d.content,
+          docType: normalizeDocType(d.docType),
           indexStatus: d.indexStatus,
           version: d.version,
           createdAt: new Date(d.createdAt),
@@ -122,6 +126,7 @@ export async function syncDocumentsToPostgres(
           projectId: d.projectId,
           title: d.title,
           content: d.content,
+          docType: normalizeDocType(d.docType),
           indexStatus: d.indexStatus,
           version: d.version,
           updatedAt: new Date(d.updatedAt),

@@ -103,9 +103,9 @@ describe('formatEvidence', () => {
 
 describe('buildStructuredKnowledgeEvidence', () => {
   const docs = [
-    { id: 'd1', title: '世界观：旧港口设定集', content: '全文A' },
-    { id: 'd2', title: '人物小传：林策', content: '全文B' },
-    { id: 'd3', title: '无关文档', content: '全文C' },
+    { id: 'd1', title: '世界观：旧港口设定集', content: '全文A', docType: 'world_setting' },
+    { id: 'd2', title: '人物小传：林策', content: '全文B', docType: 'persona_card' },
+    { id: 'd3', title: '无关文档', content: '全文C', docType: 'other' },
   ];
 
   it('returns empty when structured text missing', () => {
@@ -129,6 +129,7 @@ describe('buildStructuredKnowledgeEvidence', () => {
     assert.ok(r.evidenceText.includes('document_id=d1'));
     assert.ok(r.evidenceText.includes('全文A'));
     assert.ok(r.evidenceText.includes('document_id=d2'));
+    assert.ok(r.evidenceText.includes('知识裁剪'));
     assert.ok(r.titleMatchedDocumentIds.includes('d1'));
     assert.ok(r.titleMatchedDocumentIds.includes('d2'));
     assert.equal(r.titleMatchedDocumentIds.includes('d3'), false);
