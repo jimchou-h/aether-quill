@@ -39,7 +39,7 @@ import {
 loadEnv();
 assertRagInfrastructureEnv('rag-orchestrator');
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 app.use(observabilityMiddleware);
 
 const PORT = process.env.PORT || 3001;

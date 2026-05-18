@@ -293,9 +293,7 @@ export const apiClient = {
   },
 
   async renumberChapters(projectId: string) {
-    const response = await http.post(
-      `/api/projects/${projectId}/knowledge/chapters/renumber`
-    );
+    const response = await http.post(`/api/projects/${projectId}/knowledge/chapters/renumber`);
     return this.unwrapPayload<{ renumberedCount: number }>(response.data);
   },
 

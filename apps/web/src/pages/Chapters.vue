@@ -102,7 +102,11 @@ function handleOpenImportNovel() {
 }
 
 function handleClickOutside(event: MouseEvent) {
-  if (showMoreMenu.value && moreMenuRef.value && !moreMenuRef.value.contains(event.target as Node)) {
+  if (
+    showMoreMenu.value &&
+    moreMenuRef.value &&
+    !moreMenuRef.value.contains(event.target as Node)
+  ) {
     const menuEl = document.querySelector('.dropdown-menu');
     if (menuEl && !menuEl.contains(event.target as Node)) {
       showMoreMenu.value = false;
@@ -428,8 +432,8 @@ onUnmounted(() => {
             ref="moreMenuRef"
             class="secondary-button icon-button"
             type="button"
-            @click="toggleMoreMenu"
             aria-label="更多操作"
+            @click="toggleMoreMenu"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <circle cx="8" cy="3" r="1.5" />
@@ -472,7 +476,7 @@ onUnmounted(() => {
       <span class="warning-banner-text">
         生成章节草稿时依赖「结构化信息」做知识库标题匹配；若未解析，将无法注入知识库文档。
       </span>
-      <button class="warning-banner-close" @click="showHint = false" aria-label="关闭提示">
+      <button class="warning-banner-close" aria-label="关闭提示" @click="showHint = false">
         &times;
       </button>
     </div>
@@ -639,8 +643,13 @@ onUnmounted(() => {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .summary-status-text {

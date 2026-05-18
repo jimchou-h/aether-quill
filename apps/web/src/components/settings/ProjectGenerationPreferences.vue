@@ -138,14 +138,14 @@ onMounted(() => {
 
       <div class="toggle-row">
         <label class="toggle-label">
-          <input type="checkbox" v-model="updatePersonaOnSave" class="toggle-checkbox" />
+          <input v-model="updatePersonaOnSave" type="checkbox" class="toggle-checkbox" />
           <span class="toggle-text">保存章节时自动更新人物出场状态</span>
         </label>
       </div>
 
       <div class="toggle-row">
         <label class="toggle-label">
-          <input type="checkbox" v-model="generateRelationEventsOnSave" class="toggle-checkbox" />
+          <input v-model="generateRelationEventsOnSave" type="checkbox" class="toggle-checkbox" />
           <span class="toggle-text">保存章节时自动生成关系事件</span>
         </label>
       </div>
