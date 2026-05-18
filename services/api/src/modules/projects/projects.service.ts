@@ -75,13 +75,18 @@ import {
   buildSegmentPrompt,
   buildTypoCheckUserPrompt,
   buildTypoFixUserPrompt,
-  calculateSegmentMaxTokens,
+  appendSegmentLengthRetryHint,
+  buildSegmentBoundaryAnchors,
+  calculateSegmentMaxTokensForIndex,
   ensureChapterVersionMatches,
   makeOptimizationId,
   normalizeInstruction,
   parseExpectedUpdatedAt,
   parseSegmentOutput,
   parseTypoCheckIssues,
+  extractSegmentTailText,
+  resolveOptimizeSegmentCount,
+  shouldRetrySegmentForLength,
   splitIntoSegments,
   type ChapterOptimizeUsedRelationEvent,
   type ChapterTypoIssueRecord,
@@ -2101,17 +2106,20 @@ export class ProjectsService implements OnModuleInit {
       updatedAt: chapter.updatedAt,
     };
 
-    const segments = splitIntoSegments(chapter.content, planText, 3);
+    const segmentCount = resolveOptimizeSegmentCount(chapter.content.length, 3);
+    const segments = splitIntoSegments(chapter.content, planText, segmentCount);
     const traceId = makeOptimizationId('draft');
     callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
 
     let previousSegmentSummary: string | undefined;
+    let previousSegmentText = '';
 
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i]!;
       callbacks.onSegmentStart?.({ segmentIndex: i + 1, totalSegments: segments.length });
 
-      const segmentPrompt = buildSegmentPrompt({
+      const boundaryAnchors = buildSegmentBoundaryAnchors(segment, segments);
+      let segmentPrompt = buildSegmentPrompt({
         segment,
         chapter: chapterRef,
         instruction,
@@ -2127,14 +2135,20 @@ export class ProjectsService implements OnModuleInit {
             chapterNo: event.chapterNo,
           })
         ),
-        previousSegmentSummary,
+        previousSegmentSummary: i > 0 ? previousSegmentSummary : undefined,
+        previousSegmentTail: i > 0 ? extractSegmentTailText(previousSegmentText) : undefined,
+        boundaryAnchors,
         totalSegments: segments.length,
       });
 
-      const maxTokens = calculateSegmentMaxTokens(segment.originalText);
+      const maxTokens = calculateSegmentMaxTokensForIndex(
+        segment.originalText,
+        segment.index,
+        segments.length
+      );
 
       let output: string | null = null;
-      for (let retry = 0; retry <= 1; retry++) {
+      for (let retry = 0; retry <= 2; retry++) {
         try {
           const response = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
             projectId,
@@ -2154,11 +2168,19 @@ export class ProjectsService implements OnModuleInit {
           });
 
           if (response.data?.content && typeof response.data.content === 'string') {
-            output = response.data.content;
+            const candidate = response.data.content;
+            if (
+              retry < 2 &&
+              shouldRetrySegmentForLength(segment.originalText, candidate)
+            ) {
+              segmentPrompt = appendSegmentLengthRetryHint(segmentPrompt);
+              continue;
+            }
+            output = candidate;
             break;
           }
         } catch {
-          if (retry < 1) {
+          if (retry < 2) {
             continue;
           }
           callbacks.onError(`第 ${segment.index + 1}/${segments.length} 段生成失败，已重试`);
@@ -2175,6 +2197,7 @@ export class ProjectsService implements OnModuleInit {
       const segmentWithNewline = i < segments.length - 1 ? segmentText + '\n\n' : segmentText;
       callbacks.onContent(segmentWithNewline);
       previousSegmentSummary = summary;
+      previousSegmentText = segmentText;
     }
 
     callbacks.onEnd({ traceId });

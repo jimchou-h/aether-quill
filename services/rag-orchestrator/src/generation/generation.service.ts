@@ -1,4 +1,8 @@
 import axios from 'axios';
+import {
+  hasMultiPersonaCardEvidence,
+  MULTI_PERSONA_WRITING_GUARD,
+} from '../retrieval/persona-card-evidence';
 import { TraceRecord, GenerateRequest } from './types';
 import { TraceStore, TraceQuery, TraceStats } from './trace-store';
 
@@ -35,10 +39,13 @@ export class GenerationService {
       sections.push(`【叙事上下文】\n${context.narrativeContext.trim()}`);
     }
     if (context.retrievedEvidence?.trim()) {
-      sections.push(`【检索证据】\n${context.retrievedEvidence.trim()}`);
+      let evidence = context.retrievedEvidence.trim();
+      if (hasMultiPersonaCardEvidence(evidence)) {
+        evidence = `${MULTI_PERSONA_WRITING_GUARD}\n\n${evidence}`;
+      }
+      sections.push(`【检索证据】\n${evidence}`);
+      console.log(evidence);
     }
-
-    console.log(context.retrievedEvidence);
 
     sections.push(`【用户需求】\n${userPrompt}`);
 

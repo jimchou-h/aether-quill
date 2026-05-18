@@ -4,6 +4,11 @@ import {
   type AggregatedDocumentHit,
 } from './doc-aggregator';
 import { fetchDocumentsBatch, type BatchDocumentRecord } from './document-batch-client';
+import {
+  formatKnowledgeEvidenceBlock,
+  formatPersonaCardEvidenceBlock,
+  prependMultiPersonaPreamble,
+} from './persona-card-evidence';
 import type { ChunkWithEmbedding } from './types';
 
 export interface RetrievalFullDocument {
@@ -45,12 +50,19 @@ function formatFullDocumentEvidence(docs: RetrievalFullDocument[]): string {
   if (docs.length === 0) {
     return '';
   }
-  return docs
-    .map((d, index) => {
-      const sections = d.matchedSections.length > 0 ? d.matchedSections.join(',') : 'general';
-      return `[知识全文${index + 1}] document_id=${d.documentId} title=${d.title} sections=${sections}\n命中理由：${d.reason}\n${d.content.trim()}`;
+  const personaDocs = docs.filter((d) => d.docType === PERSONA_CARD_TYPE);
+  const otherDocs = docs.filter((d) => d.docType !== PERSONA_CARD_TYPE);
+  const personaBlocks = personaDocs.map((d) =>
+    formatPersonaCardEvidenceBlock({
+      documentId: d.documentId,
+      title: d.title,
+      content: d.content,
+      reason: d.reason,
     })
-    .join('\n\n');
+  );
+  const otherBlocks = otherDocs.map((d, index) => formatKnowledgeEvidenceBlock(d, index));
+  const body = [...personaBlocks, ...otherBlocks].join('\n\n');
+  return prependMultiPersonaPreamble(body, personaBlocks.length);
 }
 
 function pickChunksForEvidence(

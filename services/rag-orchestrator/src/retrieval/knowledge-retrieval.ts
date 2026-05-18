@@ -9,7 +9,11 @@ import {
   formatCroppedDocumentContent,
   pickTopParagraphs,
 } from './paragraph-crop';
-import { resolveEvidenceTokenBudget, trimTextsToTokenBudget } from './token-budget';
+import {
+  assembleStructuredEvidenceText,
+  formatKnowledgeEvidenceBlock,
+} from './persona-card-evidence';
+import { resolveEvidenceTokenBudget, trimTextsToTokenBudgetDetailed } from './token-budget';
 import { scoreTitleAgainstMatchingText } from './title-match-score';
 import { ChunkWithEmbedding } from './types';
 import { VectorStore } from './vector-store';
@@ -331,6 +335,8 @@ export interface ChapterKbContextInput {
 export type StructuredKnowledgeRetrievalResult = KnowledgeRetrievalResult & {
   retrievalSkippedNoStructured?: boolean;
   titleMatchedDocumentIds: string[];
+  /** 经 token 预算裁剪后实际写入 `evidenceText` 的文档 id */
+  evidenceDocumentIds: string[];
 };
 
 /**
@@ -353,6 +359,7 @@ export function buildStructuredKnowledgeEvidence(
       query: '',
       retrievalSkippedNoStructured: true,
       titleMatchedDocumentIds: [],
+      evidenceDocumentIds: [],
     };
   }
 
@@ -387,18 +394,19 @@ export function buildStructuredKnowledgeEvidence(
     }),
   ];
 
-  const evidenceBlocks = [
-    ...fullDocuments.map((d, index) => {
-      const sections =
-        d.matchedSections.length > 0 ? d.matchedSections.join(',') : 'title_match';
-      const label = d.docType === PERSONA_CARD_DOC_TYPE ? '知识全文' : '知识裁剪';
-      return `[${label}${index + 1}] document_id=${d.documentId} title=${d.title} sections=${sections} doc_type=${d.docType}\n命中理由：${d.reason}\n${d.content.trim()}`;
-    }),
-  ];
+  const evidenceBlocks = fullDocuments.map((d, index) => formatKnowledgeEvidenceBlock(d, index));
 
   const budget = resolveEvidenceTokenBudget();
-  const trimmedBlocks = trimTextsToTokenBudget(evidenceBlocks, budget);
-  const evidenceText = trimmedBlocks.join('\n\n');
+  const { texts: trimmedBlocks, includedIndices } = trimTextsToTokenBudgetDetailed(
+    evidenceBlocks,
+    budget
+  );
+  const evidenceText = assembleStructuredEvidenceText(
+    fullDocuments,
+    includedIndices,
+    trimmedBlocks
+  );
+  const evidenceDocumentIds = includedIndices.map((i) => fullDocuments[i]?.documentId).filter(Boolean);
 
   const chunks: ChunkWithEmbedding[] = picked.map((d, i) => {
     const isPersona = isPersonaCardDoc(d.docType);
@@ -425,6 +433,7 @@ export function buildStructuredKnowledgeEvidence(
     evidenceText,
     query: matchingText,
     titleMatchedDocumentIds: picked.map((d) => d.id),
+    evidenceDocumentIds,
     fullDocuments,
   };
 }

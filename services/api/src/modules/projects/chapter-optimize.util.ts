@@ -47,8 +47,20 @@ export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
   '2) 必须严格遵循 <optimization-plan> 中已确认的优化方案；',
   '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
   '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非方案明确要求修改；',
-  '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致。',
+  '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
+  '6) 若提示中含【边界锚点】/【前段末文】，锚点与末文仅用于把握衔接，不得照抄进正文；',
+  '7) 须遵守边界锚点：段首承接上段原文末句之后、段末落点不越过本段原文末句；禁止提前写入下段原文首句之后的情节；',
+  '8) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
 ].join('\n');
+
+/** 低于此字数优先单段生成，减少硬切分 */
+export const OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD = 2800;
+export const OPTIMIZE_TWO_SEGMENT_CHAR_THRESHOLD = 5500;
+export const SEGMENT_TAIL_CONTEXT_CHARS = 400;
+export const SEGMENT_LEAD_CONTEXT_CHARS = 200;
+/** 中段 maxTokens 相对原文字符上限倍率（抑制越界扩写） */
+export const MIDDLE_SEGMENT_MAX_TOKEN_CHAR_RATIO = 1.15;
+export const SEGMENT_LENGTH_RETRY_RATIO = 1.35;
 
 export function normalizeInstruction(value: unknown): string {
   if (typeof value !== 'string') {
@@ -269,6 +281,13 @@ export interface Segment {
   endParagraph: number;
 }
 
+export interface SegmentBoundaryAnchors {
+  previousOriginalLastSentence?: string;
+  currentOriginalFirstSentence: string;
+  currentOriginalLastSentence: string;
+  nextOriginalFirstSentence?: string;
+}
+
 export interface SegmentPromptInput {
   segment: Segment;
   chapter: ChapterOptimizeChapterRef;
@@ -277,7 +296,134 @@ export interface SegmentPromptInput {
   appearingCharacters?: string[];
   selectedRelationEvents?: ChapterOptimizeUsedRelationEvent[];
   previousSegmentSummary?: string;
+  /** 上一段已生成正文的末尾片段，用于语气/场景衔接 */
+  previousSegmentTail?: string;
+  /** 原文边界句锚点（情节范围） */
+  boundaryAnchors?: SegmentBoundaryAnchors;
   totalSegments: number;
+}
+
+export function splitChapterParagraphs(content: string): string[] {
+  return content.split(/\n\n+/).filter((p) => p.trim().length > 0);
+}
+
+const SENTENCE_SPLIT_RE = /(?<=[。！？…])/;
+
+export function extractFirstSentence(text: string, fallbackChars = 80): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const parts = trimmed
+    .split(SENTENCE_SPLIT_RE)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length > 0) {
+    return parts[0]!;
+  }
+  return trimmed.length <= fallbackChars ? trimmed : `${trimmed.slice(0, fallbackChars)}…`;
+}
+
+export function extractLastSentence(text: string, fallbackChars = 80): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const parts = trimmed
+    .split(SENTENCE_SPLIT_RE)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length > 0) {
+    return parts[parts.length - 1]!;
+  }
+  return trimmed.length <= fallbackChars ? trimmed : `…${trimmed.slice(-fallbackChars)}`;
+}
+
+export function buildSegmentBoundaryAnchors(
+  segment: Segment,
+  allSegments: Segment[]
+): SegmentBoundaryAnchors {
+  const currentOriginalFirstSentence = extractFirstSentence(segment.originalText);
+  const currentOriginalLastSentence = extractLastSentence(segment.originalText);
+
+  const previousSegment = segment.index > 0 ? allSegments[segment.index - 1] : undefined;
+  const nextSegment =
+    segment.index < allSegments.length - 1 ? allSegments[segment.index + 1] : undefined;
+
+  return {
+    previousOriginalLastSentence: previousSegment
+      ? extractLastSentence(previousSegment.originalText)
+      : undefined,
+    currentOriginalFirstSentence,
+    currentOriginalLastSentence,
+    nextOriginalFirstSentence: nextSegment
+      ? extractFirstSentence(nextSegment.originalText)
+      : undefined,
+  };
+}
+
+export function resolveOptimizeSegmentCount(contentLength: number, maxSegments = 3): number {
+  const max = Math.max(1, Math.min(3, Math.trunc(maxSegments)));
+  if (contentLength <= OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD) {
+    return 1;
+  }
+  if (contentLength <= OPTIMIZE_TWO_SEGMENT_CHAR_THRESHOLD) {
+    return Math.min(2, max);
+  }
+  return max;
+}
+
+export function extractSegmentTailText(text: string, maxChars = SEGMENT_TAIL_CONTEXT_CHARS): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+  return trimmed.slice(-maxChars);
+}
+
+export function extractSegmentLeadText(text: string, maxChars = SEGMENT_LEAD_CONTEXT_CHARS): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const firstParagraph = trimmed.split(/\n\n+/)[0]?.trim() || trimmed;
+  if (firstParagraph.length <= maxChars) {
+    return firstParagraph;
+  }
+  return `${firstParagraph.slice(0, maxChars)}…`;
+}
+
+function scoreParagraphBreakPoint(paragraph: string, nextParagraph?: string): number {
+  let score = 0;
+  const trimmed = paragraph.trim();
+  if (/[。！？…]["”』」]?$/.test(trimmed)) {
+    score += 3;
+  }
+  if (nextParagraph && /^[「『"'“]/.test(nextParagraph.trim())) {
+    score += 2;
+  }
+  if (trimmed.length < 40) {
+    score -= 1;
+  }
+  return score;
+}
+
+function pickBreakParagraphIndex(paragraphs: string[], targetEnd: number, searchRadius = 2): number {
+  const min = Math.max(0, targetEnd - searchRadius);
+  const max = Math.min(paragraphs.length - 1, targetEnd + searchRadius);
+  let best = targetEnd;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (let i = min; i <= max; i += 1) {
+    const score = scoreParagraphBreakPoint(paragraphs[i] || '', paragraphs[i + 1]);
+    if (score > bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  return best;
 }
 
 const SEGMENT_SUMMARY_PREFIX = '【SEG_SUMMARY】';
@@ -300,20 +446,35 @@ export function splitIntoSegments(content: string, planText: string, maxSegments
   const segSize = Math.ceil(paragraphs.length / maxSegments);
   const adjustedSegments: Array<{ start: number; end: number }> = [];
 
-  for (let start = 0; start < paragraphs.length; start += segSize) {
-    let end = Math.min(start + segSize, paragraphs.length) - 1;
-
-    const lastPara = paragraphs[end] || '';
-    if (end < paragraphs.length - 1 && /[""』』」」""]$/.test(lastPara.trim())) {
-      end = Math.min(end + 1, paragraphs.length - 1);
-    }
+  for (let start = 0; start < paragraphs.length; ) {
+    const targetEnd = Math.min(start + segSize, paragraphs.length) - 1;
+    let end =
+      adjustedSegments.length < maxSegments - 1
+        ? pickBreakParagraphIndex(paragraphs, targetEnd)
+        : paragraphs.length - 1;
+    end = Math.max(start, Math.min(end, paragraphs.length - 1));
 
     if (adjustedSegments.length === 0) {
       adjustedSegments.push({ start, end });
     } else {
       const prev = adjustedSegments[adjustedSegments.length - 1]!;
-      adjustedSegments.push({ start: prev.end + 1, end: Math.max(prev.end + 1, end) });
+      const nextStart = prev.end + 1;
+      if (nextStart >= paragraphs.length) {
+        break;
+      }
+      end = Math.max(nextStart, end);
+      adjustedSegments.push({ start: nextStart, end });
     }
+
+    start = end + 1;
+    if (adjustedSegments.length >= maxSegments) {
+      break;
+    }
+  }
+
+  const last = adjustedSegments[adjustedSegments.length - 1];
+  if (last && last.end < paragraphs.length - 1) {
+    last.end = paragraphs.length - 1;
   }
 
   return adjustedSegments.map((seg, index) => {
@@ -328,6 +489,29 @@ export function splitIntoSegments(content: string, planText: string, maxSegments
   });
 }
 
+function formatBoundaryAnchorsBlock(anchors: SegmentBoundaryAnchors, segmentIndex: number): string {
+  const lines = ['【边界锚点·只读】'];
+  if (anchors.previousOriginalLastSentence) {
+    lines.push(
+      `- 上段原文末句：「${anchors.previousOriginalLastSentence}」（本段须从此句之后自然承接，不得重复该句）`
+    );
+  } else if (segmentIndex > 0) {
+    lines.push('- 上段原文末句：（无，本段为章节后续部分）');
+  }
+  lines.push(
+    `- 本段原文首句：「${anchors.currentOriginalFirstSentence}」（改写后首句应与之语义等价或顺滑替换）`
+  );
+  lines.push(
+    `- 本段原文末句：「${anchors.currentOriginalLastSentence}」（改写后末句应落在此句附近，不得写到更后情节）`
+  );
+  if (anchors.nextOriginalFirstSentence) {
+    lines.push(
+      `- 下段原文首句：「${anchors.nextOriginalFirstSentence}」（禁止提前写入；本段不得出现该句之后的情节或章末式收束）`
+    );
+  }
+  return lines.join('\n');
+}
+
 export function buildSegmentPrompt(input: SegmentPromptInput): string {
   const {
     segment,
@@ -337,14 +521,38 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     appearingCharacters,
     selectedRelationEvents,
     previousSegmentSummary,
+    previousSegmentTail,
+    boundaryAnchors,
     totalSegments,
   } = input;
 
   const sections: string[] = [];
+  const isMiddleSegment = totalSegments > 2 && segment.index > 0 && segment.index < totalSegments - 1;
 
   sections.push(
     `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段，请聚焦本段原文进行改写，确保完整覆盖。`
   );
+
+  if (totalSegments > 1) {
+    sections.push(
+      '【衔接要求】本段须与前后段在时序、场景、人称上自然连贯；段首勿重复前段已写内容，段末勿写「总之」「与此同时」等收束句。'
+    );
+    if (segment.startParagraph === segment.endParagraph) {
+      sections.push(
+        `【本段范围】仅改写原文第 ${segment.startParagraph + 1} 段（以空行分段计），不得写到其他段落的情节。`
+      );
+    } else {
+      sections.push(
+        `【本段范围】仅改写原文第 ${segment.startParagraph + 1}–${segment.endParagraph + 1} 段（以空行分段计），不得写到其他段落的情节。`
+      );
+    }
+  }
+
+  if (isMiddleSegment) {
+    sections.push(
+      '【中段专用】本段是章节「过渡段」，不是章节结尾。禁止：章节总结、情绪收束、悬念式章末收尾、写下一段已发生的事件或对白。'
+    );
+  }
 
   sections.push(`【章节信息】第${chapter.chapterNo}章「${chapter.title}」`);
   sections.push(`【用户优化要求】\n${instruction}`);
@@ -366,8 +574,18 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
 
   sections.push(`<optimization-plan>\n${planText.trim()}\n</optimization-plan>`);
 
+  if (boundaryAnchors) {
+    sections.push(formatBoundaryAnchorsBlock(boundaryAnchors, segment.index));
+  }
+
+  if (previousSegmentTail) {
+    sections.push(
+      `【前段末文（语气参考，不要照抄；情节边界以上方「边界锚点」为准）】\n${previousSegmentTail}`
+    );
+  }
+
   if (previousSegmentSummary) {
-    sections.push(`【前段正文摘要】\n${previousSegmentSummary}`);
+    sections.push(`【前段情节摘要】\n${previousSegmentSummary}`);
   }
 
   sections.push(`<segment-original>\n${segment.originalText}\n</segment-original>`);
@@ -399,6 +617,36 @@ export function calculateSegmentMaxTokens(originalText: string): number {
   const charCount = originalText.length;
   const estimated = Math.ceil(charCount * 1.5);
   return Math.max(2048, Math.min(estimated, 4096));
+}
+
+export function calculateSegmentMaxTokensForIndex(
+  originalText: string,
+  segmentIndex: number,
+  totalSegments: number
+): number {
+  const base = calculateSegmentMaxTokens(originalText);
+  const isMiddle =
+    totalSegments > 2 && segmentIndex > 0 && segmentIndex < totalSegments - 1;
+  if (!isMiddle) {
+    return base;
+  }
+  const middleCap = Math.ceil(originalText.length * MIDDLE_SEGMENT_MAX_TOKEN_CHAR_RATIO);
+  return Math.min(base, middleCap);
+}
+
+export function shouldRetrySegmentForLength(
+  originalText: string,
+  generatedText: string
+): boolean {
+  const originalLen = originalText.trim().length;
+  if (originalLen <= 0) {
+    return false;
+  }
+  return generatedText.trim().length > originalLen * SEGMENT_LENGTH_RETRY_RATIO;
+}
+
+export function appendSegmentLengthRetryHint(prompt: string): string {
+  return `${prompt}\n\n【重试约束】上次输出超出本段原文情节范围。请严格限定在本段原文首句与末句之间，删除下段情节与章末收束，压缩至与本段原文相当的长度。`;
 }
 
 export function parseTypoCheckIssues(raw: unknown): ChapterTypoIssueRecord[] {

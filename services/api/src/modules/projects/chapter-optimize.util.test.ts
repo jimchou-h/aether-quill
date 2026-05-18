@@ -14,6 +14,14 @@ import {
   parseTypoCheckIssues,
   buildTypoCheckUserPrompt,
   buildTypoFixUserPrompt,
+  buildSegmentBoundaryAnchors,
+  calculateSegmentMaxTokensForIndex,
+  extractFirstSentence,
+  extractLastSentence,
+  extractSegmentLeadText,
+  extractSegmentTailText,
+  resolveOptimizeSegmentCount,
+  shouldRetrySegmentForLength,
   splitIntoSegments,
   buildSegmentPrompt,
   parseSegmentOutput,
@@ -214,7 +222,7 @@ test('buildSegmentPrompt includes segment index info and required sections', () 
   assert.match(prompt, /试炼之夜/);
   assert.match(prompt, /菲伦、尤里乌丝/);
   assert.match(prompt, /<segment-original>[\s\S]*第二段原文内容[\s\S]*<\/segment-original>/);
-  assert.match(prompt, /【前段正文摘要】[\s\S]*第一段描写了主角进入地下城/);
+  assert.match(prompt, /【前段情节摘要】[\s\S]*第一段描写了主角进入地下城/);
   assert.match(prompt, /【SEG_SUMMARY】/);
 });
 
@@ -241,7 +249,117 @@ test('buildSegmentPrompt omits previous summary for first segment', () => {
   });
 
   assert.match(prompt, /第 1\/2 段/);
-  assert.ok(!prompt.includes('【前段正文摘要】'));
+  assert.ok(!prompt.includes('【前段情节摘要】'));
+  assert.ok(!prompt.includes('【前段末文'));
+});
+
+test('resolveOptimizeSegmentCount uses fewer segments for shorter chapters', () => {
+  assert.equal(resolveOptimizeSegmentCount(1000), 1);
+  assert.equal(resolveOptimizeSegmentCount(4000), 2);
+  assert.equal(resolveOptimizeSegmentCount(8000), 3);
+});
+
+test('buildSegmentPrompt includes boundary anchors and middle-segment constraints', () => {
+  const segments: Segment[] = [
+    {
+      index: 0,
+      originalText: '第一段第一句。第一段最后一句。',
+      planExcerpt: 'plan',
+      startParagraph: 0,
+      endParagraph: 0,
+    },
+    {
+      index: 1,
+      originalText: '第二段首句在这里。第二段末句在这里。',
+      planExcerpt: 'plan',
+      startParagraph: 1,
+      endParagraph: 1,
+    },
+    {
+      index: 2,
+      originalText: '第三段开始了。后续内容。',
+      planExcerpt: 'plan',
+      startParagraph: 2,
+      endParagraph: 2,
+    },
+  ];
+  const anchors = buildSegmentBoundaryAnchors(segments[1]!, segments);
+  const prompt = buildSegmentPrompt({
+    segment: segments[1]!,
+    chapter: { chapterNo: 1, title: '章', content: '全文', updatedAt: new Date() },
+    instruction: '润色',
+    planText: '方案',
+    previousSegmentTail: '前段最后一句对话。',
+    previousSegmentSummary: '前段摘要',
+    boundaryAnchors: anchors,
+    totalSegments: 3,
+  });
+  assert.match(prompt, /【边界锚点·只读】/);
+  assert.match(prompt, /上段原文末句：「第一段最后一句。」/);
+  assert.match(prompt, /本段原文首句：「第二段首句在这里。」/);
+  assert.match(prompt, /本段原文末句：「第二段末句在这里。」/);
+  assert.match(prompt, /下段原文首句：「第三段开始了。」/);
+  assert.match(prompt, /【中段专用】/);
+  assert.match(prompt, /【前段末文/);
+  assert.ok(!prompt.includes('【下段原文起笔'));
+});
+
+test('buildSegmentPrompt omits next anchor on last segment', () => {
+  const segments: Segment[] = [
+    {
+      index: 0,
+      originalText: '甲段末句。',
+      planExcerpt: 'p',
+      startParagraph: 0,
+      endParagraph: 0,
+    },
+    {
+      index: 1,
+      originalText: '乙段首句。乙段末句。',
+      planExcerpt: 'p',
+      startParagraph: 1,
+      endParagraph: 1,
+    },
+  ];
+  const anchors = buildSegmentBoundaryAnchors(segments[1]!, segments);
+  const prompt = buildSegmentPrompt({
+    segment: segments[1]!,
+    chapter: { chapterNo: 1, title: '章', content: '全文', updatedAt: new Date() },
+    instruction: '润色',
+    planText: '方案',
+    boundaryAnchors: anchors,
+    totalSegments: 2,
+  });
+  assert.ok(!prompt.includes('下段原文首句'));
+  assert.match(prompt, /本段原文末句：「乙段末句。」/);
+});
+
+test('extractFirstSentence and extractLastSentence split on Chinese punctuation', () => {
+  assert.equal(extractFirstSentence('你好。世界！'), '你好。');
+  assert.equal(extractLastSentence('你好。世界！'), '世界！');
+});
+
+test('calculateSegmentMaxTokensForIndex caps middle segments', () => {
+  const long = '字'.repeat(3000);
+  const base = calculateSegmentMaxTokens(long);
+  const middle = calculateSegmentMaxTokensForIndex(long, 1, 3);
+  assert.ok(middle < base);
+  assert.equal(calculateSegmentMaxTokensForIndex(long, 0, 3), base);
+});
+
+test('shouldRetrySegmentForLength detects overrun', () => {
+  assert.equal(shouldRetrySegmentForLength('a'.repeat(100), 'b'.repeat(140)), true);
+  assert.equal(shouldRetrySegmentForLength('a'.repeat(100), 'b'.repeat(120)), false);
+});
+
+test('extractSegmentTailText keeps trailing characters', () => {
+  const tail = extractSegmentTailText('abcdefghij', 4);
+  assert.equal(tail, 'ghij');
+});
+
+test('extractSegmentLeadText uses first paragraph', () => {
+  const lead = extractSegmentLeadText('第一段。\n\n第二段。');
+  assert.equal(lead, '第一段。');
 });
 
 test('parseSegmentOutput extracts text and summary when marker present', () => {

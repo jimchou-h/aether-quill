@@ -362,13 +362,20 @@ async function handleGeneratePlan() {
       docType?: string;
     }>;
 
+    const activePersona =
+      workspace.personas.find((item) => item.id === workspace.settings.activePersonaId) ||
+      workspace.personas.find((item) => item.status === 'published') ||
+      null;
+
     previewResult.value = await apiClient.previewRetrieval(props.projectId, {
       prompt: instruction.value.trim(),
       chapterNo: props.chapter.chapterNo,
       useStructuredKb: true,
       projectCtx: {
         outlineSummary: workspace.knowledge.outlineSummary,
-        personaProfile: '章节优化',
+        personaProfile: activePersona
+          ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
+          : '未配置人物设定',
         chapters: workspace.knowledge.chapters.map((ch) => ({
           chapterNo: ch.chapterNo,
           title: ch.title,

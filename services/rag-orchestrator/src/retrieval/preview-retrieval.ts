@@ -11,6 +11,7 @@ import {
   buildGenerationRetrievalQuery,
   type KnowledgeDocumentForMatch,
 } from './knowledge-retrieval';
+import { extractPersonaDisplayName } from './persona-card-evidence';
 import { countEvidenceTokens, resolveEvidenceTokenBudget } from './token-budget';
 import type { ChunkWithEmbedding } from './types';
 import { Reranker } from './reranker';
@@ -68,6 +69,7 @@ export async function runPreviewRetrieval(
   const personaQuota = clampKnowledgeDocQuota(process.env.PERSONA_CARD_DOC_QUOTA);
   const otherQuota = clampKnowledgeDocQuota(process.env.OTHER_DOC_QUOTA);
   const items: PreviewRetrievalItem[] = [];
+  let structuredEvidenceText = '';
 
   const useStructured =
     input.useStructuredKb !== false && chapterNo > 0 && projectCtx.chapters.length > 0;
@@ -81,17 +83,26 @@ export async function runPreviewRetrieval(
       })),
       knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
     }, { personaTopN: personaQuota, otherTopN: otherQuota });
+    structuredEvidenceText = sr.evidenceText;
 
+    const evidenceIds = new Set(sr.evidenceDocumentIds ?? []);
     for (const doc of sr.fullDocuments ?? []) {
       const pool = doc.docType === 'persona_card' ? 'persona_card' : 'other_docs';
+      const included = evidenceIds.has(doc.documentId);
       items.push({
         id: doc.documentId,
         pool,
         title: doc.title,
         preview: doc.content.trim().slice(0, 400),
         score: doc.docScore,
-        selected: true,
-        meta: { docType: doc.docType, reason: doc.reason },
+        selected: included,
+        meta: {
+          docType: doc.docType,
+          reason: doc.reason,
+          excludedByTokenBudget: !included,
+          canonicalCharacter:
+            doc.docType === 'persona_card' ? extractPersonaDisplayName(doc.title) : undefined,
+        },
       });
     }
   } else if (query.trim()) {
@@ -183,7 +194,14 @@ export async function runPreviewRetrieval(
   }
 
   const tokenBudget = resolveEvidenceTokenBudget();
-  const tokenUsed = countEvidenceTokens(items.map((i) => i.preview).join('\n'));
+  const tokenUsed = structuredEvidenceText
+    ? countEvidenceTokens(structuredEvidenceText)
+    : countEvidenceTokens(
+        items
+          .filter((i) => i.selected)
+          .map((i) => i.preview)
+          .join('\n')
+      );
 
   return {
     items,
