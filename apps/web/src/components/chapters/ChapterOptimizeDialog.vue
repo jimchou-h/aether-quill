@@ -55,6 +55,7 @@ const typoIssues = ref<ChapterTypoIssue[]>([]);
 const typoCheckTraceId = ref('');
 const typoAutoCorrected = ref(false);
 const errorMessage = ref('');
+const segmentProgress = ref<{ current: number; total: number } | null>(null);
 
 const chapterUpdatedAtSnapshot = ref<string>('');
 
@@ -246,6 +247,7 @@ function resetState() {
   typoCheckTraceId.value = '';
   typoAutoCorrected.value = false;
   errorMessage.value = '';
+  segmentProgress.value = null;
   originalTextSnapshot.value = props.chapter?.content || '';
   chapterUpdatedAtSnapshot.value = props.chapter?.updatedAt || '';
 }
@@ -388,6 +390,7 @@ async function handleGenerateDraft() {
   step.value = 'draft';
   generatingDraft.value = true;
   errorMessage.value = '';
+  segmentProgress.value = null;
 
   try {
     await apiClient.optimizeChapterDraftSSE(
@@ -407,11 +410,16 @@ async function handleGenerateDraft() {
         },
         onEnd: () => {
           generatingDraft.value = false;
+          segmentProgress.value = null;
           presentSuccess('优化正文已生成，请确认是否覆盖原章节');
         },
         onError: (message) => {
           generatingDraft.value = false;
+          segmentProgress.value = null;
           errorMessage.value = presentError(message || '优化正文生成失败');
+        },
+        onSegmentStart: (segmentIndex, totalSegments) => {
+          segmentProgress.value = { current: segmentIndex, total: totalSegments };
         },
       }
     );
@@ -661,6 +669,9 @@ async function handleApply() {
 
       <section v-else-if="step === 'draft'" class="step-section draft-section">
         <h4 class="section-title">优化正文</h4>
+        <p v-if="generatingDraft && segmentProgress" class="message message-info">
+          正在生成第 {{ segmentProgress.current }} / {{ segmentProgress.total }} 段...
+        </p>
         <p v-if="typoAutoCorrected" class="message message-info">
           正文已自动修正错字，请确认后再覆盖原章节。
         </p>

@@ -261,6 +261,146 @@ export function buildTypoFixUserPrompt(
   ].join('\n\n');
 }
 
+export interface Segment {
+  index: number;
+  originalText: string;
+  planExcerpt: string;
+  startParagraph: number;
+  endParagraph: number;
+}
+
+export interface SegmentPromptInput {
+  segment: Segment;
+  chapter: ChapterOptimizeChapterRef;
+  instruction: string;
+  planText: string;
+  appearingCharacters?: string[];
+  selectedRelationEvents?: ChapterOptimizeUsedRelationEvent[];
+  previousSegmentSummary?: string;
+  totalSegments: number;
+}
+
+const SEGMENT_SUMMARY_PREFIX = '【SEG_SUMMARY】';
+
+export function splitIntoSegments(content: string, planText: string, maxSegments = 3): Segment[] {
+  const paragraphs = content.split(/\n\n+/).filter((p) => p.trim().length > 0);
+  if (paragraphs.length === 0) {
+    return [];
+  }
+  if (paragraphs.length <= maxSegments) {
+    return paragraphs.map((p, i) => ({
+      index: i,
+      originalText: p.trim(),
+      planExcerpt: planText,
+      startParagraph: i,
+      endParagraph: i,
+    }));
+  }
+
+  const segSize = Math.ceil(paragraphs.length / maxSegments);
+  const adjustedSegments: Array<{ start: number; end: number }> = [];
+
+  for (let start = 0; start < paragraphs.length; start += segSize) {
+    let end = Math.min(start + segSize, paragraphs.length) - 1;
+
+    const lastPara = paragraphs[end] || '';
+    if (end < paragraphs.length - 1 && /[""』』」」""]$/.test(lastPara.trim())) {
+      end = Math.min(end + 1, paragraphs.length - 1);
+    }
+
+    if (adjustedSegments.length === 0) {
+      adjustedSegments.push({ start, end });
+    } else {
+      const prev = adjustedSegments[adjustedSegments.length - 1]!;
+      adjustedSegments.push({ start: prev.end + 1, end: Math.max(prev.end + 1, end) });
+    }
+  }
+
+  return adjustedSegments.map((seg, index) => {
+    const text = paragraphs.slice(seg.start, seg.end + 1).join('\n\n');
+    return {
+      index,
+      originalText: text.trim(),
+      planExcerpt: planText,
+      startParagraph: seg.start,
+      endParagraph: seg.end,
+    };
+  });
+}
+
+export function buildSegmentPrompt(input: SegmentPromptInput): string {
+  const {
+    segment,
+    chapter,
+    instruction,
+    planText,
+    appearingCharacters,
+    selectedRelationEvents,
+    previousSegmentSummary,
+    totalSegments,
+  } = input;
+
+  const sections: string[] = [];
+
+  sections.push(
+    `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段，请聚焦本段原文进行改写，确保完整覆盖。`
+  );
+
+  sections.push(`【章节信息】第${chapter.chapterNo}章「${chapter.title}」`);
+  sections.push(`【用户优化要求】\n${instruction}`);
+
+  if (appearingCharacters && appearingCharacters.length > 0) {
+    sections.push(`【本章出场角色】${appearingCharacters.join('、')}`);
+  }
+
+  if (selectedRelationEvents && selectedRelationEvents.length > 0) {
+    const lines = selectedRelationEvents.map((event, i) => {
+      const chapterTag =
+        typeof event.chapterNo === 'number' && event.chapterNo > 0
+          ? `（第${event.chapterNo}章）`
+          : '';
+      return `${i + 1}. ${event.protagonist} ↔ ${event.counterparty}${chapterTag}：${event.summary}`;
+    });
+    sections.push(`【关联关系事件】\n${lines.join('\n')}`);
+  }
+
+  sections.push(`<optimization-plan>\n${planText.trim()}\n</optimization-plan>`);
+
+  if (previousSegmentSummary) {
+    sections.push(`【前段正文摘要】\n${previousSegmentSummary}`);
+  }
+
+  sections.push(`<segment-original>\n${segment.originalText}\n</segment-original>`);
+
+  sections.push(
+    '请直接输出优化后的本段正文。末尾另起一行输出 `【SEG_SUMMARY】本段摘要内容`（供下段使用）。确保完整覆盖原文内容，不得遗漏情节、对白、动作描写。不得使用「同上」「同前」「此处省略」「原段落保留」等占位语。若本段无需修改，则原样输出并附摘要。'
+  );
+
+  return sections.join('\n\n');
+}
+
+export function parseSegmentOutput(output: string): { segmentText: string; summary: string } {
+  const summaryIndex = output.lastIndexOf(SEGMENT_SUMMARY_PREFIX);
+  if (summaryIndex === -1) {
+    const trimmed = output.trim();
+    const lastSentence =
+      trimmed
+        .split(/[。！？\n]/)
+        .filter(Boolean)
+        .pop() || trimmed.slice(-80);
+    return { segmentText: trimmed, summary: lastSentence };
+  }
+  const segmentText = output.slice(0, summaryIndex).trim();
+  const summary = output.slice(summaryIndex + SEGMENT_SUMMARY_PREFIX.length).trim();
+  return { segmentText, summary };
+}
+
+export function calculateSegmentMaxTokens(originalText: string): number {
+  const charCount = originalText.length;
+  const estimated = Math.ceil(charCount * 1.5);
+  return Math.max(2048, Math.min(estimated, 4096));
+}
+
 export function parseTypoCheckIssues(raw: unknown): ChapterTypoIssueRecord[] {
   let payload = raw;
   if (typeof payload === 'string') {

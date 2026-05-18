@@ -936,7 +936,7 @@ export const apiClient = {
 
         try {
           const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'end' | 'error';
+            event?: 'start' | 'content' | 'end' | 'error' | 'segment_start';
             data?: string;
             traceId?: string;
             chapterNo?: number;
@@ -956,6 +956,18 @@ export const apiClient = {
               callbacks.onError?.(event.data || '优化正文生成失败');
               reading = false;
               break;
+            case 'segment_start': {
+              let segData: { segmentIndex: number; totalSegments: number } | null = null;
+              try {
+                segData = JSON.parse(event.data || '{}');
+              } catch {
+                // skip malformed
+              }
+              if (segData) {
+                callbacks.onSegmentStart?.(segData.segmentIndex, segData.totalSegments);
+              }
+              break;
+            }
           }
         } catch {
           // skip malformed SSE events
@@ -1275,6 +1287,7 @@ export interface ChapterOptimizeDraftCallbacks {
   onContent?: (text: string) => void;
   onEnd?: (traceId: string) => void;
   onError?: (message: string) => void;
+  onSegmentStart?: (segmentIndex: number, totalSegments: number) => void;
 }
 
 export interface ChapterTypoIssue {
