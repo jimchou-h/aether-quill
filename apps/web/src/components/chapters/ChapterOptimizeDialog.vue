@@ -6,7 +6,9 @@ import {
   type ChapterItem,
   type ChapterOptimizationPlanResult,
   type ChapterTypoIssue,
+  type PreviewRetrievalResult,
 } from '../../services/api';
+import RetrievalPreviewDialog from '../workbench/RetrievalPreviewDialog.vue';
 import {
   presentError,
   presentErrorFromCaught,
@@ -48,6 +50,11 @@ const originalTextSnapshot = ref('');
 
 const generatingPlan = ref(false);
 const generatingDraft = ref(false);
+
+const previewVisible = ref(false);
+const previewLoading = ref(false);
+const previewResult = ref<PreviewRetrievalResult | null>(null);
+const previewError = ref('');
 const applying = ref(false);
 const checkingTypos = ref(false);
 const fixingTypos = ref(false);
@@ -289,11 +296,8 @@ function syncScroll(source: 'original' | 'draft') {
   }, 50);
 }
 
-async function handleGeneratePlan() {
-  if (!props.chapter || !instruction.value.trim()) {
-    errorMessage.value = presentError('请填写优化要求');
-    return;
-  }
+async function runOptimizePlanGeneration() {
+  if (!props.chapter) return;
 
   generatingPlan.value = true;
   errorMessage.value = '';
@@ -335,6 +339,69 @@ async function handleGeneratePlan() {
   } finally {
     generatingPlan.value = false;
   }
+}
+
+async function handleGeneratePlan() {
+  if (!props.chapter || !instruction.value.trim()) {
+    errorMessage.value = presentError('请填写优化要求');
+    return;
+  }
+
+  previewVisible.value = true;
+  previewLoading.value = true;
+  previewResult.value = null;
+  previewError.value = '';
+
+  try {
+    const workspace = await apiClient.getWorkspace(props.projectId);
+    const docRes = await apiClient.documents.list(props.projectId);
+    const docList = apiClient.unwrapPayload(docRes) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      docType?: string;
+    }>;
+
+    previewResult.value = await apiClient.previewRetrieval(props.projectId, {
+      prompt: instruction.value.trim(),
+      chapterNo: props.chapter.chapterNo,
+      useStructuredKb: true,
+      projectCtx: {
+        outlineSummary: workspace.knowledge.outlineSummary,
+        personaProfile: '章节优化',
+        chapters: workspace.knowledge.chapters.map((ch) => ({
+          chapterNo: ch.chapterNo,
+          title: ch.title,
+          summary: ch.summary || ch.content.slice(0, 160),
+          structuredMatchingText: ch.structuredInfo?.matchingText,
+        })),
+        knowledgeDocuments: docList.map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          content: doc.content,
+          docType: doc.docType ?? 'other',
+        })),
+        chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
+        chapterSummaryMemoryCount:
+          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
+          3,
+      },
+      extraContext: {
+        retrievalInstruction: instruction.value.trim(),
+        retrievalChapterTitle: props.chapter.title,
+        retrievalChapterSummary: props.chapter.summary || props.chapter.content.slice(0, 500),
+      },
+    });
+  } catch (error) {
+    previewError.value = presentErrorFromCaught(error, '检索预览失败');
+  } finally {
+    previewLoading.value = false;
+  }
+}
+
+async function confirmPreviewAndGeneratePlan() {
+  previewVisible.value = false;
+  await runOptimizePlanGeneration();
 }
 
 async function handleRegeneratePlan() {
@@ -786,6 +853,15 @@ async function handleApply() {
         </div>
       </section>
     </section>
+
+    <RetrievalPreviewDialog
+      :visible="previewVisible"
+      :loading="previewLoading"
+      :result="previewResult"
+      :error-message="previewError"
+      @close="previewVisible = false"
+      @confirm="confirmPreviewAndGeneratePlan"
+    />
   </div>
 </template>
 

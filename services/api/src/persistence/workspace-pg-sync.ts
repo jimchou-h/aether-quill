@@ -5,6 +5,7 @@ import type {
   PersistedProjectState,
 } from '../modules/projects/persisted-workspace.types';
 import {
+  DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
   DEFAULT_GENERATION_TEMPERATURE,
 } from '../modules/projects/project-settings.util';
@@ -61,6 +62,7 @@ export async function loadWorkspaceFromPostgres(
         systemPromptText: p.settings.systemPromptText,
         activePersonaId: p.settings.activePersonaId,
         chapterSummaryPromptCount: p.settings.chapterSummaryPromptCount,
+        chapterSummaryMemoryCount: p.settings.chapterSummaryMemoryCount,
         generationTemperature: p.settings.generationTemperature,
         updatedAt: p.settings.updatedAt.toISOString(),
       };
@@ -237,6 +239,8 @@ export async function syncWorkspaceToPostgres(
           activePersonaId: s.activePersonaId,
           chapterSummaryPromptCount:
             s.chapterSummaryPromptCount ?? DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+          chapterSummaryMemoryCount:
+            s.chapterSummaryMemoryCount ?? DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
           generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
           updatedAt: new Date(s.updatedAt),
         },
@@ -245,6 +249,8 @@ export async function syncWorkspaceToPostgres(
           activePersonaId: s.activePersonaId,
           chapterSummaryPromptCount:
             s.chapterSummaryPromptCount ?? DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+          chapterSummaryMemoryCount:
+            s.chapterSummaryMemoryCount ?? DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
           generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
           updatedAt: new Date(s.updatedAt),
         },

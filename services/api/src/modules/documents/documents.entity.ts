@@ -1,3 +1,6 @@
+import type { UserDocType } from './documents-type.util';
+import { DEFAULT_USER_DOC_TYPE } from './documents-type.util';
+
 export type IndexStatus = 'pending' | 'indexing' | 'completed' | 'failed';
 
 export interface DocumentRecord {
@@ -5,6 +8,7 @@ export interface DocumentRecord {
   projectId: string;
   title: string;
   content: string;
+  docType: UserDocType;
   indexStatus: IndexStatus;
   version: number;
   createdAt: Date;

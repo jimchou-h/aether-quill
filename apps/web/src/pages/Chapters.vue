@@ -156,8 +156,28 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
   errorMessage.value = '';
   message.value = '';
   try {
-    await apiClient.upsertChapter(projectId.value, payload);
-    message.value = presentSuccess(`第${payload.chapterNo}章已更新`);
+    const result = await apiClient.upsertChapter(projectId.value, payload);
+    if (result.contentChanged === false) {
+      message.value = presentSuccess(`第${payload.chapterNo}章无内容变更，已跳过自动处理`);
+    } else if (result.pendingActions && result.pendingActions.length > 0) {
+      const selected = result.pendingActions.map((a) => a.type);
+      const summary = result.pendingActions
+        .map((a) => `${a.label}（约 ${a.estimatedTokens} tokens）`)
+        .join('\n');
+      const ok = confirm(`内容已保存。是否执行以下后处理？\n\n${summary}`);
+      if (ok) {
+        await apiClient.chapterAfterSaveSSE(projectId.value, payload.chapterNo, selected, {
+          onProgress: (event) => {
+            message.value = `正在执行：${event.action} (${event.status})`;
+          },
+        });
+        message.value = presentSuccess(`第${payload.chapterNo}章后处理已完成`);
+      } else {
+        message.value = presentSuccess(`第${payload.chapterNo}章已保存（未执行后处理）`);
+      }
+    } else {
+      message.value = presentSuccess(`第${payload.chapterNo}章已更新`);
+    }
     chapterListRef.value?.clearEditing();
     await loadWorkspace();
   } catch (error) {

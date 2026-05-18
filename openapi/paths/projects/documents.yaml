@@ -67,6 +67,8 @@ post:
               type: string
             content:
               type: string
+            docType:
+              $ref: '../../openapi.yaml#/components/schemas/DocType'
   responses:
     '201':
       description: Document created

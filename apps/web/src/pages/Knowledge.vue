@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   apiClient,
+  type DocType,
   type DocumentItem,
   type ChunkItem,
   type DocumentVersionItem,
@@ -27,6 +28,27 @@ const errorMessage = ref('');
 const showCreateForm = ref(false);
 const newTitle = ref('');
 const newContent = ref('');
+const newDocType = ref<DocType>('other');
+const filterDocType = ref<DocType | ''>('');
+
+const docTypeOptions: Array<{ value: DocType; label: string }> = [
+  { value: 'persona_card', label: '角色卡' },
+  { value: 'world_setting', label: '世界观' },
+  { value: 'reference', label: '参考资料' },
+  { value: 'lore', label: '设定 lore' },
+  { value: 'other', label: '其他' },
+];
+
+const filteredDocuments = computed(() => {
+  if (!filterDocType.value) {
+    return documents.value;
+  }
+  return documents.value.filter((doc) => (doc.docType ?? 'other') === filterDocType.value);
+});
+
+function docTypeLabel(value?: DocType): string {
+  return docTypeOptions.find((o) => o.value === (value ?? 'other'))?.label ?? '其他';
+}
 
 const editingDoc = ref<DocumentItem | null>(null);
 const editTitle = ref('');
@@ -65,9 +87,11 @@ async function handleCreate() {
     await apiClient.documents.create(projectId.value, {
       title: newTitle.value.trim(),
       content: newContent.value,
+      docType: newDocType.value,
     });
     newTitle.value = '';
     newContent.value = '';
+    newDocType.value = 'other';
     showCreateForm.value = false;
     message.value = presentSuccess('文档已创建');
     await loadDocuments();
@@ -78,10 +102,13 @@ async function handleCreate() {
   }
 }
 
+const editDocType = ref<DocType>('other');
+
 function startEdit(doc: DocumentItem) {
   editingDoc.value = doc;
   editTitle.value = doc.title;
   editContent.value = doc.content;
+  editDocType.value = doc.docType ?? 'other';
 }
 
 async function handleUpdate() {
@@ -94,6 +121,7 @@ async function handleUpdate() {
     await apiClient.updateDocument(editingDoc.value.id, {
       title: editTitle.value.trim() || undefined,
       content: editContent.value || undefined,
+      docType: editDocType.value,
     });
     editingDoc.value = null;
     message.value = presentSuccess('文档已更新');
@@ -207,15 +235,31 @@ onMounted(() => {
     <section class="panel">
       <div class="panel-header">
         <h3 class="panel-title">文档列表</h3>
-        <button class="primary-button" @click="showCreateForm = !showCreateForm">
-          {{ showCreateForm ? '取消' : '新建文档' }}
-        </button>
+        <div class="panel-header-actions">
+          <select v-model="filterDocType" class="field-input field-input-compact">
+            <option value="">全部类型</option>
+            <option v-for="opt in docTypeOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <button class="primary-button" @click="showCreateForm = !showCreateForm">
+            {{ showCreateForm ? '取消' : '新建文档' }}
+          </button>
+        </div>
       </div>
 
       <form v-if="showCreateForm" class="create-form" @submit.prevent="handleCreate">
         <div class="field-group">
           <label class="field-label">文档标题</label>
           <input v-model="newTitle" class="field-input" placeholder="文档标题" />
+        </div>
+        <div class="field-group">
+          <label class="field-label">文档类型</label>
+          <select v-model="newDocType" class="field-input">
+            <option v-for="opt in docTypeOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
         </div>
         <div class="field-group">
           <label class="field-label">文档内容</label>
@@ -237,11 +281,12 @@ onMounted(() => {
       </div>
 
       <div v-else class="doc-list">
-        <div v-for="doc in documents" :key="doc.id" class="doc-card">
+        <div v-for="doc in filteredDocuments" :key="doc.id" class="doc-card">
           <div class="doc-main" @click="viewDetails(doc)">
             <div class="doc-info">
               <h4 class="doc-title">{{ doc.title }}</h4>
               <div class="doc-meta">
+                <span class="doc-type-tag">{{ docTypeLabel(doc.docType) }}</span>
                 <span class="doc-version">v{{ doc.version }}</span>
                 <span :class="['doc-status', getStatusClass(doc.indexStatus)]">
                   {{
@@ -283,6 +328,14 @@ onMounted(() => {
         <div class="field-group">
           <label class="field-label">文档标题</label>
           <input v-model="editTitle" class="field-input" />
+        </div>
+        <div class="field-group">
+          <label class="field-label">文档类型</label>
+          <select v-model="editDocType" class="field-input">
+            <option v-for="opt in docTypeOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
         </div>
         <div class="field-group">
           <label class="field-label">文档内容</label>

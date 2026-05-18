@@ -1,4 +1,25 @@
+/** 用户选择的文档类型（与 OpenAPI DocType 对齐） */
+export type UserDocType = 'persona_card' | 'world_setting' | 'reference' | 'lore' | 'other';
+
+export const DEFAULT_USER_DOC_TYPE: UserDocType = 'other';
+
+const USER_DOC_TYPES: UserDocType[] = [
+  'persona_card',
+  'world_setting',
+  'reference',
+  'lore',
+  'other',
+];
+
+/** 入库 / 向量 payload 沿用的推断类型（兼容旧数据） */
 export type DocumentKnowledgeType = 'persona_card' | 'world_doc' | 'outline_doc' | 'document';
+
+export function normalizeDocType(value: unknown): UserDocType {
+  if (typeof value === 'string' && USER_DOC_TYPES.includes(value as UserDocType)) {
+    return value as UserDocType;
+  }
+  return DEFAULT_USER_DOC_TYPE;
+}
 
 export function inferDocumentKnowledgeType(title: string, content: string): DocumentKnowledgeType {
   const t = title.trim();
@@ -13,4 +34,15 @@ export function inferDocumentKnowledgeType(title: string, content: string): Docu
     return 'outline_doc';
   }
   return 'document';
+}
+
+/** 用户 docType → 入库 payload document_type */
+export function docTypeForIngestion(userDocType: UserDocType, title: string, content: string): string {
+  if (userDocType === 'persona_card') {
+    return 'persona_card';
+  }
+  if (userDocType === 'world_setting') {
+    return 'world_setting';
+  }
+  return inferDocumentKnowledgeType(title, content);
 }

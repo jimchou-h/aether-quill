@@ -596,6 +596,7 @@ export interface paths {
           'application/json': {
             title: string;
             content: string;
+            docType?: components['schemas']['DocType'];
           };
         };
       };
@@ -1928,6 +1929,8 @@ export interface components {
       activePersonaId?: string | null;
       /** @description 当前章之前注入的摘要条数，0 表示不注入 */
       chapterSummaryPromptCount: number;
+      /** @description 语义记忆池：向量检索历史章节摘要条数 */
+      chapterSummaryMemoryCount: number;
       /** @description 主生成链路采样温度 */
       generationTemperature: number;
       /** @description 保存章节时自动更新人物出场状态 */
@@ -1941,10 +1944,12 @@ export interface components {
       systemPromptText?: string;
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
+      chapterSummaryMemoryCount?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
     };
+    DocType: 'persona_card' | 'world_setting' | 'reference' | 'lore' | 'other';
     Document: {
       /** Format: uuid */
       id: string;
@@ -1952,6 +1957,7 @@ export interface components {
       projectId: string;
       title: string;
       content?: string;
+      docType?: components['schemas']['DocType'];
       /** @enum {string} */
       indexStatus: 'pending' | 'indexing' | 'completed' | 'failed';
       /** Format: date-time */

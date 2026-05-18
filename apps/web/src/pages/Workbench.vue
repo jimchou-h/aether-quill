@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { apiClient, type PersonaItem } from '../services/api';
+import {
+  apiClient,
+  type PersonaItem,
+  type PreviewRetrievalResult,
+} from '../services/api';
+import RetrievalPreviewDialog from '../components/workbench/RetrievalPreviewDialog.vue';
 import { useGenerationStore } from '../stores/generation';
 import { useEditorStore } from '../stores/editor';
 import KnowledgePanel from '../components/workbench/KnowledgePanel.vue';
@@ -28,6 +33,21 @@ const outlineSummary = ref('');
 const personaNames = ref<string[]>([]);
 const personas = ref<PersonaItem[]>([]);
 const promptConsoleRef = ref<InstanceType<typeof PromptConsole> | null>(null);
+
+const previewVisible = ref(false);
+const previewLoading = ref(false);
+const previewResult = ref<PreviewRetrievalResult | null>(null);
+const previewError = ref('');
+const pendingGenerateTask = ref<{
+  chapterNo: number;
+  goal: string;
+  pov: string;
+  mustInclude: string[];
+  avoid: string[];
+  targetWords?: number;
+  appearingCharacters: string[];
+  selectedEventIds: string[];
+} | null>(null);
 
 function applyWorkspaceSnapshot(workspace: Awaited<ReturnType<typeof apiClient.getWorkspace>>) {
   projectName.value = workspace.project.name;
@@ -82,6 +102,69 @@ async function handleGenerate(task: {
   selectedEventIds: string[];
 }) {
   errorMessage.value = '';
+  pendingGenerateTask.value = task;
+  previewVisible.value = true;
+  previewLoading.value = true;
+  previewResult.value = null;
+  previewError.value = '';
+
+  try {
+    const workspace = await apiClient.getWorkspace(projectId.value);
+    const docRes = await apiClient.documents.list(projectId.value);
+    const docList = apiClient.unwrapPayload(docRes) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      docType?: string;
+    }>;
+
+    previewResult.value = await apiClient.previewRetrieval(projectId.value, {
+      prompt: task.goal,
+      chapterNo: task.chapterNo,
+      useStructuredKb: true,
+      projectCtx: {
+        outlineSummary: workspace.knowledge.outlineSummary,
+        personaProfile: activePersonaName.value || '未配置人物设定',
+        chapters: workspace.knowledge.chapters.map((ch) => ({
+          chapterNo: ch.chapterNo,
+          title: ch.title,
+          summary: ch.summary || ch.content.slice(0, 160),
+          structuredMatchingText: ch.structuredInfo?.matchingText,
+        })),
+        knowledgeDocuments: docList.map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          content: doc.content,
+          docType: doc.docType ?? 'other',
+        })),
+        chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
+        chapterSummaryMemoryCount:
+          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
+          3,
+      },
+      extraContext: {
+        task: {
+          chapterNo: task.chapterNo,
+          goal: task.goal,
+          pov: task.pov,
+          mustInclude: task.mustInclude,
+          avoid: task.avoid,
+        },
+      },
+    });
+  } catch (error) {
+    previewError.value = presentErrorFromCaught(error, '检索预览失败');
+  } finally {
+    previewLoading.value = false;
+  }
+}
+
+async function confirmPreviewAndGenerate() {
+  previewVisible.value = false;
+  const task = pendingGenerateTask.value;
+  if (!task) {
+    return;
+  }
   await generationStore.generate(projectId.value, task);
   if (generationStore.isDone) {
     presentSuccess(`第${task.chapterNo}章草稿生成完成`);
@@ -181,6 +264,15 @@ onMounted(() => {
         </section>
       </div>
     </template>
+
+    <RetrievalPreviewDialog
+      :visible="previewVisible"
+      :loading="previewLoading"
+      :result="previewResult"
+      :error-message="previewError"
+      @close="previewVisible = false"
+      @confirm="confirmPreviewAndGenerate"
+    />
   </div>
 </template>
 

@@ -11,7 +11,10 @@ export class DocumentsController {
   }
 
   @Post('api/projects/:projectId/documents')
-  create(@Param('projectId') projectId: string, @Body() data: { title: string; content: string }) {
+  create(
+    @Param('projectId') projectId: string,
+    @Body() data: { title: string; content: string; docType?: string }
+  ) {
     return this.documentsService.create(projectId, data);
   }
 
@@ -28,7 +31,10 @@ export class DocumentsController {
   }
 
   @Put('api/documents/:id')
-  update(@Param('id') id: string, @Body() data: { title?: string; content?: string }) {
+  update(
+    @Param('id') id: string,
+    @Body() data: { title?: string; content?: string; docType?: string }
+  ) {
     return this.documentsService.update(id, data);
   }
 

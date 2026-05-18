@@ -8,11 +8,13 @@ const props = defineProps<{
 }>();
 
 const summaryCount = ref(3);
+const memoryCount = ref(3);
 const temperature = ref(0.7);
 const updatePersonaOnSave = ref(true);
 const generateRelationEventsOnSave = ref(true);
 const saved = ref<{
   summaryCount: number;
+  memoryCount: number;
   temperature: number;
   updatePersonaOnSave: boolean;
   generateRelationEventsOnSave: boolean;
@@ -29,6 +31,7 @@ const isDirty = computed(() => {
   }
   return (
     summaryCount.value !== saved.value.summaryCount ||
+    memoryCount.value !== saved.value.memoryCount ||
     temperature.value !== saved.value.temperature ||
     updatePersonaOnSave.value !== saved.value.updatePersonaOnSave ||
     generateRelationEventsOnSave.value !== saved.value.generateRelationEventsOnSave
@@ -37,11 +40,15 @@ const isDirty = computed(() => {
 
 function applyFromSettings(s: ProjectSettings) {
   summaryCount.value = s.chapterSummaryPromptCount;
+  memoryCount.value =
+    (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3;
   temperature.value = s.generationTemperature;
   updatePersonaOnSave.value = s.updatePersonaOnSave ?? true;
   generateRelationEventsOnSave.value = s.generateRelationEventsOnSave ?? true;
   saved.value = {
     summaryCount: s.chapterSummaryPromptCount,
+    memoryCount:
+      (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3,
     temperature: s.generationTemperature,
     updatePersonaOnSave: s.updatePersonaOnSave ?? true,
     generateRelationEventsOnSave: s.generateRelationEventsOnSave ?? true,
@@ -68,6 +75,7 @@ async function handleSave() {
   try {
     const s = await apiClient.updateSettings(props.projectId, {
       chapterSummaryPromptCount: summaryCount.value,
+      chapterSummaryMemoryCount: memoryCount.value,
       generationTemperature: temperature.value,
       updatePersonaOnSave: updatePersonaOnSave.value,
       generateRelationEventsOnSave: generateRelationEventsOnSave.value,
@@ -114,13 +122,27 @@ onMounted(() => {
           class="field-input"
           type="number"
           min="0"
-          max="20"
+          max="10"
           step="1"
         />
       </div>
       <p class="field-hint inline-hint">
-        范围 0~20；默认 3。仅选取「章号 &lt; 当前写作章节」且有摘要文本的章节。
+        范围 0~10；默认 3。仅选取「章号 &lt; 当前写作章节」且有摘要文本的章节（近期连续性池）。
       </p>
+
+      <div class="row">
+        <label class="field-label" for="aq-memory-count">语义记忆章节数</label>
+        <input
+          id="aq-memory-count"
+          v-model.number="memoryCount"
+          class="field-input"
+          type="number"
+          min="0"
+          max="10"
+          step="1"
+        />
+      </div>
+      <p class="field-hint inline-hint">范围 0~10；默认 3。对历史章节摘要做向量检索的相关条数。</p>
 
       <div class="row">
         <label class="field-label" for="aq-temperature">生成温度（temperature）</label>

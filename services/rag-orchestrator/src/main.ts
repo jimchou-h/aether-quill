@@ -16,8 +16,12 @@ import {
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
+import { indexChapterSummaryInQdrant } from './context/chapter-summary-memory';
+import { retrieveMemoryChapterSummaries } from './context/chapter-summary-memory';
 import { pickPriorChapterSummariesForPrompt } from './context/prior-chapter-summaries';
+import { runPreviewRetrieval, type PreviewRetrievalRequest } from './retrieval/preview-retrieval';
 import {
+  clampChapterSummaryMemoryCount,
   clampChapterSummaryPromptCount,
   clampGenerationTemperature,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
@@ -70,6 +74,7 @@ interface KnowledgeDocumentPayload {
   id: string;
   title: string;
   content: string;
+  docType?: string;
 }
 
 interface ProjectContext {
@@ -79,6 +84,8 @@ interface ProjectContext {
   chapters: ContextChapter[];
   /** 叙事上下文注入：当前章之前最近 N 章摘要（0 不注入） */
   chapterSummaryPromptCount: number;
+  /** 语义记忆池：向量检索历史章节摘要条数 */
+  chapterSummaryMemoryCount: number;
   /** 主生成链路采样温度 */
   generationTemperature: number;
   /** 项目知识库文档全文列表，用于标题匹配后整文注入 */
@@ -105,6 +112,7 @@ function getOrCreateContext(projectId: string) {
       outlineSummary: '',
       chapters: [],
       chapterSummaryPromptCount: DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+      chapterSummaryMemoryCount: 3,
       generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
       updatedAt: new Date().toISOString(),
     });
@@ -112,7 +120,11 @@ function getOrCreateContext(projectId: string) {
   return projectContextStore.get(projectId)!;
 }
 
-function buildNarrativeContext(ctx: ProjectContext, currentChapterNo?: number): string {
+async function buildNarrativeContext(
+  projectId: string,
+  ctx: ProjectContext,
+  currentChapterNo?: number
+): Promise<string> {
   const sections: string[] = [];
   if (ctx.personaProfile && ctx.personaProfile !== '未配置人物设定') {
     sections.push(`【人物设定】\n${ctx.personaProfile}`);
@@ -132,6 +144,27 @@ function buildNarrativeContext(ctx: ProjectContext, currentChapterNo?: number): 
         .join('\n')}`
     );
   }
+
+  const memoryMax = clampChapterSummaryMemoryCount(ctx.chapterSummaryMemoryCount);
+  if (memoryMax > 0) {
+    const memoryQuery = [ctx.outlineSummary, prior.map((ch) => ch.summary).join(' ')]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    if (memoryQuery) {
+      const memory = await retrieveMemoryChapterSummaries(projectId, memoryQuery, {
+        currentChapterNo,
+        maxCount: memoryMax,
+      });
+      if (memory.length > 0) {
+        sections.push(
+          `【语义记忆章节】\n${memory
+            .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
+            .join('\n')}`
+        );
+      }
+    }
+  }
   if (ctx.selectedRelationMemory?.trim()) {
     sections.push(`【已选关系事件备忘】\n${ctx.selectedRelationMemory.trim()}`);
   }
@@ -149,11 +182,14 @@ function resolveGenerationTemperature(bodyTemp: unknown, ctx: ProjectContext): n
   return clampGenerationTemperature(env);
 }
 
-function getGenerationContext(projectId: string, currentChapterNo?: number): GenerationContext {
+async function getGenerationContext(
+  projectId: string,
+  currentChapterNo?: number
+): Promise<GenerationContext> {
   const ctx = getOrCreateContext(projectId);
   return {
     systemPromptText: ctx.systemPromptText,
-    narrativeContext: buildNarrativeContext(ctx, currentChapterNo),
+    narrativeContext: await buildNarrativeContext(projectId, ctx, currentChapterNo),
   };
 }
 
@@ -380,7 +416,8 @@ app.post('/api/projects/:projectId/context', (req, res) => {
         if (!id) {
           return null;
         }
-        return { id, title, content };
+        const docType = typeof r.docType === 'string' ? r.docType : undefined;
+        return { id, title, content, docType };
       })
       .filter((x): x is KnowledgeDocumentPayload => Boolean(x));
   }
@@ -390,12 +427,73 @@ app.post('/api/projects/:projectId/context', (req, res) => {
       payload.chapterSummaryPromptCount
     );
   }
+  if (payload.chapterSummaryMemoryCount !== undefined) {
+    context.chapterSummaryMemoryCount = clampChapterSummaryMemoryCount(
+      payload.chapterSummaryMemoryCount
+    );
+  }
   if (payload.generationTemperature !== undefined) {
     context.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
   }
 
   context.updatedAt = new Date().toISOString();
   res.json(context);
+});
+
+app.post('/api/preview-retrieval', async (req, res) => {
+  const body = req.body as {
+    projectId?: string;
+    prompt?: string;
+    chapterNo?: number;
+    useStructuredKb?: boolean;
+    projectCtx?: PreviewRetrievalRequest['projectCtx'];
+    extraContext?: Record<string, unknown>;
+  };
+
+  if (!body.projectId || !body.projectCtx) {
+    return res.status(400).json({ error: 'projectId and projectCtx are required' });
+  }
+
+  try {
+    const result = await runPreviewRetrieval(vectorStore, reranker, API_BASE_URL, {
+      projectId: body.projectId,
+      prompt: body.prompt,
+      chapterNo: body.chapterNo,
+      useStructuredKb: body.useStructuredKb,
+      projectCtx: body.projectCtx,
+      extraContext: body.extraContext,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error('Preview retrieval failed:', error);
+    res.status(500).json({ error: 'Preview retrieval failed' });
+  }
+});
+
+app.post('/api/projects/:projectId/chapters/:chapterNo/index-summary', async (req, res) => {
+  const projectId = req.params.projectId;
+  const chapterNo = Number(req.params.chapterNo);
+  const { title, summary } = req.body as { title?: string; summary?: string };
+
+  if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+    return res.status(400).json({ error: 'invalid chapterNo' });
+  }
+  if (!summary?.trim()) {
+    return res.status(400).json({ error: 'summary is required' });
+  }
+
+  try {
+    await indexChapterSummaryInQdrant({
+      projectId,
+      chapterNo,
+      title: title?.trim() || `第${chapterNo}章`,
+      summary: summary.trim(),
+    });
+    res.json({ ok: true, chapterNo });
+  } catch (error) {
+    console.error('Index chapter summary failed:', error);
+    res.status(500).json({ error: 'Index chapter summary failed' });
+  }
 });
 
 app.post('/api/retrieve', async (req, res) => {
@@ -635,7 +733,7 @@ app.post('/api/generate', async (req, res) => {
     console.error('Generate retrieval failed:', error);
   }
 
-  const generationContext = getGenerationContext(projectId, narrativeCurrentChapter);
+  const generationContext = await getGenerationContext(projectId, narrativeCurrentChapter);
 
   if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {
     generationContext.systemPromptText = systemPromptOverride.trim();
@@ -791,7 +889,7 @@ app.post('/api/generate/draft', async (req, res) => {
   }
 
   const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, context);
-  const generationContext = getGenerationContext(projectId, chapterNo > 0 ? chapterNo : undefined);
+  const generationContext = await getGenerationContext(projectId, chapterNo > 0 ? chapterNo : undefined);
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
 
   const prompt = [
