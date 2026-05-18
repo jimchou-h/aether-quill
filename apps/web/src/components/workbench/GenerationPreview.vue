@@ -101,10 +101,9 @@ const emit = defineEmits<{
   flex-direction: column;
   min-height: 100%;
   border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 1.35rem;
+  border-radius: 12px;
+  padding: 1.25rem;
   background: #fff;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
 }
 
 .panel-heading {
@@ -112,38 +111,38 @@ const emit = defineEmits<{
 }
 
 .panel-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
 }
 
 .panel-description {
   margin: 0;
   color: #6b7280;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   line-height: 1.5;
 }
 
 .sub-title {
-  margin: 0 0 0.5rem;
-  font-size: 0.92rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
   color: #374151;
 }
 
 .streaming-indicator {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.55rem;
   margin-bottom: 1rem;
-  padding: 0.75rem 0.9rem;
-  border-radius: 12px;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
   background: #eff6ff;
   color: #1d4ed8;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
 }
 
 .streaming-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #1d4ed8;
   animation: pulse 1.2s ease-in-out infinite;
@@ -164,10 +163,10 @@ const emit = defineEmits<{
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  min-height: 320px;
+  gap: 0.5rem;
+  min-height: 300px;
   padding: 2rem 1.5rem;
-  border-radius: 14px;
+  border-radius: 10px;
   border: 1px dashed #d1d5db;
   background: #f8fafc;
   text-align: center;
@@ -176,15 +175,15 @@ const emit = defineEmits<{
 .empty-title {
   margin: 0;
   color: #374151;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
 }
 
 .empty-copy {
   margin: 0;
-  max-width: 24rem;
+  max-width: 22rem;
   color: #6b7280;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   line-height: 1.6;
 }
 
@@ -194,12 +193,12 @@ const emit = defineEmits<{
 
 .draft-output {
   border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 1.1rem 1.15rem;
-  background: #f8fafc;
+  border-radius: 10px;
+  padding: 1rem;
+  background: #fafafa;
   white-space: pre-wrap;
   line-height: 1.8;
-  font-size: 0.98rem;
+  font-size: 0.95rem;
   font-family: inherit;
   min-height: 360px;
   max-height: min(72vh, 760px);
@@ -209,7 +208,7 @@ const emit = defineEmits<{
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.65rem;
   margin-bottom: 1rem;
 }
 
@@ -217,10 +216,11 @@ const emit = defineEmits<{
   border: none;
   background: #1d4ed8;
   color: #fff;
-  border-radius: 10px;
-  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
   cursor: pointer;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
+  transition: background 0.15s;
 }
 
 .primary-button:hover {
@@ -229,7 +229,7 @@ const emit = defineEmits<{
 
 .primary-button:disabled,
 .secondary-button:disabled {
-  opacity: 0.65;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
@@ -237,10 +237,11 @@ const emit = defineEmits<{
   border: 1px solid #d1d5db;
   background: #fff;
   color: #374151;
-  border-radius: 10px;
-  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
   cursor: pointer;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
+  transition: all 0.15s;
 }
 
 .secondary-button:hover {
@@ -250,33 +251,34 @@ const emit = defineEmits<{
 
 .citations-section {
   border-top: 1px solid #e5e7eb;
-  padding-top: 1rem;
-  margin-top: 0.25rem;
+  padding-top: 0.85rem;
+  margin-top: 0.15rem;
 }
 
 .citation-list {
   list-style: none;
   padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.55rem;
 }
 
 .citation-item {
   display: flex;
   align-items: flex-start;
-  gap: 0.65rem;
-  font-size: 0.88rem;
+  gap: 0.6rem;
+  font-size: 0.85rem;
   color: #4b5563;
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
 .citation-badge {
   flex-shrink: 0;
   background: #eff6ff;
   color: #1d4ed8;
-  font-size: 0.75rem;
-  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.4rem;
   border-radius: 999px;
   font-weight: 500;
 }

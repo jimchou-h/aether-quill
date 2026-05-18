@@ -187,10 +187,7 @@ function handleClickOutside(event: MouseEvent) {
     const target = event.target as Node;
     const moreBtn = document.querySelector('.more-actions-trigger');
     const menu = document.querySelector('.more-actions-menu');
-    if (
-      moreBtn && !moreBtn.contains(target) &&
-      menu && !menu.contains(target)
-    ) {
+    if (moreBtn && !moreBtn.contains(target) && menu && !menu.contains(target)) {
       showMoreActions.value = false;
     }
   }
@@ -370,9 +367,7 @@ defineExpose({ clearEditing });
                 @click="emit('optimize', selectedChapter)"
               >
                 {{
-                  props.optimizingChapterNo === selectedChapter.chapterNo
-                    ? '优化中...'
-                    : '优化章节'
+                  props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '优化章节'
                 }}
               </button>
               <div class="dropdown-container">
@@ -382,8 +377,20 @@ defineExpose({ clearEditing });
                   @click="toggleMoreActions"
                 >
                   更多
-                  <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" style="margin-left:0.25rem;">
-                    <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                  <svg
+                    width="10"
+                    height="6"
+                    viewBox="0 0 10 6"
+                    fill="currentColor"
+                    style="margin-left: 0.25rem"
+                  >
+                    <path
+                      d="M1 1l4 4 4-4"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      fill="none"
+                      stroke-linecap="round"
+                    />
                   </svg>
                 </button>
                 <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">

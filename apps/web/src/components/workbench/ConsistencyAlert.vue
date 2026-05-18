@@ -30,34 +30,34 @@ defineProps<{
 <style scoped>
 .consistency-alerts {
   border: 1px solid #e5e7eb;
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 1rem 1.15rem;
   background: #fff;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03);
 }
 
 .alert-title {
-  font-size: 0.95rem;
-  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+  margin: 0 0 0.65rem;
   color: #374151;
 }
 
 .alert-list {
   list-style: none;
   padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .alert-item {
   display: flex;
   align-items: flex-start;
-  gap: 0.6rem;
-  font-size: 0.88rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: 10px;
-  line-height: 1.55;
+  gap: 0.55rem;
+  font-size: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  line-height: 1.5;
 }
 
 .alert-info {
@@ -77,9 +77,9 @@ defineProps<{
 
 .alert-level-badge {
   flex-shrink: 0;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   padding: 0.1rem 0.35rem;
-  border-radius: 3px;
+  border-radius: 4px;
   font-weight: 600;
   text-transform: uppercase;
 }

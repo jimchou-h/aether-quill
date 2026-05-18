@@ -427,33 +427,32 @@ defineExpose({ resetForm });
 <style scoped>
 .prompt-console {
   border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 1.35rem;
+  border-radius: 12px;
+  padding: 1.25rem;
   background: #fff;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
 }
 
 .panel-heading {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.15rem;
 }
 
 .panel-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
 }
 
 .panel-description {
   margin: 0;
   color: #6b7280;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   line-height: 1.5;
 }
 
 .form-section {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 1.25rem;
+  gap: 0.15rem;
+  margin-bottom: 1.15rem;
 }
 
 .form-section:last-child {
@@ -475,48 +474,53 @@ defineExpose({ resetForm });
 .field-label {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  margin-bottom: 0.9rem;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
+  color: #374151;
 }
 
 .unlimited-toggle {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   font-weight: 500;
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   color: #4b5563;
+  margin-top: 0.15rem;
 }
 
 .field-input,
 .field-textarea {
   border: 1px solid #d1d5db;
-  border-radius: 10px;
-  padding: 0.7rem 0.85rem;
-  font-size: 0.95rem;
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.92rem;
   font-family: inherit;
   background: #fff;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .field-input:focus,
 .field-textarea:focus {
   outline: none;
   border-color: #93c5fd;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .field-textarea {
-  min-height: 112px;
+  min-height: 100px;
   resize: vertical;
   line-height: 1.6;
 }
 
 .bordered-section {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
   padding: 1rem;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #f8fafc;
   border: 1px solid #edf2f7;
 }
@@ -526,8 +530,9 @@ defineExpose({ resetForm });
 }
 
 .section-title {
-  margin: 0 0 0.75rem;
-  font-size: 0.95rem;
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  color: #374151;
 }
 
 .section-header {
@@ -535,32 +540,37 @@ defineExpose({ resetForm });
   justify-content: space-between;
   gap: 0.75rem;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.65rem;
 }
 
 .section-meta {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: #6b7280;
 }
 
-.chip-list,
-.custom-character-row {
+.chip-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 
 .custom-character-row {
-  margin-top: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
+.custom-character-row .field-input {
+  flex: 1;
 }
 
 .chip-button,
-.secondary-button,
-.primary-button {
-  border-radius: 999px;
-  padding: 0.5rem 0.9rem;
+.secondary-button {
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
   cursor: pointer;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
+  transition: all 0.15s;
 }
 
 .chip-button {
@@ -569,10 +579,16 @@ defineExpose({ resetForm });
   color: #374151;
 }
 
+.chip-button:hover {
+  border-color: #93c5fd;
+  background: #f0f5ff;
+}
+
 .chip-meta {
   display: block;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: #6b7280;
+  font-weight: 400;
 }
 
 .message-warn {
@@ -595,59 +611,81 @@ defineExpose({ resetForm });
   color: #374151;
 }
 
+.secondary-button:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
 .primary-button {
   border: none;
   background: #1d4ed8;
   color: #fff;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.15s;
+}
+
+.primary-button:hover {
+  background: #2563eb;
 }
 
 .generate-button {
   align-self: flex-start;
   margin-top: 0.5rem;
-  padding: 0.72rem 1.2rem;
-  border-radius: 10px;
-  font-size: 0.95rem;
+  padding: 0.65rem 1.2rem;
+  font-size: 0.92rem;
 }
 
-.primary-button:disabled {
-  opacity: 0.65;
+.primary-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .event-checklist {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  max-height: 320px;
+  gap: 0.55rem;
+  max-height: 300px;
   overflow: auto;
   padding-right: 0.15rem;
 }
 
 .event-option {
   display: flex;
-  gap: 0.65rem;
+  gap: 0.6rem;
   align-items: flex-start;
   border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 0.75rem;
+  border-radius: 8px;
+  padding: 0.65rem;
   background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.event-option:hover {
+  border-color: #93c5fd;
 }
 
 .event-option-text {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.88rem;
+  gap: 0.2rem;
+  font-size: 0.85rem;
   line-height: 1.5;
 }
 
 .event-option-meta {
   color: #6b7280;
+  font-size: 0.8rem;
 }
 
 .message {
-  margin-bottom: 0.65rem;
-  font-size: 0.88rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.85rem;
+  color: #6b7280;
 }
 
 .message-error {
@@ -656,9 +694,9 @@ defineExpose({ resetForm });
 
 .structured-kb-banner,
 .structured-kb-ok {
-  margin: 0.5rem 0 0.75rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: 10px;
+  margin: 0.4rem 0 0.65rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
   border: 1px solid #fde68a;
   background: #fffbeb;
 }
@@ -669,8 +707,8 @@ defineExpose({ resetForm });
 }
 
 .structured-kb-title {
-  margin: 0 0 0.35rem;
-  font-size: 0.82rem;
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
   font-weight: 700;
   color: #92400e;
 }
@@ -681,8 +719,8 @@ defineExpose({ resetForm });
 
 .structured-kb-body {
   margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.55;
+  font-size: 0.83rem;
+  line-height: 1.5;
   color: #78350f;
 }
 
@@ -695,7 +733,7 @@ defineExpose({ resetForm });
 }
 
 .structured-actions {
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.65rem;
 }
 
 @media (max-width: 960px) {
