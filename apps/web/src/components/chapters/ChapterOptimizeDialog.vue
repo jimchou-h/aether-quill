@@ -544,7 +544,7 @@ async function handleApply() {
 </script>
 
 <template>
-  <div v-if="props.visible" class="modal-overlay" role="presentation" @click.self="close">
+  <div v-if="props.visible" class="modal-overlay" role="presentation">
     <section
       class="modal-dialog"
       :class="{ 'fullscreen-draft': step === 'draft' }"
@@ -671,7 +671,7 @@ async function handleApply() {
         </div>
         <div class="sync-scroll-toggle">
           <label class="sync-scroll-label">
-            <input type="checkbox" v-model="syncScrollEnabled" class="sync-scroll-checkbox" />
+            <input v-model="syncScrollEnabled" type="checkbox" class="sync-scroll-checkbox" />
             <span class="sync-scroll-text">同步滚动</span>
           </label>
         </div>
