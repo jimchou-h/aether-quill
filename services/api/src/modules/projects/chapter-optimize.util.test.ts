@@ -14,6 +14,12 @@ import {
   parseTypoCheckIssues,
   buildTypoCheckUserPrompt,
   buildTypoFixUserPrompt,
+  splitIntoSegments,
+  buildSegmentPrompt,
+  parseSegmentOutput,
+  calculateSegmentMaxTokens,
+  type Segment,
+  type ChapterOptimizeChapterRef,
 } from './chapter-optimize.util';
 
 const sampleChapter = {
@@ -147,4 +153,122 @@ test('buildTypoFixUserPrompt lists all issues', () => {
   ]);
   assert.match(prompt, /<typo-issues>/);
   assert.match(prompt, /「A」→「B」/);
+});
+
+test('splitIntoSegments splits 4000-char content into 3 segments', () => {
+  const paragraphs: string[] = [];
+  for (let i = 0; i < 15; i++) {
+    paragraphs.push(
+      `这是第${i + 1}段的正文内容。包含了一些描写和对白。段落长度大约在两百到三百字之间。`.repeat(3)
+    );
+  }
+  const content = paragraphs.join('\n\n');
+  const segments = splitIntoSegments(content, '1. 调整节奏\n2. 润色对白');
+  assert.equal(segments.length, 3);
+  for (const seg of segments) {
+    assert.ok(seg.originalText.length >= 200);
+    assert.ok(seg.index >= 0 && seg.index < 3);
+    assert.ok(seg.startParagraph <= seg.endParagraph);
+    assert.ok(seg.planExcerpt.length > 0);
+  }
+});
+
+test('splitIntoSegments handles empty content', () => {
+  const segments = splitIntoSegments('', 'test plan');
+  assert.equal(segments.length, 0);
+});
+
+test('splitIntoSegments handles content with fewer paragraphs than maxSegments', () => {
+  const segments = splitIntoSegments('一段内容\n\n二段内容', 'plan');
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0]!.originalText, '一段内容');
+  assert.equal(segments[1]!.originalText, '二段内容');
+});
+
+test('buildSegmentPrompt includes segment index info and required sections', () => {
+  const segment: Segment = {
+    index: 1,
+    originalText: '第二段原文内容',
+    planExcerpt: '修改第二段节奏',
+    startParagraph: 5,
+    endParagraph: 9,
+  };
+  const chapter: ChapterOptimizeChapterRef = {
+    chapterNo: 3,
+    title: '试炼之夜',
+    content: '全文',
+    updatedAt: new Date(),
+  };
+  const prompt = buildSegmentPrompt({
+    segment,
+    chapter,
+    instruction: '让节奏更紧凑',
+    planText: '1. 调整整体节奏',
+    appearingCharacters: ['菲伦', '尤里乌丝'],
+    previousSegmentSummary: '第一段描写了主角进入地下城',
+    totalSegments: 3,
+  });
+
+  assert.match(prompt, /第 2\/3 段/);
+  assert.match(prompt, /第3章/);
+  assert.match(prompt, /试炼之夜/);
+  assert.match(prompt, /菲伦、尤里乌丝/);
+  assert.match(prompt, /<segment-original>[\s\S]*第二段原文内容[\s\S]*<\/segment-original>/);
+  assert.match(prompt, /【前段正文摘要】[\s\S]*第一段描写了主角进入地下城/);
+  assert.match(prompt, /【SEG_SUMMARY】/);
+});
+
+test('buildSegmentPrompt omits previous summary for first segment', () => {
+  const segment: Segment = {
+    index: 0,
+    originalText: '第一段原文',
+    planExcerpt: '',
+    startParagraph: 0,
+    endParagraph: 4,
+  };
+  const chapter: ChapterOptimizeChapterRef = {
+    chapterNo: 1,
+    title: '开始',
+    content: '全文',
+    updatedAt: new Date(),
+  };
+  const prompt = buildSegmentPrompt({
+    segment,
+    chapter,
+    instruction: '润色',
+    planText: '润色全文',
+    totalSegments: 2,
+  });
+
+  assert.match(prompt, /第 1\/2 段/);
+  assert.ok(!prompt.includes('【前段正文摘要】'));
+});
+
+test('parseSegmentOutput extracts text and summary when marker present', () => {
+  const output = '优化后的第二段正文内容。\n\n【SEG_SUMMARY】第二段描写了战斗场面';
+  const result = parseSegmentOutput(output);
+  assert.equal(result.segmentText, '优化后的第二段正文内容。');
+  assert.equal(result.summary, '第二段描写了战斗场面');
+});
+
+test('parseSegmentOutput falls back to last sentence when marker absent', () => {
+  const output = '优化后的正文内容。战斗场面很激烈。';
+  const result = parseSegmentOutput(output);
+  assert.equal(result.segmentText, '优化后的正文内容。战斗场面很激烈。');
+  assert.ok(result.summary.length > 0);
+});
+
+test('calculateSegmentMaxTokens returns at least 2048', () => {
+  assert.equal(calculateSegmentMaxTokens('短文本'), 2048);
+});
+
+test('calculateSegmentMaxTokens caps at 4096', () => {
+  const longText = 'x'.repeat(4000);
+  assert.equal(calculateSegmentMaxTokens(longText), 4096);
+});
+
+test('calculateSegmentMaxTokens returns proportional value', () => {
+  const text = 'x'.repeat(1500);
+  const tokens = calculateSegmentMaxTokens(text);
+  assert.ok(tokens >= 2048 && tokens <= 4096);
 });

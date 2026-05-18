@@ -333,6 +333,12 @@ export class ProjectsController {
         onError: (message) => {
           writeEvent({ event: 'error', data: message });
         },
+        onSegmentStart: ({ segmentIndex, totalSegments }) => {
+          writeEvent({
+            event: 'segment_start',
+            data: JSON.stringify({ segmentIndex, totalSegments }),
+          });
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : '优化正文生成失败';

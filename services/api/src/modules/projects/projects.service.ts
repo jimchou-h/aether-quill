@@ -71,15 +71,18 @@ import {
   assertDraftText,
   assertInstruction,
   assertPlanText,
-  buildDraftUserPrompt,
   buildPlanUserPrompt,
+  buildSegmentPrompt,
   buildTypoCheckUserPrompt,
   buildTypoFixUserPrompt,
+  calculateSegmentMaxTokens,
   ensureChapterVersionMatches,
   makeOptimizationId,
   normalizeInstruction,
   parseExpectedUpdatedAt,
+  parseSegmentOutput,
   parseTypoCheckIssues,
+  splitIntoSegments,
   type ChapterOptimizeUsedRelationEvent,
   type ChapterTypoIssueRecord,
 } from './chapter-optimize.util';
@@ -1922,6 +1925,7 @@ export class ProjectsService implements OnModuleInit {
       onContent: (text: string) => void;
       onEnd: (event: { traceId: string }) => void;
       onError: (message: string) => void;
+      onSegmentStart?: (event: { segmentIndex: number; totalSegments: number }) => void;
     }
   ): Promise<void> {
     if (userId) {
@@ -1962,117 +1966,90 @@ export class ProjectsService implements OnModuleInit {
       usedRelationEvents
     );
 
-    const userPrompt = buildDraftUserPrompt({
-      chapter: {
-        chapterNo: chapter.chapterNo,
-        title: chapter.title,
-        content: chapter.content,
-        updatedAt: chapter.updatedAt,
-      },
-      instruction,
-      planText,
-      appearingCharacters: payload.appearingCharacters,
-      selectedRelationEvents: usedRelationEvents.map(
-        (event): ChapterOptimizeUsedRelationEvent => ({
-          id: event.id,
-          protagonist: event.protagonist,
-          counterparty: event.counterparty,
-          summary: event.summary,
-          evidenceSnippet: event.evidenceSnippet,
-          chapterNo: event.chapterNo,
-        })
-      ),
-    });
+    const chapterRef = {
+      chapterNo: chapter.chapterNo,
+      title: chapter.title,
+      content: chapter.content,
+      updatedAt: chapter.updatedAt,
+    };
 
-    const chapterSummaryForRetrieval =
-      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+    const segments = splitIntoSegments(chapter.content, planText, 3);
+    const traceId = makeOptimizationId('draft');
+    callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
 
-    let response;
-    try {
-      response = await axios.post(
-        `${this.getRagOrchestratorUrl()}/api/generate`,
-        {
-          projectId,
-          prompt: userPrompt,
-          useSSE: true,
-          systemPromptOverride: CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
-          templateKey: CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
-          context: {
-            task: 'chapter.optimize.draft',
-            chapterNo: normalizedChapterNo,
-            planId: payload.planId || null,
-            inputChapterChars: chapter.content.length,
-            inputContextChars: userPrompt.length,
-            retrievalInstruction: instruction,
-            retrievalChapterSummary: chapterSummaryForRetrieval,
-            retrievalChapterTitle: chapter.title,
-          },
-        },
-        { responseType: 'stream' }
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '调用优化正文生成失败';
-      throw new BadGatewayException(message);
-    }
+    let previousSegmentSummary: string | undefined;
 
-    let firstStartEmitted = false;
-    let buffer = '';
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i]!;
+      callbacks.onSegmentStart?.({ segmentIndex: i + 1, totalSegments: segments.length });
 
-    await new Promise<void>((resolveStream, rejectStream) => {
-      const stream = response.data as NodeJS.ReadableStream;
-
-      stream.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf-8');
-        const segments = buffer.split('\n\n');
-        buffer = segments.pop() || '';
-
-        for (const segment of segments) {
-          const trimmedSegment = segment.trim();
-          if (!trimmedSegment.startsWith('data:')) {
-            continue;
-          }
-          const dataPart = trimmedSegment.replace(/^data:\s*/, '');
-          if (!dataPart) {
-            continue;
-          }
-          let event: { event?: string; data?: string; traceId?: string };
-          try {
-            event = JSON.parse(dataPart);
-          } catch {
-            continue;
-          }
-
-          switch (event.event) {
-            case 'start': {
-              const traceId = typeof event.traceId === 'string' ? event.traceId : '';
-              if (!firstStartEmitted) {
-                callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
-                firstStartEmitted = true;
-              }
-              break;
-            }
-            case 'content': {
-              const raw = typeof event.data === 'string' ? event.data : '';
-              callbacks.onContent(raw.replace(/\\n/g, '\n'));
-              break;
-            }
-            case 'end': {
-              const traceId = typeof event.traceId === 'string' ? event.traceId : '';
-              callbacks.onEnd({ traceId });
-              break;
-            }
-            case 'error': {
-              const message = typeof event.data === 'string' ? event.data : '优化正文生成失败';
-              callbacks.onError(message);
-              break;
-            }
-          }
-        }
+      const segmentPrompt = buildSegmentPrompt({
+        segment,
+        chapter: chapterRef,
+        instruction,
+        planText,
+        appearingCharacters: payload.appearingCharacters,
+        selectedRelationEvents: usedRelationEvents.map(
+          (event): ChapterOptimizeUsedRelationEvent => ({
+            id: event.id,
+            protagonist: event.protagonist,
+            counterparty: event.counterparty,
+            summary: event.summary,
+            evidenceSnippet: event.evidenceSnippet,
+            chapterNo: event.chapterNo,
+          })
+        ),
+        previousSegmentSummary,
+        totalSegments: segments.length,
       });
 
-      stream.on('end', () => resolveStream());
-      stream.on('error', (error: unknown) => rejectStream(error));
-    });
+      const maxTokens = calculateSegmentMaxTokens(segment.originalText);
+
+      let output: string | null = null;
+      for (let retry = 0; retry <= 1; retry++) {
+        try {
+          const response = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
+            projectId,
+            prompt: segmentPrompt,
+            useSSE: false,
+            systemPromptOverride: CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
+            templateKey: CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
+            maxTokens,
+            context: {
+              task: 'chapter.optimize.segment',
+              chapterNo: normalizedChapterNo,
+              planId: payload.planId || null,
+              segmentIndex: segment.index,
+              segmentTotal: segments.length,
+              inputSegmentChars: segment.originalText.length,
+            },
+          });
+
+          if (response.data?.content && typeof response.data.content === 'string') {
+            output = response.data.content;
+            break;
+          }
+        } catch {
+          if (retry < 1) {
+            continue;
+          }
+          callbacks.onError(`第 ${segment.index + 1}/${segments.length} 段生成失败，已重试`);
+          return;
+        }
+      }
+
+      if (output === null) {
+        callbacks.onError(`第 ${segment.index + 1}/${segments.length} 段生成失败：未收到有效响应`);
+        return;
+      }
+
+      const { segmentText, summary } = parseSegmentOutput(output);
+      const segmentWithNewline = i < segments.length - 1 ? segmentText + '\n\n' : segmentText;
+      callbacks.onContent(segmentWithNewline);
+      previousSegmentSummary = summary;
+    }
+
+    callbacks.onEnd({ traceId });
   }
 
   async applyChapterOptimization(
@@ -2760,7 +2737,9 @@ export class ProjectsService implements OnModuleInit {
                 chapterNo
               );
             }
-            persona.lastAppearedChapterNo = computeLastAppearedChapterNo(persona.appearedChapterNos);
+            persona.lastAppearedChapterNo = computeLastAppearedChapterNo(
+              persona.appearedChapterNos
+            );
             persona.updatedAt = new Date();
             continue;
           }
