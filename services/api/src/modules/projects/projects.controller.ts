@@ -633,11 +633,14 @@ export class ProjectsController {
     @Body()
     data: {
       content: string;
+      chapterNos?: number[];
     },
     @Request() req: AuthenticatedRequest
   ) {
     const userId = req.user?.userId;
-    return this.projectsService.importChapterConfirm(id, data.content, userId);
+    return this.projectsService.importChapterConfirm(id, data.content, userId, {
+      chapterNos: data.chapterNos,
+    });
   }
 
   @UseGuards(JwtAuthGuard)

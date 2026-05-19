@@ -27,6 +27,12 @@ post:
               description: 原始小说原文文本（与预览时一致）
               minLength: 1
               maxLength: 5242880
+            chapterNos:
+              type: array
+              description: 可选；预览后用户剔除的章节不在此列表中。未传则导入解析出的全部章节。
+              items:
+                type: integer
+                minimum: 1
   responses:
     '200':
       description: Chapters imported successfully

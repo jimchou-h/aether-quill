@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import {
   apiClient,
   type ChapterImportPersonaBootstrap,
@@ -40,6 +40,8 @@ const importing = ref(false);
 const importedChapters = ref<ChapterItem[]>([]);
 const importBootstrap = ref<ChapterImportPersonaBootstrap | null>(null);
 const importFileName = ref('');
+
+const selectedChapterCount = computed(() => previewData.value?.chapters.length ?? 0);
 
 function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -106,8 +108,22 @@ async function doPreview() {
   }
 }
 
+function removePreviewChapter(chapterNo: number) {
+  if (!previewData.value) return;
+  previewData.value = {
+    ...previewData.value,
+    chapters: previewData.value.chapters.filter((chapter) => chapter.chapterNo !== chapterNo),
+  };
+  if (previewData.value.chapters.length === 0) {
+    localError.value = '请至少保留一个章节，或返回重新选择文件';
+  } else {
+    localError.value = '';
+  }
+}
+
 async function handleConfirmImport() {
   if (!previewData.value || previewData.value.chapters.length === 0) {
+    localError.value = '请至少保留一个章节后再导入';
     return;
   }
 
@@ -115,7 +131,12 @@ async function handleConfirmImport() {
   localError.value = '';
 
   try {
-    const fullChapters = await apiClient.importChapterConfirm(props.projectId, rawContent.value);
+    const chapterNos = previewData.value.chapters.map((chapter) => chapter.chapterNo);
+    const fullChapters = await apiClient.importChapterConfirm(
+      props.projectId,
+      rawContent.value,
+      { chapterNos }
+    );
     importedChapters.value = fullChapters.chapters;
     importBootstrap.value = fullChapters.personaBootstrap;
     step.value = ImportStep.Done;
@@ -217,10 +238,13 @@ function resetToUpload() {
             原文：<strong>{{ formatFileSize(previewData.totalChars) }}</strong>
           </span>
           <span class="preview-stat">
-            识别到 <strong>{{ previewData.detectedCount }}</strong> 个章节
+            将导入 <strong>{{ selectedChapterCount }}</strong> / 识别
+            {{ previewData.detectedCount }} 个章节
           </span>
           <span v-if="importFileName" class="preview-stat"> 文件：{{ importFileName }} </span>
         </div>
+
+        <p class="preview-hint">不需要的章节可点击右侧删除，确认后仅导入剩余章节。</p>
 
         <div class="preview-list">
           <div
@@ -232,6 +256,15 @@ function resetToUpload() {
               <span class="preview-chapter-no">第{{ chapter.chapterNo }}章</span>
               <span class="preview-chapter-title">{{ chapter.title }}</span>
               <span class="preview-chars">{{ formatFileSize(chapter.contentLength) }}</span>
+              <button
+                type="button"
+                class="preview-remove-button"
+                title="移除此章节"
+                :disabled="importing"
+                @click="removePreviewChapter(chapter.chapterNo)"
+              >
+                删除
+              </button>
             </div>
             <p class="preview-snippet">{{ chapter.contentPreview || '（空）' }}</p>
           </div>
@@ -242,10 +275,10 @@ function resetToUpload() {
           <button
             class="primary-button"
             type="button"
-            :disabled="importing"
+            :disabled="importing || selectedChapterCount === 0"
             @click="handleConfirmImport"
           >
-            {{ importing ? '导入中...' : `确认导入 ${previewData.detectedCount} 个章节` }}
+            {{ importing ? '导入中...' : `确认导入 ${selectedChapterCount} 个章节` }}
           </button>
         </div>
       </template>
@@ -465,6 +498,12 @@ function resetToUpload() {
   color: #111827;
 }
 
+.preview-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
 .preview-list {
   display: flex;
   flex-direction: column;
@@ -507,6 +546,26 @@ function resetToUpload() {
   font-size: 0.78rem;
   color: #9ca3af;
   white-space: nowrap;
+}
+
+.preview-remove-button {
+  flex-shrink: 0;
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: #b91c1c;
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.preview-remove-button:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.preview-remove-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .preview-snippet {
