@@ -33,19 +33,33 @@ const FALLBACK_SEGMENT_CHARS = 5000;
 const PREVIEW_CHARS = 200;
 
 /**
+ * 章节序号：阿拉伯数字或中文数字（含常见变体）。
+ * 命中「第…章/节/话…」时，中间为任一形式均视为章节标题。
+ */
+const CHAPTER_NUMERAL = '(?:\\d+|[一二三四五六七八九十百千万零〇两]+)';
+const CHAPTER_UNIT = '[章节话回部集卷]';
+/** 章后：行尾，或标点/空白 + 副标题（避免正文「第一章使用…」误命中） */
+const CHAPTER_TITLE_TAIL = '(?:[\\s，。、：]+.*|[\\s，。、：]*$)';
+
+function buildDiChapterTitlePattern(markdownHeading: boolean): RegExp {
+  const prefix = markdownHeading ? '^#{1,3}\\s*' : '^';
+  return new RegExp(
+    `${prefix}第\\s*${CHAPTER_NUMERAL}\\s*${CHAPTER_UNIT}${CHAPTER_TITLE_TAIL}$`,
+    'm'
+  );
+}
+
+/**
  * 常见的章节标题正则（按优先级）
  * 匹配规则：
- * - 「第X章」「第X节」「第X话」「第X回」
+ * - 「第X章」「第X节」「第X话」「第X回」（X 为阿拉伯或中文数字）
  * - 「Chapter X」「Chapter-X」
- * - Markdown 二级标题「## 第X章」
- * - Markdown 一级标题「# 第X章」
- * - 纯数字标题行如「1.」「一、」
+ * - Markdown 标题「## 第X章」
+ * - 纯数字标题行如「1.」
  */
 const CHAPTER_TITLE_PATTERNS: RegExp[] = [
-  /^#{1,3}\s*第\d+[章节话回部集][\s，。、：]*.*$/m,
-  /^第\d+[章节话回部集][\s，。、：]*.*$/m,
-  /^#{1,3}\s*第[一二三四五六七八九十百千万]+[章节话回部集][\s，。、：]+.*$/m,
-  /^第[一二三四五六七八九十百千万]+[章节话回部集][\s，。、：]+.*$/m,
+  buildDiChapterTitlePattern(true),
+  buildDiChapterTitlePattern(false),
   /^#{1,3}\s*[Cc]hapter\s*\d+[\s：:].*$/m,
   /^[Cc]hapter\s*\d+[\s：:].*$/m,
   /^#{1,3}\s*\d+[.、．]\s*.*$/m,

@@ -1128,7 +1128,12 @@ export class ProjectsService implements OnModuleInit {
     }
   }
 
-  async importChapterConfirm(projectId: string, content: string, userId?: string) {
+  async importChapterConfirm(
+    projectId: string,
+    content: string,
+    userId?: string,
+    options?: { chapterNos?: number[] }
+  ) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -1139,7 +1144,14 @@ export class ProjectsService implements OnModuleInit {
       throw new BadRequestException({ code: 1319, msg: '导入内容不能为空' });
     }
 
-    const chapters = parseNovelContent(content);
+    let chapters = parseNovelContent(content);
+
+    if (options?.chapterNos && options.chapterNos.length > 0) {
+      const allowed = new Set(
+        options.chapterNos.filter((no) => Number.isFinite(no) && no > 0).map((no) => Math.floor(no))
+      );
+      chapters = chapters.filter((chapter) => allowed.has(chapter.chapterNo));
+    }
 
     if (chapters.length === 0) {
       throw new BadRequestException({ code: 1318, msg: '导入内容中未识别到有效章节' });

@@ -56,6 +56,53 @@ test('parseNovelContent parses Markdown chapter titles', () => {
   assert.equal(segments[1]!.title, '第2章 试炼');
 });
 
+test('parseNovelContent matches standalone Chinese chapter title without subtitle', () => {
+  const text = [
+    '第十二章',
+    '',
+    '这是第十二章的正文内容，单独标题行无副标题也应被识别为章节分界。',
+  ].join('\n');
+
+  const segments = parseNovelContent(text);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0]!.title, '第十二章');
+  assert.match(segments[0]!.content, /第十二章的正文/);
+});
+
+test('parseNovelContent matches chapter titles with spaced numerals', () => {
+  const text = [
+    '第 1 章 启程',
+    '',
+    '这是第一章的正文内容，章节序号与单位字之间允许空格。',
+    '',
+    '第 二 章 试炼',
+    '',
+    '这是第二章的正文内容，中文数字同样允许空格分隔。',
+  ].join('\n');
+
+  const segments = parseNovelContent(text);
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0]!.title, '第 1 章 启程');
+  assert.equal(segments[1]!.title, '第 二 章 试炼');
+});
+
+test('parseNovelContent parses mixed Arabic and Chinese chapter titles', () => {
+  const text = [
+    '第1章 启程',
+    '',
+    '第一章使用阿拉伯数字标题，正文足够长以通过最小内容阈值检查。',
+    '',
+    '第二章：清晨',
+    '',
+    '第二章使用中文数字标题，正文同样足够长以满足导入切分要求。',
+  ].join('\n');
+
+  const segments = parseNovelContent(text);
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0]!.title, '第1章 启程');
+  assert.equal(segments[1]!.title, '第二章：清晨');
+});
+
 test('parseNovelContent parses Chinese numeral chapter titles', () => {
   const text = [
     '第一章：觉醒之夜',

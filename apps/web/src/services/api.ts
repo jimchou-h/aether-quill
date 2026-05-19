@@ -1237,10 +1237,14 @@ export const apiClient = {
     }>(response.data);
   },
 
-  async importChapterConfirm(projectId: string, content: string) {
+  async importChapterConfirm(
+    projectId: string,
+    content: string,
+    options?: { chapterNos?: number[] }
+  ) {
     const response = await http.post(
       `/api/projects/${projectId}/knowledge/chapters/import/confirm`,
-      { content }
+      { content, chapterNos: options?.chapterNos }
     );
     return this.unwrapPayload<{
       importedCount: number;
