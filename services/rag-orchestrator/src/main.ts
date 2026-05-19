@@ -155,6 +155,7 @@ async function buildNarrativeContext(
       const memory = await retrieveMemoryChapterSummaries(projectId, memoryQuery, {
         currentChapterNo,
         maxCount: memoryMax,
+        excludeChapterNos: prior.map((ch) => ch.chapterNo),
       });
       if (memory.length > 0) {
         sections.push(

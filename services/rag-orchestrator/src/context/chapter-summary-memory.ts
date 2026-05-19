@@ -76,15 +76,73 @@ export async function indexChapterSummaryInQdrant(input: {
   });
 }
 
+export type MemoryChapterSummaryRetrieveOpts = {
+  currentChapterNo?: number;
+  maxCount: number;
+  /** 已在「近期章节摘要」池中的章号，语义记忆池不再重复注入 */
+  excludeChapterNos?: Iterable<number>;
+};
+
+/** 将向量检索原始行过滤为语义记忆章节列表（可单测，不依赖 Qdrant） */
+export function pickMemoryChapterSummariesFromSearchRows(
+  rows: unknown[],
+  opts: MemoryChapterSummaryRetrieveOpts
+): ChapterSummaryInput[] {
+  const maxCount = Number.isFinite(opts.maxCount) ? Math.trunc(opts.maxCount) : 0;
+  if (maxCount <= 0) {
+    return [];
+  }
+
+  const current = opts.currentChapterNo ?? Number.MAX_SAFE_INTEGER;
+  const exclude = new Set<number>();
+  if (opts.excludeChapterNos) {
+    for (const n of opts.excludeChapterNos) {
+      if (Number.isFinite(n) && n > 0) {
+        exclude.add(Math.trunc(n));
+      }
+    }
+  }
+
+  const out: ChapterSummaryInput[] = [];
+  const seen = new Set<number>();
+
+  for (const raw of rows) {
+    const p = raw as { payload?: Record<string, unknown> };
+    const payload = p.payload ?? {};
+    const chapterNo = Number(payload.chapter_no);
+    if (!Number.isFinite(chapterNo) || chapterNo <= 0 || chapterNo >= current) {
+      continue;
+    }
+    if (exclude.has(chapterNo) || seen.has(chapterNo)) {
+      continue;
+    }
+    seen.add(chapterNo);
+    out.push({
+      chapterNo,
+      title: String(payload.docTitle ?? `第${chapterNo}章`),
+      summary: String(payload.content ?? '').trim(),
+    });
+    if (out.length >= maxCount) {
+      break;
+    }
+  }
+
+  return out;
+}
+
 export async function retrieveMemoryChapterSummaries(
   projectId: string,
   query: string,
-  opts: { currentChapterNo?: number; maxCount: number }
+  opts: MemoryChapterSummaryRetrieveOpts
 ): Promise<ChapterSummaryInput[]> {
   const maxCount = Number.isFinite(opts.maxCount) ? Math.trunc(opts.maxCount) : 0;
   if (maxCount <= 0 || !query.trim()) {
     return [];
   }
+
+  const excludeSize = opts.excludeChapterNos
+    ? [...opts.excludeChapterNos].filter((n) => Number.isFinite(n) && n > 0).length
+    : 0;
 
   const env = getResolvedRagInfrastructureEnv();
   const apiKey = (process.env.QDRANT_API_KEY || '').trim() || undefined;
@@ -103,7 +161,7 @@ export async function retrieveMemoryChapterSummaries(
 
     const res = await client.search(collection, {
       vector,
-      limit: maxCount + 5,
+      limit: maxCount + excludeSize + 5,
       with_payload: true,
       filter: {
         must: [{ key: 'doc_type', match: { value: CHAPTER_SUMMARY_DOC_TYPE } }],
@@ -116,32 +174,7 @@ export async function retrieveMemoryChapterSummaries(
         ? ((res as { points?: unknown }).points as unknown[])
         : [];
 
-    const current = opts.currentChapterNo ?? Number.MAX_SAFE_INTEGER;
-    const out: ChapterSummaryInput[] = [];
-    const seen = new Set<number>();
-
-    for (const raw of rows) {
-      const p = raw as { payload?: Record<string, unknown> };
-      const payload = p.payload ?? {};
-      const chapterNo = Number(payload.chapter_no);
-      if (!Number.isFinite(chapterNo) || chapterNo <= 0 || chapterNo >= current) {
-        continue;
-      }
-      if (seen.has(chapterNo)) {
-        continue;
-      }
-      seen.add(chapterNo);
-      out.push({
-        chapterNo,
-        title: String(payload.docTitle ?? `第${chapterNo}章`),
-        summary: String(payload.content ?? '').trim(),
-      });
-      if (out.length >= maxCount) {
-        break;
-      }
-    }
-
-    return out;
+    return pickMemoryChapterSummariesFromSearchRows(rows, opts);
   } catch (error) {
     console.error(`Memory chapter summary retrieve failed for ${projectId}:`, error);
     return [];

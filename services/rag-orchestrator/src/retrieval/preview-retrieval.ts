@@ -178,11 +178,9 @@ export async function runPreviewRetrieval(
   const memory = await retrieveMemoryChapterSummaries(projectId, query || prompt, {
     currentChapterNo: chapterNo > 0 ? chapterNo : undefined,
     maxCount: memoryMax,
+    excludeChapterNos: recent.map((ch) => ch.chapterNo),
   });
   for (const ch of memory) {
-    if (items.some((i) => i.id === `memory:${ch.chapterNo}`)) {
-      continue;
-    }
     items.push({
       id: `memory:${ch.chapterNo}`,
       pool: 'memory_chapters',
