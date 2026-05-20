@@ -60,6 +60,31 @@ const versions = ref<DocumentVersionItem[]>([]);
 const showChunks = ref(false);
 const showVersions = ref(false);
 const loadingDetails = ref(false);
+const expandedDocIds = ref<Set<string>>(new Set());
+
+const CONTENT_PREVIEW_LIMIT = 2000;
+
+function isExpanded(docId: string): boolean {
+  return expandedDocIds.value.has(docId);
+}
+
+function toggleDocExpand(docId: string) {
+  const next = new Set(expandedDocIds.value);
+  if (next.has(docId)) {
+    next.delete(docId);
+  } else {
+    next.add(docId);
+  }
+  expandedDocIds.value = next;
+}
+
+function previewContent(content?: string): string {
+  const text = content?.trim() || '（无内容）';
+  if (text.length <= CONTENT_PREVIEW_LIMIT) {
+    return text;
+  }
+  return `${text.slice(0, CONTENT_PREVIEW_LIMIT)}…`;
+}
 
 async function loadDocuments() {
   loading.value = true;
@@ -281,8 +306,8 @@ onMounted(() => {
       </div>
 
       <div v-else class="doc-list">
-        <div v-for="doc in filteredDocuments" :key="doc.id" class="doc-card">
-          <div class="doc-main" @click="viewDetails(doc)">
+        <article v-for="doc in filteredDocuments" :key="doc.id" class="doc-card">
+          <header class="doc-header">
             <div class="doc-info">
               <h4 class="doc-title">{{ doc.title }}</h4>
               <div class="doc-meta">
@@ -302,10 +327,27 @@ onMounted(() => {
                 <span class="doc-date">{{ new Date(doc.updatedAt).toLocaleDateString() }}</span>
               </div>
             </div>
-            <div class="doc-content-preview">{{ doc.content?.slice(0, 120) || '无内容' }}</div>
-          </div>
+            <button
+              class="action-button expand-button"
+              type="button"
+              @click="toggleDocExpand(doc.id)"
+            >
+              {{ isExpanded(doc.id) ? '收起预览' : '展开预览' }}
+            </button>
+          </header>
+
+          <p v-if="!isExpanded(doc.id)" class="doc-content-preview">
+            {{ doc.content?.slice(0, 120) || '无内容' }}
+          </p>
+          <pre v-else class="doc-content-expanded">{{ previewContent(doc.content) }}</pre>
+
           <div class="doc-actions">
-            <button class="action-button" title="编辑" @click="startEdit(doc)">编辑</button>
+            <button class="action-button" type="button" title="详情" @click="viewDetails(doc)">
+              详情
+            </button>
+            <button class="action-button" type="button" title="编辑" @click="startEdit(doc)">
+              编辑
+            </button>
             <button
               class="action-button"
               :disabled="indexing"
@@ -314,11 +356,16 @@ onMounted(() => {
             >
               {{ indexing ? '索引中...' : '索引' }}
             </button>
-            <button class="action-button action-danger" title="删除" @click="handleDelete(doc)">
+            <button
+              class="action-button action-danger"
+              type="button"
+              title="删除"
+              @click="handleDelete(doc)"
+            >
               删除
             </button>
           </div>
-        </div>
+        </article>
       </div>
     </section>
 
@@ -478,14 +525,12 @@ onMounted(() => {
   overflow: hidden;
 }
 
-.doc-main {
-  padding: 0.75rem;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.doc-main:hover {
-  background: #f9fafb;
+.doc-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.75rem 0.5rem;
 }
 
 .doc-info {
@@ -536,11 +581,33 @@ onMounted(() => {
 }
 
 .doc-content-preview {
+  margin: 0;
+  padding: 0 0.75rem 0.65rem;
   font-size: 0.85rem;
   color: #888;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.doc-content-expanded {
+  margin: 0 0.75rem 0.65rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: #4b5563;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+  font-family: inherit;
+}
+
+.expand-button {
+  flex-shrink: 0;
 }
 
 .doc-actions {

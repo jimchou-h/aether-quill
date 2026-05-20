@@ -70,6 +70,13 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get(':id/stats')
+  getProjectStats(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
+    const userId = req.user?.userId;
+    return this.projectsService.getProjectStats(id, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':id/settings')
   getSettings(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     const userId = req.user?.userId;

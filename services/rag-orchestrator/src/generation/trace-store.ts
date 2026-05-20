@@ -54,6 +54,7 @@ export class TraceStore {
     if (this.traces.length > this.maxTraces) {
       this.traces = this.traces.slice(-this.maxTraces);
     }
+    this.persist();
   }
 
   update(traceId: string, updates: Partial<TraceRecord>): void {
@@ -66,6 +67,7 @@ export class TraceStore {
       trace.context = { ...(trace.context || {}), ...incomingContext };
     }
     Object.assign(trace, rest);
+    this.persist();
   }
 
   findById(traceId: string): TraceRecord | undefined {

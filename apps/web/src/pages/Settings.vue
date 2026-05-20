@@ -7,6 +7,7 @@ import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
 import OutlineSummaryEditor from '../components/settings/OutlineSummaryEditor.vue';
 import ProjectGenerationPreferences from '../components/settings/ProjectGenerationPreferences.vue';
 import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
+import WritingStatsPanel from '../components/settings/WritingStatsPanel.vue';
 import { presentErrorFromCaught } from '../utils/pageFeedback';
 
 const route = useRoute();
@@ -49,6 +50,7 @@ onMounted(() => {
     <p v-if="loading" class="message">正在加载设置...</p>
 
     <template v-if="!loading">
+      <WritingStatsPanel :project-id="projectId" />
       <OutlineSummaryEditor :project-id="projectId" />
       <ProjectGenerationPreferences :project-id="projectId" />
       <SystemPromptEditor :project-id="projectId" />

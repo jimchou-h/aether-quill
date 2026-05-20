@@ -1,10 +1,32 @@
 <script setup lang="ts">
-import type { CitationItem, ConsistencyNote, UsedRelationEventItem } from '../../services/api';
+import { computed } from 'vue';
+import type {
+  CitationItem,
+  ConsistencyNote,
+  GenerationPhase,
+  UsedRelationEventItem,
+} from '../../services/api';
+
+const PHASE_LABELS: Record<GenerationPhase, string> = {
+  retrieving: '正在检索知识库...',
+  building_prompt: '正在组装写作指令...',
+  waiting_llm: '等待模型响应...',
+  generating: '正在生成正文...',
+  checking: '正在进行一致性检查...',
+};
+
+const PHASE_ORDER: GenerationPhase[] = [
+  'retrieving',
+  'building_prompt',
+  'waiting_llm',
+  'generating',
+  'checking',
+];
 
 /**
  * 生成预览组件属性定义
  */
-defineProps<{
+const props = defineProps<{
   /** 草稿文本 */
   draftText: string;
   /** 引用证据列表 */
@@ -19,7 +41,27 @@ defineProps<{
   isDone: boolean;
   /** 是否正在接受草稿（写入章节） */
   isAccepting: boolean;
+  /** 当前生成阶段 */
+  generationPhase: GenerationPhase | null;
+  /** 阶段面板是否收起 */
+  phasePanelCollapsed: boolean;
 }>();
+
+const showPhasePanel = computed(
+  () => props.isStreaming && !props.phasePanelCollapsed && props.generationPhase !== null
+);
+
+const currentPhaseIndex = computed(() => {
+  if (!props.generationPhase) return -1;
+  return PHASE_ORDER.indexOf(props.generationPhase);
+});
+
+function phaseStatus(phase: GenerationPhase): 'done' | 'active' | 'pending' {
+  const index = PHASE_ORDER.indexOf(phase);
+  if (index < currentPhaseIndex.value) return 'done';
+  if (index === currentPhaseIndex.value) return 'active';
+  return 'pending';
+}
 
 /**
  * 组件事件定义
@@ -39,9 +81,20 @@ const emit = defineEmits<{
       <p class="panel-description">草稿、引用证据与关系事件会集中展示在这里。</p>
     </div>
 
-    <div v-if="isStreaming" class="streaming-indicator">
-      <span class="streaming-dot"></span>
-      <span>正在生成...</span>
+    <div v-if="showPhasePanel" class="phase-panel" role="status" aria-live="polite">
+      <p class="phase-panel-title">生成进度</p>
+      <ol class="phase-steps">
+        <li
+          v-for="phase in PHASE_ORDER"
+          :key="phase"
+          :class="['phase-step', `phase-step--${phaseStatus(phase)}`]"
+        >
+          <span class="phase-step-icon" aria-hidden="true">
+            {{ phaseStatus(phase) === 'done' ? '✓' : phaseStatus(phase) === 'active' ? '●' : '○' }}
+          </span>
+          <span class="phase-step-label">{{ PHASE_LABELS[phase] }}</span>
+        </li>
+      </ol>
     </div>
 
     <div v-if="draftText" class="draft-section">
@@ -128,23 +181,54 @@ const emit = defineEmits<{
   color: #374151;
 }
 
-.streaming-indicator {
+.phase-panel {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
+  background: #f8fafc;
+}
+
+.phase-panel-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.phase-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.phase-step {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  margin-bottom: 1rem;
-  padding: 0.65rem 0.85rem;
-  border-radius: 8px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 0.88rem;
+  font-size: 0.86rem;
+  color: #9ca3af;
 }
 
-.streaming-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #1d4ed8;
+.phase-step--active {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.phase-step--done {
+  color: #059669;
+}
+
+.phase-step-icon {
+  width: 1rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.phase-step--active .phase-step-icon {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -154,7 +238,7 @@ const emit = defineEmits<{
     opacity: 1;
   }
   50% {
-    opacity: 0.3;
+    opacity: 0.35;
   }
 }
 

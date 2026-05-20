@@ -265,6 +265,8 @@ onMounted(() => {
             :is-streaming="generationStore.isStreaming"
             :is-done="generationStore.isDone"
             :is-accepting="generationStore.isAccepting"
+            :generation-phase="generationStore.generationPhase"
+            :phase-panel-collapsed="generationStore.phasePanelCollapsed"
             @accept="handleAcceptDraft"
             @regenerate="handleRegenerate"
           />
