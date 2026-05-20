@@ -4,6 +4,7 @@ import {
   apiClient,
   type CitationItem,
   type ConsistencyNote,
+  type GenerationPhase,
   type UsedRelationEventItem,
 } from '../services/api';
 import { presentError, presentErrorFromCaught } from '../utils/pageFeedback';
@@ -37,6 +38,10 @@ export const useGenerationStore = defineStore('generation', () => {
   const errorMessage = ref('');
   /** 是否正在落库 */
   const accepting = ref(false);
+  /** 当前生成阶段（SSE 阶段事件） */
+  const generationPhase = ref<GenerationPhase | null>(null);
+  /** 生成完成后是否收起阶段面板 */
+  const phasePanelCollapsed = ref(false);
 
   /** 是否正在生成 */
   const isStreaming = computed(() => status.value === 'streaming');
@@ -62,6 +67,8 @@ export const useGenerationStore = defineStore('generation', () => {
     usedRelationEvents.value = [];
     errorMessage.value = '';
     accepting.value = false;
+    generationPhase.value = null;
+    phasePanelCollapsed.value = false;
   }
 
   /**
@@ -94,6 +101,10 @@ export const useGenerationStore = defineStore('generation', () => {
 
     try {
       await apiClient.generateDraftSSE(projectId, task, [], {
+        onPhase: (phase) => {
+          generationPhase.value = phase;
+          phasePanelCollapsed.value = false;
+        },
         onStart: (id, chNo) => {
           traceId.value = id;
           chapterNo.value = chNo;
@@ -107,6 +118,7 @@ export const useGenerationStore = defineStore('generation', () => {
           consistencyNotes.value = notes;
           usedRelationEvents.value = usedEvents;
           status.value = 'done';
+          phasePanelCollapsed.value = true;
         },
         onError: (msg) => {
           errorMessage.value = presentError(msg);
@@ -154,6 +166,8 @@ export const useGenerationStore = defineStore('generation', () => {
     usedRelationEvents,
     errorMessage,
     accepting,
+    generationPhase,
+    phasePanelCollapsed,
     isStreaming,
     isDone,
     isError,

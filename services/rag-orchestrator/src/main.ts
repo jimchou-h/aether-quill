@@ -866,6 +866,18 @@ app.post('/api/generate/draft', async (req, res) => {
   const goal = task.goal || '推进主线并保持人物一致性';
   const pov = task.pov || '第三人称';
 
+  const writeSse = (payload: Record<string, unknown>) => {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  writeSse({ event: 'retrieving' });
+
   const taskRecord = task as Record<string, unknown>;
   const fallbackQuery = buildRetrievalQuery(taskRecord, context);
   const kbCtx = {
@@ -876,7 +888,18 @@ app.post('/api/generate/draft', async (req, res) => {
     })),
     knowledgeDocuments: context.knowledgeDocuments ?? [],
   };
-  const structuredRetrieval = buildStructuredKnowledgeEvidence(chapterNo, kbCtx);
+
+  let structuredRetrieval: ReturnType<typeof buildStructuredKnowledgeEvidence>;
+  try {
+    structuredRetrieval = buildStructuredKnowledgeEvidence(chapterNo, kbCtx);
+  } catch (error) {
+    console.error('Knowledge retrieval failed:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Knowledge retrieval failed';
+    writeSse({ event: 'error', data: errorMsg });
+    res.end();
+    return;
+  }
+
   const retrievalQuery = structuredRetrieval.retrievalSkippedNoStructured
     ? fallbackQuery
     : structuredRetrieval.query.trim() || fallbackQuery;
@@ -900,8 +923,10 @@ app.post('/api/generate/draft', async (req, res) => {
       resolvedCitations = structuredRetrieval.citations;
     }
   } catch (error) {
-    console.error('Knowledge retrieval failed:', error);
+    console.error('Knowledge retrieval assembly failed:', error);
   }
+
+  writeSse({ event: 'building_prompt' });
 
   const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, context);
   const generationContext = await getGenerationContext(projectId, chapterNo > 0 ? chapterNo : undefined);
@@ -941,14 +966,8 @@ app.post('/api/generate/draft', async (req, res) => {
 
   let fullDraftText = '';
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-
-  res.write(`data: ${JSON.stringify({ event: 'start', traceId: trace.id, chapterNo })}\n\n`);
+  writeSse({ event: 'start', traceId: trace.id, chapterNo });
+  writeSse({ event: 'waiting_llm', traceId: trace.id });
 
   const streamSpanId = startSpan(
     trace.id,
@@ -958,15 +977,20 @@ app.post('/api/generate/draft', async (req, res) => {
   );
 
   try {
+    let generatingPhaseSent = false;
     for await (const chunk of generationService.generateStream(trace, generationContext)) {
+      if (!generatingPhaseSent) {
+        writeSse({ event: 'generating', traceId: trace.id });
+        generatingPhaseSent = true;
+      }
       fullDraftText += chunk;
       const escaped = chunk.replace(/\n/g, '\\n');
-      res.write(
-        `data: ${JSON.stringify({ event: 'content', data: escaped, traceId: trace.id })}\n\n`
-      );
+      writeSse({ event: 'content', data: escaped, traceId: trace.id });
     }
 
     endSpan(streamSpanId);
+
+    writeSse({ event: 'checking', traceId: trace.id });
 
     let consistencyNotes: Array<{ level: string; message: string }> = [];
 
@@ -1025,22 +1049,20 @@ app.post('/api/generate/draft', async (req, res) => {
         : [{ level: 'warning', message: '未检测到大纲总结，请补充后再生成。' }];
     }
 
-    res.write(
-      `data: ${JSON.stringify({
-        event: 'end',
-        traceId: trace.id,
-        citations: resolvedCitations,
-        consistencyNotes,
-        usedRelationEvents: context.usedRelationEvents || [],
-      })}\n\n`
-    );
+    writeSse({
+      event: 'end',
+      traceId: trace.id,
+      citations: resolvedCitations,
+      consistencyNotes,
+      usedRelationEvents: context.usedRelationEvents || [],
+    });
     res.end();
     endSpan(traceSpanId);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Generation failed';
     endSpan(streamSpanId, errorMsg);
     endSpan(traceSpanId, errorMsg);
-    res.write(`data: ${JSON.stringify({ event: 'error', data: errorMsg, traceId: trace.id })}\n\n`);
+    writeSse({ event: 'error', data: errorMsg, traceId: trace.id });
     res.end();
   }
 });

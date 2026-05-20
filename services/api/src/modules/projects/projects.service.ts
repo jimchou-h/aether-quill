@@ -744,6 +744,54 @@ export class ProjectsService implements OnModuleInit {
     return this.knowledgeStore.get(projectId)!;
   }
 
+  async getProjectStats(projectId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapterCharCounts = [...knowledge.chapters]
+      .sort((a, b) => a.chapterNo - b.chapterNo)
+      .map((chapter) => ({
+        chapterNo: chapter.chapterNo,
+        charCount: (chapter.content || '').length,
+      }));
+    const totalCharCount = chapterCharCounts.reduce((sum, item) => sum + item.charCount, 0);
+
+    let generationTotal = 0;
+    let generationCompleted = 0;
+    let generationFailed = 0;
+    let totalTokens = 0;
+
+    try {
+      const { data } = await axios.get<{
+        total?: number;
+        completed?: number;
+        failed?: number;
+        totalTokens?: number;
+      }>(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/generation-stats`, {
+        timeout: 10000,
+      });
+      generationTotal = data.total ?? 0;
+      generationCompleted = data.completed ?? 0;
+      generationFailed = data.failed ?? 0;
+      totalTokens = data.totalTokens ?? 0;
+    } catch {
+      // RAG 编排不可用时仍返回章节字数统计
+    }
+
+    return {
+      totalCharCount,
+      chapterCharCounts,
+      totalTokens,
+      generationTotal,
+      generationCompleted,
+      generationFailed,
+    };
+  }
+
   updateOutline(projectId: string, payload: { outlineSummary: string }, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);

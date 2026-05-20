@@ -71,10 +71,28 @@ export interface SseErrorEvent {
   traceId: string;
 }
 
-export type SseEvent = SseStartEvent | SseContentEvent | SseEndEvent | SseErrorEvent;
+export type GenerationPhase =
+  | 'retrieving'
+  | 'building_prompt'
+  | 'waiting_llm'
+  | 'generating'
+  | 'checking';
+
+export interface SsePhaseEvent {
+  event: GenerationPhase;
+  traceId?: string;
+}
+
+export type SseEvent =
+  | SseStartEvent
+  | SseContentEvent
+  | SseEndEvent
+  | SseErrorEvent
+  | SsePhaseEvent;
 
 export interface SseCallbacks {
   onStart?: (traceId: string, chapterNo: number) => void;
+  onPhase?: (phase: GenerationPhase) => void;
   onContent?: (text: string) => void;
   onEnd?: (
     traceId: string,
@@ -83,6 +101,15 @@ export interface SseCallbacks {
     usedRelationEvents: UsedRelationEventItem[]
   ) => void;
   onError?: (error: string) => void;
+}
+
+export interface ProjectWritingStats {
+  totalCharCount: number;
+  chapterCharCounts: Array<{ chapterNo: number; charCount: number }>;
+  totalTokens: number;
+  generationTotal: number;
+  generationCompleted: number;
+  generationFailed: number;
 }
 
 // Create axios instance
@@ -217,6 +244,11 @@ export const apiClient = {
   async getSettings(projectId: string) {
     const response = await http.get(`/api/projects/${projectId}/settings`);
     return this.unwrapPayload<ProjectSettings>(response.data);
+  },
+
+  async getProjectStats(projectId: string) {
+    const response = await http.get(`/api/projects/${projectId}/stats`);
+    return this.unwrapPayload<ProjectWritingStats>(response.data);
   },
 
   async updateSettings(projectId: string, payload: components['schemas']['ProjectSettingsUpdate']) {
@@ -832,6 +864,13 @@ export const apiClient = {
             switch (data.event) {
               case 'start':
                 callbacks.onStart?.(data.traceId, data.chapterNo);
+                break;
+              case 'retrieving':
+              case 'building_prompt':
+              case 'waiting_llm':
+              case 'generating':
+              case 'checking':
+                callbacks.onPhase?.(data.event);
                 break;
               case 'content':
                 callbacks.onContent?.(data.data.replace(/\\n/g, '\n'));

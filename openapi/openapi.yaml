@@ -39,6 +39,8 @@ paths:
     $ref: './paths/projects/by-id.yaml'
   /api/projects/{id}/settings:
     $ref: './paths/projects/project-settings.yaml'
+  /api/projects/{id}/stats:
+    $ref: './paths/projects/project-stats.yaml'
   /api/projects/{id}/documents:
     $ref: './paths/projects/documents.yaml'
   /api/documents/{id}/reindex:
@@ -323,6 +325,45 @@ components:
           type: string
         metadata:
           type: object
+    ProjectWritingStats:
+      type: object
+      required:
+        - totalCharCount
+        - chapterCharCounts
+        - totalTokens
+        - generationTotal
+        - generationCompleted
+        - generationFailed
+      properties:
+        totalCharCount:
+          type: integer
+          minimum: 0
+        chapterCharCounts:
+          type: array
+          items:
+            type: object
+            required:
+              - chapterNo
+              - charCount
+            properties:
+              chapterNo:
+                type: integer
+                minimum: 1
+              charCount:
+                type: integer
+                minimum: 0
+        totalTokens:
+          type: integer
+          minimum: 0
+        generationTotal:
+          type: integer
+          minimum: 0
+        generationCompleted:
+          type: integer
+          minimum: 0
+        generationFailed:
+          type: integer
+          minimum: 0
     GenerationTrace:
       type: object
       required:
