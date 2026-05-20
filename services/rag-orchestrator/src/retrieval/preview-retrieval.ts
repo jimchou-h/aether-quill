@@ -9,6 +9,7 @@ import {
   buildStructuredKnowledgeEvidence,
   retrieveKnowledgeForDraft,
   buildGenerationRetrievalQuery,
+  resolveMemoryChapterSummaryEmbeddingQuery,
   type KnowledgeDocumentForMatch,
 } from './knowledge-retrieval';
 import { extractPersonaDisplayName } from './persona-card-evidence';
@@ -175,7 +176,12 @@ export async function runPreviewRetrieval(
   }
 
   const memoryMax = clampChapterSummaryMemoryCount(projectCtx.chapterSummaryMemoryCount);
-  const memory = await retrieveMemoryChapterSummaries(projectId, query || prompt, {
+  const memoryEmbedQuery = resolveMemoryChapterSummaryEmbeddingQuery({
+    currentChapterNo: chapterNo > 0 ? chapterNo : undefined,
+    chapters: projectCtx.chapters,
+    fallbackPrompt: prompt,
+  });
+  const memory = await retrieveMemoryChapterSummaries(projectId, memoryEmbedQuery, {
     currentChapterNo: chapterNo > 0 ? chapterNo : undefined,
     maxCount: memoryMax,
     excludeChapterNos: recent.map((ch) => ch.chapterNo),

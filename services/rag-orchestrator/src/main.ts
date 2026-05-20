@@ -13,6 +13,7 @@ import {
   DraftCitation,
   buildStructuredKnowledgeEvidence,
   resolveChapterScopedEmbeddingQuery,
+  resolveMemoryChapterSummaryEmbeddingQuery,
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
@@ -147,10 +148,10 @@ async function buildNarrativeContext(
 
   const memoryMax = clampChapterSummaryMemoryCount(ctx.chapterSummaryMemoryCount);
   if (memoryMax > 0) {
-    const memoryQuery = [ctx.outlineSummary, prior.map((ch) => ch.summary).join(' ')]
-      .filter(Boolean)
-      .join('\n')
-      .trim();
+    const memoryQuery = resolveMemoryChapterSummaryEmbeddingQuery({
+      currentChapterNo,
+      chapters: ctx.chapters,
+    });
     if (memoryQuery) {
       const memory = await retrieveMemoryChapterSummaries(projectId, memoryQuery, {
         currentChapterNo,

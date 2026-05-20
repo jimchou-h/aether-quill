@@ -130,6 +130,56 @@ export function resolveChapterScopedEmbeddingQuery(
   return st ?? '';
 }
 
+/** 语义章节记忆 embedding 输入上限（适配 BGE ~512 tokens，中文留余量） */
+export const MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS = 480;
+
+/** 无 structuredMatchingText 时，摘要 / prompt 降级截取长度 */
+export const MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS = 400;
+
+export type MemoryChapterSummaryChapterRef = {
+  chapterNo: number;
+  structuredMatchingText?: string;
+  summary?: string;
+};
+
+/**
+ * 语义章节记忆向量检索用的 embedding query。
+ * 有章节锚点时优先本章 structuredMatchingText，与知识库向量策略对齐；禁止拼整段大纲/人物。
+ */
+export function resolveMemoryChapterSummaryEmbeddingQuery(input: {
+  currentChapterNo?: number;
+  chapters: MemoryChapterSummaryChapterRef[];
+  fallbackPrompt?: string;
+}): string {
+  const ch =
+    Number.isFinite(input.currentChapterNo) && (input.currentChapterNo ?? 0) > 0
+      ? Math.trunc(input.currentChapterNo as number)
+      : 0;
+
+  let raw = '';
+  if (ch > 0) {
+    const chapter = input.chapters.find((c) => c.chapterNo === ch);
+    const structured = chapter?.structuredMatchingText?.trim();
+    if (structured) {
+      raw = structured;
+    } else {
+      const summary = chapter?.summary?.trim();
+      if (summary) {
+        raw = summary.slice(0, MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS);
+      }
+    }
+  }
+
+  if (!raw) {
+    const fb = input.fallbackPrompt?.trim();
+    if (fb) {
+      raw = fb.slice(0, MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS);
+    }
+  }
+
+  return raw.slice(0, MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS);
+}
+
 export function buildRetrievalQuery(
   task: Record<string, unknown>,
   context: { outlineSummary: string; personaProfile: string }

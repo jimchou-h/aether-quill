@@ -7,6 +7,9 @@ import {
   buildStructuredKnowledgeEvidence,
   formatEvidence,
   resolveChapterScopedEmbeddingQuery,
+  resolveMemoryChapterSummaryEmbeddingQuery,
+  MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS,
+  MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS,
 } from './knowledge-retrieval';
 import type { ChunkWithEmbedding } from './types';
 
@@ -57,6 +60,68 @@ describe('resolveChapterScopedEmbeddingQuery', () => {
 
   it('returns empty string when chapter has no structured text', () => {
     assert.equal(resolveChapterScopedEmbeddingQuery(ctx, 2, 0), '');
+  });
+});
+
+describe('resolveMemoryChapterSummaryEmbeddingQuery', () => {
+  const chapters = [
+    { chapterNo: 11, structuredMatchingText: '港口 走私 杨幂', summary: '很长的摘要'.repeat(100) },
+    { chapterNo: 12, structuredMatchingText: '', summary: '第十二章摘要' },
+  ];
+
+  it('prefers structuredMatchingText for current chapter', () => {
+    assert.equal(
+      resolveMemoryChapterSummaryEmbeddingQuery({
+        currentChapterNo: 11,
+        chapters,
+      }),
+      '港口 走私 杨幂'
+    );
+  });
+
+  it('falls back to summary prefix when structured text missing', () => {
+    const got = resolveMemoryChapterSummaryEmbeddingQuery({
+      currentChapterNo: 12,
+      chapters,
+    });
+    assert.equal(got, '第十二章摘要');
+  });
+
+  it('falls back to prompt when no chapter anchor', () => {
+    assert.equal(
+      resolveMemoryChapterSummaryEmbeddingQuery({
+        chapters,
+        fallbackPrompt: '优化节奏与对话',
+      }),
+      '优化节奏与对话'
+    );
+  });
+
+  it('truncates long structured text to embed max chars', () => {
+    const long = '词'.repeat(MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS + 50);
+    const got = resolveMemoryChapterSummaryEmbeddingQuery({
+      currentChapterNo: 11,
+      chapters: [{ chapterNo: 11, structuredMatchingText: long }],
+    });
+    assert.equal(got.length, MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS);
+  });
+
+  it('truncates fallback prompt', () => {
+    const got = resolveMemoryChapterSummaryEmbeddingQuery({
+      chapters: [],
+      fallbackPrompt: 'x'.repeat(MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS + 100),
+    });
+    assert.equal(got.length, MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS);
+  });
+
+  it('returns empty when nothing available', () => {
+    assert.equal(
+      resolveMemoryChapterSummaryEmbeddingQuery({
+        currentChapterNo: 99,
+        chapters,
+      }),
+      ''
+    );
   });
 });
 
