@@ -6,6 +6,7 @@ import {
   projectChunksCollectionName,
 } from '../retrieval/qdrant-client';
 import { getResolvedRagInfrastructureEnv } from '@aether-quill/config';
+import { MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS } from '../retrieval/knowledge-retrieval';
 import type { ChapterSummaryInput } from './prior-chapter-summaries';
 
 export const CHAPTER_SUMMARY_DOC_TYPE = 'chapter_summary';
@@ -30,7 +31,6 @@ export async function indexChapterSummaryInQdrant(input: {
   }
 
   const env = getResolvedRagInfrastructureEnv();
-  const apiKey = (process.env.QDRANT_API_KEY || '').trim() || undefined;
   const client = createQdrantClientFromEnv(env);
   const collection = projectChunksCollectionName(input.projectId);
   const documentId = `chapter-summary:${input.chapterNo}`;
@@ -136,7 +136,8 @@ export async function retrieveMemoryChapterSummaries(
   opts: MemoryChapterSummaryRetrieveOpts
 ): Promise<ChapterSummaryInput[]> {
   const maxCount = Number.isFinite(opts.maxCount) ? Math.trunc(opts.maxCount) : 0;
-  if (maxCount <= 0 || !query.trim()) {
+  const embedText = query.trim().slice(0, MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS);
+  if (maxCount <= 0 || !embedText) {
     return [];
   }
 
@@ -145,13 +146,12 @@ export async function retrieveMemoryChapterSummaries(
     : 0;
 
   const env = getResolvedRagInfrastructureEnv();
-  const apiKey = (process.env.QDRANT_API_KEY || '').trim() || undefined;
   const client = createQdrantClientFromEnv(env);
   const collection = projectChunksCollectionName(projectId);
 
   try {
     const provider = getEmbeddingProvider();
-    const { embeddings } = await provider.embed([query.trim()]);
+    const { embeddings } = await provider.embed([embedText]);
     const vector = embeddings[0];
     if (!vector?.length) {
       return [];
