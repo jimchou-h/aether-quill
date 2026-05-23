@@ -253,10 +253,10 @@ test('buildSegmentPrompt omits previous summary for first segment', () => {
   assert.ok(!prompt.includes('【前段末文'));
 });
 
-test('resolveOptimizeSegmentCount uses fewer segments for shorter chapters', () => {
+test('resolveOptimizeSegmentCount returns 1 while segmentation is disabled', () => {
   assert.equal(resolveOptimizeSegmentCount(1000), 1);
-  assert.equal(resolveOptimizeSegmentCount(4000), 2);
-  assert.equal(resolveOptimizeSegmentCount(8000), 3);
+  assert.equal(resolveOptimizeSegmentCount(4000), 1);
+  assert.equal(resolveOptimizeSegmentCount(8000), 1);
 });
 
 test('buildSegmentPrompt includes boundary anchors and middle-segment constraints', () => {
