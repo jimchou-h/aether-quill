@@ -53,6 +53,9 @@ export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
   '8) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
 ].join('\n');
 
+/** 关闭后始终整章单段优化（分段 UI 与多段 prompt 暂不启用） */
+export const OPTIMIZE_SEGMENTATION_ENABLED = false;
+
 /** 低于此字数优先单段生成，减少硬切分 */
 export const OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD = 2800;
 export const OPTIMIZE_TWO_SEGMENT_CHAR_THRESHOLD = 5500;
@@ -363,6 +366,9 @@ export function buildSegmentBoundaryAnchors(
 }
 
 export function resolveOptimizeSegmentCount(contentLength: number, maxSegments = 3): number {
+  if (!OPTIMIZE_SEGMENTATION_ENABLED) {
+    return 1;
+  }
   const max = Math.max(1, Math.min(3, Math.trunc(maxSegments)));
   if (contentLength <= OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD) {
     return 1;
@@ -373,7 +379,10 @@ export function resolveOptimizeSegmentCount(contentLength: number, maxSegments =
   return max;
 }
 
-export function extractSegmentTailText(text: string, maxChars = SEGMENT_TAIL_CONTEXT_CHARS): string {
+export function extractSegmentTailText(
+  text: string,
+  maxChars = SEGMENT_TAIL_CONTEXT_CHARS
+): string {
   const trimmed = text.trim();
   if (!trimmed) {
     return '';
@@ -384,7 +393,10 @@ export function extractSegmentTailText(text: string, maxChars = SEGMENT_TAIL_CON
   return trimmed.slice(-maxChars);
 }
 
-export function extractSegmentLeadText(text: string, maxChars = SEGMENT_LEAD_CONTEXT_CHARS): string {
+export function extractSegmentLeadText(
+  text: string,
+  maxChars = SEGMENT_LEAD_CONTEXT_CHARS
+): string {
   const trimmed = text.trim();
   if (!trimmed) {
     return '';
@@ -411,7 +423,11 @@ function scoreParagraphBreakPoint(paragraph: string, nextParagraph?: string): nu
   return score;
 }
 
-function pickBreakParagraphIndex(paragraphs: string[], targetEnd: number, searchRadius = 2): number {
+function pickBreakParagraphIndex(
+  paragraphs: string[],
+  targetEnd: number,
+  searchRadius = 2
+): number {
   const min = Math.max(0, targetEnd - searchRadius);
   const max = Math.min(paragraphs.length - 1, targetEnd + searchRadius);
   let best = targetEnd;
@@ -429,11 +445,29 @@ function pickBreakParagraphIndex(paragraphs: string[], targetEnd: number, search
 const SEGMENT_SUMMARY_PREFIX = '【SEG_SUMMARY】';
 
 export function splitIntoSegments(content: string, planText: string, maxSegments = 3): Segment[] {
-  const paragraphs = content.split(/\n\n+/).filter((p) => p.trim().length > 0);
+  const trimmedContent = content.trim();
+  if (!trimmedContent) {
+    return [];
+  }
+  const effectiveMax = Math.max(1, Math.trunc(maxSegments));
+  if (effectiveMax <= 1) {
+    const paragraphs = trimmedContent.split(/\n\n+/).filter((p) => p.trim().length > 0);
+    return [
+      {
+        index: 0,
+        originalText: trimmedContent,
+        planExcerpt: planText,
+        startParagraph: 0,
+        endParagraph: Math.max(0, paragraphs.length - 1),
+      },
+    ];
+  }
+
+  const paragraphs = trimmedContent.split(/\n\n+/).filter((p) => p.trim().length > 0);
   if (paragraphs.length === 0) {
     return [];
   }
-  if (paragraphs.length <= maxSegments) {
+  if (paragraphs.length <= effectiveMax) {
     return paragraphs.map((p, i) => ({
       index: i,
       originalText: p.trim(),
@@ -443,13 +477,13 @@ export function splitIntoSegments(content: string, planText: string, maxSegments
     }));
   }
 
-  const segSize = Math.ceil(paragraphs.length / maxSegments);
+  const segSize = Math.ceil(paragraphs.length / effectiveMax);
   const adjustedSegments: Array<{ start: number; end: number }> = [];
 
   for (let start = 0; start < paragraphs.length; ) {
     const targetEnd = Math.min(start + segSize, paragraphs.length) - 1;
     let end =
-      adjustedSegments.length < maxSegments - 1
+      adjustedSegments.length < effectiveMax - 1
         ? pickBreakParagraphIndex(paragraphs, targetEnd)
         : paragraphs.length - 1;
     end = Math.max(start, Math.min(end, paragraphs.length - 1));
@@ -467,7 +501,7 @@ export function splitIntoSegments(content: string, planText: string, maxSegments
     }
 
     start = end + 1;
-    if (adjustedSegments.length >= maxSegments) {
+    if (adjustedSegments.length >= effectiveMax) {
       break;
     }
   }
@@ -527,7 +561,8 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
   } = input;
 
   const sections: string[] = [];
-  const isMiddleSegment = totalSegments > 2 && segment.index > 0 && segment.index < totalSegments - 1;
+  const isMiddleSegment =
+    totalSegments > 2 && segment.index > 0 && segment.index < totalSegments - 1;
 
   sections.push(
     `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段，请聚焦本段原文进行改写，确保完整覆盖。`
@@ -625,8 +660,7 @@ export function calculateSegmentMaxTokensForIndex(
   totalSegments: number
 ): number {
   const base = calculateSegmentMaxTokens(originalText);
-  const isMiddle =
-    totalSegments > 2 && segmentIndex > 0 && segmentIndex < totalSegments - 1;
+  const isMiddle = totalSegments > 2 && segmentIndex > 0 && segmentIndex < totalSegments - 1;
   if (!isMiddle) {
     return base;
   }
@@ -634,10 +668,7 @@ export function calculateSegmentMaxTokensForIndex(
   return Math.min(base, middleCap);
 }
 
-export function shouldRetrySegmentForLength(
-  originalText: string,
-  generatedText: string
-): boolean {
+export function shouldRetrySegmentForLength(originalText: string, generatedText: string): boolean {
   const originalLen = originalText.trim().length;
   if (originalLen <= 0) {
     return false;

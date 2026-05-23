@@ -11,7 +11,11 @@ import {
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import axios from 'axios';
-import { buildFallbackChapterSummary, type ChapterSummarySource } from './chapter-summary.util';
+import {
+  buildFallbackChapterSummary,
+  resolveChapterSummaryOnContentWrite,
+  type ChapterSummarySource,
+} from './chapter-summary.util';
 import {
   buildFallbackPersonaState,
   clampPersonaStateText,
@@ -932,10 +936,15 @@ export class ProjectsService implements OnModuleInit {
     const nextHash = hashChapterContent(payload.content);
     const now = new Date();
     const existing = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
-    const contentChanged = !existing || existing.contentHash !== nextHash;
+    const previousHash = existing
+      ? (existing.contentHash ?? hashChapterContent(existing.content))
+      : null;
+    const contentChanged = !existing || previousHash !== nextHash;
     const postWriteMode = options?.postWriteMode ?? 'defer';
 
     if (existing && !contentChanged) {
+      existing.title = payload.title.trim();
+      existing.contentHash = nextHash;
       existing.updatedAt = now;
       this.persistState();
       return {
@@ -945,16 +954,20 @@ export class ProjectsService implements OnModuleInit {
       };
     }
 
-    const nextSummary = buildFallbackChapterSummary(payload.content);
+    const summaryFields = resolveChapterSummaryOnContentWrite({
+      content: payload.content,
+      existing,
+      now,
+    });
 
     let targetChapter: ChapterRecord;
     if (existing) {
       existing.title = payload.title.trim();
       existing.content = payload.content;
       existing.contentHash = nextHash;
-      existing.summary = nextSummary;
-      existing.summarySource = 'fallback';
-      existing.summaryUpdatedAt = now;
+      existing.summary = summaryFields.summary;
+      existing.summarySource = summaryFields.summarySource;
+      existing.summaryUpdatedAt = summaryFields.summaryUpdatedAt;
       existing.updatedAt = now;
       targetChapter = existing;
     } else {
@@ -963,9 +976,9 @@ export class ProjectsService implements OnModuleInit {
         title: payload.title.trim(),
         content: payload.content,
         contentHash: nextHash,
-        summary: nextSummary,
-        summarySource: 'fallback',
-        summaryUpdatedAt: now,
+        summary: summaryFields.summary,
+        summarySource: summaryFields.summarySource,
+        summaryUpdatedAt: summaryFields.summaryUpdatedAt,
         updatedAt: now,
       };
       knowledge.chapters.push(targetChapter);
@@ -978,10 +991,16 @@ export class ProjectsService implements OnModuleInit {
     const pendingActions = this.buildChapterPendingActions(settings);
 
     if (postWriteMode === 'auto') {
-      await this.runChapterPostWriteActions(projectId, chapterNo, payload.content, targetChapter.title, {
-        persona: settings.updatePersonaOnSave !== false,
-        relationEvents: settings.generateRelationEventsOnSave !== false,
-      });
+      await this.runChapterPostWriteActions(
+        projectId,
+        chapterNo,
+        payload.content,
+        targetChapter.title,
+        {
+          persona: settings.updatePersonaOnSave !== false,
+          relationEvents: settings.generateRelationEventsOnSave !== false,
+        }
+      );
       this.relinkRelationEventsForProject(projectId);
       this.persistState();
       return {
@@ -1064,12 +1083,7 @@ export class ProjectsService implements OnModuleInit {
 
     if (selected.persona) {
       onProgress?.({ event: 'progress', action: 'persona', status: 'started' });
-      await this.syncPersonaGraphFromChapter(
-        projectId,
-        chapterNo,
-        chapter.content,
-        chapter.title
-      );
+      await this.syncPersonaGraphFromChapter(projectId, chapterNo, chapter.content, chapter.title);
       onProgress?.({ event: 'progress', action: 'persona', status: 'completed' });
     }
 
@@ -2209,36 +2223,66 @@ export class ProjectsService implements OnModuleInit {
 
       let output: string | null = null;
       for (let retry = 0; retry <= 2; retry++) {
+        let response;
         try {
-          const response = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
-            projectId,
-            prompt: segmentPrompt,
-            useSSE: false,
-            systemPromptOverride: CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
-            templateKey: CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
-            maxTokens,
-            context: {
-              task: 'chapter.optimize.segment',
-              chapterNo: normalizedChapterNo,
-              planId: payload.planId || null,
-              segmentIndex: segment.index,
-              segmentTotal: segments.length,
-              inputSegmentChars: segment.originalText.length,
+          response = await axios.post(
+            `${this.getRagOrchestratorUrl()}/api/generate`,
+            {
+              projectId,
+              prompt: segmentPrompt,
+              useSSE: true,
+              systemPromptOverride: CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
+              templateKey: CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
+              maxTokens,
+              context: {
+                task: 'chapter.optimize.segment',
+                chapterNo: normalizedChapterNo,
+                planId: payload.planId || null,
+                segmentIndex: segment.index,
+                segmentTotal: segments.length,
+                inputSegmentChars: segment.originalText.length,
+              },
             },
-          });
+            { responseType: 'stream' }
+          );
+        } catch {
+          if (retry < 2) {
+            continue;
+          }
+          callbacks.onError(`第 ${segment.index + 1}/${segments.length} 段生成失败，已重试`);
+          return;
+        }
 
-          if (response.data?.content && typeof response.data.content === 'string') {
-            const candidate = response.data.content;
-            if (
-              retry < 2 &&
-              shouldRetrySegmentForLength(segment.originalText, candidate)
-            ) {
-              segmentPrompt = appendSegmentLengthRetryHint(segmentPrompt);
+        try {
+          const sseResult = await this.readOrchestratorGenerateSseStream(
+            response.data as NodeJS.ReadableStream,
+            {
+              onStreamContent: (piece) => callbacks.onContent(piece),
+            }
+          );
+
+          if (sseResult.errorMessage) {
+            if (retry < 2) {
               continue;
             }
-            output = candidate;
+            callbacks.onError(sseResult.errorMessage);
+            return;
+          }
+
+          const candidate = sseResult.accumulated.trim();
+          if (!candidate) {
+            if (retry < 2) {
+              continue;
+            }
             break;
           }
+
+          // if (retry < 2 && shouldRetrySegmentForLength(segment.originalText, candidate)) {
+          //   segmentPrompt = appendSegmentLengthRetryHint(segmentPrompt);
+          //   continue;
+          // }
+          output = candidate;
+          break;
         } catch {
           if (retry < 2) {
             continue;
@@ -2254,8 +2298,9 @@ export class ProjectsService implements OnModuleInit {
       }
 
       const { segmentText, summary } = parseSegmentOutput(output);
-      const segmentWithNewline = i < segments.length - 1 ? segmentText + '\n\n' : segmentText;
-      callbacks.onContent(segmentWithNewline);
+      if (i < segments.length - 1) {
+        callbacks.onContent('\n\n');
+      }
       previousSegmentSummary = summary;
       previousSegmentText = segmentText;
     }
@@ -2302,6 +2347,7 @@ export class ProjectsService implements OnModuleInit {
     }
 
     chapter.content = draftText;
+    chapter.contentHash = hashChapterContent(draftText);
     chapter.updatedAt = new Date();
     knowledge.indexVersion += 1;
 
@@ -2786,6 +2832,8 @@ export class ProjectsService implements OnModuleInit {
             outlineSummary: knowledge.outlineSummary,
             chapters: (knowledge.chapters || []).map((chapter) => ({
               ...chapter,
+              contentHash:
+                typeof chapter.contentHash === 'string' ? chapter.contentHash : undefined,
               summarySource: chapter.summarySource as ChapterSummarySource | undefined,
               updatedAt: new Date(chapter.updatedAt),
               summaryUpdatedAt: chapter.summaryUpdatedAt
@@ -3170,7 +3218,10 @@ export class ProjectsService implements OnModuleInit {
     return job;
   }
 
-  private async indexChapterSummaryVector(projectId: string, chapter: ChapterRecord): Promise<void> {
+  private async indexChapterSummaryVector(
+    projectId: string,
+    chapter: ChapterRecord
+  ): Promise<void> {
     const summary = chapter.summary?.trim();
     if (!summary) {
       return;
@@ -3278,6 +3329,85 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`未找到项目: ${projectId}`);
     }
     return project;
+  }
+
+  /**
+   * 消费 rag-orchestrator `/api/generate` 的 SSE 响应，拼回完整文本。
+   */
+  private readOrchestratorGenerateSseStream(
+    stream: NodeJS.ReadableStream,
+    options?: { onStreamContent?: (piece: string) => void }
+  ): Promise<{
+    accumulated: string;
+    orchestratorTraceId: string;
+    sawEnd: boolean;
+    errorMessage?: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      let accumulated = '';
+      let orchestratorTraceId = '';
+      let sawEnd = false;
+      let errorMessage: string | undefined;
+      let buffer = '';
+
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf-8');
+        const segments = buffer.split('\n\n');
+        buffer = segments.pop() || '';
+
+        for (const segment of segments) {
+          const trimmedSegment = segment.trim();
+          if (!trimmedSegment.startsWith('data:')) {
+            continue;
+          }
+          const dataPart = trimmedSegment.replace(/^data:\s*/, '');
+          if (!dataPart) {
+            continue;
+          }
+          let event: { event?: string; data?: string; traceId?: string };
+          try {
+            event = JSON.parse(dataPart);
+          } catch {
+            continue;
+          }
+
+          switch (event.event) {
+            case 'start': {
+              orchestratorTraceId =
+                typeof event.traceId === 'string' ? event.traceId : orchestratorTraceId;
+              break;
+            }
+            case 'content': {
+              const raw = typeof event.data === 'string' ? event.data : '';
+              const piece = raw.replace(/\\n/g, '\n');
+              accumulated += piece;
+              options?.onStreamContent?.(piece);
+              break;
+            }
+            case 'end': {
+              sawEnd = true;
+              orchestratorTraceId =
+                typeof event.traceId === 'string' ? event.traceId : orchestratorTraceId;
+              break;
+            }
+            case 'error': {
+              errorMessage = typeof event.data === 'string' ? event.data : '生成失败';
+              break;
+            }
+          }
+        }
+      });
+
+      stream.on('end', () => {
+        resolve({
+          accumulated,
+          orchestratorTraceId,
+          sawEnd,
+          errorMessage,
+        });
+      });
+      stream.on('error', (error: unknown) => reject(error));
+    });
   }
 
   private getRagOrchestratorUrl() {

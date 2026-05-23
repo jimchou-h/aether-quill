@@ -64,6 +64,7 @@ export interface PersistedProjectState {
         chapterNo: number;
         title: string;
         content: string;
+        contentHash?: string;
         summary: string;
         summarySource?: string;
         summaryUpdatedAt?: string;

@@ -4,6 +4,7 @@ import {
   MULTI_PERSONA_WRITING_GUARD,
 } from '../retrieval/persona-card-evidence';
 import { TraceRecord, GenerateRequest } from './types';
+import { consumeProviderSseStreamChunk, flushProviderSseStreamBuffer } from './provider-sse-stream';
 import { TraceStore, TraceQuery, TraceStats } from './trace-store';
 
 export interface GenerationContext {
@@ -610,24 +611,47 @@ export class GenerationService {
     );
 
     const stream = response.data as NodeJS.ReadableStream;
+    let lineBuffer = '';
 
     for await (const chunk of stream) {
-      const chunkStr = chunk.toString('utf-8');
-      const lines = chunkStr.split('\n').filter((line: string) => line.startsWith('data: '));
+      const consumed = consumeProviderSseStreamChunk(lineBuffer, chunk.toString('utf-8'));
+      lineBuffer = consumed.nextBuffer;
 
-      for (const line of lines) {
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') return;
-
-        try {
-          const parsed = JSON.parse(data);
-          const content = parsed.choices?.[0]?.delta?.content || '';
-          if (content) {
-            yield content;
-          }
-        } catch {
-          // skip malformed SSE lines
+      for (const event of consumed.events) {
+        if (event.type === 'done') {
+          return;
         }
+        if (event.type === 'content') {
+          yield event.content;
+          continue;
+        }
+        if (event.type === 'malformed') {
+          console.error('[callProviderStream] malformed SSE line after reassembly', {
+            traceId: trace.id,
+            error: event.error,
+            linePreview: event.data.slice(0, 200),
+            lineLength: event.data.length,
+          });
+        }
+      }
+    }
+
+    const flushed = flushProviderSseStreamBuffer(lineBuffer);
+    for (const event of flushed.events) {
+      if (event.type === 'done') {
+        return;
+      }
+      if (event.type === 'content') {
+        yield event.content;
+        continue;
+      }
+      if (event.type === 'malformed') {
+        console.error('[callProviderStream] malformed SSE line in stream tail', {
+          traceId: trace.id,
+          error: event.error,
+          linePreview: event.data.slice(0, 200),
+          lineLength: event.data.length,
+        });
       }
     }
   }
