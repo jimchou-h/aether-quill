@@ -1,19 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import {
-  apiClient,
-  type PersonaItem,
-  type PreviewRetrievalResult,
-} from '../services/api';
+import { apiClient, type PersonaItem, type PreviewRetrievalResult } from '../services/api';
 import RetrievalPreviewDialog from '../components/workbench/RetrievalPreviewDialog.vue';
 import { useGenerationStore } from '../stores/generation';
 import { useEditorStore } from '../stores/editor';
 import KnowledgePanel from '../components/workbench/KnowledgePanel.vue';
 import PromptConsole from '../components/workbench/PromptConsole.vue';
-import GenerationPreview from '../components/workbench/GenerationPreview.vue';
-import ConsistencyAlert from '../components/workbench/ConsistencyAlert.vue';
-import { presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
+import WorkbenchStepper from '../components/workbench/WorkbenchStepper.vue';
+import type { WorkbenchStepItem } from '../components/workbench/WorkbenchStepper.vue';
+import WorkbenchOutputPanel from '../components/workbench/WorkbenchOutputPanel.vue';
+import { presentErrorFromCaught, presentInfo, presentSuccess } from '../utils/pageFeedback';
+import '../components/workbench/workbench-tokens.css';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -38,7 +36,7 @@ const previewVisible = ref(false);
 const previewLoading = ref(false);
 const previewResult = ref<PreviewRetrievalResult | null>(null);
 const previewError = ref('');
-const pendingGenerateTask = ref<{
+type WriteTaskPayload = {
   chapterNo: number;
   goal: string;
   pov: string;
@@ -47,7 +45,97 @@ const pendingGenerateTask = ref<{
   targetWords?: number;
   appearingCharacters: string[];
   selectedEventIds: string[];
-} | null>(null);
+};
+
+const pendingGenerateTask = ref<WriteTaskPayload | null>(null);
+const lastWriteTask = ref<WriteTaskPayload | null>(null);
+const previewIntent = ref<'outline' | 'draft'>('outline');
+const outputTab = ref<'outline' | 'draft' | 'evidence'>('outline');
+
+const evidenceCount = computed(
+  () =>
+    generationStore.citations.length +
+    generationStore.consistencyNotes.length +
+    generationStore.usedRelationEvents.length
+);
+
+const workflowSteps = computed<WorkbenchStepItem[]>(() => {
+  const hasOutline = generationStore.hasOutline;
+  const outlineDone = generationStore.outlineConfirmed;
+  const draftActive =
+    generationStore.isStreaming || generationStore.isDone || Boolean(generationStore.draftText);
+
+  let requirements: WorkbenchStepItem['status'] = 'active';
+  let outline: WorkbenchStepItem['status'] = 'locked';
+  let draft: WorkbenchStepItem['status'] = 'locked';
+
+  if (generationStore.isOutlineStreaming) {
+    requirements = 'done';
+    outline = 'active';
+  } else if (hasOutline && !outlineDone) {
+    requirements = 'done';
+    outline = 'active';
+  } else if (outlineDone) {
+    requirements = 'done';
+    outline = 'done';
+    draft = draftActive ? 'active' : 'pending';
+  } else if (hasOutline) {
+    requirements = 'done';
+    outline = 'active';
+  }
+
+  if (generationStore.isDone) {
+    draft = 'done';
+  }
+
+  return [
+    {
+      id: 'requirements',
+      label: '写作要求',
+      hint: '章节号、目标与约束',
+      status: requirements,
+    },
+    {
+      id: 'outline',
+      label: '章节大纲',
+      hint: '生成并确认结构',
+      status: outline,
+    },
+    {
+      id: 'draft',
+      label: '正文草稿',
+      hint: '流式生成与落库',
+      status: draft,
+    },
+  ];
+});
+
+watch(
+  () => generationStore.isOutlineStreaming,
+  (streaming) => {
+    if (streaming) {
+      outputTab.value = 'outline';
+    }
+  }
+);
+
+watch(
+  () => generationStore.isStreaming,
+  (streaming) => {
+    if (streaming) {
+      outputTab.value = 'draft';
+    }
+  }
+);
+
+watch(
+  () => generationStore.isDone,
+  (done) => {
+    if (done && evidenceCount.value > 0) {
+      outputTab.value = 'draft';
+    }
+  }
+);
 
 function applyWorkspaceSnapshot(workspace: Awaited<ReturnType<typeof apiClient.getWorkspace>>) {
   projectName.value = workspace.project.name;
@@ -91,18 +179,10 @@ async function refreshWorkspaceData() {
   }
 }
 
-async function handleGenerate(task: {
-  chapterNo: number;
-  goal: string;
-  pov: string;
-  mustInclude: string[];
-  avoid: string[];
-  targetWords?: number;
-  appearingCharacters: string[];
-  selectedEventIds: string[];
-}) {
+async function openRetrievalPreview(task: WriteTaskPayload, intent: 'outline' | 'draft') {
   errorMessage.value = '';
   pendingGenerateTask.value = task;
+  previewIntent.value = intent;
   previewVisible.value = true;
   previewLoading.value = true;
   previewResult.value = null;
@@ -146,8 +226,8 @@ async function handleGenerate(task: {
         })),
         chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
         chapterSummaryMemoryCount:
-          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
-          3,
+          (workspace.settings as { chapterSummaryMemoryCount?: number })
+            .chapterSummaryMemoryCount ?? 3,
       },
       extraContext: {
         task: {
@@ -166,16 +246,73 @@ async function handleGenerate(task: {
   }
 }
 
-async function confirmPreviewAndGenerate() {
+async function handleGenerateOutline(task: WriteTaskPayload) {
+  lastWriteTask.value = task;
+  await openRetrievalPreview(task, 'outline');
+}
+
+async function confirmPreviewAndContinue() {
   previewVisible.value = false;
   const task = pendingGenerateTask.value;
   if (!task) {
     return;
   }
+
+  if (previewIntent.value === 'outline') {
+    outputTab.value = 'outline';
+    await generationStore.generateOutline(projectId.value, task);
+    if (generationStore.hasOutline) {
+      presentSuccess(`第${task.chapterNo}章大纲已生成，请确认后继续`);
+    }
+    return;
+  }
+
+  if (!generationStore.outlineConfirmed) {
+    presentInfo('请先确认章节大纲后再生成正文');
+    outputTab.value = 'outline';
+    return;
+  }
+
+  outputTab.value = 'draft';
   await generationStore.generate(projectId.value, task);
   if (generationStore.isDone) {
     presentSuccess(`第${task.chapterNo}章草稿生成完成`);
   }
+}
+
+function handleConfirmOutline() {
+  generationStore.confirmOutline();
+  if (generationStore.outlineConfirmed) {
+    presentSuccess('大纲已确认，可切换到「正文草稿」或点击生成正文');
+  }
+}
+
+function handleRegenerateOutline() {
+  const task = pendingGenerateTask.value ?? lastWriteTask.value;
+  if (!task?.goal.trim()) {
+    presentInfo('请先在左侧填写本章目标');
+    return;
+  }
+  outputTab.value = 'outline';
+  void generationStore.generateOutline(projectId.value, task);
+}
+
+async function handleGenerateDraft() {
+  if (!generationStore.outlineConfirmed) {
+    presentInfo('请先确认章节大纲');
+    outputTab.value = 'outline';
+    return;
+  }
+  const task = pendingGenerateTask.value ?? lastWriteTask.value;
+  if (!task) {
+    presentInfo('请先在左侧填写写作要求');
+    return;
+  }
+  await openRetrievalPreview(task, 'draft');
+}
+
+function handleOutlineTextUpdate(value: string) {
+  generationStore.setOutlineText(value);
 }
 
 async function handleAcceptDraft() {
@@ -193,11 +330,19 @@ async function handleAcceptDraft() {
   });
   presentSuccess(`第${chNo}章草稿已落库`);
   promptConsoleRef.value?.resetForm();
+  generationStore.reset();
+  outputTab.value = 'outline';
   await loadWorkspace();
 }
 
-async function handleRegenerate() {
-  generationStore.reset();
+async function handleRegenerateDraft() {
+  const task = pendingGenerateTask.value ?? lastWriteTask.value;
+  if (!task || !generationStore.outlineConfirmed) {
+    return;
+  }
+  generationStore.resetDraft();
+  outputTab.value = 'draft';
+  await generationStore.generate(projectId.value, task);
 }
 
 onMounted(() => {
@@ -206,71 +351,81 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="workbench-page">
-    <header class="workbench-header">
-      <div class="workbench-header-copy">
-        <h2 class="page-title">写作工作台</h2>
-        <p class="page-subtitle">配置本章目标与约束，实时预览 AI 生成的草稿与引用。</p>
+  <div class="wb-root workbench-page">
+    <header class="wb-page-header">
+      <div class="wb-page-header-main">
+        <h1 class="wb-page-title">写作工作台</h1>
+        <p class="wb-page-subtitle">三步完成：配置要求 → 确认大纲 → 生成并保存正文</p>
       </div>
-      <div v-if="!loading" class="workbench-header-meta">
-        <span class="meta-pill">{{ projectName || '未命名项目' }}</span>
-        <span class="meta-pill">已录入 {{ chapterCount }} 章</span>
-        <span class="meta-pill" :class="outlineReady ? 'meta-pill-ready' : 'meta-pill-missing'">
-          {{ outlineReady ? '大纲已配置' : '大纲未配置' }}
-        </span>
-      </div>
+      <KnowledgePanel
+        v-if="!loading"
+        class="wb-knowledge-inline"
+        :project-name="projectName"
+        :chapter-count="chapterCount"
+        :outline-ready="outlineReady"
+        :active-persona-name="activePersonaName"
+        :outline-summary="outlineSummary"
+        compact
+      />
     </header>
 
-    <div v-if="loading" class="loading-state">
-      <div class="loading-card">
-        <div class="loading-spinner"></div>
-        <p>正在加载工作台...</p>
+    <div v-if="loading" class="wb-loading">
+      <div class="wb-loading-card">
+        <div class="wb-spinner" />
+        <p>正在加载项目上下文…</p>
       </div>
     </div>
-    <div v-if="errorMessage || generationStore.errorMessage" class="error-banner">
-      {{ errorMessage || generationStore.errorMessage }}
-    </div>
 
-    <template v-if="!loading">
-      <div class="workbench-shell">
-        <section class="compose-column" aria-label="生成参数">
-          <KnowledgePanel
-            :project-name="projectName"
-            :chapter-count="chapterCount"
-            :outline-ready="outlineReady"
-            :active-persona-name="activePersonaName"
-            :outline-summary="outlineSummary"
-          />
+    <template v-else>
+      <WorkbenchStepper class="wb-stepper-block" :steps="workflowSteps" />
 
+      <div
+        v-if="errorMessage || generationStore.errorMessage || generationStore.outlineErrorMessage"
+        class="wb-alert wb-alert--error"
+        role="alert"
+      >
+        {{ errorMessage || generationStore.errorMessage || generationStore.outlineErrorMessage }}
+      </div>
+
+      <div class="wb-layout">
+        <aside class="wb-sidebar" aria-label="写作要求配置">
           <PromptConsole
             ref="promptConsoleRef"
-            :generating="generationStore.isStreaming"
+            :generating="generationStore.isOutlineStreaming || generationStore.isStreaming"
             :project-id="projectId"
             :persona-names="personaNames"
             :personas="personas"
             :knowledge-chapters="editorStore.chapters"
-            @generate="handleGenerate"
+            @generate="handleGenerateOutline"
             @structured-parsed="refreshWorkspaceData"
           />
+        </aside>
 
-          <ConsistencyAlert :notes="generationStore.consistencyNotes" />
-        </section>
-
-        <section class="result-column" aria-label="生成结果">
-          <GenerationPreview
+        <main class="wb-main" aria-label="生成产出">
+          <WorkbenchOutputPanel
+            v-model:active-tab="outputTab"
+            :outline-text="generationStore.outlineText"
+            :outline-confirmed="generationStore.outlineConfirmed"
+            :is-outline-streaming="generationStore.isOutlineStreaming"
+            :is-draft-streaming="generationStore.isStreaming"
+            :has-outline="generationStore.hasOutline"
             :draft-text="generationStore.draftText"
             :citations="generationStore.citations"
             :consistency-notes="generationStore.consistencyNotes"
             :used-relation-events="generationStore.usedRelationEvents"
-            :is-streaming="generationStore.isStreaming"
             :is-done="generationStore.isDone"
             :is-accepting="generationStore.isAccepting"
             :generation-phase="generationStore.generationPhase"
             :phase-panel-collapsed="generationStore.phasePanelCollapsed"
-            @accept="handleAcceptDraft"
-            @regenerate="handleRegenerate"
+            :evidence-count="evidenceCount"
+            @update:outline-text="handleOutlineTextUpdate"
+            @confirm="handleConfirmOutline"
+            @regenerate-outline="handleRegenerateOutline"
+            @generate-draft="handleGenerateDraft"
+            @accept-draft="handleAcceptDraft"
+            @regenerate-draft="handleRegenerateDraft"
           />
-        </section>
+        </main>
       </div>
     </template>
 
@@ -280,163 +435,131 @@ onMounted(() => {
       :result="previewResult"
       :error-message="previewError"
       @close="previewVisible = false"
-      @confirm="confirmPreviewAndGenerate"
+      @confirm="confirmPreviewAndContinue"
     />
   </div>
 </template>
 
 <style scoped>
 .workbench-page {
-  width: 100%;
-  max-width: none;
-  margin: 0;
-  padding: 0 0 2rem;
+  font-family: var(--wb-font);
+  color: var(--wb-text);
+  padding-bottom: 2.5rem;
+  min-height: 100%;
 }
 
-.workbench-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1.5rem;
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.workbench-header-copy {
-  max-width: 42rem;
-}
-
-.page-title {
-  margin: 0 0 0.25rem;
-  font-size: 1.5rem;
-  line-height: 1.3;
-  color: #111827;
-}
-
-.page-subtitle {
-  margin: 0;
-  color: #6b7280;
-  font-size: 0.92rem;
-  line-height: 1.5;
-}
-
-.workbench-header-meta {
+.wb-page-header {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  max-width: 28rem;
-}
-
-.meta-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  color: #374151;
-  font-size: 0.82rem;
-  line-height: 1.2;
-}
-
-.meta-pill-ready {
-  background: #ecfdf3;
-  border-color: #abefc6;
-  color: #027a48;
-}
-
-.meta-pill-missing {
-  background: #fffaeb;
-  border-color: #fedf89;
-  color: #b54708;
-}
-
-.workbench-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-  gap: 1.5rem;
-  align-items: start;
-}
-
-.compose-column,
-.result-column {
-  display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.wb-page-header-main {
+  flex: 1 1 16rem;
   min-width: 0;
 }
 
-.result-column {
-  position: sticky;
-  top: 1rem;
+.wb-page-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
-.loading-state {
+.wb-page-subtitle {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--wb-text-secondary);
+  line-height: 1.5;
+}
+
+.wb-knowledge-inline {
+  flex: 1 1 20rem;
+  max-width: 36rem;
+}
+
+.wb-stepper-block {
+  margin-bottom: 1.25rem;
+}
+
+.wb-alert {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--wb-radius-sm);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.wb-alert--error {
+  background: var(--wb-danger-soft);
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.wb-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.38fr) minmax(0, 0.62fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.wb-sidebar,
+.wb-main {
+  min-width: 0;
+}
+
+.wb-loading {
   display: flex;
   justify-content: center;
-  padding: 3rem 0;
+  padding: 4rem 0;
 }
 
-.loading-card {
+.wb-loading-card {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 1rem;
-  padding: 2rem 3rem;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  color: #6b7280;
-  font-size: 0.95rem;
+  padding: 2rem 2.5rem;
+  border-radius: var(--wb-radius);
+  border: 1px solid var(--wb-border);
+  background: var(--wb-surface);
+  color: var(--wb-text-secondary);
 }
 
-.loading-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2.5px solid #e5e7eb;
-  border-top-color: #1d4ed8;
+.wb-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--wb-border);
+  border-top-color: var(--wb-primary);
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  animation: wb-spin 0.75s linear infinite;
 }
 
-@keyframes spin {
+@keyframes wb-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-.error-banner {
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: 10px;
-  background: #fef3f2;
-  border: 1px solid #fecdca;
-  color: #b42318;
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-@media (max-width: 1280px) {
-  .workbench-shell {
+@media (max-width: 1100px) {
+  .wb-layout {
     grid-template-columns: 1fr;
   }
+}
 
-  .result-column {
-    position: static;
+@media (max-width: 640px) {
+  .wb-page-title {
+    font-size: 1.35rem;
   }
 }
 
-@media (max-width: 960px) {
-  .workbench-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .workbench-header-meta {
-    justify-content: flex-start;
-    max-width: none;
+@media (prefers-reduced-motion: reduce) {
+  .wb-spinner {
+    animation: none;
   }
 }
 </style>

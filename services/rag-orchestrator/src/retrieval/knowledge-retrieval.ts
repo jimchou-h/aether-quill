@@ -70,6 +70,10 @@ export function buildGenerationRetrievalQuery(
 export const CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY = 'chapter.optimize.plan';
 export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
 
+/** 写作工作台两阶段：大纲 / 正文（AQ-217~AQ-219） */
+export const WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY = 'write.chapter.outline';
+export const WRITE_CHAPTER_DRAFT_TEMPLATE_KEY = 'write.chapter';
+
 export interface ChapterOptimizeRetrievalInput {
   chapterNo: number;
   title: string;

@@ -1,0 +1,38 @@
+post:
+  tags:
+    - Generation
+  summary: Stream workbench chapter draft (SSE)
+  description: |
+    写作工作台两阶段生成之第二步：基于**已确认**的章节大纲流式生成正文。
+    必须提供 `confirmedOutlineText`（或经服务端校验的 `outlineId` 与之一致）。
+
+    SSE phase events: `retrieving` → `building_prompt` → `start` → `waiting_llm` → `generating` → `checking` → `end`
+
+    Trace 上下文会记录 `outlineId`、`outlineTraceId` 以便回溯正文来源大纲。
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/GenerateWorkbenchDraftRequest'
+  responses:
+    '200':
+      description: SSE stream of draft content and metadata
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Missing confirmed outline or invalid task
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

@@ -10,6 +10,8 @@ import {
   buildRetrievalQuery,
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+  WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
+  WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY,
   DraftCitation,
   buildStructuredKnowledgeEvidence,
   resolveChapterScopedEmbeddingQuery,
@@ -17,6 +19,10 @@ import {
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
+import {
+  assertConfirmedOutlineText,
+  buildWorkbenchDraftUserPrompt,
+} from './generation/write-chapter-prompt';
 import { indexChapterSummaryInQdrant } from './context/chapter-summary-memory';
 import { retrieveMemoryChapterSummaries } from './context/chapter-summary-memory';
 import { pickPriorChapterSummariesForPrompt } from './context/prior-chapter-summaries';
@@ -650,7 +656,9 @@ app.post('/api/generate', async (req, res) => {
 
   let retrievalQuery: string;
   if (
-    (tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY || tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY) &&
+    (tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
+      tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
+      tk === WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY) &&
     typeof extra?.retrievalInstruction === 'string' &&
     extra.retrievalInstruction.trim()
   ) {
@@ -854,8 +862,32 @@ app.get('/api/projects/:projectId/generation-stats', (req, res) => {
   res.json(stats);
 });
 
+const WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT = [
+  '你是一位专业小说写作助手，正在根据作者已确认的章节大纲撰写本章正文。',
+  '硬约束：',
+  '1) 必须严格遵循 <chapter-outline> 中已确认的章节大纲结构与节拍；',
+  '2) 必须满足写作目标、视角、必须包含与避免项；',
+  '3) 保持与【叙事上下文】及【检索证据】（如有）一致；',
+  '4) 直接输出小说正文，不要输出大纲、说明或 Markdown 标题。',
+].join('\n');
+
 app.post('/api/generate/draft', async (req, res) => {
-  const { projectId, task = {}, citations = [] } = req.body;
+  const {
+    projectId,
+    task = {},
+    citations = [],
+    confirmedOutlineText: bodyOutline,
+    outlineId,
+    outlineTraceId,
+  } = req.body;
+
+  let confirmedOutlineText: string;
+  try {
+    confirmedOutlineText = assertConfirmedOutlineText(bodyOutline);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'confirmedOutlineText is required';
+    return res.status(400).json({ error: errorMsg, code: 1321 });
+  }
 
   const requestTraceId =
     (req as RequestWithObservability).traceId ||
@@ -931,26 +963,42 @@ app.post('/api/generate/draft', async (req, res) => {
   const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, context);
   const generationContext = await getGenerationContext(projectId, chapterNo > 0 ? chapterNo : undefined);
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
+  generationContext.systemPromptText = WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT;
 
-  const prompt = [
-    `请撰写第${chapterNo}章小说正文。`,
-    `写作目标：${goal}`,
-    `叙事视角：${pov}`,
-    `要求：保持情节连贯、人物行为符合【叙事上下文】与【检索证据】（如有）；${buildTargetWordsRequirement(task.targetWords)}`,
-  ].join('\n');
+  const prompt = buildWorkbenchDraftUserPrompt(
+    {
+      chapterNo,
+      goal,
+      pov,
+      mustInclude: Array.isArray(task.mustInclude) ? task.mustInclude : [],
+      avoid: Array.isArray(task.avoid) ? task.avoid : [],
+      targetWords: task.targetWords,
+      appearingCharacters: Array.isArray(task.appearingCharacters)
+        ? task.appearingCharacters
+        : [],
+    },
+    confirmedOutlineText
+  );
 
   const traceSpanId = startSpan(requestTraceId, 'generate.draft', {
     projectId,
     chapterNo,
     task,
+    outlineId: typeof outlineId === 'string' ? outlineId : undefined,
+    outlineTraceId: typeof outlineTraceId === 'string' ? outlineTraceId : undefined,
   });
 
   const trace = await generationService.createTrace({
     prompt,
     projectId,
-    systemPrompt: context.systemPromptText,
+    systemPrompt: WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT,
     context: {
+      phase: 'write.chapter.draft',
       task,
+      templateKey: WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
+      outlineId: typeof outlineId === 'string' ? outlineId : null,
+      outlineTraceId: typeof outlineTraceId === 'string' ? outlineTraceId : null,
+      confirmedOutlineText,
       citations: resolvedCitations,
       retrieval_query: retrievalQuery,
       retrieved_chunk_ids: retrievedChunkIds,

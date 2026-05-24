@@ -1,17 +1,22 @@
 <script setup lang="ts">
+import { withDefaults } from 'vue';
 import type { ConsistencyNote } from '../../services/api';
 
-/**
- * 一致性提示组件属性定义
- */
-defineProps<{
-  /** 一致性提示列表 */
-  notes: ConsistencyNote[];
-}>();
+withDefaults(
+  defineProps<{
+    notes: ConsistencyNote[];
+    embedded?: boolean;
+  }>(),
+  { embedded: false }
+);
 </script>
 
 <template>
-  <div v-if="notes.length > 0" class="consistency-alerts">
+  <div
+    v-if="notes.length > 0"
+    class="consistency-alerts"
+    :class="{ 'consistency-alerts--embedded': embedded }"
+  >
     <h4 class="alert-title">一致性提示</h4>
     <ul class="alert-list">
       <li
@@ -33,6 +38,13 @@ defineProps<{
   border-radius: 12px;
   padding: 1rem 1.15rem;
   background: #fff;
+}
+
+.consistency-alerts--embedded {
+  border-radius: var(--wb-radius-sm);
+  border-color: var(--wb-border);
+  background: var(--wb-surface-muted);
+  padding: 0.85rem 1rem;
 }
 
 .alert-title {

@@ -1,0 +1,24 @@
+/* 写作工作台设计令牌（局部引用，不污染全局） */
+.wb-root {
+  --wb-bg: #f4f6f9;
+  --wb-surface: #ffffff;
+  --wb-surface-muted: #f8fafc;
+  --wb-border: #e2e8f0;
+  --wb-border-strong: #cbd5e1;
+  --wb-text: #0f172a;
+  --wb-text-secondary: #64748b;
+  --wb-text-muted: #94a3b8;
+  --wb-primary: #4f46e5;
+  --wb-primary-hover: #4338ca;
+  --wb-primary-soft: #eef2ff;
+  --wb-success: #059669;
+  --wb-success-soft: #ecfdf5;
+  --wb-warning: #d97706;
+  --wb-warning-soft: #fffbeb;
+  --wb-danger: #dc2626;
+  --wb-danger-soft: #fef2f2;
+  --wb-radius: 14px;
+  --wb-radius-sm: 10px;
+  --wb-shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 8px 24px rgb(15 23 42 / 6%);
+  --wb-font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}

@@ -673,6 +673,61 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/write/outline')
+  async writeChapterOutline(
+    @Param('id') id: string,
+    @Body()
+    data: {
+      chapterNo: number;
+      goal: string;
+      pov: string;
+      mustInclude?: string[];
+      avoid?: string[];
+      targetWords?: number;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(': keep-alive\n\n');
+
+    const writeEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    try {
+      await this.projectsService.writeChapterOutlineStream(id, data, userId, {
+        onStart: ({ traceId, chapterNo, outlineId, basis }) => {
+          writeEvent({ event: 'start', traceId, chapterNo, outlineId, basis });
+        },
+        onContent: (text) => {
+          writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+        },
+        onEnd: ({ traceId, outlineText, outlineId, basis }) => {
+          writeEvent({ event: 'end', traceId, outlineText, outlineId, basis });
+        },
+        onError: (message) => {
+          writeEvent({ event: 'error', data: message });
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '生成章节大纲失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/write')
   async writeChapter(
     @Param('id') id: string,
@@ -686,6 +741,9 @@ export class ProjectsController {
       targetWords?: number;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
+      confirmedOutlineText?: string;
+      outlineId?: string;
+      outlineTraceId?: string;
     },
     @Request() req: AuthenticatedRequest
   ) {

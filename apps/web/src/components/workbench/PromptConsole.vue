@@ -252,7 +252,7 @@ defineExpose({ resetForm });
   <section class="prompt-console">
     <div class="panel-heading">
       <h3 class="panel-title">生成参数</h3>
-      <p class="panel-description">填写本章目标、出场角色与约束条件后发起生成。</p>
+      <p class="panel-description">填写本章核心信息；角色、关系与约束可展开配置。</p>
     </div>
 
     <div class="form-section">
@@ -321,115 +321,134 @@ defineExpose({ resetForm });
       </label>
     </div>
 
-    <section class="relation-section bordered-section">
-      <h4 class="section-title">出场角色</h4>
-      <div v-if="absentWarnings.length > 0" class="hint-list">
-        <p v-for="warning in absentWarnings" :key="warning.personaId" class="message message-warn">
-          ⚠ {{ warning.name }} 已连续 {{ warning.absentChapterCount }} 章未出场
-          <template v-if="warning.lastAppearedChapterNo">
-            （最后出场：第{{ warning.lastAppearedChapterNo }}章）
-          </template>
-        </p>
-      </div>
-      <div class="chip-list">
-        <button
-          v-for="name in availableCharacters"
-          :key="name"
-          type="button"
-          class="chip-button"
-          :class="{ 'chip-button-active': appearingCharacters.includes(name) }"
-          @click="toggleCharacter(name)"
-        >
-          <span>{{ name }}</span>
-          <span class="chip-meta">{{ personaStateByName.get(name) }}</span>
-        </button>
-      </div>
-      <div class="custom-character-row">
-        <input
-          v-model="customCharacter"
-          class="field-input"
-          placeholder="自定义出场角色"
-          @keyup.enter.prevent="addCustomCharacter"
-        />
-        <button class="secondary-button" type="button" @click="addCustomCharacter">添加</button>
-      </div>
-    </section>
+    <details class="wb-accordion">
+      <summary class="wb-accordion-summary">角色与关系事件</summary>
+      <div class="wb-accordion-body">
+        <section class="relation-section">
+          <h4 class="section-title">出场角色</h4>
+          <div v-if="absentWarnings.length > 0" class="hint-list">
+            <p
+              v-for="warning in absentWarnings"
+              :key="warning.personaId"
+              class="message message-warn"
+            >
+              ⚠ {{ warning.name }} 已连续 {{ warning.absentChapterCount }} 章未出场
+              <template v-if="warning.lastAppearedChapterNo">
+                （最后出场：第{{ warning.lastAppearedChapterNo }}章）
+              </template>
+            </p>
+          </div>
+          <div class="chip-list">
+            <button
+              v-for="name in availableCharacters"
+              :key="name"
+              type="button"
+              class="chip-button"
+              :class="{ 'chip-button-active': appearingCharacters.includes(name) }"
+              @click="toggleCharacter(name)"
+            >
+              <span>{{ name }}</span>
+              <span class="chip-meta">{{ personaStateByName.get(name) }}</span>
+            </button>
+          </div>
+          <div class="custom-character-row">
+            <input
+              v-model="customCharacter"
+              class="field-input"
+              placeholder="自定义出场角色"
+              @keyup.enter.prevent="addCustomCharacter"
+            />
+            <button class="secondary-button" type="button" @click="addCustomCharacter">添加</button>
+          </div>
+        </section>
 
-    <section class="relation-section bordered-section">
-      <div class="section-header">
-        <h4 class="section-title">
-          {{ appearingCharacters.length > 0 ? '系统推荐关系事件' : '关系事件（手动勾选）' }}
-        </h4>
-        <span class="section-meta">
-          已选 {{ selectedEventIds.length }} 条 / 约 {{ selectedPreviewLength }} 字
-        </span>
-      </div>
-      <p v-if="appearingCharacters.length > 0" class="message">
-        已根据出场角色自动推荐 {{ recommendedEventIds.length }} 条，可取消勾选。
-      </p>
-      <p v-for="item in relationSuggestions" :key="item.id" class="message message-warn">
-        ☐ {{ item.label }}
-      </p>
-      <p v-if="eventError" class="message message-error">{{ eventError }}</p>
-      <p v-if="loadingEvents" class="message">正在加载关系事件...</p>
-      <p v-else-if="filteredEvents.length === 0" class="message">暂无可选关系事件。</p>
-      <div v-else class="event-checklist">
-        <label v-for="event in filteredEvents" :key="event.id" class="event-option">
-          <input
-            type="checkbox"
-            :checked="selectedEventIds.includes(event.id)"
-            @change="toggleEvent(event.id)"
-          />
-          <span class="event-option-text">
-            <strong>{{ event.protagonist }} ↔ {{ event.counterparty }}</strong>
-            <span class="event-option-meta">
-              <template v-if="event.chapterNo">第{{ event.chapterNo }}章</template>
+        <section class="relation-section relation-section--events">
+          <div class="section-header">
+            <h4 class="section-title">
+              {{ appearingCharacters.length > 0 ? '系统推荐关系事件' : '关系事件（手动勾选）' }}
+            </h4>
+            <span class="section-meta">
+              已选 {{ selectedEventIds.length }} 条 / 约 {{ selectedPreviewLength }} 字
             </span>
-            <span>{{ event.summary }}</span>
-          </span>
-        </label>
+          </div>
+          <p v-if="appearingCharacters.length > 0" class="message">
+            已根据出场角色自动推荐 {{ recommendedEventIds.length }} 条，可取消勾选。
+          </p>
+          <p v-for="item in relationSuggestions" :key="item.id" class="message message-warn">
+            ☐ {{ item.label }}
+          </p>
+          <p v-if="eventError" class="message message-error">{{ eventError }}</p>
+          <p v-if="loadingEvents" class="message">正在加载关系事件...</p>
+          <p v-else-if="filteredEvents.length === 0" class="message">暂无可选关系事件。</p>
+          <div v-else class="event-checklist">
+            <label v-for="event in filteredEvents" :key="event.id" class="event-option">
+              <input
+                type="checkbox"
+                :checked="selectedEventIds.includes(event.id)"
+                @change="toggleEvent(event.id)"
+              />
+              <span class="event-option-text">
+                <strong>{{ event.protagonist }} ↔ {{ event.counterparty }}</strong>
+                <span class="event-option-meta">
+                  <template v-if="event.chapterNo">第{{ event.chapterNo }}章</template>
+                </span>
+                <span>{{ event.summary }}</span>
+              </span>
+            </label>
+          </div>
+        </section>
       </div>
-    </section>
+    </details>
 
-    <div class="form-section">
-      <div class="form-grid">
-        <label class="field-label">
-          必须包含（每行一条）
-          <textarea
-            v-model="mustIncludeText"
-            class="field-textarea"
-            placeholder="旧港口&#10;怀表线索&#10;雨夜追逐"
-            rows="5"
-          />
-        </label>
-        <label class="field-label">
-          禁止内容（每行一条）
-          <textarea
-            v-model="avoidText"
-            class="field-textarea"
-            placeholder="直接揭露终极反派&#10;角色性格突变"
-            rows="5"
-          />
-        </label>
+    <details class="wb-accordion">
+      <summary class="wb-accordion-summary">写作约束（可选）</summary>
+      <div class="wb-accordion-body">
+        <div class="form-section form-section--flush">
+          <div class="form-grid">
+            <label class="field-label">
+              必须包含（每行一条）
+              <textarea
+                v-model="mustIncludeText"
+                class="field-textarea"
+                placeholder="旧港口&#10;怀表线索&#10;雨夜追逐"
+                rows="5"
+              />
+            </label>
+            <label class="field-label">
+              禁止内容（每行一条）
+              <textarea
+                v-model="avoidText"
+                class="field-textarea"
+                placeholder="直接揭露终极反派&#10;角色性格突变"
+                rows="5"
+              />
+            </label>
+          </div>
+        </div>
       </div>
+    </details>
 
+    <div class="prompt-cta">
       <button
-        class="primary-button generate-button"
+        class="wb-btn wb-btn--primary wb-btn--block"
+        type="button"
         :disabled="generating || !goal.trim()"
         @click="handleGenerate"
       >
-        {{ generating ? '生成中...' : '生成章节草稿' }}
+        {{ generating ? '正在生成大纲…' : '① 生成章节大纲' }}
       </button>
+      <p class="prompt-cta-hint">将先预览检索上下文，再流式生成大纲。</p>
     </div>
   </section>
 </template>
 
 <style scoped>
 .prompt-console {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1.25rem;
-  background: #fff;
+  border: 1px solid var(--wb-border, #e5e7eb);
+  border-radius: var(--wb-radius, 12px);
+  padding: 1.15rem;
+  background: var(--wb-surface, #fff);
+  box-shadow: var(--wb-shadow, none);
 }
 
 .panel-heading {
@@ -517,16 +536,90 @@ defineExpose({ resetForm });
   line-height: 1.6;
 }
 
-.bordered-section {
-  margin-bottom: 1rem;
-  padding: 1rem;
-  border-radius: 10px;
-  background: #f8fafc;
-  border: 1px solid #edf2f7;
+.wb-accordion {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--wb-border, #e5e7eb);
+  border-radius: var(--wb-radius-sm, 10px);
+  background: var(--wb-surface-muted, #f8fafc);
+  overflow: hidden;
+}
+
+.wb-accordion-summary {
+  padding: 0.7rem 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--wb-text, #0f172a);
+  cursor: pointer;
+  list-style: none;
+}
+
+.wb-accordion-summary::-webkit-details-marker {
+  display: none;
+}
+
+.wb-accordion-summary::after {
+  content: '＋';
+  float: right;
+  color: var(--wb-text-muted, #94a3b8);
+  font-weight: 400;
+}
+
+.wb-accordion[open] .wb-accordion-summary::after {
+  content: '－';
+}
+
+.wb-accordion-body {
+  padding: 0 0.9rem 0.9rem;
+  border-top: 1px solid var(--wb-border, #e5e7eb);
 }
 
 .relation-section {
+  margin-bottom: 0.85rem;
+}
+
+.relation-section--events {
   margin-bottom: 0;
+}
+
+.form-section--flush {
+  margin-bottom: 0;
+}
+
+.prompt-cta {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--wb-border, #e5e7eb);
+}
+
+.prompt-cta-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  color: var(--wb-text-muted, #94a3b8);
+  text-align: center;
+}
+
+.wb-btn--block {
+  width: 100%;
+}
+
+.wb-btn--primary {
+  border: none;
+  background: var(--wb-primary, #4f46e5);
+  color: #fff;
+  min-height: 2.75rem;
+  border-radius: var(--wb-radius-sm, 10px);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wb-btn--primary:hover:not(:disabled) {
+  background: var(--wb-primary-hover, #4338ca);
+}
+
+.wb-btn--primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .section-title {

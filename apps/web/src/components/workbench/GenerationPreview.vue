@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, withDefaults } from 'vue';
 import type {
   CitationItem,
   ConsistencyNote,
@@ -26,26 +26,30 @@ const PHASE_ORDER: GenerationPhase[] = [
 /**
  * 生成预览组件属性定义
  */
-const props = defineProps<{
-  /** 草稿文本 */
-  draftText: string;
-  /** 引用证据列表 */
-  citations: CitationItem[];
-  /** 一致性提示列表 */
-  consistencyNotes: ConsistencyNote[];
-  /** 本次使用的关系事件 */
-  usedRelationEvents: UsedRelationEventItem[];
-  /** 是否正在生成 */
-  isStreaming: boolean;
-  /** 是否生成完成 */
-  isDone: boolean;
-  /** 是否正在接受草稿（写入章节） */
-  isAccepting: boolean;
-  /** 当前生成阶段 */
-  generationPhase: GenerationPhase | null;
-  /** 阶段面板是否收起 */
-  phasePanelCollapsed: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    /** 草稿文本 */
+    draftText: string;
+    /** 引用证据列表 */
+    citations: CitationItem[];
+    /** 一致性提示列表 */
+    consistencyNotes: ConsistencyNote[];
+    /** 本次使用的关系事件 */
+    usedRelationEvents: UsedRelationEventItem[];
+    /** 是否正在生成 */
+    isStreaming: boolean;
+    /** 是否生成完成 */
+    isDone: boolean;
+    /** 是否正在接受草稿（写入章节） */
+    isAccepting: boolean;
+    /** 当前生成阶段 */
+    generationPhase: GenerationPhase | null;
+    /** 阶段面板是否收起 */
+    phasePanelCollapsed: boolean;
+    embedded?: boolean;
+  }>(),
+  { embedded: false }
+);
 
 const showPhasePanel = computed(
   () => props.isStreaming && !props.phasePanelCollapsed && props.generationPhase !== null
@@ -75,11 +79,11 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section class="generation-preview">
-    <div class="panel-heading">
-      <h3 class="panel-title">生成结果</h3>
-      <p class="panel-description">草稿、引用证据与关系事件会集中展示在这里。</p>
-    </div>
+  <section class="generation-preview" :class="{ 'generation-preview--embedded': embedded }">
+    <header v-if="!embedded" class="panel-heading">
+      <h3 class="panel-title">正文草稿</h3>
+      <p class="panel-description">流式生成结果；引用与告警请切换到「引用与告警」标签。</p>
+    </header>
 
     <div v-if="showPhasePanel" class="phase-panel" role="status" aria-live="polite">
       <p class="phase-panel-title">生成进度</p>
@@ -102,49 +106,30 @@ const emit = defineEmits<{
     </div>
 
     <div v-if="!draftText && !isStreaming" class="empty-state">
-      <p class="empty-title">等待生成</p>
-      <p class="empty-copy">输入生成参数后点击「生成章节草稿」，结果将实时显示在此处。</p>
+      <p class="empty-title">等待生成正文</p>
+      <p class="empty-copy">请先在「章节大纲」标签中确认大纲，再点击「生成正文」。</p>
     </div>
 
-    <div v-if="isDone" class="actions">
-      <button class="primary-button" type="button" :disabled="isAccepting" @click="emit('accept')">
-        {{ isAccepting ? '接受中...' : '接受草稿' }}
-      </button>
-      <button
-        class="secondary-button"
-        type="button"
-        :disabled="isAccepting"
-        @click="emit('regenerate')"
-      >
-        重新生成
-      </button>
-    </div>
-
-    <div v-if="usedRelationEvents.length > 0" class="citations-section">
-      <h4 class="sub-title">本次使用的关系事件</h4>
-      <ul class="citation-list">
-        <li v-for="event in usedRelationEvents" :key="event.id" class="citation-item">
-          <span class="citation-badge">relation-event</span>
-          <span class="citation-snippet">
-            {{ event.protagonist }} ↔ {{ event.counterparty }} · {{ event.summary }}
-          </span>
-        </li>
-      </ul>
-    </div>
-
-    <div v-if="citations.length > 0" class="citations-section">
-      <h4 class="sub-title">引用证据</h4>
-      <ul class="citation-list">
-        <li
-          v-for="(citation, index) in citations"
-          :key="`${citation.sourceType}-${citation.sourceId}-${index}`"
-          class="citation-item"
+    <footer v-if="isDone || isStreaming" class="draft-footer">
+      <div v-if="isDone" class="actions">
+        <button
+          class="wb-btn wb-btn--primary"
+          type="button"
+          :disabled="isAccepting"
+          @click="emit('accept')"
         >
-          <span class="citation-badge">{{ citation.sourceType }}</span>
-          <span class="citation-snippet">{{ citation.snippet }}</span>
-        </li>
-      </ul>
-    </div>
+          {{ isAccepting ? '落库中…' : '接受草稿并保存' }}
+        </button>
+        <button
+          class="wb-btn wb-btn--ghost"
+          type="button"
+          :disabled="isAccepting || isStreaming"
+          @click="emit('regenerate')"
+        >
+          重新生成正文
+        </button>
+      </div>
+    </footer>
   </section>
 </template>
 
@@ -157,6 +142,14 @@ const emit = defineEmits<{
   border-radius: 12px;
   padding: 1.25rem;
   background: #fff;
+}
+
+.generation-preview--embedded {
+  border: none;
+  border-radius: 0;
+  padding: 1rem 1.15rem 0;
+  background: transparent;
+  min-height: min(68vh, 720px);
 }
 
 .panel-heading {
@@ -276,98 +269,68 @@ const emit = defineEmits<{
 }
 
 .draft-output {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 1rem;
-  background: #fafafa;
+  border: 1px solid var(--wb-border, #e5e7eb);
+  border-radius: var(--wb-radius-sm, 10px);
+  padding: 1rem 1.05rem;
+  background: var(--wb-surface-muted, #fafafa);
   white-space: pre-wrap;
-  line-height: 1.8;
-  font-size: 0.95rem;
-  font-family: inherit;
-  min-height: 360px;
-  max-height: min(72vh, 760px);
+  line-height: 1.75;
+  font-size: 0.94rem;
+  font-family: var(--wb-font, inherit);
+  color: var(--wb-text, #111827);
+  min-height: 340px;
+  max-height: min(58vh, 640px);
   overflow-y: auto;
+}
+
+.generation-preview--embedded .draft-output {
+  flex: 1;
+  max-height: none;
+  min-height: 300px;
+}
+
+.draft-footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: 1rem;
+  padding: 0.85rem 0 1rem;
+  background: linear-gradient(to top, var(--wb-surface, #fff) 75%, transparent);
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
-  margin-bottom: 1rem;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
-.primary-button {
+.wb-btn {
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--wb-radius-sm, 8px);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wb-btn--primary {
   border: none;
-  background: #1d4ed8;
+  background: var(--wb-primary, #4f46e5);
   color: #fff;
-  border-radius: 8px;
-  padding: 0.55rem 1rem;
-  cursor: pointer;
-  font-size: 0.88rem;
-  transition: background 0.15s;
 }
 
-.primary-button:hover {
-  background: #2563eb;
+.wb-btn--primary:hover:not(:disabled) {
+  background: var(--wb-primary-hover, #4338ca);
 }
 
-.primary-button:disabled,
-.secondary-button:disabled {
-  opacity: 0.5;
+.wb-btn--ghost {
+  border: 1px solid var(--wb-border, #e5e7eb);
+  background: var(--wb-surface, #fff);
+  color: var(--wb-text-secondary, #64748b);
+}
+
+.wb-btn:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
-}
-
-.secondary-button {
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #374151;
-  border-radius: 8px;
-  padding: 0.55rem 1rem;
-  cursor: pointer;
-  font-size: 0.88rem;
-  transition: all 0.15s;
-}
-
-.secondary-button:hover {
-  background: #f9fafb;
-  border-color: #9ca3af;
-}
-
-.citations-section {
-  border-top: 1px solid #e5e7eb;
-  padding-top: 0.85rem;
-  margin-top: 0.15rem;
-}
-
-.citation-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.citation-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  font-size: 0.85rem;
-  color: #4b5563;
-  line-height: 1.5;
-}
-
-.citation-badge {
-  flex-shrink: 0;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 0.72rem;
-  padding: 0.15rem 0.4rem;
-  border-radius: 999px;
-  font-weight: 500;
-}
-
-.citation-snippet {
-  word-break: break-word;
 }
 </style>

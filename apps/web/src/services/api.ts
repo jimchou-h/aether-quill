@@ -798,6 +798,133 @@ export const apiClient = {
   },
 
   // SSE streaming generation for writing workbench
+  async generateWriteOutlineSSE(
+    projectId: string,
+    task: {
+      chapterNo: number;
+      goal: string;
+      pov: string;
+      mustInclude: string[];
+      avoid: string[];
+      targetWords?: number;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    callbacks: {
+      onStart?: (event: WriteChapterOutlineStartEvent) => void;
+      onContent?: (text: string) => void;
+      onEnd?: (result: WriteChapterOutlineResult) => void;
+      onError?: (message: string) => void;
+    }
+  ): Promise<void> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
+    const token = localStorage.getItem('token');
+    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const url = `${baseURL}/api/projects/${projectId}/write/outline`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(task),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `生成章节大纲失败: ${response.statusText}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let reading = true;
+
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const segments = buffer.split('\n\n');
+      buffer = segments.pop() || '';
+
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        const dataPart = trimmed.replace(/^data:\s*/, '');
+        if (!dataPart) {
+          continue;
+        }
+
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            outlineId?: string;
+            outlineText?: string;
+            basis?: WriteChapterOutlineBasis;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId || '',
+                chapterNo: event.chapterNo ?? task.chapterNo,
+                outlineId: event.outlineId || '',
+                basis:
+                  event.basis ??
+                  ({
+                    usedPersonaId: null,
+                    outlineUsed: false,
+                    recentChapterCount: 0,
+                    usedRelationEvents: [],
+                  } as WriteChapterOutlineBasis),
+              });
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'end': {
+              callbacks.onEnd?.({
+                traceId: event.traceId || '',
+                outlineText: (event.outlineText || '').trim(),
+                outlineId: event.outlineId || '',
+                basis:
+                  event.basis ??
+                  ({
+                    usedPersonaId: null,
+                    outlineUsed: false,
+                    recentChapterCount: 0,
+                    usedRelationEvents: [],
+                  } as WriteChapterOutlineBasis),
+              });
+              reading = false;
+              break;
+            }
+            case 'error':
+              callbacks.onError?.(event.data || '生成章节大纲失败');
+              reading = false;
+              break;
+          }
+        } catch {
+          // skip malformed SSE lines
+        }
+      }
+    }
+  },
+
   async generateDraftSSE(
     projectId: string,
     task: {
@@ -809,6 +936,11 @@ export const apiClient = {
       targetWords?: number;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
+    },
+    outline: {
+      confirmedOutlineText: string;
+      outlineId?: string;
+      outlineTraceId?: string;
     },
     citations: CitationItem[],
     callbacks: SseCallbacks
@@ -830,7 +962,14 @@ export const apiClient = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ projectId, task, citations }),
+      body: JSON.stringify({
+        projectId,
+        task,
+        citations,
+        confirmedOutlineText: outline.confirmedOutlineText,
+        outlineId: outline.outlineId,
+        outlineTraceId: outline.outlineTraceId,
+      }),
     });
 
     if (!response.ok) {
@@ -1448,6 +1587,27 @@ export interface ChapterOptimizationPlanResult {
   planId: string;
   traceId: string;
   basis: ChapterOptimizationBasis;
+}
+
+export interface WriteChapterOutlineBasis {
+  usedPersonaId: string | null;
+  outlineUsed: boolean;
+  recentChapterCount: number;
+  usedRelationEvents: UsedRelationEventItem[];
+}
+
+export interface WriteChapterOutlineResult {
+  outlineText: string;
+  outlineId: string;
+  traceId: string;
+  basis: WriteChapterOutlineBasis;
+}
+
+export interface WriteChapterOutlineStartEvent {
+  traceId: string;
+  chapterNo: number;
+  outlineId: string;
+  basis: WriteChapterOutlineBasis;
 }
 
 export interface ChapterOptimizePlanCallbacks {

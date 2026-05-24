@@ -95,6 +95,19 @@ import {
   type ChapterOptimizeUsedRelationEvent,
   type ChapterTypoIssueRecord,
 } from './chapter-optimize.util';
+import {
+  WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT,
+  WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
+  WRITE_CHAPTER_OUTLINE_SYSTEM_PROMPT,
+  WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY,
+  assertConfirmedOutlineForDraft,
+  assertOutlineText,
+  buildWriteDraftUserPrompt,
+  buildWriteOutlineUserPrompt,
+  makeWriteOutlineId,
+  type WriteChapterTaskInput,
+  type WriteChapterUsedRelationEvent,
+} from './write-chapter.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { usePostgresPersistence } from '../../persistence/use-postgres';
 import {
@@ -240,6 +253,9 @@ interface WriteTaskInput {
   targetWords?: number;
   appearingCharacters?: string[];
   selectedEventIds?: string[];
+  confirmedOutlineText?: string;
+  outlineId?: string;
+  outlineTraceId?: string;
 }
 
 export interface RelationEventRecord {
@@ -1772,6 +1788,221 @@ export class ProjectsService implements OnModuleInit {
     return { id: event.id };
   }
 
+  async writeChapterOutlineStream(
+    projectId: string,
+    payload: Partial<WriteTaskInput>,
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: {
+        traceId: string;
+        chapterNo: number;
+        outlineId: string;
+        basis: {
+          usedPersonaId: string | null;
+          outlineUsed: boolean;
+          recentChapterCount: number;
+          usedRelationEvents: UsedRelationEventRecord[];
+        };
+      }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: {
+        traceId: string;
+        outlineText: string;
+        outlineId: string;
+        basis: {
+          usedPersonaId: string | null;
+          outlineUsed: boolean;
+          recentChapterCount: number;
+          usedRelationEvents: UsedRelationEventRecord[];
+        };
+      }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const task = this.normalizeWriteTaskInput(payload);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const usedRelationEvents = this.resolveSelectedRelationEvents(
+      projectId,
+      payload.selectedEventIds
+    );
+
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      usedRelationEvents
+    );
+
+    const userPrompt = buildWriteOutlineUserPrompt({
+      task,
+      selectedRelationEvents: usedRelationEvents.map(
+        (event): WriteChapterUsedRelationEvent => ({
+          id: event.id,
+          protagonist: event.protagonist,
+          counterparty: event.counterparty,
+          summary: event.summary,
+          evidenceSnippet: event.evidenceSnippet,
+          chapterNo: event.chapterNo,
+        })
+      ),
+    });
+
+    const outlineId = makeWriteOutlineId();
+    const activePersona =
+      personas.find((item) => item.id === settings.activePersonaId) ||
+      personas.find((item) => item.status === 'published') ||
+      null;
+
+    const basis = {
+      usedPersonaId: activePersona?.id || null,
+      outlineUsed: Boolean(knowledge.outlineSummary),
+      recentChapterCount: knowledge.chapters.slice(-3).length,
+      usedRelationEvents,
+    };
+
+    const structuredChapter = knowledge.chapters.find((ch) => ch.chapterNo === task.chapterNo);
+    const chapterSummaryForRetrieval =
+      (structuredChapter?.summary && structuredChapter.summary.trim()) ||
+      structuredChapter?.content.slice(0, 160) ||
+      task.goal.slice(0, 160);
+
+    let response;
+    try {
+      response = await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/generate`,
+        {
+          projectId,
+          prompt: userPrompt,
+          useSSE: true,
+          systemPromptOverride: WRITE_CHAPTER_OUTLINE_SYSTEM_PROMPT,
+          templateKey: WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY,
+          context: {
+            task: 'write.chapter.outline',
+            chapterNo: task.chapterNo,
+            outlineId,
+            writeTask: task,
+            retrievalInstruction: task.goal,
+            retrievalChapterSummary: chapterSummaryForRetrieval,
+            retrievalChapterTitle: structuredChapter?.title || `第${task.chapterNo}章`,
+          },
+        },
+        { responseType: 'stream' }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '调用章节大纲生成失败';
+      throw new BadGatewayException(message);
+    }
+
+    let accumulated = '';
+    let traceId = '';
+    let sawTerminalSse = false;
+
+    await new Promise<void>((resolveStream, rejectStream) => {
+      const stream = response.data as NodeJS.ReadableStream;
+      let buffer = '';
+
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf-8');
+        const segments = buffer.split('\n\n');
+        buffer = segments.pop() || '';
+
+        for (const segment of segments) {
+          const trimmedSegment = segment.trim();
+          if (!trimmedSegment.startsWith('data:')) {
+            continue;
+          }
+          const dataPart = trimmedSegment.replace(/^data:\s*/, '');
+          if (!dataPart) {
+            continue;
+          }
+          let event: { event?: string; data?: string; traceId?: string };
+          try {
+            event = JSON.parse(dataPart);
+          } catch {
+            continue;
+          }
+
+          switch (event.event) {
+            case 'start': {
+              traceId = typeof event.traceId === 'string' ? event.traceId : '';
+              callbacks.onStart({
+                traceId,
+                chapterNo: task.chapterNo,
+                outlineId,
+                basis,
+              });
+              break;
+            }
+            case 'content': {
+              const raw = typeof event.data === 'string' ? event.data : '';
+              const piece = raw.replace(/\\n/g, '\n');
+              accumulated += piece;
+              callbacks.onContent(piece);
+              break;
+            }
+            case 'end': {
+              sawTerminalSse = true;
+              traceId = typeof event.traceId === 'string' ? event.traceId : traceId;
+              try {
+                const outlineText = accumulated.trim();
+                assertOutlineText(outlineText);
+                callbacks.onEnd({
+                  traceId,
+                  outlineText,
+                  outlineId,
+                  basis,
+                });
+              } catch (error) {
+                const message =
+                  error instanceof Error ? error.message : '章节大纲生成失败：大纲文本无效';
+                callbacks.onError(message);
+              }
+              break;
+            }
+            case 'error': {
+              sawTerminalSse = true;
+              const message = typeof event.data === 'string' ? event.data : '章节大纲生成失败';
+              callbacks.onError(message);
+              break;
+            }
+          }
+        }
+      });
+
+      stream.on('end', () => {
+        if (!sawTerminalSse) {
+          const fallback = accumulated.trim();
+          if (fallback) {
+            try {
+              assertOutlineText(fallback);
+              callbacks.onEnd({
+                traceId,
+                outlineText: fallback,
+                outlineId,
+                basis,
+              });
+            } catch {
+              callbacks.onError('章节大纲生成失败：未收到完整响应');
+            }
+          } else {
+            callbacks.onError('章节大纲生成失败：未收到完整响应');
+          }
+        }
+        resolveStream();
+      });
+      stream.on('error', (error: unknown) => rejectStream(error));
+    });
+  }
+
   async writeChapter(projectId: string, payload: Partial<WriteTaskInput>, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
@@ -1839,6 +2070,13 @@ export class ProjectsService implements OnModuleInit {
       payload.selectedEventIds
     );
 
+    let confirmedOutlineText: string;
+    try {
+      confirmedOutlineText = assertConfirmedOutlineForDraft(payload.confirmedOutlineText);
+    } catch {
+      throw new BadRequestException('生成正文前必须先确认章节大纲（confirmedOutlineText）');
+    }
+
     const draftText = await this.generateDraftThroughOrchestrator(
       projectId,
       chapterNo,
@@ -1846,7 +2084,8 @@ export class ProjectsService implements OnModuleInit {
       settings,
       personas,
       knowledge,
-      usedRelationEvents
+      usedRelationEvents,
+      confirmedOutlineText
     );
 
     const autoUpdates = await this.applyPostWriteUpdates(
@@ -3457,6 +3696,38 @@ export class ProjectsService implements OnModuleInit {
     });
   }
 
+  private normalizeWriteTaskInput(payload: Partial<WriteTaskInput>): WriteChapterTaskInput {
+    const chapterNo = Number(payload.chapterNo || 0);
+    if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+    const goal = typeof payload.goal === 'string' ? payload.goal.trim() : '';
+    if (!goal) {
+      throw new BadRequestException('goal 不能为空');
+    }
+    const pov = typeof payload.pov === 'string' && payload.pov.trim() ? payload.pov.trim() : '第三人称';
+    return {
+      chapterNo,
+      goal,
+      pov,
+      mustInclude: Array.isArray(payload.mustInclude)
+        ? payload.mustInclude.map((item) => String(item).trim()).filter(Boolean)
+        : [],
+      avoid: Array.isArray(payload.avoid)
+        ? payload.avoid.map((item) => String(item).trim()).filter(Boolean)
+        : [],
+      ...(Number.isFinite(Number(payload.targetWords)) && Number(payload.targetWords) > 0
+        ? { targetWords: Number(payload.targetWords) }
+        : {}),
+      appearingCharacters: Array.isArray(payload.appearingCharacters)
+        ? payload.appearingCharacters.map((item) => String(item).trim()).filter(Boolean)
+        : [],
+      selectedEventIds: Array.isArray(payload.selectedEventIds)
+        ? payload.selectedEventIds.map((item) => String(item).trim()).filter(Boolean)
+        : [],
+    };
+  }
+
   private async generateDraftThroughOrchestrator(
     projectId: string,
     chapterNo: number,
@@ -3464,7 +3735,8 @@ export class ProjectsService implements OnModuleInit {
     settings: ProjectSettings,
     personas: PersonaRecord[],
     knowledge: KnowledgeRecord,
-    usedRelationEvents: UsedRelationEventRecord[] = []
+    usedRelationEvents: UsedRelationEventRecord[] = [],
+    confirmedOutlineText?: string
   ) {
     await this.syncProjectContextToOrchestrator(
       projectId,
@@ -3474,27 +3746,42 @@ export class ProjectsService implements OnModuleInit {
       usedRelationEvents
     );
 
-    const goal = payload.goal?.trim() || '推进主线并保持人物一致性';
-    const pov = payload.pov?.trim() || '第三人称';
-    const mustInclude = payload.mustInclude ?? [];
-    const avoid = payload.avoid ?? [];
-    const prompt = [
-      `请撰写第${chapterNo}章小说正文。`,
-      `写作目标：${goal}`,
-      `叙事视角：${pov}`,
-      mustInclude.length > 0 ? `必须包含：${mustInclude.join('；')}` : '',
-      avoid.length > 0 ? `避免内容：${avoid.join('；')}` : '',
-      buildTargetWordsInstruction(payload.targetWords),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const task = this.normalizeWriteTaskInput({ ...payload, chapterNo });
+    const outlineText =
+      confirmedOutlineText ?? assertConfirmedOutlineForDraft(payload.confirmedOutlineText);
+
+    const usedForPrompt = usedRelationEvents.map(
+      (event): WriteChapterUsedRelationEvent => ({
+        id: event.id,
+        protagonist: event.protagonist,
+        counterparty: event.counterparty,
+        summary: event.summary,
+        evidenceSnippet: event.evidenceSnippet,
+        chapterNo: event.chapterNo,
+      })
+    );
+
+    const prompt = buildWriteDraftUserPrompt({
+      task,
+      confirmedOutlineText: outlineText,
+      selectedRelationEvents: usedForPrompt,
+    });
 
     try {
       const { data } = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
         projectId,
         prompt,
         useSSE: false,
-        context: { task: payload },
+        systemPromptOverride: WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT,
+        templateKey: WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
+        context: {
+          task: 'write.chapter.draft',
+          chapterNo,
+          outlineId: payload.outlineId || null,
+          outlineTraceId: payload.outlineTraceId || null,
+          confirmedOutlineText: outlineText,
+          writeTask: task,
+        },
       });
 
       if (!data?.content || typeof data.content !== 'string') {
