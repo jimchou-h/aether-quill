@@ -9,12 +9,16 @@ const props = defineProps<{
 
 const summaryCount = ref(3);
 const memoryCount = ref(3);
+const priorTailChars = ref(800);
+const excerptMaxChars = ref(400);
 const temperature = ref(0.7);
 const updatePersonaOnSave = ref(true);
 const generateRelationEventsOnSave = ref(true);
 const saved = ref<{
   summaryCount: number;
   memoryCount: number;
+  priorTailChars: number;
+  excerptMaxChars: number;
   temperature: number;
   updatePersonaOnSave: boolean;
   generateRelationEventsOnSave: boolean;
@@ -32,6 +36,8 @@ const isDirty = computed(() => {
   return (
     summaryCount.value !== saved.value.summaryCount ||
     memoryCount.value !== saved.value.memoryCount ||
+    priorTailChars.value !== saved.value.priorTailChars ||
+    excerptMaxChars.value !== saved.value.excerptMaxChars ||
     temperature.value !== saved.value.temperature ||
     updatePersonaOnSave.value !== saved.value.updatePersonaOnSave ||
     generateRelationEventsOnSave.value !== saved.value.generateRelationEventsOnSave
@@ -42,6 +48,8 @@ function applyFromSettings(s: ProjectSettings) {
   summaryCount.value = s.chapterSummaryPromptCount;
   memoryCount.value =
     (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3;
+  priorTailChars.value = (s as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800;
+  excerptMaxChars.value = (s as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400;
   temperature.value = s.generationTemperature;
   updatePersonaOnSave.value = s.updatePersonaOnSave ?? true;
   generateRelationEventsOnSave.value = s.generateRelationEventsOnSave ?? true;
@@ -49,6 +57,8 @@ function applyFromSettings(s: ProjectSettings) {
     summaryCount: s.chapterSummaryPromptCount,
     memoryCount:
       (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3,
+    priorTailChars: (s as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800,
+    excerptMaxChars: (s as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400,
     temperature: s.generationTemperature,
     updatePersonaOnSave: s.updatePersonaOnSave ?? true,
     generateRelationEventsOnSave: s.generateRelationEventsOnSave ?? true,
@@ -76,6 +86,8 @@ async function handleSave() {
     const s = await apiClient.updateSettings(props.projectId, {
       chapterSummaryPromptCount: summaryCount.value,
       chapterSummaryMemoryCount: memoryCount.value,
+      priorChapterTailChars: priorTailChars.value,
+      contextExcerptMaxChars: excerptMaxChars.value,
       generationTemperature: temperature.value,
       updatePersonaOnSave: updatePersonaOnSave.value,
       generateRelationEventsOnSave: generateRelationEventsOnSave.value,
@@ -127,7 +139,7 @@ onMounted(() => {
         />
       </div>
       <p class="field-hint inline-hint">
-        范围 0~10；默认 3。仅选取「章号 &lt; 当前写作章节」且有摘要文本的章节（近期连续性池）。
+        范围 0~10；默认 3。选取「章号 &lt; 当前写作章节」的章节；无摘要时使用正文摘录降级（近期连续性池）。
       </p>
 
       <div class="row">
@@ -143,6 +155,38 @@ onMounted(() => {
         />
       </div>
       <p class="field-hint inline-hint">范围 0~10；默认 3。对历史章节摘要做向量检索的相关条数。</p>
+
+      <div class="row">
+        <label class="field-label" for="aq-prior-tail">前章衔接字数</label>
+        <input
+          id="aq-prior-tail"
+          v-model.number="priorTailChars"
+          class="field-input"
+          type="number"
+          min="0"
+          max="2000"
+          step="50"
+        />
+      </div>
+      <p class="field-hint inline-hint">
+        写第 N 章时注入第 N-1 章正文末尾字符数；范围 0~2000，默认 800。0 表示关闭（不推荐）。
+      </p>
+
+      <div class="row">
+        <label class="field-label" for="aq-excerpt-max">无摘要摘录字数</label>
+        <input
+          id="aq-excerpt-max"
+          v-model.number="excerptMaxChars"
+          class="field-input"
+          type="number"
+          min="200"
+          max="800"
+          step="50"
+        />
+      </div>
+      <p class="field-hint inline-hint">
+        前序章节无摘要时，从正文尾部截取的 excerpt 长度；范围 200~800，默认 400。
+      </p>
 
       <div class="row">
         <label class="field-label" for="aq-temperature">生成温度（temperature）</label>

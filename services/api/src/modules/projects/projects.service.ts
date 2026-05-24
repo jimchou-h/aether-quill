@@ -119,11 +119,17 @@ import { hashChapterContent } from './chapter-content-hash.util';
 import {
   clampChapterSummaryMemoryCount,
   clampChapterSummaryPromptCount,
+  clampContextExcerptMaxChars,
   clampGenerationTemperature,
+  clampPriorChapterTailChars,
   DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+  DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
   DEFAULT_GENERATION_TEMPERATURE,
+  DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
+  sliceContentTail,
 } from './project-settings.util';
+import { buildWriteContextReadiness } from './write-context-readiness.util';
 
 function buildTargetWordsInstruction(targetWords?: number): string {
   const parsed = Number(targetWords);
@@ -161,6 +167,10 @@ export interface ProjectSettings {
   chapterSummaryPromptCount: number;
   /** 语义记忆池：向量检索历史章节摘要条数 */
   chapterSummaryMemoryCount: number;
+  /** 写第 N 章时注入第 N-1 章正文末尾字符数；0 关闭 */
+  priorChapterTailChars: number;
+  /** 无摘要章节降级 excerpt 最大长度 */
+  contextExcerptMaxChars: number;
   /** 主生成链路采样温度（0~2） */
   generationTemperature: number;
   /** 保存章节时自动更新人物出场状态 */
@@ -538,6 +548,29 @@ export class ProjectsService implements OnModuleInit {
     };
   }
 
+  getWriteContextReadiness(projectId: string, chapterNo: number, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalized = Number(chapterNo);
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    return buildWriteContextReadiness(
+      normalized,
+      knowledge.chapters.map((ch) => ({
+        chapterNo: ch.chapterNo,
+        summary: ch.summary,
+        content: ch.content,
+      }))
+    );
+  }
+
   getSettings(projectId: string, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId);
@@ -556,6 +589,8 @@ export class ProjectsService implements OnModuleInit {
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
       chapterSummaryMemoryCount?: number;
+      priorChapterTailChars?: number;
+      contextExcerptMaxChars?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
@@ -598,6 +633,14 @@ export class ProjectsService implements OnModuleInit {
       settings.chapterSummaryMemoryCount = clampChapterSummaryMemoryCount(
         payload.chapterSummaryMemoryCount
       );
+    }
+
+    if (payload.priorChapterTailChars !== undefined) {
+      settings.priorChapterTailChars = clampPriorChapterTailChars(payload.priorChapterTailChars);
+    }
+
+    if (payload.contextExcerptMaxChars !== undefined) {
+      settings.contextExcerptMaxChars = clampContextExcerptMaxChars(payload.contextExcerptMaxChars);
     }
 
     if (payload.generationTemperature !== undefined) {
@@ -3039,6 +3082,12 @@ export class ProjectsService implements OnModuleInit {
             chapterSummaryMemoryCount: clampChapterSummaryMemoryCount(
               value.chapterSummaryMemoryCount
             ),
+            priorChapterTailChars: clampPriorChapterTailChars(
+              value.priorChapterTailChars ?? DEFAULT_PRIOR_CHAPTER_TAIL_CHARS
+            ),
+            contextExcerptMaxChars: clampContextExcerptMaxChars(
+              value.contextExcerptMaxChars ?? DEFAULT_CONTEXT_EXCERPT_MAX_CHARS
+            ),
             generationTemperature: clampGenerationTemperature(value.generationTemperature),
             updatePersonaOnSave: value.updatePersonaOnSave ?? true,
             generateRelationEventsOnSave: value.generateRelationEventsOnSave ?? true,
@@ -3510,6 +3559,8 @@ export class ProjectsService implements OnModuleInit {
         activePersonaId: null,
         chapterSummaryPromptCount: DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
         chapterSummaryMemoryCount: DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
+        priorChapterTailChars: DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
+        contextExcerptMaxChars: DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
         generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
         updatePersonaOnSave: true,
         generateRelationEventsOnSave: true,
@@ -3551,6 +3602,12 @@ export class ProjectsService implements OnModuleInit {
     );
     settings.chapterSummaryMemoryCount = clampChapterSummaryMemoryCount(
       settings.chapterSummaryMemoryCount
+    );
+    settings.priorChapterTailChars = clampPriorChapterTailChars(
+      settings.priorChapterTailChars ?? DEFAULT_PRIOR_CHAPTER_TAIL_CHARS
+    );
+    settings.contextExcerptMaxChars = clampContextExcerptMaxChars(
+      settings.contextExcerptMaxChars ?? DEFAULT_CONTEXT_EXCERPT_MAX_CHARS
     );
     settings.generationTemperature = clampGenerationTemperature(settings.generationTemperature);
     if (settings.updatePersonaOnSave === undefined) {
@@ -3677,13 +3734,23 @@ export class ProjectsService implements OnModuleInit {
       outlineSummary: knowledge.outlineSummary,
       chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
       chapterSummaryMemoryCount: settings.chapterSummaryMemoryCount,
+      priorChapterTailChars: settings.priorChapterTailChars,
+      contextExcerptMaxChars: settings.contextExcerptMaxChars,
       generationTemperature: settings.generationTemperature,
-      chapters: knowledge.chapters.map((chapter) => ({
-        chapterNo: chapter.chapterNo,
-        title: chapter.title,
-        summary: chapter.summary || chapter.content.slice(0, 160),
-        structuredMatchingText: chapter.structuredInfo?.matchingText?.trim(),
-      })),
+      chapters: knowledge.chapters.map((chapter) => {
+        const tailK = Math.max(
+          settings.priorChapterTailChars,
+          settings.contextExcerptMaxChars
+        );
+        return {
+          chapterNo: chapter.chapterNo,
+          title: chapter.title,
+          summary: chapter.summary || '',
+          content: chapter.content,
+          contentTail: sliceContentTail(chapter.content, tailK),
+          structuredMatchingText: chapter.structuredInfo?.matchingText?.trim(),
+        };
+      }),
       knowledgeDocuments: docs.map((doc) => ({
         id: doc.id,
         title: doc.title,

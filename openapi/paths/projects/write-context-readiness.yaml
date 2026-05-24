@@ -1,0 +1,47 @@
+get:
+  tags:
+    - Projects
+  summary: Check writing context readiness before generating a new chapter
+  description: |
+    写作前上下文就绪检查（提示性，不阻塞生成）。
+    返回上一章是否存在、前序缺摘要章列表与建议操作。
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: query
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      description: 即将写作的章节号 N
+  responses:
+    '200':
+      description: Readiness snapshot
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/WriteContextReadiness'
+    '400':
+      description: Invalid chapterNo
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/ErrorResponse'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/ErrorResponse'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/ErrorResponse'

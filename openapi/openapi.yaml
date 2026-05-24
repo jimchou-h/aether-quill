@@ -77,6 +77,8 @@ paths:
     $ref: './paths/projects/write.yaml'
   /api/projects/{id}/write/outline:
     $ref: './paths/projects/write-outline.yaml'
+  /api/projects/{id}/write-context-readiness:
+    $ref: './paths/projects/write-context-readiness.yaml'
   /api/generate/draft:
     $ref: './paths/drafts/generate-draft.yaml'
   /api/projects/{id}/knowledge/chapters/summarize:
@@ -486,6 +488,8 @@ components:
         - activePersonaId
         - chapterSummaryPromptCount
         - chapterSummaryMemoryCount
+        - priorChapterTailChars
+        - contextExcerptMaxChars
         - generationTemperature
         - updatePersonaOnSave
         - generateRelationEventsOnSave
@@ -510,6 +514,18 @@ components:
           maximum: 10
           default: 3
           description: 语义记忆池：向量检索历史章节摘要条数；0 表示不注入
+        priorChapterTailChars:
+          type: integer
+          minimum: 0
+          maximum: 2000
+          default: 800
+          description: 写第 N 章时注入第 N-1 章正文末尾字符数；0 表示关闭前章衔接段
+        contextExcerptMaxChars:
+          type: integer
+          minimum: 200
+          maximum: 800
+          default: 400
+          description: 前序章节无摘要时，降级 excerpt 最大长度（取正文尾部）
         generationTemperature:
           type: number
           format: float
@@ -544,6 +560,14 @@ components:
           type: integer
           minimum: 0
           maximum: 10
+        priorChapterTailChars:
+          type: integer
+          minimum: 0
+          maximum: 2000
+        contextExcerptMaxChars:
+          type: integer
+          minimum: 200
+          maximum: 800
         generationTemperature:
           type: number
           format: float
@@ -555,6 +579,32 @@ components:
         generateRelationEventsOnSave:
           type: boolean
           description: 保存章节时自动生成关系事件
+    WriteContextReadiness:
+      type: object
+      required:
+        - chapterNo
+        - priorChapterExists
+        - priorChaptersMissingSummary
+        - recommendedActions
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+        priorChapterExists:
+          type: boolean
+          description: 是否存在第 N-1 章正文
+        priorChaptersMissingSummary:
+          type: array
+          items:
+            type: integer
+          description: 章号 < N 且缺少摘要的章节列表（升序）
+        recommendedActions:
+          type: array
+          items:
+            type: string
+            enum:
+              - batch_summarize
+          description: 建议操作（非强制）
     Persona:
       type: object
       required:

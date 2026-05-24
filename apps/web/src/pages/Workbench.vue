@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { apiClient, type PersonaItem, type PreviewRetrievalResult } from '../services/api';
+import {
+  apiClient,
+  type PersonaItem,
+  type PreviewRetrievalResult,
+  type WriteContextReadiness,
+} from '../services/api';
 import RetrievalPreviewDialog from '../components/workbench/RetrievalPreviewDialog.vue';
 import { useGenerationStore } from '../stores/generation';
 import { useEditorStore } from '../stores/editor';
@@ -51,6 +56,12 @@ const pendingGenerateTask = ref<WriteTaskPayload | null>(null);
 const lastWriteTask = ref<WriteTaskPayload | null>(null);
 const previewIntent = ref<'outline' | 'draft'>('outline');
 const outputTab = ref<'outline' | 'draft' | 'evidence'>('outline');
+
+const readinessVisible = ref(false);
+const readinessLoading = ref(false);
+const readinessBatchSummarizing = ref(false);
+const readinessSnapshot = ref<WriteContextReadiness | null>(null);
+const readinessTask = ref<WriteTaskPayload | null>(null);
 
 const evidenceCount = computed(
   () =>
@@ -179,6 +190,49 @@ async function refreshWorkspaceData() {
   }
 }
 
+function buildPreviewProjectCtx(
+  workspace: Awaited<ReturnType<typeof apiClient.getWorkspace>>,
+  docList: Array<{ id: string; title: string; content: string; docType?: string }>
+) {
+  const activePersona =
+    workspace.personas.find((item) => item.id === workspace.settings.activePersonaId) ||
+    workspace.personas.find((item) => item.status === 'published') ||
+    null;
+
+  const tailK = Math.max(
+    workspace.settings.priorChapterTailChars ?? 800,
+    workspace.settings.contextExcerptMaxChars ?? 400
+  );
+
+  return {
+    outlineSummary: workspace.knowledge.outlineSummary,
+    personaProfile: activePersona
+      ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
+      : '未配置人物设定',
+    chapters: workspace.knowledge.chapters.map((ch) => ({
+      chapterNo: ch.chapterNo,
+      title: ch.title,
+      summary: ch.summary || '',
+      content: ch.content,
+      contentTail:
+        ch.content.trim().length <= tailK
+          ? ch.content.trim()
+          : ch.content.trim().slice(-tailK),
+      structuredMatchingText: ch.structuredInfo?.matchingText,
+    })),
+    knowledgeDocuments: docList.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      content: doc.content,
+      docType: doc.docType ?? 'other',
+    })),
+    chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
+    chapterSummaryMemoryCount: workspace.settings.chapterSummaryMemoryCount ?? 3,
+    priorChapterTailChars: workspace.settings.priorChapterTailChars ?? 800,
+    contextExcerptMaxChars: workspace.settings.contextExcerptMaxChars ?? 400,
+  };
+}
+
 async function openRetrievalPreview(task: WriteTaskPayload, intent: 'outline' | 'draft') {
   errorMessage.value = '';
   pendingGenerateTask.value = task;
@@ -198,37 +252,11 @@ async function openRetrievalPreview(task: WriteTaskPayload, intent: 'outline' | 
       docType?: string;
     }>;
 
-    const activePersona =
-      workspace.personas.find((item) => item.id === workspace.settings.activePersonaId) ||
-      workspace.personas.find((item) => item.status === 'published') ||
-      null;
-
     previewResult.value = await apiClient.previewRetrieval(projectId.value, {
       prompt: task.goal,
       chapterNo: task.chapterNo,
       useStructuredKb: true,
-      projectCtx: {
-        outlineSummary: workspace.knowledge.outlineSummary,
-        personaProfile: activePersona
-          ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
-          : '未配置人物设定',
-        chapters: workspace.knowledge.chapters.map((ch) => ({
-          chapterNo: ch.chapterNo,
-          title: ch.title,
-          summary: ch.summary || ch.content.slice(0, 160),
-          structuredMatchingText: ch.structuredInfo?.matchingText,
-        })),
-        knowledgeDocuments: docList.map((doc) => ({
-          id: doc.id,
-          title: doc.title,
-          content: doc.content,
-          docType: doc.docType ?? 'other',
-        })),
-        chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
-        chapterSummaryMemoryCount:
-          (workspace.settings as { chapterSummaryMemoryCount?: number })
-            .chapterSummaryMemoryCount ?? 3,
-      },
+      projectCtx: buildPreviewProjectCtx(workspace, docList),
       extraContext: {
         task: {
           chapterNo: task.chapterNo,
@@ -246,9 +274,67 @@ async function openRetrievalPreview(task: WriteTaskPayload, intent: 'outline' | 
   }
 }
 
+async function proceedAfterReadiness(task: WriteTaskPayload, intent: 'outline' | 'draft') {
+  readinessVisible.value = false;
+  readinessSnapshot.value = null;
+  readinessTask.value = null;
+  await openRetrievalPreview(task, intent);
+}
+
 async function handleGenerateOutline(task: WriteTaskPayload) {
   lastWriteTask.value = task;
+  if (task.chapterNo <= 1) {
+    await openRetrievalPreview(task, 'outline');
+    return;
+  }
+
+  readinessLoading.value = true;
+  try {
+    const readiness = await apiClient.getWriteContextReadiness(projectId.value, task.chapterNo);
+    if (readiness.priorChaptersMissingSummary.length > 0) {
+      readinessSnapshot.value = readiness;
+      readinessTask.value = task;
+      readinessVisible.value = true;
+      return;
+    }
+  } catch (error) {
+    presentInfo(presentErrorFromCaught(error, '上下文就绪检查失败，将直接继续生成'));
+  } finally {
+    readinessLoading.value = false;
+  }
+
   await openRetrievalPreview(task, 'outline');
+}
+
+async function handleReadinessContinue() {
+  const task = readinessTask.value;
+  if (!task) {
+    return;
+  }
+  await proceedAfterReadiness(task, 'outline');
+}
+
+async function handleReadinessBatchSummarize() {
+  const task = readinessTask.value;
+  const snapshot = readinessSnapshot.value;
+  if (!task || !snapshot) {
+    return;
+  }
+
+  readinessBatchSummarizing.value = true;
+  errorMessage.value = '';
+  try {
+    await apiClient.createBatchSummaryJob(projectId.value, {
+      chapterNos: snapshot.priorChaptersMissingSummary,
+    });
+    presentSuccess(`已提交第 ${snapshot.priorChaptersMissingSummary.join('、')} 章摘要任务`);
+    await refreshWorkspaceData();
+    await proceedAfterReadiness(task, 'outline');
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '批量补摘要失败');
+  } finally {
+    readinessBatchSummarizing.value = false;
+  }
 }
 
 async function confirmPreviewAndContinue() {
@@ -429,6 +515,49 @@ onMounted(() => {
       </div>
     </template>
 
+    <div
+      v-if="readinessVisible && readinessSnapshot"
+      class="wb-readiness-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="readiness-title"
+    >
+      <div class="wb-readiness-dialog" @click.stop>
+        <h3 id="readiness-title">前文上下文提示</h3>
+        <p class="wb-readiness-text">
+          第
+          <strong>{{ readinessSnapshot.priorChaptersMissingSummary.join('、') }}</strong>
+          章缺少摘要，AI 对前文剧情理解可能不完整。前章衔接段仍会注入；近期池将使用正文摘录降级。
+        </p>
+        <footer class="wb-readiness-actions">
+          <button
+            type="button"
+            class="ghost-button"
+            :disabled="readinessBatchSummarizing"
+            @click="readinessVisible = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="ghost-button"
+            :disabled="readinessBatchSummarizing"
+            @click="handleReadinessContinue"
+          >
+            仍继续生成
+          </button>
+          <button
+            type="button"
+            class="primary-button"
+            :disabled="readinessBatchSummarizing"
+            @click="handleReadinessBatchSummarize"
+          >
+            {{ readinessBatchSummarizing ? '提交中...' : '一键补摘要' }}
+          </button>
+        </footer>
+      </div>
+    </div>
+
     <RetrievalPreviewDialog
       :visible="previewVisible"
       :loading="previewLoading"
@@ -441,6 +570,39 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.wb-readiness-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 1rem;
+}
+
+.wb-readiness-dialog {
+  width: min(28rem, 100%);
+  background: #fff;
+  border-radius: 10px;
+  padding: 1.25rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.wb-readiness-text {
+  margin: 0.75rem 0 1.25rem;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #374151;
+}
+
+.wb-readiness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .workbench-page {
   font-family: var(--wb-font);
   color: var(--wb-text);

@@ -1,10 +1,16 @@
 import { retrieveMemoryChapterSummaries } from '../context/chapter-summary-memory';
-import { pickPriorChapterSummariesForPrompt } from '../context/prior-chapter-summaries';
 import {
   clampChapterSummaryMemoryCount,
   clampChapterSummaryPromptCount,
+  clampContextExcerptMaxChars,
   clampKnowledgeDocQuota,
+  clampPriorChapterTailChars,
 } from '../context/generation-preferences';
+import {
+  pickPriorChapterSummariesForPrompt,
+  type ChapterSummaryInput,
+} from '../context/prior-chapter-summaries';
+import { resolvePriorChapterTail } from '../context/prior-chapter-tail';
 import {
   buildStructuredKnowledgeEvidence,
   retrieveKnowledgeForDraft,
@@ -26,22 +32,19 @@ export interface PreviewRetrievalRequest {
   projectCtx: {
     outlineSummary: string;
     personaProfile: string;
-    chapters: Array<{
-      chapterNo: number;
-      title: string;
-      summary: string;
-      structuredMatchingText?: string;
-    }>;
+    chapters: Array<ChapterSummaryInput & { structuredMatchingText?: string }>;
     knowledgeDocuments?: KnowledgeDocumentForMatch[];
     chapterSummaryPromptCount?: number;
     chapterSummaryMemoryCount?: number;
+    priorChapterTailChars?: number;
+    contextExcerptMaxChars?: number;
   };
   extraContext?: Record<string, unknown>;
 }
 
 export interface PreviewRetrievalItem {
   id: string;
-  pool: 'persona_card' | 'other_docs' | 'recent_chapters' | 'memory_chapters';
+  pool: 'prior_chapter_tail' | 'persona_card' | 'other_docs' | 'recent_chapters' | 'memory_chapters';
   title: string;
   preview: string;
   score?: number;
@@ -71,6 +74,26 @@ export async function runPreviewRetrieval(
   const otherQuota = clampKnowledgeDocQuota(process.env.OTHER_DOC_QUOTA);
   const items: PreviewRetrievalItem[] = [];
   let structuredEvidenceText = '';
+
+  const tailChars = clampPriorChapterTailChars(projectCtx.priorChapterTailChars);
+  const excerptMax = clampContextExcerptMaxChars(projectCtx.contextExcerptMaxChars);
+
+  if (chapterNo > 1 && tailChars > 0) {
+    const priorTail = resolvePriorChapterTail(projectCtx.chapters, chapterNo, tailChars);
+    if (!priorTail.skipped && priorTail.text) {
+      items.push({
+        id: `prior_tail:${priorTail.chapterNo ?? chapterNo - 1}`,
+        pool: 'prior_chapter_tail',
+        title: `第${priorTail.chapterNo ?? chapterNo - 1}章 末尾衔接`,
+        preview: priorTail.text.slice(0, 400),
+        selected: true,
+        meta: {
+          chapterNo: priorTail.chapterNo,
+          prior_chapter_tail_chars: priorTail.chars,
+        },
+      });
+    }
+  }
 
   const useStructured =
     input.useStructuredKb !== false && chapterNo > 0 && projectCtx.chapters.length > 0;
@@ -163,15 +186,19 @@ export async function runPreviewRetrieval(
   const recent = pickPriorChapterSummariesForPrompt(projectCtx.chapters, {
     currentChapterNo: chapterNo > 0 ? chapterNo : undefined,
     maxCount: recentMax,
+    excerptMaxChars: excerptMax,
   });
   for (const ch of recent) {
     items.push({
       id: `recent:${ch.chapterNo}`,
       pool: 'recent_chapters',
-      title: `第${ch.chapterNo}章 ${ch.title}`,
+      title: `第${ch.chapterNo}章 ${ch.title}${ch.usedExcerptFallback ? '（正文摘录）' : ''}`,
       preview: ch.summary.trim().slice(0, 400),
       selected: true,
-      meta: { chapterNo: ch.chapterNo },
+      meta: {
+        chapterNo: ch.chapterNo,
+        excerptFallback: ch.usedExcerptFallback === true,
+      },
     });
   }
 

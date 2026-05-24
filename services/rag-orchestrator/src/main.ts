@@ -15,7 +15,6 @@ import {
   DraftCitation,
   buildStructuredKnowledgeEvidence,
   resolveChapterScopedEmbeddingQuery,
-  resolveMemoryChapterSummaryEmbeddingQuery,
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
@@ -24,15 +23,18 @@ import {
   buildWorkbenchDraftUserPrompt,
 } from './generation/write-chapter-prompt';
 import { indexChapterSummaryInQdrant } from './context/chapter-summary-memory';
-import { retrieveMemoryChapterSummaries } from './context/chapter-summary-memory';
-import { pickPriorChapterSummariesForPrompt } from './context/prior-chapter-summaries';
+import { buildNarrativeContextText, type NarrativeContextMeta } from './context/narrative-context';
 import { runPreviewRetrieval, type PreviewRetrievalRequest } from './retrieval/preview-retrieval';
 import {
   clampChapterSummaryMemoryCount,
   clampChapterSummaryPromptCount,
+  clampContextExcerptMaxChars,
   clampGenerationTemperature,
+  clampPriorChapterTailChars,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
+  DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
   DEFAULT_GENERATION_TEMPERATURE,
+  DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
 } from './context/generation-preferences';
 import { ConsistencyChecker } from './consistency';
 import {
@@ -73,6 +75,8 @@ interface ContextChapter {
   chapterNo: number;
   title: string;
   summary: string;
+  content?: string;
+  contentTail?: string;
   /** 由 API 同步：章节已解析的结构化匹配文本，用于知识库标题匹配 */
   structuredMatchingText?: string;
 }
@@ -93,6 +97,8 @@ interface ProjectContext {
   chapterSummaryPromptCount: number;
   /** 语义记忆池：向量检索历史章节摘要条数 */
   chapterSummaryMemoryCount: number;
+  priorChapterTailChars: number;
+  contextExcerptMaxChars: number;
   /** 主生成链路采样温度 */
   generationTemperature: number;
   /** 项目知识库文档全文列表，用于标题匹配后整文注入 */
@@ -111,6 +117,18 @@ interface ProjectContext {
 
 const projectContextStore = new Map<string, ProjectContext>();
 
+function patchProjectContextDefaults(ctx: ProjectContext) {
+  ctx.chapterSummaryPromptCount = clampChapterSummaryPromptCount(ctx.chapterSummaryPromptCount);
+  ctx.chapterSummaryMemoryCount = clampChapterSummaryMemoryCount(ctx.chapterSummaryMemoryCount);
+  ctx.priorChapterTailChars = clampPriorChapterTailChars(
+    ctx.priorChapterTailChars ?? DEFAULT_PRIOR_CHAPTER_TAIL_CHARS
+  );
+  ctx.contextExcerptMaxChars = clampContextExcerptMaxChars(
+    ctx.contextExcerptMaxChars ?? DEFAULT_CONTEXT_EXCERPT_MAX_CHARS
+  );
+  ctx.generationTemperature = clampGenerationTemperature(ctx.generationTemperature);
+}
+
 function getOrCreateContext(projectId: string) {
   if (!projectContextStore.has(projectId)) {
     projectContextStore.set(projectId, {
@@ -120,63 +138,15 @@ function getOrCreateContext(projectId: string) {
       chapters: [],
       chapterSummaryPromptCount: DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
       chapterSummaryMemoryCount: 3,
+      priorChapterTailChars: DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
+      contextExcerptMaxChars: DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
       generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
       updatedAt: new Date().toISOString(),
     });
   }
-  return projectContextStore.get(projectId)!;
-}
-
-async function buildNarrativeContext(
-  projectId: string,
-  ctx: ProjectContext,
-  currentChapterNo?: number
-): Promise<string> {
-  const sections: string[] = [];
-  if (ctx.personaProfile && ctx.personaProfile !== '未配置人物设定') {
-    sections.push(`【人物设定】\n${ctx.personaProfile}`);
-  }
-  if (ctx.outlineSummary?.trim()) {
-    sections.push(`【大纲总结】\n${ctx.outlineSummary.trim()}`);
-  }
-  const maxCount = clampChapterSummaryPromptCount(ctx.chapterSummaryPromptCount);
-  const prior = pickPriorChapterSummariesForPrompt(ctx.chapters, {
-    currentChapterNo,
-    maxCount,
-  });
-  if (prior.length > 0) {
-    sections.push(
-      `【近期章节摘要】\n${prior
-        .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
-        .join('\n')}`
-    );
-  }
-
-  const memoryMax = clampChapterSummaryMemoryCount(ctx.chapterSummaryMemoryCount);
-  if (memoryMax > 0) {
-    const memoryQuery = resolveMemoryChapterSummaryEmbeddingQuery({
-      currentChapterNo,
-      chapters: ctx.chapters,
-    });
-    if (memoryQuery) {
-      const memory = await retrieveMemoryChapterSummaries(projectId, memoryQuery, {
-        currentChapterNo,
-        maxCount: memoryMax,
-        excludeChapterNos: prior.map((ch) => ch.chapterNo),
-      });
-      if (memory.length > 0) {
-        sections.push(
-          `【语义记忆章节】\n${memory
-            .map((ch) => `第${ch.chapterNo}章 ${ch.title}: ${ch.summary}`)
-            .join('\n')}`
-        );
-      }
-    }
-  }
-  if (ctx.selectedRelationMemory?.trim()) {
-    sections.push(`【已选关系事件备忘】\n${ctx.selectedRelationMemory.trim()}`);
-  }
-  return sections.join('\n\n');
+  const ctx = projectContextStore.get(projectId)!;
+  patchProjectContextDefaults(ctx);
+  return ctx;
 }
 
 function resolveGenerationTemperature(bodyTemp: unknown, ctx: ProjectContext): number {
@@ -193,11 +163,24 @@ function resolveGenerationTemperature(bodyTemp: unknown, ctx: ProjectContext): n
 async function getGenerationContext(
   projectId: string,
   currentChapterNo?: number
-): Promise<GenerationContext> {
+): Promise<GenerationContext & { narrativeMeta?: NarrativeContextMeta }> {
   const ctx = getOrCreateContext(projectId);
+  const built = await buildNarrativeContextText({
+    projectId,
+    personaProfile: ctx.personaProfile,
+    outlineSummary: ctx.outlineSummary,
+    chapters: ctx.chapters,
+    chapterSummaryPromptCount: ctx.chapterSummaryPromptCount,
+    chapterSummaryMemoryCount: ctx.chapterSummaryMemoryCount,
+    priorChapterTailChars: ctx.priorChapterTailChars,
+    contextExcerptMaxChars: ctx.contextExcerptMaxChars,
+    selectedRelationMemory: ctx.selectedRelationMemory,
+    currentChapterNo,
+  });
   return {
     systemPromptText: ctx.systemPromptText,
-    narrativeContext: await buildNarrativeContext(projectId, ctx, currentChapterNo),
+    narrativeContext: built.text,
+    narrativeMeta: built.meta,
   };
 }
 
@@ -442,6 +425,12 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
   if (payload.generationTemperature !== undefined) {
     context.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
+  }
+  if (payload.priorChapterTailChars !== undefined) {
+    context.priorChapterTailChars = clampPriorChapterTailChars(payload.priorChapterTailChars);
+  }
+  if (payload.contextExcerptMaxChars !== undefined) {
+    context.contextExcerptMaxChars = clampContextExcerptMaxChars(payload.contextExcerptMaxChars);
   }
 
   context.updatedAt = new Date().toISOString();
@@ -752,6 +741,7 @@ app.post('/api/generate', async (req, res) => {
   }
 
   const generationContext = await getGenerationContext(projectId, narrativeCurrentChapter);
+  const narrativeMeta = generationContext.narrativeMeta;
 
   if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {
     generationContext.systemPromptText = systemPromptOverride.trim();
@@ -775,6 +765,7 @@ app.post('/api/generate', async (req, res) => {
       : {}),
     ...(extra || {}),
     ...(templateKey ? { templateKey } : {}),
+    ...(narrativeMeta || {}),
   };
 
   const trace = await generationService.createTrace({
@@ -962,6 +953,7 @@ app.post('/api/generate/draft', async (req, res) => {
 
   const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, context);
   const generationContext = await getGenerationContext(projectId, chapterNo > 0 ? chapterNo : undefined);
+  const draftNarrativeMeta = generationContext.narrativeMeta;
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
   generationContext.systemPromptText = WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT;
 
@@ -1007,6 +999,7 @@ app.post('/api/generate/draft', async (req, res) => {
       evidence_document_ids: structuredRetrieval.evidenceDocumentIds,
       retrieval_skipped_no_structured: structuredRetrieval.retrievalSkippedNoStructured === true,
       generation_temperature: resolvedTemperature,
+      ...(draftNarrativeMeta || {}),
     },
     useSSE: true,
     temperature: resolvedTemperature,
