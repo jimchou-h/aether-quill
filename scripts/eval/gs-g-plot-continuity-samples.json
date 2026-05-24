@@ -1,0 +1,49 @@
+{
+  "suite": "GS-G",
+  "dimension": "plot_continuity",
+  "description": "AQ-227：新增章节衔接 — 前章末尾与无摘要 excerpt 降级",
+  "samples": [
+    {
+      "id": "pc-01",
+      "scenario": "写第3章，第2章有正文无摘要",
+      "currentChapterNo": 3,
+      "priorChapterTail": "他握紧剑柄，望向城门外的黑影。",
+      "mustReferenceInOutline": ["剑柄", "城门", "黑影"]
+    },
+    {
+      "id": "pc-02",
+      "scenario": "写第5章，第4章摘要为空但有章末悬念正文",
+      "currentChapterNo": 5,
+      "priorChapterTail": "「明日卯时，大殿见。」她转身离去。",
+      "mustNotRepeat": ["重新介绍已出场主角姓名与身份"]
+    },
+    {
+      "id": "pc-03",
+      "scenario": "近期池 excerpt 降级覆盖第1~2章要点",
+      "currentChapterNo": 4,
+      "excerptChapters": [1, 2],
+      "mustReferenceInOutline": ["第1章伏笔", "第2章冲突"]
+    },
+    {
+      "id": "pc-04",
+      "scenario": "第1章无前章衔接",
+      "currentChapterNo": 1,
+      "expectPriorTailSkipped": true
+    },
+    {
+      "id": "pc-05",
+      "scenario": "priorChapterTailChars=0 关闭衔接段",
+      "currentChapterNo": 6,
+      "priorChapterTailChars": 0,
+      "expectPriorTailSkipped": true,
+      "recentPoolStillInjected": true
+    },
+    {
+      "id": "pc-06",
+      "scenario": "多章缺摘要时 readiness 提示 batch_summarize",
+      "currentChapterNo": 8,
+      "missingSummaryChapterNos": [1, 3, 5],
+      "recommendedActions": ["batch_summarize"]
+    }
+  ]
+}

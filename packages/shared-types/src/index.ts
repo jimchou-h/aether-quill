@@ -1931,6 +1931,10 @@ export interface components {
       chapterSummaryPromptCount: number;
       /** @description 语义记忆池：向量检索历史章节摘要条数 */
       chapterSummaryMemoryCount: number;
+      /** @description 写第 N 章时注入第 N-1 章正文末尾字符数；0 关闭 */
+      priorChapterTailChars: number;
+      /** @description 无摘要章节降级 excerpt 最大长度 */
+      contextExcerptMaxChars: number;
       /** @description 主生成链路采样温度 */
       generationTemperature: number;
       /** @description 保存章节时自动更新人物出场状态 */
@@ -1945,9 +1949,17 @@ export interface components {
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
       chapterSummaryMemoryCount?: number;
+      priorChapterTailChars?: number;
+      contextExcerptMaxChars?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+    };
+    WriteContextReadiness: {
+      chapterNo: number;
+      priorChapterExists: boolean;
+      priorChaptersMissingSummary: number[];
+      recommendedActions: Array<'batch_summarize'>;
     };
     DocType: 'persona_card' | 'world_setting' | 'reference' | 'lore' | 'other';
     Document: {

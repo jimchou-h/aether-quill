@@ -241,6 +241,13 @@ export const apiClient = {
     return this.unwrapPayload<ProjectExportBundle>(response.data);
   },
 
+  async getWriteContextReadiness(projectId: string, chapterNo: number) {
+    const response = await http.get(`/api/projects/${projectId}/write-context-readiness`, {
+      params: { chapterNo },
+    });
+    return this.unwrapPayload<WriteContextReadiness>(response.data);
+  },
+
   async getSettings(projectId: string) {
     const response = await http.get(`/api/projects/${projectId}/settings`);
     return this.unwrapPayload<ProjectSettings>(response.data);
@@ -387,6 +394,8 @@ export const apiClient = {
           chapterNo: number;
           title: string;
           summary: string;
+          content?: string;
+          contentTail?: string;
           structuredMatchingText?: string;
         }>;
         knowledgeDocuments?: Array<{
@@ -397,6 +406,8 @@ export const apiClient = {
         }>;
         chapterSummaryPromptCount?: number;
         chapterSummaryMemoryCount?: number;
+        priorChapterTailChars?: number;
+        contextExcerptMaxChars?: number;
       };
       extraContext?: Record<string, unknown>;
     }
@@ -1501,9 +1512,21 @@ export interface ChapterUpsertResult extends ChapterItem {
   pendingActions?: ChapterPendingAction[];
 }
 
+export interface WriteContextReadiness {
+  chapterNo: number;
+  priorChapterExists: boolean;
+  priorChaptersMissingSummary: number[];
+  recommendedActions: Array<'batch_summarize'>;
+}
+
 export interface PreviewRetrievalItem {
   id: string;
-  pool: 'persona_card' | 'other_docs' | 'recent_chapters' | 'memory_chapters';
+  pool:
+    | 'prior_chapter_tail'
+    | 'persona_card'
+    | 'other_docs'
+    | 'recent_chapters'
+    | 'memory_chapters';
   title: string;
   preview: string;
   score?: number;

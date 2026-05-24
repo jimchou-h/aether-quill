@@ -43,6 +43,10 @@ const emit = defineEmits<{
   'structured-parsed': [];
 }>();
 
+function suggestedChapterNoFromMax(max: number): number {
+  return max > 0 ? max + 1 : 1;
+}
+
 const chapterNo = ref(1);
 const goal = ref('');
 const pov = ref('第三人称有限视角');
@@ -74,6 +78,12 @@ const maxChapterNo = computed(() => {
   }
   return Math.max(...props.knowledgeChapters.map((chapter) => chapter.chapterNo));
 });
+
+const suggestedChapterNo = computed(() => suggestedChapterNoFromMax(maxChapterNo.value));
+
+function applySuggestedChapterNo() {
+  chapterNo.value = suggestedChapterNo.value;
+}
 
 const filteredEvents = computed(() => {
   if (appearingCharacters.value.length === 0) {
@@ -218,7 +228,7 @@ async function handleParseStructured() {
 }
 
 function resetForm() {
-  chapterNo.value = 1;
+  applySuggestedChapterNo();
   goal.value = '';
   pov.value = '第三人称有限视角';
   mustIncludeText.value = '';
@@ -240,6 +250,25 @@ watch(
 watch(chapterNo, () => {
   structuredParseError.value = '';
 });
+
+watch(
+  maxChapterNo,
+  (max, prevMax) => {
+    const nextSuggested = suggestedChapterNoFromMax(max);
+    const prevSuggested = suggestedChapterNoFromMax(prevMax ?? 0);
+    if (chapterNo.value === prevSuggested || (chapterNo.value === 1 && max > 0)) {
+      chapterNo.value = nextSuggested;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => props.projectId,
+  () => {
+    applySuggestedChapterNo();
+  }
+);
 
 onMounted(() => {
   void loadRelationEvents();

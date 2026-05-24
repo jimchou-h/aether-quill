@@ -77,6 +77,17 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get(':id/write-context-readiness')
+  getWriteContextReadiness(
+    @Param('id') id: string,
+    @Query('chapterNo') chapterNo: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.getWriteContextReadiness(id, Number(chapterNo), userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':id/settings')
   getSettings(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     const userId = req.user?.userId;
@@ -93,6 +104,8 @@ export class ProjectsController {
       activePersonaId?: string | null;
       chapterSummaryPromptCount?: number;
       chapterSummaryMemoryCount?: number;
+      priorChapterTailChars?: number;
+      contextExcerptMaxChars?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;

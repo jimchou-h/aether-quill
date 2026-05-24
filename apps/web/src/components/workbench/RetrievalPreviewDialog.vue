@@ -17,6 +17,7 @@ const emit = defineEmits<{
 const selectedIds = ref<Set<string>>(new Set());
 
 const poolLabels: Record<PreviewRetrievalItem['pool'], string> = {
+  prior_chapter_tail: '前章衔接（章末正文）',
   persona_card: '角色卡（整文）',
   other_docs: '其他文档（段落裁剪）',
   recent_chapters: '近期章节摘要',
