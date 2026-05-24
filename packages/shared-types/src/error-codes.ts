@@ -60,6 +60,8 @@ export const GenerationErrorCodes = {
   ChapterImportContentTooLarge: 1317,
   ChapterImportNoValidChapters: 1318,
   ChapterImportParsingFailed: 1319,
+  WriteChapterOutlineFailed: 1320,
+  WriteChapterOutlineNotConfirmed: 1321,
 } as const;
 
 /**
@@ -106,8 +108,15 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     if (errorCode === 1205) return 413;
     if (errorCode === 1304) return 429;
     if (errorCode === 1303) return 408;
-    if (errorCode === 1305 || errorCode === 1306 || errorCode === 1314 || errorCode === 1315)
+    if (
+      errorCode === 1305 ||
+      errorCode === 1306 ||
+      errorCode === 1314 ||
+      errorCode === 1315 ||
+      errorCode === 1320
+    )
       return 502;
+    if (errorCode === 1321) return 400;
     if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
     if (errorCode === 1311) return 504;
     if (errorCode === 1313) return 500;
@@ -168,6 +177,8 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1317: 'Chapter import content too large',
     1318: 'No valid chapters found in import content',
     1319: 'Chapter import parsing failed',
+    1320: 'Write chapter outline failed',
+    1321: 'Write chapter outline not confirmed',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

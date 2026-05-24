@@ -1,15 +1,21 @@
 <script setup lang="ts">
-defineProps<{
-  projectName: string;
-  chapterCount: number;
-  outlineReady: boolean;
-  activePersonaName: string;
-  outlineSummary: string;
-}>();
+import { withDefaults } from 'vue';
+
+withDefaults(
+  defineProps<{
+    projectName: string;
+    chapterCount: number;
+    outlineReady: boolean;
+    activePersonaName: string;
+    outlineSummary: string;
+    compact?: boolean;
+  }>(),
+  { compact: false }
+);
 </script>
 
 <template>
-  <section class="knowledge-bar">
+  <section class="knowledge-bar" :class="{ 'knowledge-bar--compact': compact }">
     <div class="kb-items">
       <div class="kb-item">
         <span class="kb-label">项目</span>
@@ -42,10 +48,20 @@ defineProps<{
 
 <style scoped>
 .knowledge-bar {
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  background: #fff;
+  border-radius: var(--wb-radius-sm, 12px);
+  border: 1px solid var(--wb-border, #e5e7eb);
+  background: var(--wb-surface, #fff);
   padding: 0.85rem 1rem;
+}
+
+.knowledge-bar--compact {
+  padding: 0.65rem 0.85rem;
+  background: var(--wb-surface-muted, #f8fafc);
+  box-shadow: none;
+}
+
+.knowledge-bar--compact .kb-outline {
+  display: none;
 }
 
 .kb-items {

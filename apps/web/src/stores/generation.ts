@@ -6,61 +6,47 @@ import {
   type ConsistencyNote,
   type GenerationPhase,
   type UsedRelationEventItem,
+  type WriteChapterOutlineResult,
 } from '../services/api';
 import { presentError, presentErrorFromCaught } from '../utils/pageFeedback';
 
-/**
- * 生成状态枚举
- * @typedef {'idle' | 'streaming' | 'done' | 'error'} GenerationStatus
- */
 export type GenerationStatus = 'idle' | 'streaming' | 'done' | 'error';
+export type OutlineStatus = 'idle' | 'streaming' | 'done' | 'error';
 
-/**
- * 生成状态管理 Store
- * 用于管理章节草稿生成的状态和结果
- */
 export const useGenerationStore = defineStore('generation', () => {
-  /** 生成状态 */
   const status = ref<GenerationStatus>('idle');
-  /** 追踪ID */
   const traceId = ref('');
-  /** 当前章节号 */
   const chapterNo = ref(1);
-  /** 生成的草稿文本 */
   const draftText = ref('');
-  /** 引用证据列表 */
   const citations = ref<CitationItem[]>([]);
-  /** 一致性提示列表 */
   const consistencyNotes = ref<ConsistencyNote[]>([]);
-  /** 本次使用的关系事件 */
   const usedRelationEvents = ref<UsedRelationEventItem[]>([]);
-  /** 错误消息 */
   const errorMessage = ref('');
-  /** 是否正在落库 */
   const accepting = ref(false);
-  /** 当前生成阶段（SSE 阶段事件） */
   const generationPhase = ref<GenerationPhase | null>(null);
-  /** 生成完成后是否收起阶段面板 */
   const phasePanelCollapsed = ref(false);
 
-  /** 是否正在生成 */
+  const outlineStatus = ref<OutlineStatus>('idle');
+  const outlineText = ref('');
+  const outlineId = ref('');
+  const outlineTraceId = ref('');
+  const outlineConfirmed = ref(false);
+  const outlineErrorMessage = ref('');
+
   const isStreaming = computed(() => status.value === 'streaming');
-  /** 是否生成完成 */
   const isDone = computed(() => status.value === 'done');
-  /** 是否发生错误 */
   const isError = computed(() => status.value === 'error');
-  /** 是否处于空闲状态 */
   const isIdle = computed(() => status.value === 'idle');
-  /** 是否正在接受草稿 */
   const isAccepting = computed(() => accepting.value);
 
-  /**
-   * 重置所有状态
-   */
-  function reset() {
+  const isOutlineStreaming = computed(() => outlineStatus.value === 'streaming');
+  const hasOutline = computed(
+    () => outlineStatus.value === 'done' && Boolean(outlineText.value.trim())
+  );
+
+  function resetDraft() {
     status.value = 'idle';
     traceId.value = '';
-    chapterNo.value = 1;
     draftText.value = '';
     citations.value = [];
     consistencyNotes.value = [];
@@ -71,71 +57,143 @@ export const useGenerationStore = defineStore('generation', () => {
     phasePanelCollapsed.value = false;
   }
 
-  /**
-   * 生成章节草稿
-   * @param {string} projectId - 项目ID
-   * @param {Object} task - 生成任务参数
-   * @param {number} task.chapterNo - 章节号
-   * @param {string} task.goal - 本章目标
-   * @param {string} task.pov - 叙事视角
-   * @param {string[]} task.mustInclude - 必须包含的内容
-   * @param {string[]} task.avoid - 禁止内容
-   * @param {number} [task.targetWords] - 目标字数；省略表示不限制
-   */
+  function resetOutline() {
+    outlineStatus.value = 'idle';
+    outlineText.value = '';
+    outlineId.value = '';
+    outlineTraceId.value = '';
+    outlineConfirmed.value = false;
+    outlineErrorMessage.value = '';
+  }
+
+  function reset() {
+    resetDraft();
+    resetOutline();
+    chapterNo.value = 1;
+  }
+
+  function invalidateOutlineConfirmation() {
+    outlineConfirmed.value = false;
+  }
+
+  function setOutlineText(value: string) {
+    if (outlineText.value !== value) {
+      outlineText.value = value;
+      invalidateOutlineConfirmation();
+    }
+  }
+
+  function confirmOutline() {
+    if (!outlineText.value.trim()) {
+      outlineErrorMessage.value = presentError('大纲内容为空，无法确认');
+      return false;
+    }
+    outlineConfirmed.value = true;
+    outlineErrorMessage.value = '';
+    return true;
+  }
+
+  type WriteTask = {
+    chapterNo: number;
+    goal: string;
+    pov: string;
+    mustInclude: string[];
+    avoid: string[];
+    targetWords?: number;
+    appearingCharacters?: string[];
+    selectedEventIds?: string[];
+  };
+
+  async function generateOutline(projectId: string, task: WriteTask) {
+    resetOutline();
+    resetDraft();
+    outlineStatus.value = 'streaming';
+    outlineText.value = '';
+    chapterNo.value = task.chapterNo;
+
+    try {
+      await apiClient.generateWriteOutlineSSE(projectId, task, {
+        onStart: (event) => {
+          outlineId.value = event.outlineId;
+          outlineTraceId.value = event.traceId;
+          chapterNo.value = event.chapterNo;
+        },
+        onContent: (text) => {
+          outlineText.value += text;
+        },
+        onEnd: (result: WriteChapterOutlineResult) => {
+          outlineText.value = result.outlineText;
+          outlineId.value = result.outlineId;
+          outlineTraceId.value = result.traceId;
+          outlineStatus.value = 'done';
+          invalidateOutlineConfirmation();
+        },
+        onError: (msg) => {
+          outlineErrorMessage.value = presentError(msg);
+          outlineStatus.value = 'error';
+        },
+      });
+    } catch (error) {
+      outlineErrorMessage.value = presentErrorFromCaught(error, '生成章节大纲失败');
+      outlineStatus.value = 'error';
+    }
+  }
+
   async function generate(
     projectId: string,
-    task: {
-      chapterNo: number;
-      goal: string;
-      pov: string;
-      mustInclude: string[];
-      avoid: string[];
-      targetWords?: number;
-      appearingCharacters?: string[];
-      selectedEventIds?: string[];
-    }
+    task: WriteTask
   ) {
-    reset();
+    if (!outlineConfirmed.value || !outlineText.value.trim()) {
+      errorMessage.value = presentError('请先确认章节大纲后再生成正文');
+      return;
+    }
+
+    resetDraft();
     status.value = 'streaming';
     draftText.value = '';
 
     try {
-      await apiClient.generateDraftSSE(projectId, task, [], {
-        onPhase: (phase) => {
-          generationPhase.value = phase;
-          phasePanelCollapsed.value = false;
+      await apiClient.generateDraftSSE(
+        projectId,
+        task,
+        {
+          confirmedOutlineText: outlineText.value.trim(),
+          outlineId: outlineId.value || undefined,
+          outlineTraceId: outlineTraceId.value || undefined,
         },
-        onStart: (id, chNo) => {
-          traceId.value = id;
-          chapterNo.value = chNo;
-        },
-        onContent: (text) => {
-          draftText.value += text;
-        },
-        onEnd: (id, cites, notes, usedEvents) => {
-          traceId.value = id;
-          citations.value = cites;
-          consistencyNotes.value = notes;
-          usedRelationEvents.value = usedEvents;
-          status.value = 'done';
-          phasePanelCollapsed.value = true;
-        },
-        onError: (msg) => {
-          errorMessage.value = presentError(msg);
-          status.value = 'error';
-        },
-      });
+        [],
+        {
+          onPhase: (phase) => {
+            generationPhase.value = phase;
+            phasePanelCollapsed.value = false;
+          },
+          onStart: (id, chNo) => {
+            traceId.value = id;
+            chapterNo.value = chNo;
+          },
+          onContent: (text) => {
+            draftText.value += text;
+          },
+          onEnd: (id, cites, notes, usedEvents) => {
+            traceId.value = id;
+            citations.value = cites;
+            consistencyNotes.value = notes;
+            usedRelationEvents.value = usedEvents;
+            status.value = 'done';
+            phasePanelCollapsed.value = true;
+          },
+          onError: (msg) => {
+            errorMessage.value = presentError(msg);
+            status.value = 'error';
+          },
+        }
+      );
     } catch (error) {
       errorMessage.value = presentErrorFromCaught(error, '生成请求失败');
       status.value = 'error';
     }
   }
 
-  /**
-   * 接受草稿并保存到章节
-   * @param {string} projectId - 项目ID
-   * @param {number} chapterNoVal - 章节号
-   */
   async function acceptDraft(projectId: string, chapterNoVal: number) {
     if (!draftText.value.trim()) {
       errorMessage.value = presentError('草稿内容为空，无法接受');
@@ -168,12 +226,26 @@ export const useGenerationStore = defineStore('generation', () => {
     accepting,
     generationPhase,
     phasePanelCollapsed,
+    outlineStatus,
+    outlineText,
+    outlineId,
+    outlineTraceId,
+    outlineConfirmed,
+    outlineErrorMessage,
     isStreaming,
     isDone,
     isError,
     isIdle,
     isAccepting,
+    isOutlineStreaming,
+    hasOutline,
     reset,
+    resetDraft,
+    resetOutline,
+    invalidateOutlineConfirmation,
+    setOutlineText,
+    confirmOutline,
+    generateOutline,
     generate,
     acceptDraft,
   };

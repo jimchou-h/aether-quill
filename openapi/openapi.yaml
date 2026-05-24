@@ -75,6 +75,10 @@ paths:
     $ref: './paths/projects/relation-event-by-id.yaml'
   /api/projects/{id}/write:
     $ref: './paths/projects/write.yaml'
+  /api/projects/{id}/write/outline:
+    $ref: './paths/projects/write-outline.yaml'
+  /api/generate/draft:
+    $ref: './paths/drafts/generate-draft.yaml'
   /api/projects/{id}/knowledge/chapters/summarize:
     $ref: './paths/projects/chapter-summarize-batch.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/summarize:
@@ -712,7 +716,7 @@ components:
         chapterNo:
           type: integer
           nullable: true
-    WriteChapterRequest:
+    WriteChapterTaskFields:
       type: object
       required:
         - chapterNo
@@ -745,6 +749,91 @@ components:
           type: array
           items:
             type: string
+    WriteChapterOutlineRequest:
+      allOf:
+        - $ref: '#/components/schemas/WriteChapterTaskFields'
+    WriteChapterOutlineBasis:
+      type: object
+      properties:
+        usedPersonaId:
+          type: string
+          nullable: true
+        outlineUsed:
+          type: boolean
+        recentChapterCount:
+          type: integer
+        usedRelationEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsedRelationEvent'
+    WriteChapterOutlineResult:
+      type: object
+      required:
+        - traceId
+        - outlineId
+        - outlineText
+        - basis
+      properties:
+        traceId:
+          type: string
+        outlineId:
+          type: string
+        outlineText:
+          type: string
+        basis:
+          $ref: '#/components/schemas/WriteChapterOutlineBasis'
+    WriteChapterConfirmedOutline:
+      type: object
+      properties:
+        outlineId:
+          type: string
+          description: 大纲阶段生成的 outlineId，用于 trace 关联
+        outlineTraceId:
+          type: string
+          description: 大纲生成 traceId，正文 trace 将记录此字段
+        confirmedOutlineText:
+          type: string
+          description: 用户确认后的章节大纲全文（正文生成必填）
+      required:
+        - confirmedOutlineText
+    WriteChapterRequest:
+      allOf:
+        - $ref: '#/components/schemas/WriteChapterTaskFields'
+        - $ref: '#/components/schemas/WriteChapterConfirmedOutline'
+    GenerateWorkbenchDraftRequest:
+      type: object
+      required:
+        - projectId
+        - task
+        - confirmedOutlineText
+      properties:
+        projectId:
+          type: string
+        task:
+          $ref: '#/components/schemas/WriteChapterTaskFields'
+        confirmedOutlineText:
+          type: string
+          description: 已确认的章节大纲全文
+        outlineId:
+          type: string
+        outlineTraceId:
+          type: string
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              sourceType:
+                type: string
+              sourceId:
+                type: string
+              snippet:
+                type: string
+        temperature:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 2
     WriteChapterResult:
       type: object
       required:

@@ -1,0 +1,59 @@
+post:
+  tags:
+    - Projects
+  summary: Stream chapter writing outline (SSE)
+  description: |
+    写作工作台两阶段生成之第一步：根据本章写作要求流式生成「章节大纲」。
+    用户确认大纲后方可调用正文生成（`/api/generate/draft`）。
+
+    SSE event sequence:
+      - `data: {"event":"start","traceId":"...","chapterNo":N,"outlineId":"...","basis":{...}}`
+      - `data: {"event":"content","data":"..."}` (multiple; newlines escaped as `\\n`)
+      - `data: {"event":"end","traceId":"...","outlineText":"...","outlineId":"...","basis":{...}}`
+      - `data: {"event":"error","data":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/WriteChapterOutlineRequest'
+  responses:
+    '200':
+      description: SSE stream of outline chunks and final structured result
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: Server-Sent Events stream (see summary for event shapes)
+    '400':
+      description: Invalid request (empty goal etc.)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Chapter outline generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

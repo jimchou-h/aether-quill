@@ -95,16 +95,37 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
  *
  * 治理占位符 `{{narrativeContext}}` / `{{retrievedEvidence}}` 与上述中文分节一一对应，便于审计与模板 diff。
  */
+/**
+ * 写作工作台-章节大纲（AQ-217~AQ-219）
+ * 用于「写作要求 → 生成/确认大纲」步骤；不输出正文。
+ */
+export const writeChapterOutlineTemplate: PromptTemplate = {
+  id: 'write.chapter.outline',
+  name: '写作工作台-章节大纲',
+  version: '1.0.0',
+  category: 'task',
+  status: 'published',
+  systemPromptText: [
+    '你是一位资深小说策划编辑，正在根据作者的写作要求为本章拟定「章节大纲」。',
+    '本步骤只需要输出结构化章节大纲，不要直接输出小说正文。',
+    '请始终参考 <writing-task> 中的约束，并与【叙事上下文】保持一致。',
+  ].join('\n'),
+  content: '写作工作台-章节大纲 system prompt（v1.0.0）',
+};
+
 export const writeChapterTaskTemplate: PromptTemplate = {
   id: 'write.chapter',
   name: '通用章节续写（叙事上下文 + 检索证据）',
-  version: '1.1.0',
+  version: '1.2.0',
   category: 'task',
   status: 'published',
-  systemPromptText:
-    '写作时请区分「叙事上下文」（项目摘要与设定）与「检索证据」（知识库召回）；证据块仅作参考，不得当作已发表正文复述。',
+  systemPromptText: [
+    '你是一位专业小说写作助手，正在根据作者已确认的章节大纲撰写本章正文。',
+    '必须严格遵循 <chapter-outline> 中的结构与节拍，并区分「叙事上下文」与「检索证据」。',
+    '证据块仅作参考，不得当作已发表正文复述。',
+  ].join('\n'),
   content:
-    '占位说明：{{narrativeContext}}、{{retrievedEvidence}} 由 Orchestrator 注入；本模板 id 供 templateKey 扩展与文档对齐。',
+    '占位说明：{{narrativeContext}}、{{retrievedEvidence}} 由 Orchestrator 注入；正文阶段须携带 <chapter-outline>。',
 };
 
 /**
@@ -114,6 +135,7 @@ export const writeChapterTaskTemplate: PromptTemplate = {
 export const templateRegistry: Record<string, PromptTemplate> = {
   [chapterOptimizePlanTemplate.id]: chapterOptimizePlanTemplate,
   [chapterOptimizeDraftTemplate.id]: chapterOptimizeDraftTemplate,
+  [writeChapterOutlineTemplate.id]: writeChapterOutlineTemplate,
   [writeChapterTaskTemplate.id]: writeChapterTaskTemplate,
 };
 
