@@ -11,6 +11,10 @@ import {
   MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS,
   MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS,
 } from './knowledge-retrieval';
+import {
+  buildEffectiveMatchingText,
+  supplementPersonaKeywordsFromSource,
+} from './persona-keyword-supplement';
 import type { ChunkWithEmbedding } from './types';
 
 describe('buildGenerationRetrievalQuery', () => {
@@ -182,6 +186,22 @@ describe('buildStructuredKnowledgeEvidence', () => {
     assert.equal(r.retrievalSkippedNoStructured, true);
     assert.equal(r.evidenceText, '');
     assert.deepEqual(r.titleMatchedDocumentIds, []);
+  });
+
+  it('hits persona card when effective text includes rule-supplemented name (AI missed keyword)', () => {
+    const { supplementedKeywords } = supplementPersonaKeywordsFromSource(
+      '林策在旧港口走私。',
+      [{ id: 'd2', title: '人物小传：林策', docType: 'persona_card' }],
+      []
+    );
+    const effective = buildEffectiveMatchingText('旧港口 走私', supplementedKeywords);
+    const r = buildStructuredKnowledgeEvidence(2, {
+      chapterNo: 2,
+      chapters: [{ chapterNo: 2, structuredMatchingText: effective }],
+      knowledgeDocuments: docs,
+    });
+    assert.ok(r.evidenceText.includes('canonical_character=林策'));
+    assert.ok(r.titleMatchedDocumentIds.includes('d2'));
   });
 
   it('injects top title-matched full documents', () => {

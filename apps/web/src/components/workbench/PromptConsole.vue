@@ -5,6 +5,8 @@ import {
   type ChapterItem,
   type PersonaItem,
   type RelationEventItem,
+  type ChapterStructuredInfo,
+  type StructuredInfoParseResult,
 } from '../../services/api';
 import {
   buildRecommendedRelationEventIds,
@@ -12,6 +14,11 @@ import {
   findUnselectedRelationSuggestions,
 } from '../../utils/personaGraph';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
+import {
+  hasStructuredInfoForKnowledgeMatch,
+  normalizeWorkbenchChapterNo,
+  resolveWorkbenchStructuredInfo,
+} from '../../utils/structured-matching';
 
 const props = withDefaults(
   defineProps<{
@@ -20,6 +27,7 @@ const props = withDefaults(
     personaNames: string[];
     personas: PersonaItem[];
     knowledgeChapters: ChapterItem[];
+    workbenchStructuredByChapter?: Record<string, ChapterStructuredInfo>;
   }>(),
   {
     knowledgeChapters: () => [],
@@ -40,7 +48,7 @@ const emit = defineEmits<{
       selectedEventIds: string[];
     },
   ];
-  'structured-parsed': [];
+  'structured-parsed': [result: StructuredInfoParseResult];
 }>();
 
 function suggestedChapterNoFromMax(max: number): number {
@@ -65,12 +73,17 @@ const structuredParseError = ref('');
 
 const availableCharacters = computed(() => [...new Set(props.personaNames.filter(Boolean))]);
 
-const currentStructured = computed(() => {
-  const n = Number(chapterNo.value);
-  return props.knowledgeChapters.find((c) => c.chapterNo === n)?.structuredInfo;
-});
+const currentStructured = computed(() =>
+  resolveWorkbenchStructuredInfo(
+    chapterNo.value,
+    props.knowledgeChapters,
+    props.workbenchStructuredByChapter
+  )
+);
 
-const missingStructuredForKb = computed(() => !currentStructured.value?.matchingText?.trim());
+const missingStructuredForKb = computed(
+  () => !hasStructuredInfoForKnowledgeMatch(currentStructured.value)
+);
 
 const maxChapterNo = computed(() => {
   if (props.knowledgeChapters.length === 0) {
@@ -211,7 +224,9 @@ async function handleParseStructured() {
   structuredParseError.value = '';
   parsingStructured.value = true;
   try {
-    await apiClient.parseChapterStructuredInfo(props.projectId, Number(chapterNo.value), {
+    const parsedChapterNo = normalizeWorkbenchChapterNo(chapterNo.value);
+    chapterNo.value = parsedChapterNo;
+    const result = await apiClient.parseChapterStructuredInfo(props.projectId, parsedChapterNo, {
       mode: 'workbench',
       goal: goal.value,
       pov: pov.value,
@@ -219,7 +234,7 @@ async function handleParseStructured() {
       avoid: parseMultiLine(avoidText.value),
     });
     presentSuccess('本章结构化信息已解析并保存');
-    emit('structured-parsed');
+    emit('structured-parsed', result);
   } catch (error) {
     structuredParseError.value = presentErrorFromCaught(error, '解析失败');
   } finally {
@@ -252,18 +267,6 @@ watch(chapterNo, () => {
 });
 
 watch(
-  maxChapterNo,
-  (max, prevMax) => {
-    const nextSuggested = suggestedChapterNoFromMax(max);
-    const prevSuggested = suggestedChapterNoFromMax(prevMax ?? 0);
-    if (chapterNo.value === prevSuggested || (chapterNo.value === 1 && max > 0)) {
-      chapterNo.value = nextSuggested;
-    }
-  },
-  { immediate: true }
-);
-
-watch(
   () => props.projectId,
   () => {
     applySuggestedChapterNo();
@@ -271,6 +274,7 @@ watch(
 );
 
 onMounted(() => {
+  applySuggestedChapterNo();
   void loadRelationEvents();
 });
 
@@ -289,6 +293,7 @@ defineExpose({ resetForm });
         <label class="field-label">
           章节号
           <input v-model.number="chapterNo" type="number" min="1" class="field-input" />
+          <span class="field-hint text-muted">建议下一章：第 {{ suggestedChapterNo }} 章</span>
         </label>
         <div class="field-label">
           <span>目标字数</span>
@@ -328,8 +333,14 @@ defineExpose({ resetForm });
         <p v-if="currentStructured?.narrativeSummary" class="structured-kb-body">
           {{ currentStructured.narrativeSummary }}
         </p>
-        <p v-else class="structured-kb-body text-muted">
+        <p
+          v-else-if="currentStructured?.matchingText?.trim()"
+          class="structured-kb-body text-muted"
+        >
           已生成匹配文本，生成草稿时将按标题匹配注入知识库文档全文。
+        </p>
+        <p v-else-if="currentStructured?.keywords?.length" class="structured-kb-body text-muted">
+          已生成关键词：{{ currentStructured.keywords.join('、') }}
         </p>
       </div>
       <p v-if="structuredParseError" class="message message-error">{{ structuredParseError }}</p>

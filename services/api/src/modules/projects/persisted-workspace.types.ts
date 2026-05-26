@@ -6,6 +6,8 @@
 export interface ChapterStructuredInfoPersisted {
   matchingText: string;
   keywords?: string[];
+  /** 规则层从正文匹配到的角色名（用于 sync 拼接 effectiveMatchingText） */
+  personaKeywordSupplements?: string[];
   narrativeSummary?: string;
   parseSource?: 'workbench' | 'chapter';
   parsedAt?: string;
@@ -73,6 +75,8 @@ export interface PersistedProjectState {
         structuredInfo?: ChapterStructuredInfoPersisted;
         updatedAt: string;
       }>;
+      /** 工作台预写章节的结构化匹配（未落正文前不占章节列表） */
+      workbenchStructuredByChapter?: Record<string, ChapterStructuredInfoPersisted>;
       indexVersion: number;
       lastIndexedAt: string | null;
     }

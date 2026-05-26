@@ -23,12 +23,15 @@ export function clampChapterSummaryMemoryCount(value: unknown): number {
   return Math.min(10, Math.max(0, Math.trunc(n)));
 }
 
-export function clampKnowledgeDocQuota(value: unknown, fallback = DEFAULT_KNOWLEDGE_DOC_QUOTA): number {
+export function clampKnowledgeDocQuota(
+  value: unknown,
+  fallback = DEFAULT_KNOWLEDGE_DOC_QUOTA
+): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) {
     return fallback;
   }
-  return Math.min(10, Math.max(1, Math.trunc(n)));
+  return Math.min(20, Math.max(1, Math.trunc(n)));
 }
 
 export function clampGenerationTemperature(value: unknown): number {

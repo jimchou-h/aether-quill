@@ -528,6 +528,12 @@ export class GenerationService {
     if (!parsed.matchingText.trim() && parsed.keywords.length === 0) {
       return this.fallbackStructuredInfoFromSourceText(raw);
     }
+    if (!parsed.matchingText.trim() && parsed.keywords.length > 0) {
+      return {
+        ...parsed,
+        matchingText: parsed.keywords.join(' ').slice(0, 2000),
+      };
+    }
     return parsed;
   }
 
