@@ -15,6 +15,7 @@ import {
   presentInfo,
   presentSuccess,
 } from '../../utils/pageFeedback';
+import { resolveEffectiveStructuredMatchingText } from '../../utils/structured-matching';
 
 type Step = 'instruction' | 'plan' | 'draft';
 
@@ -378,7 +379,7 @@ async function handleGeneratePlan() {
           chapterNo: ch.chapterNo,
           title: ch.title,
           summary: ch.summary || ch.content.slice(0, 160),
-          structuredMatchingText: ch.structuredInfo?.matchingText,
+          structuredMatchingText: resolveEffectiveStructuredMatchingText(ch.structuredInfo),
         })),
         knowledgeDocuments: docList.map((doc) => ({
           id: doc.id,

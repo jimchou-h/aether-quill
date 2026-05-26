@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import type { ChapterItem, ChapterStructuredInfo } from '../../services/api';
+import { isPersonaKeywordSupplement } from '../../utils/structured-matching';
 
 const props = defineProps<{
   chapters: ChapterItem[];
@@ -455,8 +456,21 @@ defineExpose({ clearEditing });
                 v-for="(kw, kwIndex) in selectedChapter.structuredInfo.keywords"
                 :key="`${kwIndex}-${kw}`"
                 class="keyword-tag"
+                :class="{
+                  'keyword-tag--supplement': isPersonaKeywordSupplement(
+                    kw,
+                    selectedChapter.structuredInfo
+                  ),
+                }"
               >
                 {{ kw }}
+                <span
+                  v-if="
+                    isPersonaKeywordSupplement(kw, selectedChapter.structuredInfo)
+                  "
+                  class="keyword-tag-source"
+                  >正文匹配</span
+                >
               </li>
             </ul>
           </div>
@@ -631,13 +645,27 @@ defineExpose({ clearEditing });
 }
 
 .keyword-tag {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   padding: 0.2rem 0.45rem;
   border-radius: 999px;
   font-size: 0.75rem;
   color: #334155;
   background: #fff;
   border: 1px solid #cbd5e1;
+}
+
+.keyword-tag--supplement {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.keyword-tag-source {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: #3b82f6;
 }
 
 .structured-meta {

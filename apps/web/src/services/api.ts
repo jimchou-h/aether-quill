@@ -8,6 +8,10 @@
 
 import axios, { AxiosInstance } from 'axios';
 import type { paths, components } from '@aether-quill/shared-types';
+import {
+  resolveEffectiveStructuredMatchingText,
+  resolveWorkbenchStructuredInfo,
+} from '../utils/structured-matching';
 
 // Type helpers
 type PathMethod<T extends keyof paths> = {
@@ -757,12 +761,45 @@ export const apiClient = {
           ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
           : '未配置人物设定',
         outlineSummary: workspace.knowledge.outlineSummary,
-        chapters: workspace.knowledge.chapters.map((chapter) => ({
-          chapterNo: chapter.chapterNo,
-          title: chapter.title,
-          summary: chapter.summary || chapter.content.slice(0, 160),
-          structuredMatchingText: chapter.structuredInfo?.matchingText?.trim(),
-        })),
+        chapters: (() => {
+          const byNo = new Map<
+            number,
+            {
+              chapterNo: number;
+              title: string;
+              summary: string;
+              structuredMatchingText?: string;
+            }
+          >();
+          for (const chapter of workspace.knowledge.chapters) {
+            const structured = resolveWorkbenchStructuredInfo(
+              chapter.chapterNo,
+              workspace.knowledge.chapters,
+              workspace.knowledge.workbenchStructuredByChapter
+            );
+            byNo.set(chapter.chapterNo, {
+              chapterNo: chapter.chapterNo,
+              title: chapter.title,
+              summary: chapter.summary || chapter.content.slice(0, 160),
+              structuredMatchingText: resolveEffectiveStructuredMatchingText(structured),
+            });
+          }
+          for (const [key, draft] of Object.entries(
+            workspace.knowledge.workbenchStructuredByChapter ?? {}
+          )) {
+            const chapterNo = Number(key);
+            if (!Number.isFinite(chapterNo) || chapterNo <= 0 || byNo.has(chapterNo)) {
+              continue;
+            }
+            byNo.set(chapterNo, {
+              chapterNo,
+              title: `第${chapterNo}章`,
+              summary: '',
+              structuredMatchingText: resolveEffectiveStructuredMatchingText(draft),
+            });
+          }
+          return [...byNo.values()].sort((a, b) => a.chapterNo - b.chapterNo);
+        })(),
         knowledgeDocuments: docList.map((doc) => ({
           docType: doc.docType ?? 'other',
           id: doc.id,
@@ -1587,6 +1624,7 @@ export interface ChapterItem {
 export interface ChapterStructuredInfo {
   matchingText: string;
   keywords?: string[];
+  personaKeywordSupplements?: string[];
   narrativeSummary?: string;
   parseSource?: 'workbench' | 'chapter';
   parsedAt?: string;
@@ -1677,6 +1715,7 @@ export interface ChapterOptimizeTypoFixCallbacks {
 export interface KnowledgeItem {
   outlineSummary: string;
   chapters: ChapterItem[];
+  workbenchStructuredByChapter?: Record<string, ChapterStructuredInfo>;
   indexVersion: number;
   lastIndexedAt: string | null;
 }

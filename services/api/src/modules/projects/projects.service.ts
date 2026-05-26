@@ -49,6 +49,11 @@ import {
   countChapterAppearancesForName,
 } from './persona-graph.util';
 import {
+  isPersonaKeywordSupplementEnabled,
+  resolveStructuredMatchingTextForSync,
+  supplementPersonaKeywordsFromSource,
+} from './persona-keyword-supplement';
+import {
   buildRelationMemoryBlock,
   matchesRelationEventFilters,
   normalizeRelationEventDedupeKey,
@@ -217,6 +222,8 @@ export interface ChapterRecord {
 export interface KnowledgeRecord {
   outlineSummary: string;
   chapters: ChapterRecord[];
+  /** 工作台「解析结构化信息」暂存（无正文时不创建空章节） */
+  workbenchStructuredByChapter?: Record<number, ChapterStructuredInfoPersisted>;
   indexVersion: number;
   lastIndexedAt: Date | null;
 }
@@ -804,7 +811,11 @@ export class ProjectsService implements OnModuleInit {
     }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
-    return this.knowledgeStore.get(projectId)!;
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    if (this.migrateOrphanWorkbenchStructuredChapters(knowledge)) {
+      this.persistState();
+    }
+    return knowledge;
   }
 
   async getProjectStats(projectId: string, userId?: string) {
@@ -1019,6 +1030,8 @@ export class ProjectsService implements OnModuleInit {
       now,
     });
 
+    const workbenchDraft = knowledge.workbenchStructuredByChapter?.[chapterNo];
+
     let targetChapter: ChapterRecord;
     if (existing) {
       existing.title = payload.title.trim();
@@ -1042,6 +1055,13 @@ export class ProjectsService implements OnModuleInit {
       };
       knowledge.chapters.push(targetChapter);
       knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
+    }
+
+    if (workbenchDraft && !targetChapter.structuredInfo) {
+      targetChapter.structuredInfo = workbenchDraft;
+    }
+    if (workbenchDraft && knowledge.workbenchStructuredByChapter) {
+      delete knowledge.workbenchStructuredByChapter[chapterNo];
     }
 
     this.persistState();
@@ -1356,24 +1376,14 @@ export class ProjectsService implements OnModuleInit {
     this.ensureProjectState(projectId);
 
     const knowledge = this.knowledgeStore.get(projectId)!;
-    let chapter = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
+    if (this.migrateOrphanWorkbenchStructuredChapters(knowledge)) {
+      this.persistState();
+    }
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === chapterNo);
+    const workbenchDrafts = this.ensureWorkbenchStructuredDrafts(knowledge);
 
-    if (!chapter) {
-      if (body.mode !== 'workbench') {
-        throw new NotFoundException(`未找到第 ${chapterNo} 章`);
-      }
-      const now = new Date();
-      chapter = {
-        chapterNo,
-        title: `第${chapterNo}章`,
-        content: '',
-        summary: '',
-        summarySource: 'fallback',
-        summaryUpdatedAt: now,
-        updatedAt: now,
-      };
-      knowledge.chapters.push(chapter);
-      knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
+    if (!chapter && body.mode !== 'workbench') {
+      throw new NotFoundException(`未找到第 ${chapterNo} 章`);
     }
 
     let sourceText = '';
@@ -1386,7 +1396,7 @@ export class ProjectsService implements OnModuleInit {
       ].filter(Boolean);
       sourceText = parts.join('\n');
     } else {
-      sourceText = chapter.content ?? '';
+      sourceText = chapter!.content ?? '';
     }
 
     if (!sourceText.trim()) {
@@ -1394,6 +1404,8 @@ export class ProjectsService implements OnModuleInit {
         '解析源文本为空：请先填写本章目标（工作台）或章节正文（章节模块）。'
       );
     }
+
+    const knowledgeDocs = this.documentsService.findAll(projectId);
 
     try {
       const { data } = await axios.post(
@@ -1405,27 +1417,74 @@ export class ProjectsService implements OnModuleInit {
         { timeout: 120000 }
       );
 
-      const matchingText =
+      let matchingText =
         typeof data?.matchingText === 'string' ? data.matchingText.trim().slice(0, 2000) : '';
       const rawKeywords: unknown[] = Array.isArray(data?.keywords) ? data.keywords : [];
-      const keywords = rawKeywords
+      const aiKeywords = rawKeywords
         .map((item) => (typeof item === 'string' ? item.trim() : ''))
         .filter((s): s is string => Boolean(s))
         .slice(0, 40);
+
+      let keywords = [...new Set(aiKeywords)];
+      let personaKeywordSupplements: string[] | undefined;
+
+      if (isPersonaKeywordSupplementEnabled()) {
+        const personaCards = knowledgeDocs
+          .filter((doc) => doc.docType === 'persona_card')
+          .map((doc) => ({ id: doc.id, title: doc.title, docType: doc.docType }));
+        const supplement = supplementPersonaKeywordsFromSource(
+          sourceText,
+          personaCards,
+          aiKeywords
+        );
+        keywords = supplement.mergedKeywords;
+        if (supplement.supplementedKeywords.length > 0) {
+          personaKeywordSupplements = supplement.supplementedKeywords;
+        }
+      }
+
+      if (!matchingText.trim() && keywords.length > 0) {
+        matchingText = keywords.join(' ').slice(0, 2000);
+      }
+      if (!matchingText.trim() && sourceText.trim()) {
+        matchingText = sourceText.replace(/\s+/g, ' ').trim().slice(0, 400);
+      }
+
       const narrativeSummary =
         typeof data?.narrativeSummary === 'string' ? data.narrativeSummary.trim() : undefined;
 
-      chapter.structuredInfo = {
+      const structuredInfo: ChapterStructuredInfoPersisted = {
         matchingText,
-        keywords: [...new Set(keywords)],
+        keywords,
+        ...(personaKeywordSupplements?.length
+          ? { personaKeywordSupplements }
+          : {}),
         narrativeSummary: narrativeSummary || undefined,
         parseSource: body.mode,
         parsedAt: new Date().toISOString(),
       };
-      chapter.updatedAt = new Date();
-      this.persistState();
 
-      return { chapter, structuredInfo: chapter.structuredInfo };
+      const now = new Date();
+      if (chapter) {
+        chapter.structuredInfo = structuredInfo;
+        chapter.updatedAt = now;
+        delete workbenchDrafts[chapterNo];
+        this.persistState();
+        return { chapter, structuredInfo: chapter.structuredInfo };
+      }
+
+      workbenchDrafts[chapterNo] = structuredInfo;
+      this.persistState();
+      return {
+        chapter: {
+          chapterNo,
+          title: `第${chapterNo}章`,
+          content: '',
+          summary: '',
+          updatedAt: now.toISOString(),
+        },
+        structuredInfo,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : '结构化信息解析失败';
       throw new BadGatewayException(message);
@@ -3012,6 +3071,17 @@ export class ProjectsService implements OnModuleInit {
             ? chapter.summaryUpdatedAt.toISOString()
             : undefined,
         })),
+        ...(knowledge.workbenchStructuredByChapter &&
+        Object.keys(knowledge.workbenchStructuredByChapter).length > 0
+          ? {
+              workbenchStructuredByChapter: Object.fromEntries(
+                Object.entries(knowledge.workbenchStructuredByChapter).map(([key, value]) => [
+                  String(key),
+                  value,
+                ])
+              ),
+            }
+          : {}),
         indexVersion: knowledge.indexVersion,
         lastIndexedAt: knowledge.lastIndexedAt ? knowledge.lastIndexedAt.toISOString() : null,
       };
@@ -3128,6 +3198,9 @@ export class ProjectsService implements OnModuleInit {
                 ? new Date(chapter.summaryUpdatedAt)
                 : undefined,
             })),
+            workbenchStructuredByChapter: this.parsePersistedWorkbenchStructuredDrafts(
+              knowledge.workbenchStructuredByChapter
+            ),
             indexVersion: knowledge.indexVersion,
             lastIndexedAt: knowledge.lastIndexedAt ? new Date(knowledge.lastIndexedAt) : null,
           },
@@ -3578,9 +3651,12 @@ export class ProjectsService implements OnModuleInit {
       this.knowledgeStore.set(projectId, {
         outlineSummary: '',
         chapters: [],
+        workbenchStructuredByChapter: {},
         indexVersion: 0,
         lastIndexedAt: null,
       });
+    } else if (!this.knowledgeStore.get(projectId)!.workbenchStructuredByChapter) {
+      this.knowledgeStore.get(projectId)!.workbenchStructuredByChapter = {};
     }
 
     if (!this.indexJobsStore.has(projectId)) {
@@ -3616,6 +3692,102 @@ export class ProjectsService implements OnModuleInit {
     if (settings.generateRelationEventsOnSave === undefined) {
       settings.generateRelationEventsOnSave = true;
     }
+  }
+
+  private ensureWorkbenchStructuredDrafts(
+    knowledge: KnowledgeRecord
+  ): Record<number, ChapterStructuredInfoPersisted> {
+    if (!knowledge.workbenchStructuredByChapter) {
+      knowledge.workbenchStructuredByChapter = {};
+    }
+    return knowledge.workbenchStructuredByChapter;
+  }
+
+  private parsePersistedWorkbenchStructuredDrafts(
+    raw?: Record<string, ChapterStructuredInfoPersisted>
+  ): Record<number, ChapterStructuredInfoPersisted> {
+    if (!raw || typeof raw !== 'object') {
+      return {};
+    }
+    const drafts: Record<number, ChapterStructuredInfoPersisted> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      const chapterNo = Number(key);
+      if (!Number.isFinite(chapterNo) || chapterNo <= 0 || !value || typeof value !== 'object') {
+        continue;
+      }
+      drafts[chapterNo] = value;
+    }
+    return drafts;
+  }
+
+  /** 将历史误创建的空章节（仅 workbench 结构化）迁回草稿，避免章节列表出现空章 */
+  private migrateOrphanWorkbenchStructuredChapters(knowledge: KnowledgeRecord): boolean {
+    const drafts = this.ensureWorkbenchStructuredDrafts(knowledge);
+    const retained: ChapterRecord[] = [];
+
+    for (const chapter of knowledge.chapters) {
+      const defaultTitle = `第${chapter.chapterNo}章`;
+      const isOrphanWorkbenchStructured =
+        !chapter.content?.trim() &&
+        chapter.structuredInfo?.parseSource === 'workbench' &&
+        (!chapter.title?.trim() || chapter.title.trim() === defaultTitle);
+
+      if (isOrphanWorkbenchStructured && chapter.structuredInfo) {
+        drafts[chapter.chapterNo] = chapter.structuredInfo;
+        continue;
+      }
+      retained.push(chapter);
+    }
+
+    const changed = retained.length !== knowledge.chapters.length;
+    knowledge.chapters = retained;
+    return changed;
+  }
+
+  private buildOrchestratorChapterContexts(
+    knowledge: KnowledgeRecord,
+    settings: { priorChapterTailChars: number; contextExcerptMaxChars: number }
+  ) {
+    const tailK = Math.max(settings.priorChapterTailChars, settings.contextExcerptMaxChars);
+    const byNo = new Map<
+      number,
+      {
+        chapterNo: number;
+        title: string;
+        summary: string;
+        content: string;
+        contentTail: string;
+        structuredMatchingText?: string;
+      }
+    >();
+
+    for (const chapter of knowledge.chapters) {
+      byNo.set(chapter.chapterNo, {
+        chapterNo: chapter.chapterNo,
+        title: chapter.title,
+        summary: chapter.summary || '',
+        content: chapter.content,
+        contentTail: sliceContentTail(chapter.content, tailK),
+        structuredMatchingText: resolveStructuredMatchingTextForSync(chapter.structuredInfo ?? {}),
+      });
+    }
+
+    for (const [key, draft] of Object.entries(knowledge.workbenchStructuredByChapter ?? {})) {
+      const chapterNo = Number(key);
+      if (!Number.isFinite(chapterNo) || chapterNo <= 0 || byNo.has(chapterNo)) {
+        continue;
+      }
+      byNo.set(chapterNo, {
+        chapterNo,
+        title: `第${chapterNo}章`,
+        summary: '',
+        content: '',
+        contentTail: '',
+        structuredMatchingText: resolveStructuredMatchingTextForSync(draft),
+      });
+    }
+
+    return [...byNo.values()].sort((a, b) => a.chapterNo - b.chapterNo);
   }
 
   private getProjectOrThrow(projectId: string) {
@@ -3737,20 +3909,7 @@ export class ProjectsService implements OnModuleInit {
       priorChapterTailChars: settings.priorChapterTailChars,
       contextExcerptMaxChars: settings.contextExcerptMaxChars,
       generationTemperature: settings.generationTemperature,
-      chapters: knowledge.chapters.map((chapter) => {
-        const tailK = Math.max(
-          settings.priorChapterTailChars,
-          settings.contextExcerptMaxChars
-        );
-        return {
-          chapterNo: chapter.chapterNo,
-          title: chapter.title,
-          summary: chapter.summary || '',
-          content: chapter.content,
-          contentTail: sliceContentTail(chapter.content, tailK),
-          structuredMatchingText: chapter.structuredInfo?.matchingText?.trim(),
-        };
-      }),
+      chapters: this.buildOrchestratorChapterContexts(knowledge, settings),
       knowledgeDocuments: docs.map((doc) => ({
         id: doc.id,
         title: doc.title,

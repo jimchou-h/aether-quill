@@ -16,10 +16,16 @@ import WorkbenchStepper from '../components/workbench/WorkbenchStepper.vue';
 import type { WorkbenchStepItem } from '../components/workbench/WorkbenchStepper.vue';
 import WorkbenchOutputPanel from '../components/workbench/WorkbenchOutputPanel.vue';
 import { presentErrorFromCaught, presentInfo, presentSuccess } from '../utils/pageFeedback';
+import {
+  resolveEffectiveStructuredMatchingText,
+  resolveWorkbenchStructuredInfo,
+} from '../utils/structured-matching';
+import type { ChapterStructuredInfo, StructuredInfoParseResult } from '../services/api';
 import '../components/workbench/workbench-tokens.css';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
+const workbenchStructuredByChapter = ref<Record<string, ChapterStructuredInfo>>({});
 
 const generationStore = useGenerationStore();
 const editorStore = useEditorStore();
@@ -165,6 +171,7 @@ function applyWorkspaceSnapshot(workspace: Awaited<ReturnType<typeof apiClient.g
   }));
   personaNames.value = personas.value.map((item) => item.name);
   editorStore.setChapters(workspace.knowledge.chapters);
+  workbenchStructuredByChapter.value = workspace.knowledge.workbenchStructuredByChapter ?? {};
 }
 
 async function loadWorkspace() {
@@ -190,6 +197,26 @@ async function refreshWorkspaceData() {
   }
 }
 
+function onStructuredParsed(result: StructuredInfoParseResult) {
+  const ch = result.chapter;
+  const info = result.structuredInfo ?? ch.structuredInfo;
+  if (info) {
+    const existing = editorStore.chapters.find((item) => item.chapterNo === ch.chapterNo);
+    if (existing) {
+      editorStore.addOrUpdateChapter({
+        ...existing,
+        structuredInfo: info,
+      });
+    } else {
+      workbenchStructuredByChapter.value = {
+        ...workbenchStructuredByChapter.value,
+        [String(ch.chapterNo)]: info,
+      };
+    }
+  }
+  void refreshWorkspaceData();
+}
+
 function buildPreviewProjectCtx(
   workspace: Awaited<ReturnType<typeof apiClient.getWorkspace>>,
   docList: Array<{ id: string; title: string; content: string; docType?: string }>
@@ -204,12 +231,25 @@ function buildPreviewProjectCtx(
     workspace.settings.contextExcerptMaxChars ?? 400
   );
 
-  return {
-    outlineSummary: workspace.knowledge.outlineSummary,
-    personaProfile: activePersona
-      ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
-      : '未配置人物设定',
-    chapters: workspace.knowledge.chapters.map((ch) => ({
+  const chapterCtxByNo = new Map<
+    number,
+    {
+      chapterNo: number;
+      title: string;
+      summary: string;
+      content: string;
+      contentTail: string;
+      structuredMatchingText?: string;
+    }
+  >();
+
+  for (const ch of workspace.knowledge.chapters) {
+    const structured = resolveWorkbenchStructuredInfo(
+      ch.chapterNo,
+      workspace.knowledge.chapters,
+      workspace.knowledge.workbenchStructuredByChapter
+    );
+    chapterCtxByNo.set(ch.chapterNo, {
       chapterNo: ch.chapterNo,
       title: ch.title,
       summary: ch.summary || '',
@@ -218,8 +258,31 @@ function buildPreviewProjectCtx(
         ch.content.trim().length <= tailK
           ? ch.content.trim()
           : ch.content.trim().slice(-tailK),
-      structuredMatchingText: ch.structuredInfo?.matchingText,
-    })),
+      structuredMatchingText: resolveEffectiveStructuredMatchingText(structured),
+    });
+  }
+
+  for (const [key, draft] of Object.entries(workspace.knowledge.workbenchStructuredByChapter ?? {})) {
+    const chapterNo = Number(key);
+    if (!Number.isFinite(chapterNo) || chapterNo <= 0 || chapterCtxByNo.has(chapterNo)) {
+      continue;
+    }
+    chapterCtxByNo.set(chapterNo, {
+      chapterNo,
+      title: `第${chapterNo}章`,
+      summary: '',
+      content: '',
+      contentTail: '',
+      structuredMatchingText: resolveEffectiveStructuredMatchingText(draft),
+    });
+  }
+
+  return {
+    outlineSummary: workspace.knowledge.outlineSummary,
+    personaProfile: activePersona
+      ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
+      : '未配置人物设定',
+    chapters: [...chapterCtxByNo.values()].sort((a, b) => a.chapterNo - b.chapterNo),
     knowledgeDocuments: docList.map((doc) => ({
       id: doc.id,
       title: doc.title,
@@ -482,8 +545,9 @@ onMounted(() => {
             :persona-names="personaNames"
             :personas="personas"
             :knowledge-chapters="editorStore.chapters"
+            :workbench-structured-by-chapter="workbenchStructuredByChapter"
             @generate="handleGenerateOutline"
-            @structured-parsed="refreshWorkspaceData"
+            @structured-parsed="onStructuredParsed"
           />
         </aside>
 

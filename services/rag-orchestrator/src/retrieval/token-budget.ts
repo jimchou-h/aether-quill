@@ -1,6 +1,6 @@
 import { countTokens } from 'gpt-tokenizer';
 
-export const DEFAULT_EVIDENCE_TOKEN_BUDGET = 16384;
+export const DEFAULT_EVIDENCE_TOKEN_BUDGET = 99999;
 
 export function resolveEvidenceTokenBudget(): number {
   const raw = Number(process.env.EVIDENCE_TOKEN_BUDGET ?? DEFAULT_EVIDENCE_TOKEN_BUDGET);
