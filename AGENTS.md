@@ -12,7 +12,7 @@ pnpm workspace，Node.js 20+，全栈 TypeScript。
 
 ```text
 aether-quill/
-  apps/web/                     # Vue 3 + Vite + Pinia + Naive UI（前端，组合式 API）
+  apps/web/                     # Vue 3 + Vite + Pinia + Ant Design Vue（前端，组合式 API）
   services/
     api/                        # NestJS：业务 API、Auth、Project/Chapter/Persona/Knowledge CRUD
     rag-orchestrator/           # 检索 + 生成编排（SSE 流式），含 prompt 组装与一致性检查

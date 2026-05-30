@@ -2,10 +2,13 @@ import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import router from './router';
 import App from './App.vue';
+import { setupAntd } from './plugins/antd';
 import { presentErrorFromCaught } from './utils/pageFeedback';
 import './styles/main.css';
 
 const app = createApp(App);
+
+setupAntd(app);
 
 app.use(createPinia());
 app.use(router);

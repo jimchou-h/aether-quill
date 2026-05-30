@@ -619,31 +619,18 @@ async function handleApply() {
 </script>
 
 <template>
-  <div v-if="props.visible" class="modal-overlay" role="presentation">
-    <section
-      class="modal-dialog"
-      :class="{ 'fullscreen-draft': step === 'draft' }"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="optimize-modal-title"
-    >
-      <header class="modal-header">
-        <div>
-          <h3 id="optimize-modal-title" class="modal-title">
-            章节优化{{ props.chapter ? ` · 第${props.chapter.chapterNo}章` : '' }}
-          </h3>
-          <p class="modal-subtitle">三步流程：输入要求 → 确认或编辑方案 → 生成正文 → 覆盖原章节</p>
-        </div>
-        <button
-          type="button"
-          class="modal-close"
-          aria-label="关闭弹窗"
-          :disabled="isBusy"
-          @click="close"
-        >
-          ×
-        </button>
-      </header>
+  <a-modal
+    :open="props.visible"
+    :width="step === 'draft' ? '100%' : 920"
+    :wrap-class-name="step === 'draft' ? 'optimize-modal-fullscreen' : undefined"
+    :title="`章节优化${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
+    :footer="null"
+    :mask-closable="!isBusy"
+    :closable="!isBusy"
+    destroy-on-close
+    @cancel="close"
+  >
+    <p class="modal-subtitle">三步流程：输入要求 → 确认或编辑方案 → 生成正文 → 覆盖原章节</p>
 
       <ol class="stepper" :data-step="stepIndex">
         <li :class="{ active: step === 'instruction', done: stepIndex > 0 }">
@@ -849,32 +836,38 @@ async function handleApply() {
           </button>
         </div>
       </section>
-    </section>
+  </a-modal>
 
-    <RetrievalPreviewDialog
-      :visible="previewVisible"
-      :loading="previewLoading"
-      :result="previewResult"
-      :error-message="previewError"
-      @close="previewVisible = false"
-      @confirm="confirmPreviewAndGeneratePlan"
-    />
-  </div>
+  <RetrievalPreviewDialog
+    :visible="previewVisible"
+    :loading="previewLoading"
+    :result="previewResult"
+    :error-message="previewError"
+    @close="previewVisible = false"
+    @confirm="confirmPreviewAndGeneratePlan"
+  />
 </template>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
-  background: rgba(15, 23, 42, 0.45);
+.modal-subtitle {
+  margin: 0 0 1rem;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 0.85rem;
 }
 
-.modal-dialog {
+:global(.optimize-modal-fullscreen .ant-modal) {
+  top: 0;
+  max-width: 100vw;
+  padding-bottom: 0;
+  margin: 0;
+}
+
+:global(.optimize-modal-fullscreen .ant-modal-content) {
+  min-height: 100vh;
+  border-radius: 0;
+}
+
+.modal-dialog-legacy {
   width: min(820px, 100%);
   max-height: calc(100vh - 3rem);
   overflow: auto;
