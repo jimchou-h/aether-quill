@@ -178,17 +178,22 @@ function resetToUpload() {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="handleClose">
-    <div class="modal-dialog import-dialog">
-      <header class="modal-header">
-        <div>
-          <h3 class="modal-title">导入小说生成章节</h3>
-          <p class="modal-subtitle">支持 .txt / .md 文件，按章节标题自动切分</p>
-        </div>
-        <button class="modal-close" type="button" @click="handleClose">&times;</button>
-      </header>
+  <a-modal
+    :open="true"
+    :width="720"
+    :mask-closable="!importing"
+    :closable="!importing"
+    destroy-on-close
+    @cancel="handleClose"
+  >
+    <template #title>
+      <div>
+        <div>导入小说生成章节</div>
+        <p class="modal-subtitle">支持 .txt / .md 文件，按章节标题自动切分</p>
+      </div>
+    </template>
 
-      <p v-if="localError" class="message message-error">{{ localError }}</p>
+    <a-alert v-if="localError" type="error" :message="localError" show-icon class="import-alert" />
 
       <!-- Step 1: Upload -->
       <template v-if="step === ImportStep.Upload">
@@ -313,62 +318,19 @@ function resetToUpload() {
           <button class="primary-button" type="button" @click="handleDone">完成</button>
         </div>
       </template>
-    </div>
-  </div>
+  </a-modal>
 </template>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
-  background: rgba(15, 23, 42, 0.45);
-}
-
-.modal-dialog {
-  width: min(720px, 100%);
-  max-height: calc(100vh - 3rem);
-  overflow: auto;
-  border-radius: 12px;
-  background: #fff;
-  padding: 1.25rem;
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.modal-title {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
 .modal-subtitle {
   margin: 0.35rem 0 0;
-  color: #6b7280;
+  color: rgba(0, 0, 0, 0.45);
   font-size: 0.85rem;
+  font-weight: normal;
 }
 
-.modal-close {
-  border: none;
-  background: transparent;
-  color: #6b7280;
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.modal-close:hover {
-  color: #111827;
+.import-alert {
+  margin-bottom: 1rem;
 }
 
 .message {

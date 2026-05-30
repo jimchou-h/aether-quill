@@ -1,4 +1,5 @@
 <template>
+  <a-config-provider :locale="antdLocale">
   <div id="app">
     <!-- 应用头部导航 -->
     <header v-if="authStore.isAuthenticated" class="app-header">
@@ -14,15 +15,17 @@
     <main class="app-main">
       <router-view />
     </main>
-    <AppToastHost />
   </div>
+  </a-config-provider>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
+import zhCN from 'ant-design-vue/es/locale/zh_CN';
 import { useRouter } from 'vue-router';
-import AppToastHost from './components/common/AppToastHost.vue';
 import { useAuthStore } from './stores/auth';
+
+const antdLocale = zhCN;
 
 /** 路由实例 */
 const router = useRouter();

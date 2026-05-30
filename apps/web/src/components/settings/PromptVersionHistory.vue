@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { usePromptConfigStore } from '../../stores/promptConfig';
+import { confirmAction } from '../../composables/useAppConfirm';
 
 /** 提示词配置状态管理 */
 const store = usePromptConfigStore();
@@ -36,9 +37,15 @@ function formatTime(iso: string): string {
  * 处理回滚到指定版本
  * @param {number} version - 目标版本号
  */
-function handleRollbackTo(version: number) {
-  if (window.confirm(`确定回滚到版本 v${version}？当前未发布内容将被覆盖。`)) {
-    store.rollback(props.projectId, version);
+async function handleRollbackTo(version: number) {
+  const confirmed = await confirmAction({
+    title: '回滚提示词版本',
+    content: `确定回滚到版本 v${version}？当前未发布内容将被覆盖。`,
+    okText: '确认回滚',
+    danger: true,
+  });
+  if (confirmed) {
+    void store.rollback(props.projectId, version);
   }
 }
 </script>

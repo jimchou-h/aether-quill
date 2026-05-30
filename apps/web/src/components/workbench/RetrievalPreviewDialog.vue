@@ -42,12 +42,12 @@ watch(
   { immediate: true }
 );
 
-function toggleItem(id: string) {
+function setItemSelected(id: string, selected: boolean) {
   const next = new Set(selectedIds.value);
-  if (next.has(id)) {
-    next.delete(id);
-  } else {
+  if (selected) {
     next.add(id);
+  } else {
+    next.delete(id);
   }
   selectedIds.value = next;
 }
@@ -58,95 +58,58 @@ function handleConfirm() {
 </script>
 
 <template>
-  <div
-    v-if="visible"
-    class="overlay"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="retrieval-preview-title"
+  <a-modal
+    :open="visible"
+    title="检索预览"
+    :width="800"
+    ok-text="确认并生成"
+    cancel-text="取消"
+    :confirm-loading="loading"
+    :ok-button-props="{ disabled: loading || !!errorMessage }"
+    @ok="handleConfirm"
+    @cancel="emit('close')"
   >
-    <div class="dialog" @click.stop>
-      <header class="dialog-header">
-        <h3 id="retrieval-preview-title">检索预览</h3>
-        <p class="dialog-subtitle">
-          已勾选条目将注入生成上下文。标题匹配但超出 Token 预算的条目会默认不勾选。
-        </p>
-      </header>
+    <p class="dialog-subtitle">
+      已勾选条目将注入生成上下文。标题匹配但超出 Token 预算的条目会默认不勾选。
+    </p>
 
-      <p v-if="loading" class="message">正在执行检索预览...</p>
-      <p v-else-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
+    <a-spin v-if="loading" tip="正在执行检索预览..." />
+    <a-alert v-else-if="errorMessage" type="error" :message="errorMessage" show-icon />
 
-      <template v-else-if="result">
-        <p class="token-report">Token 预算 {{ result.tokenUsed }} / {{ result.tokenBudget }}</p>
+    <template v-else-if="result">
+      <p class="token-report">Token 预算 {{ result.tokenUsed }} / {{ result.tokenBudget }}</p>
 
-        <div v-for="[pool, items] in groupedItems" :key="pool" class="pool-group">
-          <h4 class="pool-title">{{ poolLabels[pool] }}</h4>
-          <label v-for="item in items" :key="item.id" class="preview-item">
-            <input
-              type="checkbox"
-              :checked="selectedIds.has(item.id)"
-              @change="toggleItem(item.id)"
-            />
-            <span class="preview-body">
-              <strong>{{ item.title }}</strong>
-              <span v-if="typeof item.meta?.canonicalCharacter === 'string'" class="canonical-name">
-                主名 {{ item.meta.canonicalCharacter }}
-              </span>
-              <span v-if="item.score != null" class="score">分数 {{ item.score.toFixed(3) }}</span>
-              <span v-if="item.meta?.excludedByTokenBudget" class="budget-hint">
-                已匹配，超出 Token 预算未注入
-              </span>
-              <p class="preview-text">{{ item.preview }}</p>
-            </span>
-          </label>
-        </div>
-      </template>
-
-      <footer class="dialog-footer">
-        <button type="button" class="ghost-button" @click="emit('close')">取消</button>
-        <button
-          type="button"
-          class="primary-button"
-          :disabled="loading || !!errorMessage"
-          @click="handleConfirm"
+      <div v-for="[pool, items] in groupedItems" :key="pool" class="pool-group">
+        <h4 class="pool-title">{{ poolLabels[pool] }}</h4>
+        <a-checkbox
+          v-for="item in items"
+          :key="item.id"
+          :checked="selectedIds.has(item.id)"
+          class="preview-item"
+          @update:checked="(checked: boolean) => setItemSelected(item.id, checked)"
         >
-          确认并生成
-        </button>
-      </footer>
-    </div>
-  </div>
+          <span class="preview-body">
+            <strong>{{ item.title }}</strong>
+            <span v-if="typeof item.meta?.canonicalCharacter === 'string'" class="canonical-name">
+              主名 {{ item.meta.canonicalCharacter }}
+            </span>
+            <span v-if="item.score != null" class="score">分数 {{ item.score.toFixed(3) }}</span>
+            <span v-if="item.meta?.excludedByTokenBudget" class="budget-hint">
+              已匹配，超出 Token 预算未注入
+            </span>
+            <p class="preview-text">{{ item.preview }}</p>
+          </span>
+        </a-checkbox>
+      </div>
+    </template>
+  </a-modal>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 1rem;
-}
-
-.dialog {
-  width: min(720px, 100%);
-  max-height: 85vh;
-  overflow: auto;
-  background: #fff;
-  border-radius: 12px;
-  padding: 1.25rem;
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
-}
-
-.dialog-header {
-  margin-bottom: 1rem;
-}
-
 .dialog-subtitle {
   color: #6b7280;
   font-size: 0.9rem;
-  margin-top: 0.25rem;
+  margin: 0 0 1rem;
 }
 
 .token-report {
@@ -167,12 +130,11 @@ function handleConfirm() {
 
 .preview-item {
   display: flex;
-  gap: 0.5rem;
+  width: 100%;
   padding: 0.5rem;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   margin-bottom: 0.5rem;
-  cursor: pointer;
 }
 
 .preview-body {
@@ -203,43 +165,4 @@ function handleConfirm() {
   white-space: pre-wrap;
 }
 
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.message {
-  margin: 0.5rem 0;
-}
-
-.message-error {
-  color: #b42318;
-}
-
-.primary-button,
-.ghost-button {
-  padding: 0.45rem 0.9rem;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.primary-button {
-  border: none;
-  background: #2563eb;
-  color: #fff;
-}
-
-.primary-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.ghost-button {
-  border: 1px solid #d1d5db;
-  background: #fff;
-  color: #374151;
-}
 </style>

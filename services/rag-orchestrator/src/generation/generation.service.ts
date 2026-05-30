@@ -187,11 +187,13 @@ export class GenerationService {
 
   buildChapterSummaryPrompt(input: { chapterNo: number; title: string; content: string }): string {
     return [
-      '你是一位小说编辑，请为以下章节正文生成一段中文语义摘要。',
+      '你是一位小说编辑，请为以下章节正文生成一段详细的中文语义摘要。',
       '要求：',
-      '1. 概括主要情节、冲突与结果，不要逐句复述',
-      '2. 控制在 80~160 字',
-      '3. 只输出摘要正文，不要标题、编号或解释',
+      '1. 概括主要情节、冲突与结果，保留关键角色互动与状态变化',
+      '2. 标注本章涉及的角色名称及其行为动机',
+      '3. 如有伏笔或悬念，简要提及',
+      '4. 控制在 300~500 字',
+      '5. 只输出摘要正文，不要标题、编号或解释',
       '',
       `章节：第${input.chapterNo}章 ${input.title}`,
       '正文：',
@@ -206,7 +208,7 @@ export class GenerationService {
   }): Promise<string> {
     const prompt = this.buildChapterSummaryPrompt(input);
     const result = await this.callProviderApi(prompt, {
-      maxTokens: 512,
+      maxTokens: 1536,
       temperature: 0.3,
     });
     return result.content.trim();
