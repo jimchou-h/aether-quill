@@ -69,6 +69,19 @@ export function buildGenerationRetrievalQuery(
 /** 与 API `chapter-optimize.util` 及 prompt-templates 模板 key 保持一致 */
 export const CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY = 'chapter.optimize.plan';
 export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
+export const CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY = 'chapter.optimize.typo-check';
+export const CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY = 'chapter.optimize.typo-fix';
+
+/** 章节优化全链路模板（plan / draft / typo），用于启用下章衔接等专用上下文 */
+export function isChapterOptimizeTemplateKey(templateKey: string): boolean {
+  const tk = templateKey.trim();
+  return (
+    tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY
+  );
+}
 
 /** 写作工作台两阶段：大纲 / 正文（AQ-217~AQ-219） */
 export const WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY = 'write.chapter.outline';

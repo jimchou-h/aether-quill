@@ -6,6 +6,7 @@ import {
   type ChapterItem,
 } from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
+import { readTextFile } from '../../utils/read-text-file';
 
 const props = defineProps<{
   projectId: string;
@@ -19,7 +20,6 @@ const emit = defineEmits<{
 enum ImportStep {
   Upload,
   Preview,
-  Importing,
   Done,
 }
 
@@ -37,24 +37,25 @@ const previewData = ref<{
   }>;
 } | null>(null);
 const importing = ref(false);
+const readingFile = ref(false);
 const importedChapters = ref<ChapterItem[]>([]);
 const importBootstrap = ref<ChapterImportPersonaBootstrap | null>(null);
 const importFileName = ref('');
+const autoExtractRelationEvents = ref(true);
+const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const selectedChapterCount = computed(() => previewData.value?.chapters.length ?? 0);
-
-function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('文件读取失败'));
-    reader.readAsText(file, 'utf-8');
-  });
-}
+const isBusy = computed(() => importing.value || readingFile.value);
 
 function isAllowedFileType(file: File): boolean {
   const name = file.name.toLowerCase();
   return name.endsWith('.txt') || name.endsWith('.md');
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 async function handleFileSelected(event: Event) {
@@ -68,21 +69,19 @@ async function handleFileSelected(event: Event) {
   }
 
   localError.value = '';
-  importFileName.value = file.name;
+  importFileName.value = `${file.name}（${formatBytes(file.size)}）`;
+  readingFile.value = true;
 
   try {
-    rawContent.value = await readFileAsText(file);
-  } catch (error) {
-    localError.value = '文件读取失败，请确认文件编码为 UTF-8';
+    rawContent.value = await readTextFile(file);
+  } catch {
+    localError.value = '文件读取失败，请确认文件为 UTF-8 或 GBK 编码';
+    readingFile.value = false;
     return;
   }
 
   await doPreview();
-}
-
-function handlePasteInput() {
-  localError.value = '';
-  importFileName.value = '粘贴文本';
+  readingFile.value = false;
 }
 
 async function doPreview() {
@@ -135,15 +134,21 @@ async function handleConfirmImport() {
     const fullChapters = await apiClient.importChapterConfirm(
       props.projectId,
       rawContent.value,
-      { chapterNos }
+      { chapterNos, autoExtractRelationEvents: autoExtractRelationEvents.value }
     );
     importedChapters.value = fullChapters.chapters;
     importBootstrap.value = fullChapters.personaBootstrap;
     step.value = ImportStep.Done;
     const bootstrap = fullChapters.personaBootstrap;
-    presentSuccess(
-      `成功导入 ${fullChapters.importedCount} 个章节；自动创建 ${bootstrap.createdPersonaCount} 个角色草稿、${bootstrap.createdRelationEventCount} 条关系事件`
-    );
+    if (autoExtractRelationEvents.value) {
+      presentSuccess(
+        `成功导入 ${fullChapters.importedCount} 个章节；自动创建 ${bootstrap.createdPersonaCount} 个角色草稿、${bootstrap.createdRelationEventCount} 条关系事件`
+      );
+    } else {
+      presentSuccess(
+        `成功导入 ${fullChapters.importedCount} 个章节；已跳过关系事件自动抽取，可稍后在章节页手动抽取`
+      );
+    }
   } catch (error) {
     localError.value = presentErrorFromCaught(error, '导入章节失败');
   } finally {
@@ -174,6 +179,11 @@ function resetToUpload() {
   importBootstrap.value = null;
   localError.value = '';
   importFileName.value = '';
+  autoExtractRelationEvents.value = true;
+  readingFile.value = false;
+  if (fileInputRef.value) {
+    fileInputRef.value.value = '';
+  }
 }
 </script>
 
@@ -181,15 +191,15 @@ function resetToUpload() {
   <a-modal
     :open="true"
     :width="720"
-    :mask-closable="!importing"
-    :closable="!importing"
+    :mask-closable="!isBusy"
+    :closable="!isBusy"
     destroy-on-close
     @cancel="handleClose"
   >
     <template #title>
       <div>
         <div>导入小说生成章节</div>
-        <p class="modal-subtitle">支持 .txt / .md 文件，按章节标题自动切分</p>
+        <p class="modal-subtitle">支持 .txt / .md 文件（UTF-8 / GBK），按章节标题自动切分，单文件最大约 5MB</p>
       </div>
     </template>
 
@@ -197,41 +207,27 @@ function resetToUpload() {
 
       <!-- Step 1: Upload -->
       <template v-if="step === ImportStep.Upload">
-        <div class="upload-area">
-          <label class="upload-label">
-            <span class="upload-icon">&#128196;</span>
-            <span class="upload-text">点击选择文件或粘贴小说原文</span>
-            <input
-              type="file"
-              accept=".txt,.md"
-              class="upload-input"
-              @change="handleFileSelected"
-            />
-          </label>
-        </div>
-
-        <div class="paste-section">
-          <label class="field-label" for="paste-content">或直接粘贴小说原文</label>
-          <textarea
-            id="paste-content"
-            v-model="rawContent"
-            class="field-textarea"
-            placeholder="将小说原文（txt / md 格式）粘贴到此处..."
-            rows="8"
-            @input="handlePasteInput"
-          />
-          <div class="chars-count">{{ formatFileSize(rawContent.length) }}</div>
-        </div>
+        <a-spin :spinning="readingFile" tip="正在读取并解析文件...">
+          <div class="upload-area">
+            <label class="upload-label" :class="{ disabled: readingFile }">
+              <span class="upload-icon">&#128196;</span>
+              <span class="upload-text">点击选择 .txt / .md 小说文件</span>
+              <span class="upload-hint">选择后自动识别章节，无需粘贴大段文本</span>
+              <input
+                ref="fileInputRef"
+                type="file"
+                accept=".txt,.md"
+                class="upload-input"
+                :disabled="readingFile"
+                @change="handleFileSelected"
+              />
+            </label>
+          </div>
+        </a-spin>
 
         <div class="form-actions">
-          <button class="secondary-button" type="button" @click="handleClose">取消</button>
-          <button
-            class="primary-button"
-            type="button"
-            :disabled="!rawContent.trim()"
-            @click="doPreview"
-          >
-            预览章节
+          <button class="secondary-button" type="button" :disabled="readingFile" @click="handleClose">
+            取消
           </button>
         </div>
       </template>
@@ -250,6 +246,15 @@ function resetToUpload() {
         </div>
 
         <p class="preview-hint">不需要的章节可点击右侧删除，确认后仅导入剩余章节。</p>
+
+        <div class="import-options">
+          <a-checkbox v-model:checked="autoExtractRelationEvents" :disabled="importing">
+            导入后自动抽取关系事件
+          </a-checkbox>
+          <p class="import-options-hint">
+            勾选后将为每个导入章节调用 AI 抽取人物关系事件，并尝试创建角色草稿；章节较多时耗时较长。取消勾选则仅导入章节正文，可稍后在章节列表手动抽取。
+          </p>
+        </div>
 
         <div class="preview-list">
           <div
@@ -298,19 +303,24 @@ function resetToUpload() {
         </div>
 
         <div v-if="importBootstrap" class="bootstrap-report">
-          <p>
-            自动创建角色草稿：<strong>{{ importBootstrap.createdPersonaCount }}</strong> 个
-          </p>
-          <p>
-            自动抽取关系事件：<strong>{{ importBootstrap.createdRelationEventCount }}</strong> 条
-          </p>
-          <p v-if="importBootstrap.createdPersonas.length > 0">
-            新增角色：{{ importBootstrap.createdPersonas.map((item) => item.name).join('、') }}
-          </p>
-          <p v-if="importBootstrap.suspectedNameConflicts.length > 0" class="message message-warn">
-            疑似同名冲突：{{
-              importBootstrap.suspectedNameConflicts.join('、')
-            }}（请前往人物设定页确认）
+          <template v-if="autoExtractRelationEvents">
+            <p>
+              自动创建角色草稿：<strong>{{ importBootstrap.createdPersonaCount }}</strong> 个
+            </p>
+            <p>
+              自动抽取关系事件：<strong>{{ importBootstrap.createdRelationEventCount }}</strong> 条
+            </p>
+            <p v-if="importBootstrap.createdPersonas.length > 0">
+              新增角色：{{ importBootstrap.createdPersonas.map((item) => item.name).join('、') }}
+            </p>
+            <p v-if="importBootstrap.suspectedNameConflicts.length > 0" class="message message-warn">
+              疑似同名冲突：{{
+                importBootstrap.suspectedNameConflicts.join('、')
+              }}（请前往人物设定页确认）
+            </p>
+          </template>
+          <p v-else class="import-skipped-hint">
+            已跳过关系事件自动抽取。如需补充人物关系，请前往章节列表对单章执行「抽取关系事件」。
           </p>
         </div>
 
@@ -361,8 +371,13 @@ function resetToUpload() {
   transition: border-color 0.2s;
 }
 
-.upload-label:hover {
+.upload-label:hover:not(.disabled) {
   border-color: #111827;
+}
+
+.upload-label.disabled {
+  opacity: 0.7;
+  cursor: wait;
 }
 
 .upload-icon {
@@ -370,41 +385,17 @@ function resetToUpload() {
 }
 
 .upload-text {
-  color: #6b7280;
+  color: #374151;
   font-size: 0.9rem;
+}
+
+.upload-hint {
+  color: #9ca3af;
+  font-size: 0.78rem;
 }
 
 .upload-input {
   display: none;
-}
-
-.paste-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 1rem;
-}
-
-.field-label {
-  font-size: 0.8rem;
-  color: #6b7280;
-}
-
-.field-textarea {
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  padding: 0.5rem 0.65rem;
-  font: inherit;
-  resize: vertical;
-  min-height: 120px;
-  font-size: 0.85rem;
-  line-height: 1.6;
-}
-
-.chars-count {
-  text-align: right;
-  font-size: 0.78rem;
-  color: #9ca3af;
 }
 
 .form-actions {
@@ -464,6 +455,46 @@ function resetToUpload() {
   margin: 0 0 0.75rem;
   font-size: 0.8rem;
   color: #6b7280;
+}
+
+.import-options {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.import-options-hint {
+  margin: 0.5rem 0 0 1.5rem;
+  font-size: 0.78rem;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.bootstrap-report {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.bootstrap-report p {
+  margin: 0 0 0.35rem;
+}
+
+.import-skipped-hint {
+  margin: 0;
+  color: #6b7280;
+}
+
+.message-warn {
+  background: #fffbeb;
+  color: #92400e;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
 }
 
 .preview-list {

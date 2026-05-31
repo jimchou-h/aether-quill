@@ -2,12 +2,19 @@
 import { computed, ref, watch } from 'vue';
 import type { PreviewRetrievalItem, PreviewRetrievalResult } from '../../services/api';
 
-const props = defineProps<{
-  visible: boolean;
-  loading: boolean;
-  result: PreviewRetrievalResult | null;
-  errorMessage?: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    visible: boolean;
+    loading: boolean;
+    result: PreviewRetrievalResult | null;
+    errorMessage?: string;
+    /** 嵌套在其他 Modal 之上时需更高层级（默认 1200，高于 antd Modal 默认 1000） */
+    zIndex?: number;
+  }>(),
+  {
+    zIndex: 1200,
+  }
+);
 
 const emit = defineEmits<{
   close: [];
@@ -60,6 +67,7 @@ function handleConfirm() {
 <template>
   <a-modal
     :open="visible"
+    :z-index="zIndex"
     title="检索预览"
     :width="800"
     ok-text="确认并生成"

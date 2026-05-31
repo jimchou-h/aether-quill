@@ -12,6 +12,7 @@ import {
   type ChapterSummaryInput,
   type PriorChapterPickResult,
 } from './prior-chapter-summaries';
+import { resolveNextChapterHead } from './next-chapter-head';
 import { resolvePriorChapterTail } from './prior-chapter-tail';
 import { resolveMemoryChapterSummaryEmbeddingQuery } from '../retrieval/knowledge-retrieval';
 
@@ -19,6 +20,9 @@ export type NarrativeContextMeta = {
   prior_chapter_tail_injected: boolean;
   prior_chapter_tail_chars: number;
   prior_chapter_tail_skipped: boolean;
+  next_chapter_head_injected: boolean;
+  next_chapter_head_chars: number;
+  next_chapter_head_skipped: boolean;
   excerpt_fallback_chapter_nos: number[];
 };
 
@@ -33,6 +37,8 @@ export type NarrativeContextBuildInput = {
   contextExcerptMaxChars: number;
   selectedRelationMemory?: string;
   currentChapterNo?: number;
+  /** 章节优化：注入第 N+1 章开头只读锚点（复用 priorChapterTailChars 预算） */
+  includeNextChapterHead?: boolean;
 };
 
 export type NarrativeContextBuildResult = {
@@ -109,10 +115,24 @@ export async function buildNarrativeContextText(
     sections.push(`【已选关系事件备忘】\n${input.selectedRelationMemory.trim()}`);
   }
 
+  let nextHead = resolveNextChapterHead(input.chapters, currentChapterNo ?? 0, tailChars);
+  if (input.includeNextChapterHead && currentChapterNo && !nextHead.skipped && nextHead.text) {
+    sections.push(
+      `【下章衔接】（第${nextHead.chapterNo}章开头只读锚点，改写本章末勿与之矛盾，勿提前写入下章情节）\n${nextHead.text}`
+    );
+  } else if (input.includeNextChapterHead && currentChapterNo && tailChars > 0) {
+    nextHead = { ...nextHead, skipped: true };
+  }
+
   const meta: NarrativeContextMeta = {
     prior_chapter_tail_injected: Boolean(priorTail.text && !priorTail.skipped),
     prior_chapter_tail_chars: priorTail.chars,
     prior_chapter_tail_skipped: priorTail.skipped,
+    next_chapter_head_injected: Boolean(
+      input.includeNextChapterHead && nextHead.text && !nextHead.skipped
+    ),
+    next_chapter_head_chars: nextHead.chars,
+    next_chapter_head_skipped: nextHead.skipped,
     excerpt_fallback_chapter_nos: excerptFallbackChapterNos,
   };
 
