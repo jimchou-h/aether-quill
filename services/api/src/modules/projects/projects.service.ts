@@ -1273,7 +1273,7 @@ export class ProjectsService implements OnModuleInit {
     projectId: string,
     content: string,
     userId?: string,
-    options?: { chapterNos?: number[] }
+    options?: { chapterNos?: number[]; autoExtractRelationEvents?: boolean }
   ) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
@@ -1335,7 +1335,9 @@ export class ProjectsService implements OnModuleInit {
     const personas = this.personasStore.get(projectId)!;
     rebuildPersonaAppearancesFromChapters(personas, knowledge.chapters);
 
-    const personaBootstrap = await this.bootstrapPersonasAfterImport(projectId, imported);
+    const personaBootstrap = await this.bootstrapPersonasAfterImport(projectId, imported, {
+      autoExtractRelationEvents: options?.autoExtractRelationEvents ?? true,
+    });
 
     this.relinkRelationEventsForProject(projectId);
     this.persistState();
@@ -4059,34 +4061,38 @@ export class ProjectsService implements OnModuleInit {
 
   private async bootstrapPersonasAfterImport(
     projectId: string,
-    importedChapters: ChapterRecord[]
+    importedChapters: ChapterRecord[],
+    options?: { autoExtractRelationEvents?: boolean }
   ): Promise<ChapterImportPersonaBootstrap> {
     const knowledge = this.knowledgeStore.get(projectId)!;
     const personas = this.personasStore.get(projectId)!;
     const existingNames = personas.map((persona) => persona.name);
     const candidateNames = new Set<string>();
     let createdRelationEventCount = 0;
+    const shouldExtractRelationEvents = options?.autoExtractRelationEvents !== false;
 
-    for (const chapter of importedChapters) {
-      if (!chapter.content.trim()) {
-        continue;
-      }
-      try {
-        const result = await this.generateChapterRelationEvents(
-          projectId,
-          chapter.chapterNo,
-          undefined
-        );
-        createdRelationEventCount += result.createdCount;
-        for (const event of result.events) {
-          candidateNames.add(event.protagonist);
-          candidateNames.add(event.counterparty);
-          for (const actor of event.actors) {
-            candidateNames.add(actor);
-          }
+    if (shouldExtractRelationEvents) {
+      for (const chapter of importedChapters) {
+        if (!chapter.content.trim()) {
+          continue;
         }
-      } catch {
-        // 导入流程不因单章抽取失败而中断
+        try {
+          const result = await this.generateChapterRelationEvents(
+            projectId,
+            chapter.chapterNo,
+            undefined
+          );
+          createdRelationEventCount += result.createdCount;
+          for (const event of result.events) {
+            candidateNames.add(event.protagonist);
+            candidateNames.add(event.counterparty);
+            for (const actor of event.actors) {
+              candidateNames.add(actor);
+            }
+          }
+        } catch {
+          // 导入流程不因单章抽取失败而中断
+        }
       }
     }
 

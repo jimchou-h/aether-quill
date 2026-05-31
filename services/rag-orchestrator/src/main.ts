@@ -10,6 +10,7 @@ import {
   buildRetrievalQuery,
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+  isChapterOptimizeTemplateKey,
   WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
   WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY,
   DraftCitation,
@@ -162,7 +163,8 @@ function resolveGenerationTemperature(bodyTemp: unknown, ctx: ProjectContext): n
 
 async function getGenerationContext(
   projectId: string,
-  currentChapterNo?: number
+  currentChapterNo?: number,
+  options?: { includeNextChapterHead?: boolean }
 ): Promise<GenerationContext & { narrativeMeta?: NarrativeContextMeta }> {
   const ctx = getOrCreateContext(projectId);
   const built = await buildNarrativeContextText({
@@ -176,6 +178,7 @@ async function getGenerationContext(
     contextExcerptMaxChars: ctx.contextExcerptMaxChars,
     selectedRelationMemory: ctx.selectedRelationMemory,
     currentChapterNo,
+    includeNextChapterHead: options?.includeNextChapterHead,
   });
   return {
     systemPromptText: ctx.systemPromptText,
@@ -740,7 +743,9 @@ app.post('/api/generate', async (req, res) => {
     console.error('Generate retrieval failed:', error);
   }
 
-  const generationContext = await getGenerationContext(projectId, narrativeCurrentChapter);
+  const generationContext = await getGenerationContext(projectId, narrativeCurrentChapter, {
+    includeNextChapterHead: isChapterOptimizeTemplateKey(tk),
+  });
   const narrativeMeta = generationContext.narrativeMeta;
 
   if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {

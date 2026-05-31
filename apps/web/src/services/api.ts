@@ -1466,11 +1466,15 @@ export const apiClient = {
   async importChapterConfirm(
     projectId: string,
     content: string,
-    options?: { chapterNos?: number[] }
+    options?: { chapterNos?: number[]; autoExtractRelationEvents?: boolean }
   ) {
     const response = await http.post(
       `/api/projects/${projectId}/knowledge/chapters/import/confirm`,
-      { content, chapterNos: options?.chapterNos }
+      {
+        content,
+        chapterNos: options?.chapterNos,
+        autoExtractRelationEvents: options?.autoExtractRelationEvents,
+      }
     );
     return this.unwrapPayload<{
       importedCount: number;

@@ -33,6 +33,10 @@ post:
               items:
                 type: integer
                 minimum: 1
+            autoExtractRelationEvents:
+              type: boolean
+              description: 是否在导入后为每章自动抽取关系事件；默认 true。为 false 时跳过 AI 抽取，可稍后在章节页手动抽取。
+              default: true
   responses:
     '200':
       description: Chapters imported successfully

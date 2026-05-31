@@ -654,12 +654,14 @@ export class ProjectsController {
     data: {
       content: string;
       chapterNos?: number[];
+      autoExtractRelationEvents?: boolean;
     },
     @Request() req: AuthenticatedRequest
   ) {
     const userId = req.user?.userId;
     return this.projectsService.importChapterConfirm(id, data.content, userId, {
       chapterNos: data.chapterNos,
+      autoExtractRelationEvents: data.autoExtractRelationEvents,
     });
   }
 
