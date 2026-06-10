@@ -1,11 +1,14 @@
 const PERSONA_TITLE_PATTERNS: RegExp[] = [
   /^人物小传[：:]\s*(.+)$/,
   /^角色卡[：:]\s*(.+)$/,
+  /^角色卡\s*[-–—>→]+\s*(.+)$/,
   /^人设[：:]\s*(.+)$/,
   /^人物设定[：:]\s*(.+)$/,
   /^(.+?)角色卡$/,
   /^(.+?)人物卡$/,
   /^(.+?)人设$/,
+  /^(.+?)人物小传$/,
+  /^(.+?)人物设定$/,
 ];
 
 /** 从知识库文档标题提取主角色名（用于证据锚点） */
@@ -57,6 +60,9 @@ export function formatMultiPersonaEvidencePreamble(personaCount: number): string
 
 export const MULTI_PERSONA_WRITING_GUARD =
   '【写作约束】严格按各角色卡的 canonical_character 区分身份；化名、马甲、别名不得归属到其他角色。';
+
+export const PERSONA_APPEARANCE_CONTINUITY_GUARD =
+  '【外观与状态连续性】人物着装、外貌、伤势、关键持有物须与【人物当前快照】一致；仅当本章写作目标或 mustInclude 明确要求变化时方可改写，且须在正文中交代变化过程。';
 
 export function hasMultiPersonaCardEvidence(evidenceText: string): boolean {
   const matches = evidenceText.match(/canonical_character=/g);

@@ -6,11 +6,14 @@
 const PERSONA_TITLE_PATTERNS: RegExp[] = [
   /^人物小传[：:]\s*(.+)$/,
   /^角色卡[：:]\s*(.+)$/,
+  /^角色卡\s*[-–—>→]+\s*(.+)$/,
   /^人设[：:]\s*(.+)$/,
   /^人物设定[：:]\s*(.+)$/,
   /^(.+?)角色卡$/,
   /^(.+?)人物卡$/,
   /^(.+?)人设$/,
+  /^(.+?)人物小传$/,
+  /^(.+?)人物设定$/,
 ];
 
 const PAREN_ALIAS_DISPLAY_NAME =
@@ -31,19 +34,26 @@ function extractPersonaDisplayName(title: string): string {
   return trimmed;
 }
 
+/** 中文全名常见称呼：取末尾 2~3 字（如 霞之丘舞衣 → 舞衣），仅当全名足够长时启用 */
+function appendPersonaNicknameSuffixTokens(
+  fullName: string,
+  add: (token: string) => void
+): void {
+  const len = fullName.length;
+  if (len >= 4) {
+    add(fullName.slice(-2));
+  }
+  if (len >= 6) {
+    add(fullName.slice(-3));
+  }
+}
+
 export function expandPersonaMatchTokens(displayName: string): string[] {
   const trimmed = displayName.trim();
   if (!trimmed) {
     return [];
   }
 
-  const match = trimmed.match(PAREN_ALIAS_DISPLAY_NAME);
-  if (!match) {
-    return [trimmed];
-  }
-
-  const primary = match[1]?.trim() ?? '';
-  const alias = match[2]?.trim() ?? '';
   const tokens: string[] = [];
   const seen = new Set<string>();
 
@@ -56,9 +66,21 @@ export function expandPersonaMatchTokens(displayName: string): string[] {
     tokens.push(value);
   };
 
-  add(primary);
-  add(alias);
+  const match = trimmed.match(PAREN_ALIAS_DISPLAY_NAME);
+  if (match) {
+    const primary = match[1]?.trim() ?? '';
+    const alias = match[2]?.trim() ?? '';
+    add(primary);
+    add(alias);
+    add(trimmed);
+    if (primary) {
+      appendPersonaNicknameSuffixTokens(primary, add);
+    }
+    return tokens;
+  }
+
   add(trimmed);
+  appendPersonaNicknameSuffixTokens(trimmed, add);
   return tokens;
 }
 

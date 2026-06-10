@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { diffChars as computeDiff, type Change } from 'diff';
 import {
   apiClient,
+  buildPersonasContextPayload,
   type ChapterItem,
   type ChapterOptimizationPlanResult,
   type ChapterTypoIssue,
@@ -391,6 +392,7 @@ async function handleGeneratePlan() {
         chapterSummaryMemoryCount:
           (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
           3,
+        personas: buildPersonasContextPayload(workspace.personas),
       },
       extraContext: {
         retrievalInstruction: instruction.value.trim(),

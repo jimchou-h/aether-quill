@@ -79,6 +79,9 @@ export async function loadWorkspaceFromPostgres(
       relationEventIds: (per.relationEventIds as string[]) ?? [],
       appearedChapterNos: (per.appearedChapterNos as number[]) ?? [],
       lastAppearedChapterNo: per.lastAppearedChapterNo ?? null,
+      chapterStates: Array.isArray(per.chapterStates)
+        ? (per.chapterStates as PersistedProjectState['personas'][string][number]['chapterStates'])
+        : undefined,
       createdAt: per.createdAt.toISOString(),
       updatedAt: per.updatedAt.toISOString(),
     }));
@@ -273,6 +276,7 @@ export async function syncWorkspaceToPostgres(
           relationEventIds: per.relationEventIds ?? [],
           appearedChapterNos: per.appearedChapterNos ?? [],
           lastAppearedChapterNo: per.lastAppearedChapterNo ?? null,
+          chapterStates: per.chapterStates ?? Prisma.JsonNull,
           createdAt: new Date(per.createdAt),
           updatedAt: new Date(per.updatedAt),
         });

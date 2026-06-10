@@ -11,6 +11,8 @@ import {
 describe('extractPersonaDisplayName', () => {
   it('parses common persona card titles', () => {
     assert.equal(extractPersonaDisplayName('人物小传：林策'), '林策');
+    assert.equal(extractPersonaDisplayName('林策人物小传'), '林策');
+    assert.equal(extractPersonaDisplayName('角色卡 -> 比企谷小町'), '比企谷小町');
     assert.equal(extractPersonaDisplayName('苏晚角色卡'), '苏晚');
     assert.equal(extractPersonaDisplayName('世界观设定'), '世界观设定');
   });

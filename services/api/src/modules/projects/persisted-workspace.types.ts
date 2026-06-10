@@ -55,7 +55,20 @@ export interface PersistedProjectState {
       status: 'draft' | 'published';
       relationEventIds?: string[];
       appearedChapterNos?: number[];
-      lastAppearedChapterNo?: number | null;
+        lastAppearedChapterNo?: number | null;
+      chapterStates?: Array<{
+        chapterNo: number;
+        appeared: boolean;
+        snapshot: {
+          clothing?: string;
+          appearance?: string;
+          status?: string;
+          location?: string;
+          possessions?: string;
+        };
+        summaryLine: string;
+        updatedAt: string;
+      }>;
       createdAt: string;
       updatedAt: string;
     }>

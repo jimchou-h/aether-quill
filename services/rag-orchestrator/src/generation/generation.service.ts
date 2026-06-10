@@ -2,6 +2,7 @@ import axios from 'axios';
 import {
   hasMultiPersonaCardEvidence,
   MULTI_PERSONA_WRITING_GUARD,
+  PERSONA_APPEARANCE_CONTINUITY_GUARD,
 } from '../retrieval/persona-card-evidence';
 import { TraceRecord, GenerateRequest } from './types';
 import { consumeProviderSseStreamChunk, flushProviderSseStreamBuffer } from './provider-sse-stream';
@@ -37,7 +38,11 @@ export class GenerationService {
       sections.push(`【系统指令】\n${context.systemPromptText.trim()}`);
     }
     if (context.narrativeContext?.trim()) {
-      sections.push(`【叙事上下文】\n${context.narrativeContext.trim()}`);
+      let narrative = context.narrativeContext.trim();
+      if (narrative.includes('【人物当前快照】')) {
+        narrative = `${PERSONA_APPEARANCE_CONTINUITY_GUARD}\n\n${narrative}`;
+      }
+      sections.push(`【叙事上下文】\n${narrative}`);
     }
     if (context.retrievedEvidence?.trim()) {
       let evidence = context.retrievedEvidence.trim();
@@ -191,9 +196,10 @@ export class GenerationService {
       '要求：',
       '1. 概括主要情节、冲突与结果，保留关键角色互动与状态变化',
       '2. 标注本章涉及的角色名称及其行为动机',
-      '3. 如有伏笔或悬念，简要提及',
-      '4. 控制在 300~500 字',
-      '5. 只输出摘要正文，不要标题、编号或解释',
+      '3. 单独列出主要出场人物的着装与瞬时状态（无变化则写「维持」）',
+      '4. 如有伏笔或悬念，简要提及',
+      '5. 控制在 300~500 字',
+      '6. 只输出摘要正文，不要标题、编号或解释',
       '',
       `章节：第${input.chapterNo}章 ${input.title}`,
       '正文：',
@@ -308,23 +314,39 @@ export class GenerationService {
     chapterNo: number;
     title?: string;
     content: string;
-    personas: Array<{ name: string; profile: string; state: string }>;
+    personas: Array<{
+      name: string;
+      profile: string;
+      state: string;
+      priorSnapshot?: Record<string, unknown>;
+    }>;
   }): string {
     const roster = input.personas
-      .map(
-        (persona, index) =>
-          `${index + 1}. ${persona.name}｜历史状态：${persona.state?.trim() || '暂无'}｜设定摘要：${persona.profile.trim().slice(0, 200)}`
-      )
+      .map((persona, index) => {
+        const priorParts: string[] = [];
+        const prior = persona.priorSnapshot ?? {};
+        for (const key of ['clothing', 'appearance', 'status', 'location', 'possessions'] as const) {
+          const value = prior[key];
+          if (typeof value === 'string' && value.trim()) {
+            priorParts.push(`${key}=${value.trim()}`);
+          }
+        }
+        const priorHint =
+          priorParts.length > 0 ? priorParts.join('；') : persona.state?.trim() || '暂无';
+        return `${index + 1}. ${persona.name}｜历史快照：${priorHint}｜设定摘要：${persona.profile.trim().slice(0, 200)}`;
+      })
       .join('\n');
 
     return [
-      '你是小说角色状态跟踪器。请根据章节正文，为名单中的每一位角色输出读完本章后的「当前状态」。',
+      '你是小说角色状态跟踪器。请根据章节正文，为名单中的每一位角色输出读完本章后的结构化快照（含着装与瞬时状态）。',
       '要求：',
       '1. 只输出 JSON 对象，不要 Markdown 或解释',
-      '2. 格式：{"personas":[{"name":"角色名","appeared":true|false,"state":"一句中文状态"}]}',
+      '2. 格式：{"personas":[{"name":"角色名","appeared":true|false,"snapshot":{"clothing":"...","appearance":"...","status":"...","location":"...","possessions":"..."},"summaryLine":"一句中文摘要"}]}',
       '3. 必须覆盖名单中的每一个 name，不得新增名单外角色',
-      '4. state 为一句中文，<=60 字；appeared 表示本章是否实质出场（对白/行为/明确描写）',
-      '5. 若本章未出场，appeared 为 false，state 可写「本章未出场」并简要沿用历史状态',
+      '4. snapshot.clothing 为着装；snapshot.status 为情绪/伤势/醉酒等瞬时状态；各字段 <=80 字',
+      '5. summaryLine 为一句中文（<=120字），须同时体现着装与状态（若有）',
+      '6. 若本章未出场，appeared 为 false，snapshot 可沿用历史快照并在 summaryLine 注明「本章未出场」',
+      '7. 若正文未明确换装或形象变化，clothing/appearance 须与历史快照一致',
       '',
       `章节：第${input.chapterNo}章${input.title ? ` ${input.title}` : ''}`,
       '角色名单：',
@@ -339,6 +361,14 @@ export class GenerationService {
     name: string;
     appeared: boolean;
     state: string;
+    snapshot?: {
+      clothing?: string;
+      appearance?: string;
+      status?: string;
+      location?: string;
+      possessions?: string;
+    };
+    summaryLine?: string;
   }> {
     const trimmed = content.trim();
     if (!trimmed) {
@@ -363,21 +393,66 @@ export class GenerationService {
         ? (payload as { personas: unknown[] }).personas
         : [];
 
-    const personas: Array<{ name: string; appeared: boolean; state: string }> = [];
+    const personas: Array<{
+      name: string;
+      appeared: boolean;
+      state: string;
+      snapshot?: {
+        clothing?: string;
+        appearance?: string;
+        status?: string;
+        location?: string;
+        possessions?: string;
+      };
+      summaryLine?: string;
+    }> = [];
     for (const item of items) {
       if (!item || typeof item !== 'object') {
         continue;
       }
       const record = item as Record<string, unknown>;
       const name = typeof record.name === 'string' ? record.name.trim() : '';
-      const state = typeof record.state === 'string' ? record.state.trim().slice(0, 60) : '';
-      if (!name || !state) {
+      const legacyState = typeof record.state === 'string' ? record.state.trim().slice(0, 120) : '';
+      const snapshotRaw =
+        record.snapshot && typeof record.snapshot === 'object'
+          ? (record.snapshot as Record<string, unknown>)
+          : undefined;
+      const snapshot = snapshotRaw
+        ? {
+            clothing:
+              typeof snapshotRaw.clothing === 'string'
+                ? snapshotRaw.clothing.trim().slice(0, 80)
+                : undefined,
+            appearance:
+              typeof snapshotRaw.appearance === 'string'
+                ? snapshotRaw.appearance.trim().slice(0, 80)
+                : undefined,
+            status:
+              typeof snapshotRaw.status === 'string'
+                ? snapshotRaw.status.trim().slice(0, 80)
+                : undefined,
+            location:
+              typeof snapshotRaw.location === 'string'
+                ? snapshotRaw.location.trim().slice(0, 80)
+                : undefined,
+            possessions:
+              typeof snapshotRaw.possessions === 'string'
+                ? snapshotRaw.possessions.trim().slice(0, 80)
+                : undefined,
+          }
+        : undefined;
+      const summaryLineRaw =
+        typeof record.summaryLine === 'string' ? record.summaryLine.trim().slice(0, 120) : legacyState;
+      const summaryLine = summaryLineRaw || legacyState;
+      if (!name || !summaryLine) {
         continue;
       }
       personas.push({
         name,
         appeared: record.appeared === true,
-        state,
+        state: summaryLine,
+        snapshot,
+        summaryLine,
       });
     }
 
@@ -388,8 +463,27 @@ export class GenerationService {
     chapterNo: number;
     title?: string;
     content: string;
-    personas: Array<{ name: string; profile: string; state: string }>;
-  }): Promise<Array<{ name: string; appeared: boolean; state: string }>> {
+    personas: Array<{
+      name: string;
+      profile: string;
+      state: string;
+      priorSnapshot?: Record<string, unknown>;
+    }>;
+  }): Promise<
+    Array<{
+      name: string;
+      appeared: boolean;
+      state: string;
+      snapshot?: {
+        clothing?: string;
+        appearance?: string;
+        status?: string;
+        location?: string;
+        possessions?: string;
+      };
+      summaryLine?: string;
+    }>
+  > {
     if (input.personas.length === 0) {
       return [];
     }

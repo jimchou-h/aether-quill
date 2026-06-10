@@ -649,6 +649,50 @@ components:
           type: integer
           nullable: true
           description: Latest chapter number where this persona appeared
+        chapterStates:
+          type: array
+          description: 按章结构化快照（着装 + 瞬时状态）
+          items:
+            $ref: '#/components/schemas/PersonaChapterStateRecord'
+    PersonaSnapshot:
+      type: object
+      properties:
+        clothing:
+          type: string
+          description: 着装
+        appearance:
+          type: string
+          description: 外貌特征
+        status:
+          type: string
+          description: 瞬时状态（情绪、伤势等）
+        location:
+          type: string
+          description: 位置
+        possessions:
+          type: string
+          description: 关键持有物
+    PersonaChapterStateRecord:
+      type: object
+      required:
+        - chapterNo
+        - appeared
+        - snapshot
+        - summaryLine
+        - updatedAt
+      properties:
+        chapterNo:
+          type: integer
+        appeared:
+          type: boolean
+        snapshot:
+          $ref: '#/components/schemas/PersonaSnapshot'
+        summaryLine:
+          type: string
+          description: 一行摘要（含着装与状态）
+        updatedAt:
+          type: string
+          format: date-time
     PromptConfig:
       type: object
       required:

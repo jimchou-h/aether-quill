@@ -25,7 +25,14 @@ import {
 } from './generation/write-chapter-prompt';
 import { indexChapterSummaryInQdrant } from './context/chapter-summary-memory';
 import { buildNarrativeContextText, type NarrativeContextMeta } from './context/narrative-context';
+import { type PersonaContextPayload } from './context/persona-snapshot';
 import { runPreviewRetrieval, type PreviewRetrievalRequest } from './retrieval/preview-retrieval';
+import {
+  listPersonaCardsFromKnowledgeDocs,
+  mapChaptersForStructuredKnowledgeMatch,
+  parseAppearingCharactersFromExtra,
+  shouldApplyChapterOptimizeMatchingBoost,
+} from './retrieval/optimize-matching-text';
 import {
   clampChapterSummaryMemoryCount,
   clampChapterSummaryPromptCount,
@@ -113,6 +120,7 @@ interface ProjectContext {
     evidenceSnippet?: string;
     chapterNo?: number | null;
   }>;
+  personas?: PersonaContextPayload[];
   updatedAt: string;
 }
 
@@ -178,6 +186,7 @@ async function getGenerationContext(
     contextExcerptMaxChars: ctx.contextExcerptMaxChars,
     selectedRelationMemory: ctx.selectedRelationMemory,
     currentChapterNo,
+    personas: ctx.personas,
     includeNextChapterHead: options?.includeNextChapterHead,
   });
   return {
@@ -286,12 +295,30 @@ app.post('/api/extract/chapter-personas', async (req, res) => {
       const name = typeof record.name === 'string' ? record.name.trim() : '';
       const profile = typeof record.profile === 'string' ? record.profile.trim() : '';
       const state = typeof record.state === 'string' ? record.state.trim() : '';
+      const priorSnapshot =
+        record.priorSnapshot && typeof record.priorSnapshot === 'object'
+          ? (record.priorSnapshot as Record<string, unknown>)
+          : undefined;
       if (!name) {
         return null;
       }
-      return { name, profile, state };
+      return { name, profile, state, priorSnapshot };
     })
-    .filter((item): item is { name: string; profile: string; state: string } => Boolean(item));
+    .filter(
+      (
+        item: {
+          name: string;
+          profile: string;
+          state: string;
+          priorSnapshot?: Record<string, unknown>;
+        } | null
+      ): item is {
+        name: string;
+        profile: string;
+        state: string;
+        priorSnapshot?: Record<string, unknown>;
+      } => Boolean(item)
+    );
 
   if (normalizedPersonas.length === 0) {
     res.status(400).json({ message: 'personas 不能为空' });
@@ -398,22 +425,22 @@ app.post('/api/projects/:projectId/context', (req, res) => {
     context.usedRelationEvents = payload.usedRelationEvents;
   }
   if (Array.isArray(payload.knowledgeDocuments)) {
-    context.knowledgeDocuments = payload.knowledgeDocuments
-      .map((row: unknown) => {
-        if (!row || typeof row !== 'object') {
-          return null;
-        }
-        const r = row as Record<string, unknown>;
-        const id = typeof r.id === 'string' ? r.id.trim() : '';
-        const title = typeof r.title === 'string' ? r.title : '';
-        const content = typeof r.content === 'string' ? r.content : '';
-        if (!id) {
-          return null;
-        }
-        const docType = typeof r.docType === 'string' ? r.docType : undefined;
-        return { id, title, content, docType };
-      })
-      .filter((x): x is KnowledgeDocumentPayload => Boolean(x));
+    const docs: KnowledgeDocumentPayload[] = [];
+    for (const row of payload.knowledgeDocuments as unknown[]) {
+      if (!row || typeof row !== 'object') {
+        continue;
+      }
+      const r = row as Record<string, unknown>;
+      const id = typeof r.id === 'string' ? r.id.trim() : '';
+      const title = typeof r.title === 'string' ? r.title : '';
+      const content = typeof r.content === 'string' ? r.content : '';
+      if (!id) {
+        continue;
+      }
+      const docType = typeof r.docType === 'string' ? r.docType : undefined;
+      docs.push({ id, title, content, docType });
+    }
+    context.knowledgeDocuments = docs;
   }
 
   if (payload.chapterSummaryPromptCount !== undefined) {
@@ -434,6 +461,64 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
   if (payload.contextExcerptMaxChars !== undefined) {
     context.contextExcerptMaxChars = clampContextExcerptMaxChars(payload.contextExcerptMaxChars);
+  }
+  if (Array.isArray(payload.personas)) {
+    context.personas = payload.personas
+      .map((row: unknown): PersonaContextPayload | null => {
+        if (!row || typeof row !== 'object') {
+          return null;
+        }
+        const record = row as Record<string, unknown>;
+        const name = typeof record.name === 'string' ? record.name.trim() : '';
+        if (!name) {
+          return null;
+        }
+        const profile = typeof record.profile === 'string' ? record.profile : '';
+        const state = typeof record.state === 'string' ? record.state : '';
+        const status = record.status === 'published' ? 'published' : 'draft';
+        const chapterStates = Array.isArray(record.chapterStates)
+          ? record.chapterStates.flatMap((item: unknown) => {
+              if (!item || typeof item !== 'object') {
+                return [];
+              }
+              const cs = item as Record<string, unknown>;
+              const chapterNo = Number(cs.chapterNo);
+              if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+                return [];
+              }
+              const snapshotRaw =
+                cs.snapshot && typeof cs.snapshot === 'object'
+                  ? (cs.snapshot as Record<string, unknown>)
+                  : {};
+              return [
+                {
+                  chapterNo,
+                  appeared: cs.appeared === true,
+                  snapshot: {
+                    clothing:
+                      typeof snapshotRaw.clothing === 'string' ? snapshotRaw.clothing : undefined,
+                    appearance:
+                      typeof snapshotRaw.appearance === 'string' ? snapshotRaw.appearance : undefined,
+                    status: typeof snapshotRaw.status === 'string' ? snapshotRaw.status : undefined,
+                    location:
+                      typeof snapshotRaw.location === 'string' ? snapshotRaw.location : undefined,
+                    possessions:
+                      typeof snapshotRaw.possessions === 'string'
+                        ? snapshotRaw.possessions
+                        : undefined,
+                  },
+                  summaryLine: typeof cs.summaryLine === 'string' ? cs.summaryLine : '',
+                  updatedAt:
+                    typeof cs.updatedAt === 'string'
+                      ? cs.updatedAt
+                      : new Date().toISOString(),
+                },
+              ];
+            })
+          : undefined;
+        return { name, profile, state, status, chapterStates };
+      })
+      .filter((item): item is PersonaContextPayload => Boolean(item));
   }
 
   context.updatedAt = new Date().toISOString();
@@ -695,12 +780,35 @@ app.post('/api/generate', async (req, res) => {
   let retrievedFullDocuments: Array<Record<string, unknown>> = [];
   try {
     if (useStructuredChapterKb) {
+      const optimizeInstruction =
+        typeof extra?.retrievalInstruction === 'string' ? extra.retrievalInstruction.trim() : '';
+      const appearingCharacters = parseAppearingCharactersFromExtra(extra);
+      const personaCards = listPersonaCardsFromKnowledgeDocs(
+        projectCtx.knowledgeDocuments ?? [],
+        projectCtx.personas
+      );
+      const optimizeBoost = shouldApplyChapterOptimizeMatchingBoost({
+        templateKey: tk,
+        instruction: optimizeInstruction,
+        appearingCharacters,
+      })
+        ? {
+            instruction: optimizeInstruction,
+            appearingCharacters,
+            personaCards,
+          }
+        : undefined;
+
       const sr = buildStructuredKnowledgeEvidence(structuredChapterNo, {
         chapterNo: structuredChapterNo,
-        chapters: projectCtx.chapters.map((c) => ({
-          chapterNo: c.chapterNo,
-          structuredMatchingText: c.structuredMatchingText,
-        })),
+        chapters: mapChaptersForStructuredKnowledgeMatch(
+          projectCtx.chapters.map((c) => ({
+            chapterNo: c.chapterNo,
+            structuredMatchingText: c.structuredMatchingText,
+          })),
+          structuredChapterNo,
+          optimizeBoost
+        ),
         knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
       });
       structuredKbTrace = {
