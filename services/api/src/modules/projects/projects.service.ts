@@ -24,6 +24,15 @@ import {
   trimForPrompt,
 } from './persona-state.util';
 import {
+  buildSummaryLineFromSnapshot,
+  normalizePersonaSnapshot,
+  resolvePersonaSnapshotAsOfChapter,
+  snapshotFromLegacyState,
+  upsertPersonaChapterState,
+  type PersonaChapterStateRecord,
+  type PersonaSnapshot,
+} from './persona-snapshot.util';
+import {
   normalizePersonaUpdateInput,
   resolveActivePersonaIdAfterDelete,
 } from './persona-management.util';
@@ -196,6 +205,8 @@ export interface PersonaRecord {
   relationEventIds: string[];
   appearedChapterNos: number[];
   lastAppearedChapterNo: number | null;
+  /** 按章结构化快照（着装 + 状态），写第 N 章时取 < N 的最新记录 */
+  chapterStates?: PersonaChapterStateRecord[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -2349,6 +2360,9 @@ export class ProjectsService implements OnModuleInit {
             retrievalInstruction: instruction,
             retrievalChapterSummary: chapterSummaryForRetrieval,
             retrievalChapterTitle: chapter.title,
+            ...(payload.appearingCharacters?.length
+              ? { appearingCharacters: payload.appearingCharacters }
+              : {}),
           },
         },
         { responseType: 'stream' }
@@ -2523,6 +2537,9 @@ export class ProjectsService implements OnModuleInit {
       updatedAt: chapter.updatedAt,
     };
 
+    const chapterSummaryForRetrieval =
+      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+
     const segmentCount = resolveOptimizeSegmentCount(chapter.content.length, 3);
     const segments = splitIntoSegments(chapter.content, planText, segmentCount);
     const traceId = makeOptimizationId('draft');
@@ -2584,6 +2601,12 @@ export class ProjectsService implements OnModuleInit {
                 segmentIndex: segment.index,
                 segmentTotal: segments.length,
                 inputSegmentChars: segment.originalText.length,
+                retrievalInstruction: instruction,
+                retrievalChapterSummary: chapterSummaryForRetrieval,
+                retrievalChapterTitle: chapter.title,
+                ...(payload.appearingCharacters?.length
+                  ? { appearingCharacters: payload.appearingCharacters }
+                  : {}),
               },
             },
             { responseType: 'stream' }
@@ -3333,11 +3356,15 @@ export class ProjectsService implements OnModuleInit {
           chapterNo,
           title: chapterTitle?.trim() || undefined,
           content: chapterContent,
-          personas: personas.map((persona) => ({
-            name: persona.name,
-            profile: persona.profile,
-            state: persona.state,
-          })),
+          personas: personas.map((persona) => {
+            const prior = resolvePersonaSnapshotAsOfChapter(persona.chapterStates, chapterNo);
+            return {
+              name: persona.name,
+              profile: persona.profile,
+              state: persona.state,
+              priorSnapshot: prior?.snapshot ?? snapshotFromLegacyState(persona.state),
+            };
+          }),
         },
         { timeout: 120000 }
       );
@@ -3348,8 +3375,22 @@ export class ProjectsService implements OnModuleInit {
         for (const persona of personas) {
           const item = byName.get(persona.name.trim());
           if (item) {
-            if (item.state) {
-              persona.state = item.state;
+            const snapshot =
+              item.snapshot ??
+              normalizePersonaSnapshot(snapshotFromLegacyState(item.state ?? item.summaryLine));
+            const summaryLine =
+              item.summaryLine?.trim() ||
+              buildSummaryLineFromSnapshot(snapshot) ||
+              item.state?.trim() ||
+              persona.state;
+            persona.chapterStates = upsertPersonaChapterState(persona.chapterStates, {
+              chapterNo,
+              appeared: item.appeared,
+              snapshot,
+              summaryLine,
+            });
+            if (summaryLine) {
+              persona.state = summaryLine;
             }
             if (item.appeared) {
               persona.appearedChapterNos = addChapterAppearance(
@@ -3423,12 +3464,23 @@ export class ProjectsService implements OnModuleInit {
         personaName: persona.name,
         personaProfile: persona.profile,
         currentState: persona.state,
+        priorSnapshot:
+          resolvePersonaSnapshotAsOfChapter(persona.chapterStates, chapterNo)?.snapshot ??
+          snapshotFromLegacyState(persona.state),
       });
 
       const normalizedState = clampPersonaStateText(nextState);
       if (normalizedState && normalizedState !== persona.state) {
         persona.state = normalizedState;
       }
+      const snapshot = snapshotFromLegacyState(normalizedState || persona.state);
+      const summaryLine = buildSummaryLineFromSnapshot(snapshot) || normalizedState || persona.state;
+      persona.chapterStates = upsertPersonaChapterState(persona.chapterStates, {
+        chapterNo,
+        appeared: true,
+        snapshot,
+        summaryLine,
+      });
     }
     persona.updatedAt = new Date();
   }
@@ -3440,21 +3492,25 @@ export class ProjectsService implements OnModuleInit {
     personaName: string;
     personaProfile: string;
     currentState: string;
+    priorSnapshot?: PersonaSnapshot;
   }) {
     const fallbackState = buildFallbackPersonaState(input.chapterNo, input.chapterContent);
+    const priorLine = buildSummaryLineFromSnapshot(input.priorSnapshot ?? {});
     const prompt = [
       `你是小说角色状态提取器。`,
-      `请基于人物设定与第${input.chapterNo}章正文，输出该人物的"当前状态"（一句中文，<=60字）。`,
-      `禁止输出解释、禁止编号、禁止Markdown。`,
+      `请基于人物设定与第${input.chapterNo}章正文，输出该人物读完本章后的结构化快照（JSON）。`,
+      `字段：clothing（着装）、appearance（外貌）、status（瞬时状态/情绪/伤势）、location（位置）、possessions（持有物）。`,
+      `若正文未明确换装或形象变化，clothing/appearance 须与历史快照一致。`,
+      `禁止输出解释、禁止 Markdown，只输出 JSON 对象。`,
       '',
       `人物名：${input.personaName}`,
       `人物设定：${input.personaProfile}`,
-      `历史状态：${input.currentState || '暂无'}`,
+      `历史快照：${priorLine || input.currentState || '暂无'}`,
       '',
       `第${input.chapterNo}章正文：`,
       trimForPrompt(input.chapterContent, 2200),
       '',
-      '只输出状态短句。',
+      '只输出 JSON：{"clothing":"...","appearance":"...","status":"...","location":"...","possessions":"..."}',
     ].join('\n');
 
     try {
@@ -3470,8 +3526,21 @@ export class ProjectsService implements OnModuleInit {
       );
 
       const generated = normalizePersonaStateOutput(String(data?.content || ''));
+      if (generated) {
+        return clampPersonaStateText(generated);
+      }
 
-      return clampPersonaStateText(generated || fallbackState);
+      try {
+        const snapshot = normalizePersonaSnapshot(JSON.parse(String(data?.content || '{}')));
+        const summary = buildSummaryLineFromSnapshot(snapshot);
+        if (summary) {
+          return summary;
+        }
+      } catch {
+        // fall through
+      }
+
+      return clampPersonaStateText(fallbackState);
     } catch {
       return fallbackState;
     }
@@ -3921,6 +3990,19 @@ export class ProjectsService implements OnModuleInit {
       selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
       usedRelationEvents,
       personaConsistencyNotes,
+      personas: personas.map((persona) => ({
+        name: persona.name,
+        profile: persona.profile,
+        state: persona.state,
+        status: persona.status,
+        chapterStates: persona.chapterStates?.map((record) => ({
+          chapterNo: record.chapterNo,
+          appeared: record.appeared,
+          snapshot: record.snapshot,
+          summaryLine: record.summaryLine,
+          updatedAt: record.updatedAt,
+        })),
+      })),
     });
   }
 

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   apiClient,
+  buildPersonasContextPayload,
   type PersonaItem,
   type PreviewRetrievalResult,
   type WriteContextReadiness,
@@ -293,6 +294,7 @@ function buildPreviewProjectCtx(
     chapterSummaryMemoryCount: workspace.settings.chapterSummaryMemoryCount ?? 3,
     priorChapterTailChars: workspace.settings.priorChapterTailChars ?? 800,
     contextExcerptMaxChars: workspace.settings.contextExcerptMaxChars ?? 400,
+    personas: buildPersonasContextPayload(workspace.personas),
   };
 }
 

@@ -44,15 +44,36 @@ test('parseChapterPersonaStatesFromModelContent parses fenced json array', () =>
   const raw = '```json\n[{"name":"叶辰","appeared":true,"state":"重伤昏迷"},{"name":"清歌","appeared":false,"state":"未出场"}]\n```';
   const items = parseChapterPersonaStatesFromModelContent(raw);
   assert.equal(items.length, 2);
-  assert.deepEqual(items[0], { name: '叶辰', appeared: true, state: '重伤昏迷' });
-  assert.deepEqual(items[1], { name: '清歌', appeared: false, state: '未出场' });
+  assert.deepEqual(items[0], {
+    name: '叶辰',
+    appeared: true,
+    state: '重伤昏迷',
+    summaryLine: '重伤昏迷',
+  });
+  assert.deepEqual(items[1], {
+    name: '清歌',
+    appeared: false,
+    state: '未出场',
+    summaryLine: '未出场',
+  });
+});
+
+test('parseChapterPersonaStatesFromModelContent parses structured snapshot', () => {
+  const raw =
+    '{"personas":[{"name":"叶辰","appeared":true,"snapshot":{"clothing":"深灰西装","status":"冷静"},"summaryLine":"着装：深灰西装；状态：冷静"}]}';
+  const items = parseChapterPersonaStatesFromModelContent(raw);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.snapshot?.clothing, '深灰西装');
+  assert.equal(items[0]?.summaryLine, '着装：深灰西装；状态：冷静');
 });
 
 test('parseChapterPersonaStatesFromModelContent parses personas wrapper', () => {
   const items = parseChapterPersonaStatesFromModelContent({
     personas: [{ name: '林月', appeared: true, state: '已离开宗门' }],
   });
-  assert.deepEqual(items, [{ name: '林月', appeared: true, state: '已离开宗门' }]);
+  assert.deepEqual(items, [
+    { name: '林月', appeared: true, state: '已离开宗门', summaryLine: '已离开宗门' },
+  ]);
 });
 
 test('parseChapterPersonaStatesFromModelContent skips invalid entries', () => {
@@ -61,5 +82,7 @@ test('parseChapterPersonaStatesFromModelContent skips invalid entries', () => {
     { name: '有效', appeared: false, state: '' },
     { name: '有效', appeared: true, state: '有效状态' },
   ]);
-  assert.deepEqual(items, [{ name: '有效', appeared: true, state: '有效状态' }]);
+  assert.deepEqual(items, [
+    { name: '有效', appeared: true, state: '有效状态', summaryLine: '有效状态' },
+  ]);
 });

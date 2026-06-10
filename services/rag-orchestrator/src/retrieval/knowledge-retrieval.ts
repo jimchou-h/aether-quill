@@ -14,6 +14,7 @@ import {
   formatKnowledgeEvidenceBlock,
 } from './persona-card-evidence';
 import { resolveEvidenceTokenBudget, trimTextsToTokenBudgetDetailed } from './token-budget';
+import { normalizeKnowledgeDocumentsForRetrieval } from './knowledge-doc-type';
 import { scoreTitleAgainstMatchingText } from './title-match-score';
 import { ChunkWithEmbedding } from './types';
 import { VectorStore } from './vector-store';
@@ -417,6 +418,9 @@ export function buildStructuredKnowledgeEvidence(
 ): StructuredKnowledgeRetrievalResult {
   const ch = kbCtx.chapters.find((c) => c.chapterNo === chapterNo);
   const matchingText = ch?.structuredMatchingText?.trim() ?? '';
+  const knowledgeDocuments = normalizeKnowledgeDocumentsForRetrieval(
+    kbCtx.knowledgeDocuments
+  );
 
   if (!matchingText) {
     return {
@@ -434,7 +438,7 @@ export function buildStructuredKnowledgeEvidence(
   const otherTopN = quotas?.otherTopN ?? TITLE_MATCHED_OTHER_DOC_TOP_N;
   const scanLimit = personaTopN + otherTopN + 20;
 
-  const ranked = pickTopTitleMatchedDocuments(matchingText, kbCtx.knowledgeDocuments, scanLimit);
+  const ranked = pickTopTitleMatchedDocuments(matchingText, knowledgeDocuments, scanLimit);
   const personaPicked = ranked
     .filter((d) => isPersonaCardDoc(d.docType))
     .slice(0, personaTopN);

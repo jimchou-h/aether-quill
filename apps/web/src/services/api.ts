@@ -116,9 +116,21 @@ export interface ProjectWritingStats {
   generationFailed: number;
 }
 
+/** 开发默认相对路径，走 Vite proxy，支持 localhost / 局域网 IP 访问 */
+function getApiBaseURL(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+  if (import.meta.env.DEV) {
+    return '';
+  }
+  return 'http://localhost:3000';
+}
+
 // Create axios instance
 const http: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000',
+  baseURL: getApiBaseURL(),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -412,6 +424,7 @@ export const apiClient = {
         chapterSummaryMemoryCount?: number;
         priorChapterTailChars?: number;
         contextExcerptMaxChars?: number;
+        personas?: ReturnType<typeof buildPersonasContextPayload>;
       };
       extraContext?: Record<string, unknown>;
     }
@@ -813,6 +826,7 @@ export const apiClient = {
         generationTemperature: workspace.settings.generationTemperature,
         selectedRelationMemory: buildRelationMemoryBlock(selectedEvents),
         usedRelationEvents: selectedEvents,
+        personas: buildPersonasContextPayload(workspace.personas),
       }),
     });
 
@@ -869,7 +883,7 @@ export const apiClient = {
     await useAuthStore().ensureFreshSession();
 
     const token = localStorage.getItem('token');
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/write/outline`;
 
     const response = await fetch(url, {
@@ -1098,7 +1112,7 @@ export const apiClient = {
     await useAuthStore().ensureFreshSession();
 
     const token = localStorage.getItem('token');
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/plan`;
 
     const response = await fetch(url, {
@@ -1217,7 +1231,7 @@ export const apiClient = {
     await useAuthStore().ensureFreshSession();
 
     const token = localStorage.getItem('token');
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/draft`;
 
     const response = await fetch(url, {
@@ -1339,7 +1353,7 @@ export const apiClient = {
     await useAuthStore().ensureFreshSession();
 
     const token = localStorage.getItem('token');
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/typo-fix`;
 
     const response = await fetch(url, {
@@ -1425,7 +1439,7 @@ export const apiClient = {
     await useAuthStore().ensureFreshSession();
 
     const token = localStorage.getItem('token');
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/export?format=txt`;
 
     const response = await fetch(url, {
@@ -1564,6 +1578,7 @@ export interface PreviewRetrievalItem {
   id: string;
   pool:
     | 'prior_chapter_tail'
+    | 'persona_snapshots'
     | 'persona_card'
     | 'other_docs'
     | 'recent_chapters'
@@ -1599,6 +1614,22 @@ export interface DocumentVersionItem {
 
 export type ProjectSettings = components['schemas']['ProjectSettings'];
 
+export interface PersonaChapterStateRecord {
+  chapterNo: number;
+  appeared: boolean;
+  snapshot: PersonaSnapshot;
+  summaryLine: string;
+  updatedAt: string;
+}
+
+export interface PersonaSnapshot {
+  clothing?: string;
+  appearance?: string;
+  status?: string;
+  location?: string;
+  possessions?: string;
+}
+
 export interface PersonaItem {
   id: string;
   name: string;
@@ -1608,8 +1639,19 @@ export interface PersonaItem {
   relationEventIds: string[];
   appearedChapterNos: number[];
   lastAppearedChapterNo: number | null;
+  chapterStates?: PersonaChapterStateRecord[];
   createdAt: string;
   updatedAt: string;
+}
+
+export function buildPersonasContextPayload(personas: PersonaItem[]) {
+  return personas.map((persona) => ({
+    name: persona.name,
+    profile: persona.profile,
+    state: persona.state,
+    status: persona.status,
+    chapterStates: persona.chapterStates,
+  }));
 }
 
 export type ChapterSummarySource = 'llm' | 'fallback';

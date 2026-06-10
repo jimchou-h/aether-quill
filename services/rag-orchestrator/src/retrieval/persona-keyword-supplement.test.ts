@@ -75,6 +75,20 @@ describe('expandPersonaMatchTokens', () => {
   it('returns single token when no parentheses', () => {
     assert.deepEqual(expandPersonaMatchTokens('林策'), ['林策']);
   });
+
+  it('includes trailing nickname suffix for long display names', () => {
+    assert.deepEqual(expandPersonaMatchTokens('比企谷小町'), ['比企谷小町', '小町']);
+  });
+});
+
+describe('supplementPersonaKeywordsFromSource (nickname suffix)', () => {
+  const card = [{ id: 'p', title: '角色卡 -> 比企谷小町', docType: 'persona_card' as const }];
+
+  it('matches instruction that only uses trailing nickname 小町', () => {
+    const source = '男主睡前想到了小町，辗转难眠。';
+    const { supplementedKeywords } = supplementPersonaKeywordsFromSource(source, card, []);
+    assert.deepEqual(supplementedKeywords, ['小町']);
+  });
 });
 
 describe('supplementPersonaKeywordsFromSource (paren alias)', () => {

@@ -11,6 +11,7 @@ import {
   type ChapterSummaryInput,
 } from '../context/prior-chapter-summaries';
 import { resolvePriorChapterTail } from '../context/prior-chapter-tail';
+import { buildPersonaSnapshotSection } from '../context/persona-snapshot';
 import {
   buildStructuredKnowledgeEvidence,
   retrieveKnowledgeForDraft,
@@ -19,6 +20,12 @@ import {
   type KnowledgeDocumentForMatch,
 } from './knowledge-retrieval';
 import { extractPersonaDisplayName } from './persona-card-evidence';
+import {
+  listPersonaCardsFromKnowledgeDocs,
+  mapChaptersForStructuredKnowledgeMatch,
+  parseAppearingCharactersFromExtra,
+  shouldApplyChapterOptimizeMatchingBoost,
+} from './optimize-matching-text';
 import { countEvidenceTokens, resolveEvidenceTokenBudget } from './token-budget';
 import type { ChunkWithEmbedding } from './types';
 import { Reranker } from './reranker';
@@ -38,13 +45,20 @@ export interface PreviewRetrievalRequest {
     chapterSummaryMemoryCount?: number;
     priorChapterTailChars?: number;
     contextExcerptMaxChars?: number;
+    personas?: import('../context/persona-snapshot').PersonaContextPayload[];
   };
   extraContext?: Record<string, unknown>;
 }
 
 export interface PreviewRetrievalItem {
   id: string;
-  pool: 'prior_chapter_tail' | 'persona_card' | 'other_docs' | 'recent_chapters' | 'memory_chapters';
+  pool:
+    | 'prior_chapter_tail'
+    | 'persona_snapshots'
+    | 'persona_card'
+    | 'other_docs'
+    | 'recent_chapters'
+    | 'memory_chapters';
   title: string;
   preview: string;
   score?: number;
@@ -95,19 +109,64 @@ export async function runPreviewRetrieval(
     }
   }
 
+  const snapshotSection = buildPersonaSnapshotSection({
+    personas: projectCtx.personas ?? [],
+    currentChapterNo: chapterNo > 0 ? chapterNo : undefined,
+  });
+  if (snapshotSection.text) {
+    items.push({
+      id: 'persona_snapshots:all',
+      pool: 'persona_snapshots',
+      title: '人物当前快照（着装 + 状态）',
+      preview: snapshotSection.text.slice(0, 400),
+      selected: true,
+      meta: {
+        persona_snapshot_injected_count: snapshotSection.injectedCount,
+        persona_snapshot_as_of_chapter: snapshotSection.asOfChapterNo,
+      },
+    });
+  }
+
   const useStructured =
     input.useStructuredKb !== false && chapterNo > 0 && projectCtx.chapters.length > 0;
 
+  let structuredMatchingQuery = '';
+
   if (useStructured) {
+    const extra = input.extraContext;
+    const optimizeInstruction = (
+      typeof extra?.retrievalInstruction === 'string' ? extra.retrievalInstruction : prompt
+    ).trim();
+    const appearingCharacters = parseAppearingCharactersFromExtra(extra);
+    const personaCards = listPersonaCardsFromKnowledgeDocs(
+      projectCtx.knowledgeDocuments ?? [],
+      projectCtx.personas
+    );
+    const optimizeBoost = shouldApplyChapterOptimizeMatchingBoost({
+      instruction: optimizeInstruction,
+      appearingCharacters,
+    })
+      ? {
+          instruction: optimizeInstruction,
+          appearingCharacters,
+          personaCards,
+        }
+      : undefined;
+
     const sr = buildStructuredKnowledgeEvidence(chapterNo, {
       chapterNo,
-      chapters: projectCtx.chapters.map((c) => ({
-        chapterNo: c.chapterNo,
-        structuredMatchingText: c.structuredMatchingText,
-      })),
+      chapters: mapChaptersForStructuredKnowledgeMatch(
+        projectCtx.chapters.map((c) => ({
+          chapterNo: c.chapterNo,
+          structuredMatchingText: c.structuredMatchingText,
+        })),
+        chapterNo,
+        optimizeBoost
+      ),
       knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
     }, { personaTopN: personaQuota, otherTopN: otherQuota });
     structuredEvidenceText = sr.evidenceText;
+    structuredMatchingQuery = sr.query.trim();
 
     const evidenceIds = new Set(sr.evidenceDocumentIds ?? []);
     for (const doc of sr.fullDocuments ?? []) {
@@ -238,6 +297,6 @@ export async function runPreviewRetrieval(
     items,
     tokenBudget,
     tokenUsed,
-    query: query || prompt,
+    query: structuredMatchingQuery || query || prompt,
   };
 }

@@ -1,3 +1,9 @@
+import {
+  buildSummaryLineFromSnapshot,
+  normalizePersonaSnapshot,
+  type PersonaSnapshot,
+} from './persona-snapshot.util';
+
 export function buildFallbackPersonaState(chapterNo: number, chapterContent: string) {
   const firstSentence = chapterContent
     .replace(/\s+/g, ' ')
@@ -36,7 +42,10 @@ export const PERSONA_STATE_MAX_LENGTH = 60;
 export interface ChapterPersonaStateItem {
   name: string;
   appeared: boolean;
-  state: string;
+  /** 兼容旧格式单行状态 */
+  state?: string;
+  snapshot?: PersonaSnapshot;
+  summaryLine?: string;
 }
 
 export function clampPersonaStateText(state: string): string {
@@ -77,14 +86,23 @@ export function parseChapterPersonaStatesFromModelContent(raw: unknown): Chapter
     }
     const record = item as Record<string, unknown>;
     const name = typeof record.name === 'string' ? record.name.trim() : '';
-    const stateRaw = typeof record.state === 'string' ? record.state.trim() : '';
-    if (!name || !stateRaw) {
+    const appeared = record.appeared === true;
+    const snapshot = normalizePersonaSnapshot(record.snapshot);
+    const legacyState = typeof record.state === 'string' ? record.state.trim() : '';
+    const summaryLineRaw =
+      typeof record.summaryLine === 'string' ? record.summaryLine.trim() : legacyState;
+    const summaryLine = (
+      summaryLineRaw || buildSummaryLineFromSnapshot(snapshot) || legacyState
+    ).slice(0, 120);
+    if (!name || !summaryLine) {
       continue;
     }
     parsed.push({
       name,
-      appeared: record.appeared === true,
-      state: clampPersonaStateText(stateRaw),
+      appeared,
+      state: summaryLine,
+      summaryLine,
+      ...(Object.keys(snapshot).length > 0 ? { snapshot } : {}),
     });
   }
 

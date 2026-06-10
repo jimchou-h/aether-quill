@@ -15,6 +15,10 @@ import {
 import { resolveNextChapterHead } from './next-chapter-head';
 import { resolvePriorChapterTail } from './prior-chapter-tail';
 import { resolveMemoryChapterSummaryEmbeddingQuery } from '../retrieval/knowledge-retrieval';
+import {
+  buildPersonaSnapshotSection,
+  type PersonaContextPayload,
+} from './persona-snapshot';
 
 export type NarrativeContextMeta = {
   prior_chapter_tail_injected: boolean;
@@ -24,6 +28,8 @@ export type NarrativeContextMeta = {
   next_chapter_head_chars: number;
   next_chapter_head_skipped: boolean;
   excerpt_fallback_chapter_nos: number[];
+  persona_snapshot_injected_count: number;
+  persona_snapshot_as_of_chapter: number | null;
 };
 
 export type NarrativeContextBuildInput = {
@@ -37,6 +43,8 @@ export type NarrativeContextBuildInput = {
   contextExcerptMaxChars: number;
   selectedRelationMemory?: string;
   currentChapterNo?: number;
+  /** 全部人物及其按章快照，用于【人物当前快照】段 */
+  personas?: PersonaContextPayload[];
   /** 章节优化：注入第 N+1 章开头只读锚点（复用 priorChapterTailChars 预算） */
   includeNextChapterHead?: boolean;
 };
@@ -66,6 +74,14 @@ export async function buildNarrativeContextText(
     sections.push(`【前章衔接】\n${priorTail.text}`);
   } else if (currentChapterNo && currentChapterNo > 1 && tailChars > 0) {
     priorTail = { ...priorTail, skipped: true };
+  }
+
+  const snapshotSection = buildPersonaSnapshotSection({
+    personas: input.personas ?? [],
+    currentChapterNo,
+  });
+  if (snapshotSection.text) {
+    sections.push(snapshotSection.text);
   }
 
   const maxCount = clampChapterSummaryPromptCount(input.chapterSummaryPromptCount);
@@ -134,6 +150,8 @@ export async function buildNarrativeContextText(
     next_chapter_head_chars: nextHead.chars,
     next_chapter_head_skipped: nextHead.skipped,
     excerpt_fallback_chapter_nos: excerptFallbackChapterNos,
+    persona_snapshot_injected_count: snapshotSection.injectedCount,
+    persona_snapshot_as_of_chapter: snapshotSection.asOfChapterNo,
   };
 
   return { text: sections.join('\n\n'), meta };
