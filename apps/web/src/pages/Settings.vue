@@ -63,27 +63,5 @@ onMounted(() => {
 .settings-page {
   max-width: 980px;
   margin: 0 auto;
-  padding: 1rem;
-}
-
-.page-title {
-  margin-bottom: 0.25rem;
-}
-
-.page-subtitle {
-  color: #666;
-  margin-bottom: 1rem;
-}
-
-.message {
-  margin-bottom: 0.75rem;
-}
-
-.message-ok {
-  color: #027a48;
-}
-
-.message-error {
-  color: #b42318;
 }
 </style>

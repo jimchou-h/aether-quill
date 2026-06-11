@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, shallowRef } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { PlusOutlined } from '@ant-design/icons-vue';
 import { apiClient, type ProjectItem } from '../services/api';
 import { presentError, presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
 
@@ -72,7 +73,6 @@ async function handleCreateProject() {
       name: newProjectName.value.trim(),
       description: newProjectDescription.value.trim(),
     });
-    console.log(project);
     projects.value = [project, ...projects.value];
     newProjectName.value = '';
     newProjectDescription.value = '';
@@ -92,58 +92,79 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="projects-page">
-    <header class="projects-header">
-      <h1 class="projects-title">我的小说项目</h1>
-      <p class="projects-subtitle">每个项目都有独立的人物设定、知识库和写作上下文。</p>
+  <div class="aq-page projects-page">
+    <header class="aq-page-header">
+      <h1 class="aq-page-title">我的小说项目</h1>
+      <p class="aq-page-subtitle">每个项目都有独立的人物设定、知识库和写作上下文。</p>
     </header>
 
-    <section class="create-card">
-      <h2 class="card-title">新建项目</h2>
-      <div class="field-group">
-        <label class="field-label" for="project-name">项目名称</label>
+    <section class="aq-card create-card">
+      <h2 class="aq-card-title">
+        <PlusOutlined aria-hidden="true" />
+        新建项目
+      </h2>
+      <div class="aq-field-group">
+        <label class="aq-field-label" for="project-name">项目名称</label>
         <input
           id="project-name"
           v-model="newProjectName"
-          class="field-input"
+          class="aq-field-input"
           placeholder="例如：暮潮纪元"
         />
       </div>
-      <div class="field-group">
-        <label class="field-label" for="project-description">项目描述</label>
+      <div class="aq-field-group">
+        <label class="aq-field-label" for="project-description">项目描述</label>
         <textarea
           id="project-description"
           v-model="newProjectDescription"
-          class="field-textarea"
+          class="aq-field-textarea"
           placeholder="一句话说明这本小说的定位"
         />
       </div>
-      <button class="primary-button" :disabled="submitLoading" @click="handleCreateProject">
+      <button
+        class="aq-btn aq-btn-primary"
+        type="button"
+        :disabled="submitLoading"
+        @click="handleCreateProject"
+      >
         {{ submitLoading ? '创建中...' : '创建并进入工作台' }}
       </button>
     </section>
 
-    <p v-if="routeTipMessage" class="message message-error">{{ routeTipMessage }}</p>
-    <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
-    <p v-if="loading" class="message">正在加载项目...</p>
+    <p v-if="routeTipMessage" class="aq-message aq-message--error">{{ routeTipMessage }}</p>
+    <p v-if="errorMessage" class="aq-message aq-message--error">{{ errorMessage }}</p>
+
+    <div v-if="loading" class="loading-state">
+      <div class="loading-spinner" aria-hidden="true" />
+      <p>正在加载项目...</p>
+    </div>
+
+    <section v-else-if="projects.length === 0" class="aq-empty">
+      <p>还没有项目，在上方创建你的第一本小说吧。</p>
+    </section>
 
     <section v-else class="project-list">
       <article v-for="project in projects" :key="project.id" class="project-card">
-        <h3 class="project-title">{{ project.name }}</h3>
-        <p class="project-description">{{ project.description || '暂无描述' }}</p>
+        <div class="project-card-body">
+          <h3 class="project-title">{{ project.name }}</h3>
+          <p class="project-description">{{ project.description || '暂无描述' }}</p>
+        </div>
         <div class="card-actions">
-          <router-link class="link-button" :to="`/projects/${project.id}/workbench`"
-            >进入写作</router-link
+          <router-link
+            class="aq-btn aq-btn-primary"
+            :to="`/projects/${project.id}/workbench`"
           >
-          <router-link class="link-button" :to="`/projects/${project.id}/knowledge`"
-            >知识库</router-link
-          >
-          <router-link class="link-button" :to="`/projects/${project.id}/personas`"
-            >人物设定</router-link
-          >
+            进入写作
+          </router-link>
+          <router-link class="aq-btn aq-btn-link" :to="`/projects/${project.id}/knowledge`">
+            知识库
+          </router-link>
+          <router-link class="aq-btn aq-btn-link" :to="`/projects/${project.id}/personas`">
+            人物设定
+          </router-link>
           <button
             type="button"
-            class="danger-button"
+            class="aq-btn aq-btn-danger"
             :disabled="deletingProjectId === project.id"
             @click="handleDeleteProject(project)"
           >
@@ -157,80 +178,43 @@ onMounted(() => {
 
 <style scoped>
 .projects-page {
-  padding: 2rem;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-
-.projects-header {
-  margin-bottom: 1.5rem;
-}
-
-.projects-title {
-  margin-bottom: 0.25rem;
-}
-
-.projects-subtitle {
-  color: #666;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
 }
 
 .create-card {
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  background: #fafafa;
+  margin-bottom: 1.25rem;
 }
 
-.card-title {
-  margin-bottom: 0.75rem;
+.create-card .aq-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
-.field-group {
-  margin-bottom: 0.75rem;
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 0;
+  color: var(--aq-text-secondary);
+  font-size: 0.9rem;
 }
 
-.field-label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-weight: 600;
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--aq-border);
+  border-top-color: var(--aq-primary);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
 }
 
-.field-input,
-.field-textarea {
-  width: 100%;
-  border: 1px solid #d9d9d9;
-  border-radius: 6px;
-  padding: 0.5rem 0.6rem;
-  font-size: 0.95rem;
-}
-
-.field-textarea {
-  min-height: 84px;
-  resize: vertical;
-}
-
-.primary-button {
-  border: none;
-  background: #1d4ed8;
-  color: #fff;
-  border-radius: 6px;
-  padding: 0.55rem 0.9rem;
-  cursor: pointer;
-}
-
-.primary-button:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.message {
-  margin-bottom: 0.75rem;
-  color: #555;
-}
-
-.message-error {
-  color: #b42318;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .project-list {
@@ -240,19 +224,41 @@ onMounted(() => {
 }
 
 .project-card {
-  padding: 1rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--aq-border);
+  border-radius: var(--aq-radius-sm);
+  background: var(--aq-surface);
+  box-shadow: var(--aq-shadow-sm);
+  transition:
+    border-color var(--aq-transition),
+    box-shadow var(--aq-transition);
+}
+
+.project-card:hover {
+  border-color: var(--aq-primary-muted);
+  box-shadow: var(--aq-shadow);
 }
 
 .project-title {
-  margin-bottom: 0.35rem;
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--aq-text);
 }
 
 .project-description {
-  color: #555;
-  margin-bottom: 0.75rem;
+  margin: 0;
+  color: var(--aq-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .card-actions {
@@ -261,25 +267,9 @@ onMounted(() => {
   gap: 0.5rem;
 }
 
-.link-button {
-  border: 1px solid #d9d9d9;
-  border-radius: 6px;
-  padding: 0.35rem 0.65rem;
-  color: #1f2937;
-  text-decoration: none;
-}
-
-.danger-button {
-  border: 1px solid #fecdca;
-  border-radius: 6px;
-  padding: 0.35rem 0.65rem;
-  background: #fff;
-  color: #b42318;
-  cursor: pointer;
-}
-
-.danger-button:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+  }
 }
 </style>

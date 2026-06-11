@@ -1,15 +1,503 @@
-* {
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: var(--aq-font);
+  font-size: 16px;
   line-height: 1.6;
-  color: #333;
+  color: var(--aq-text);
+  background: var(--aq-bg);
 }
 
 #app {
   min-height: 100vh;
+}
+
+/* 共享页面布局 */
+.aq-page {
+  max-width: var(--aq-content-max-width);
+  margin: 0 auto;
+  padding: var(--aq-page-padding);
+}
+
+.aq-page-header {
+  margin-bottom: 1.5rem;
+}
+
+.aq-page-header--row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.aq-page-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  color: var(--aq-text);
+}
+
+.aq-page-subtitle {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--aq-text-secondary);
+  line-height: 1.55;
+}
+
+/* 共享卡片 */
+.aq-card {
+  background: var(--aq-surface);
+  border: 1px solid var(--aq-border);
+  border-radius: var(--aq-radius-sm);
+  padding: 1.25rem;
+  box-shadow: var(--aq-shadow-sm);
+}
+
+.aq-card--muted {
+  background: var(--aq-surface-muted);
+}
+
+.aq-card-title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--aq-text);
+}
+
+/* 共享表单 */
+.aq-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.aq-field-label {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--aq-text);
+}
+
+.aq-field-input,
+.aq-field-textarea,
+.aq-field-select {
+  width: 100%;
+  border: 1px solid var(--aq-border-strong);
+  border-radius: var(--aq-radius-xs);
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9375rem;
+  font-family: inherit;
+  color: var(--aq-text);
+  background: var(--aq-surface);
+  transition: border-color var(--aq-transition), box-shadow var(--aq-transition);
+}
+
+.aq-field-input:focus,
+.aq-field-textarea:focus,
+.aq-field-select:focus {
+  outline: none;
+  border-color: var(--aq-primary);
+  box-shadow: 0 0 0 3px rgb(79 70 229 / 12%);
+}
+
+.aq-field-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+/* 共享按钮 */
+.aq-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: var(--aq-radius-xs);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background var(--aq-transition),
+    border-color var(--aq-transition),
+    color var(--aq-transition),
+    box-shadow var(--aq-transition),
+    opacity var(--aq-transition);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.aq-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.aq-btn:focus-visible {
+  outline: 2px solid var(--aq-primary);
+  outline-offset: 2px;
+}
+
+.aq-btn-primary {
+  border: none;
+  background: var(--aq-primary);
+  color: var(--aq-text-inverse);
+}
+
+.aq-btn-primary:hover:not(:disabled) {
+  background: var(--aq-primary-hover);
+}
+
+.aq-btn-secondary {
+  border: 1px solid var(--aq-border-strong);
+  background: var(--aq-surface);
+  color: var(--aq-text);
+}
+
+.aq-btn-secondary:hover:not(:disabled) {
+  border-color: var(--aq-primary-muted);
+  background: var(--aq-primary-soft);
+  color: var(--aq-primary-hover);
+}
+
+.aq-btn-ghost {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--aq-text-secondary);
+}
+
+.aq-btn-ghost:hover:not(:disabled) {
+  background: var(--aq-surface-muted);
+  color: var(--aq-text);
+}
+
+.aq-btn-danger {
+  border: 1px solid var(--aq-danger-border);
+  background: var(--aq-surface);
+  color: var(--aq-danger);
+}
+
+.aq-btn-danger:hover:not(:disabled) {
+  background: var(--aq-danger-soft);
+  border-color: var(--aq-danger);
+}
+
+.aq-btn-link {
+  border: 1px solid var(--aq-border);
+  background: var(--aq-surface);
+  color: var(--aq-text);
+}
+
+.aq-btn-link:hover:not(:disabled) {
+  border-color: var(--aq-primary-muted);
+  color: var(--aq-primary);
+  background: var(--aq-primary-soft);
+}
+
+/* 共享消息 */
+.aq-message {
+  margin-bottom: 0.85rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--aq-radius-xs);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.aq-message--error {
+  background: var(--aq-danger-soft);
+  color: #991b1b;
+  border: 1px solid var(--aq-danger-border);
+}
+
+.aq-message--success {
+  background: var(--aq-success-soft);
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.aq-message--info {
+  background: var(--aq-primary-soft);
+  color: var(--aq-primary-hover);
+  border: 1px solid var(--aq-primary-muted);
+}
+
+/* 空状态 */
+.aq-empty {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--aq-text-muted);
+  font-size: 0.9rem;
+}
+
+/* 面板 */
+.aq-panel {
+  border: 1px solid var(--aq-border);
+  border-radius: var(--aq-radius-sm);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--aq-surface);
+  box-shadow: var(--aq-shadow-sm);
+}
+
+/* 兼容各页面 scoped 内重复定义的通用 class */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.page-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--aq-text);
+}
+
+.page-subtitle {
+  margin: 0;
+  color: var(--aq-text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.panel {
+  border: 1px solid var(--aq-border);
+  border-radius: var(--aq-radius-sm);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--aq-surface);
+  box-shadow: var(--aq-shadow-sm);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--aq-text);
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.field-label {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--aq-text);
+}
+
+.field-input,
+.field-textarea,
+.field-select {
+  width: 100%;
+  border: 1px solid var(--aq-border-strong);
+  border-radius: var(--aq-radius-xs);
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9375rem;
+  font-family: inherit;
+  color: var(--aq-text);
+  background: var(--aq-surface);
+  transition: border-color var(--aq-transition), box-shadow var(--aq-transition);
+}
+
+.field-input:focus,
+.field-textarea:focus,
+.field-select:focus {
+  outline: none;
+  border-color: var(--aq-primary);
+  box-shadow: 0 0 0 3px rgb(79 70 229 / 12%);
+}
+
+.field-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.primary-button,
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: var(--aq-radius-xs);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background var(--aq-transition),
+    border-color var(--aq-transition),
+    color var(--aq-transition);
+}
+
+.primary-button {
+  border: none;
+  background: var(--aq-primary);
+  color: var(--aq-text-inverse);
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--aq-primary-hover);
+}
+
+.primary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--aq-border-strong);
+  border-radius: var(--aq-radius-xs);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: inherit;
+  background: var(--aq-surface);
+  color: var(--aq-text);
+  cursor: pointer;
+  transition:
+    background var(--aq-transition),
+    border-color var(--aq-transition),
+    color var(--aq-transition);
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--aq-primary-muted);
+  background: var(--aq-primary-soft);
+  color: var(--aq-primary-hover);
+}
+
+.secondary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ghost-button {
+  border: 1px solid var(--aq-border-strong);
+  background: var(--aq-surface);
+  color: var(--aq-text-secondary);
+}
+
+.ghost-button:hover:not(:disabled) {
+  border-color: var(--aq-primary-muted);
+  color: var(--aq-primary);
+  background: var(--aq-primary-soft);
+}
+
+.danger-button {
+  border: 1px solid var(--aq-danger-border);
+  border-radius: var(--aq-radius-xs);
+  padding: 0.45rem 0.85rem;
+  background: var(--aq-surface);
+  color: var(--aq-danger);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background var(--aq-transition);
+}
+
+.danger-button:hover:not(:disabled) {
+  background: var(--aq-danger-soft);
+}
+
+.message {
+  margin-bottom: 0.85rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--aq-radius-xs);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.message-error {
+  background: var(--aq-danger-soft);
+  color: #991b1b;
+  border: 1px solid var(--aq-danger-border);
+}
+
+.message-ok {
+  background: var(--aq-success-soft);
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--aq-text-muted);
+  font-size: 0.9rem;
+}
+
+.action-button {
+  border: 1px solid var(--aq-border-strong);
+  background: var(--aq-surface);
+  color: var(--aq-text);
+  border-radius: var(--aq-radius-xs);
+  padding: 0.3rem 0.65rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background var(--aq-transition);
+}
+
+.action-button:hover:not(:disabled) {
+  background: var(--aq-surface-muted);
+}
+
+.action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-danger {
+  color: var(--aq-danger);
+}
+
+.action-danger:hover:not(:disabled) {
+  background: var(--aq-danger-soft);
+  border-color: var(--aq-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --aq-page-padding: 1rem;
+  }
+
+  .aq-page-title {
+    font-size: 1.3rem;
+  }
 }

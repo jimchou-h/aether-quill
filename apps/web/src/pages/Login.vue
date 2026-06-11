@@ -1,24 +1,23 @@
 <template>
   <div class="login-page">
     <div class="login-card">
-      <!-- 品牌标识 -->
       <div class="login-brand">
+        <div class="brand-mark" aria-hidden="true">Q</div>
         <h1 class="brand-title">Aether Quill</h1>
-        <p class="brand-subtitle">小说写作助手</p>
+        <p class="brand-subtitle">面向中文小说创作者的 AI 写作助手</p>
       </div>
 
-      <!-- 登录表单 -->
       <form class="login-form" @submit.prevent="handleLogin">
-        <!-- 错误提示 -->
-        <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
+        <p v-if="errorMessage" class="aq-message aq-message--error" role="alert">
+          {{ errorMessage }}
+        </p>
 
-        <!-- 邮箱输入 -->
-        <div class="field-group">
-          <label class="field-label" for="email">邮箱</label>
+        <div class="aq-field-group">
+          <label class="aq-field-label" for="email">邮箱</label>
           <input
             id="email"
             v-model="email"
-            class="field-input"
+            class="aq-field-input"
             type="email"
             placeholder="admin@example.com"
             autocomplete="email"
@@ -26,22 +25,20 @@
           />
         </div>
 
-        <!-- 密码输入 -->
-        <div class="field-group">
-          <label class="field-label" for="password">密码</label>
+        <div class="aq-field-group">
+          <label class="aq-field-label" for="password">密码</label>
           <input
             id="password"
             v-model="password"
-            class="field-input"
+            class="aq-field-input"
             type="password"
-            placeholder="password123"
+            placeholder="请输入密码"
             autocomplete="current-password"
             required
           />
         </div>
 
-        <!-- 登录按钮 -->
-        <button class="primary-button" type="submit" :disabled="loading">
+        <button class="aq-btn aq-btn-primary login-submit" type="submit" :disabled="loading">
           {{ loading ? '登录中...' : '登录' }}
         </button>
       </form>
@@ -73,7 +70,6 @@ const errorMessage = ref('');
  * 处理登录表单提交
  */
 async function handleLogin() {
-  // 验证输入
   if (!email.value.trim() || !password.value.trim()) {
     errorMessage.value = presentError('请填写邮箱和密码');
     return;
@@ -83,12 +79,10 @@ async function handleLogin() {
   errorMessage.value = '';
 
   try {
-    // 调用登录接口
     await authStore.login(email.value.trim(), password.value);
     presentSuccess('登录成功');
     await router.push('/projects');
   } catch (error: any) {
-    // 处理登录失败
     const message =
       error?.response?.data?.message || error?.message || '登录失败，请检查邮箱和密码';
     errorMessage.value = presentError(message);
@@ -104,15 +98,20 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  padding: 1.5rem;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgb(79 70 229 / 14%), transparent),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgb(217 119 6 / 8%), transparent),
+    var(--aq-bg);
 }
 
 .login-card {
-  width: 400px;
-  padding: 2.5rem;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+  width: min(420px, 100%);
+  padding: 2.5rem 2rem;
+  background: var(--aq-surface);
+  border: 1px solid var(--aq-border);
+  border-radius: var(--aq-radius);
+  box-shadow: var(--aq-shadow-lg);
 }
 
 .login-brand {
@@ -120,83 +119,49 @@ async function handleLogin() {
   margin-bottom: 2rem;
 }
 
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 1rem;
+  border-radius: var(--aq-radius-sm);
+  background: linear-gradient(135deg, var(--aq-primary) 0%, #6366f1 100%);
+  color: var(--aq-text-inverse);
+  font-family: var(--aq-font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
 .brand-title {
+  font-family: var(--aq-font-display);
   font-size: 1.75rem;
   font-weight: 700;
-  color: #1a1a2e;
-  margin-bottom: 0.25rem;
+  color: var(--aq-text);
+  margin-bottom: 0.35rem;
+  letter-spacing: -0.02em;
 }
 
 .brand-subtitle {
-  color: #666;
-  font-size: 0.95rem;
+  color: var(--aq-text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
 }
 
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+.login-form .aq-field-group:last-of-type {
+  margin-bottom: 1.25rem;
 }
 
-.field-label {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: #333;
-}
-
-.field-input {
+.login-submit {
   width: 100%;
-  border: 1px solid #d9d9d9;
-  border-radius: 8px;
-  padding: 0.65rem 0.75rem;
-  font-size: 0.95rem;
-  transition: border-color 0.2s;
-}
-
-.field-input:focus {
-  outline: none;
-  border-color: #1d4ed8;
-  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1);
-}
-
-.primary-button {
-  width: 100%;
-  border: none;
-  background: #1d4ed8;
-  color: #fff;
-  border-radius: 8px;
   padding: 0.7rem;
   font-size: 1rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
-  margin-top: 0.5rem;
-}
-
-.primary-button:hover {
-  background: #1e40af;
-}
-
-.primary-button:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.message {
-  font-size: 0.9rem;
-  text-align: center;
-}
-
-.message-error {
-  color: #b42318;
-  background: #fef2f2;
-  padding: 0.5rem;
-  border-radius: 6px;
 }
 </style>

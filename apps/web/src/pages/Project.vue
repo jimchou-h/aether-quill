@@ -1,13 +1,21 @@
 <template>
   <div class="project-page">
-    <aside class="project-sidebar">
-      <nav>
-        <router-link :to="`/projects/${projectId}/workbench`">写作工作台</router-link>
-        <router-link :to="`/projects/${projectId}/knowledge`">知识库</router-link>
-        <router-link :to="`/projects/${projectId}/personas`">人物设定</router-link>
-        <router-link :to="`/projects/${projectId}/relation-events`">关系事件</router-link>
-        <router-link :to="`/projects/${projectId}/chapters`">章节</router-link>
-        <router-link :to="`/projects/${projectId}/settings`">设置</router-link>
+    <aside class="project-sidebar" aria-label="项目导航">
+      <router-link to="/projects" class="sidebar-back aq-btn aq-btn-ghost">
+        <ArrowLeftOutlined aria-hidden="true" />
+        <span>全部项目</span>
+      </router-link>
+
+      <nav class="sidebar-nav">
+        <router-link
+          v-for="item in navItems"
+          :key="item.path"
+          :to="`/projects/${projectId}/${item.path}`"
+          class="sidebar-link"
+        >
+          <component :is="item.icon" class="sidebar-icon" aria-hidden="true" />
+          <span>{{ item.label }}</span>
+        </router-link>
       </nav>
     </aside>
     <main class="project-content">
@@ -19,37 +27,131 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
+import {
+  ArrowLeftOutlined,
+  BookOutlined,
+  ClusterOutlined,
+  EditOutlined,
+  FileTextOutlined,
+  SettingOutlined,
+  TeamOutlined,
+} from '@ant-design/icons-vue';
 
 const route = useRoute();
 const projectId = computed(() => route.params.id as string);
+
+const navItems = [
+  { path: 'workbench', label: '写作工作台', icon: EditOutlined },
+  { path: 'knowledge', label: '知识库', icon: BookOutlined },
+  { path: 'personas', label: '人物设定', icon: TeamOutlined },
+  { path: 'relation-events', label: '关系事件', icon: ClusterOutlined },
+  { path: 'chapters', label: '章节', icon: FileTextOutlined },
+  { path: 'settings', label: '设置', icon: SettingOutlined },
+];
 </script>
 
 <style scoped>
 .project-page {
   display: flex;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--aq-header-height));
 }
+
 .project-sidebar {
-  width: 200px;
-  padding: 1rem;
-  background: #f5f5f5;
-}
-.project-sidebar nav {
+  width: var(--aq-sidebar-width);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 0.75rem;
+  background: var(--aq-surface);
+  border-right: 1px solid var(--aq-border);
 }
-.project-sidebar a {
-  padding: 0.5rem;
+
+.sidebar-back {
+  justify-content: flex-start;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8125rem;
+  color: var(--aq-text-secondary);
+}
+
+.sidebar-back:hover {
+  color: var(--aq-primary);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--aq-radius-xs);
   text-decoration: none;
-  color: #333;
+  color: var(--aq-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition:
+    background var(--aq-transition),
+    color var(--aq-transition);
 }
-.project-sidebar a.router-link-active {
-  background: #ddd;
-  border-radius: 4px;
+
+.sidebar-link:hover {
+  background: var(--aq-surface-muted);
+  color: var(--aq-text);
 }
+
+.sidebar-link.router-link-active {
+  background: var(--aq-primary-soft);
+  color: var(--aq-primary);
+  font-weight: 600;
+}
+
+.sidebar-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
 .project-content {
   flex: 1;
   min-width: 0;
   padding: 1.25rem 1.5rem;
+  background: var(--aq-bg);
+}
+
+@media (max-width: 768px) {
+  .project-page {
+    flex-direction: column;
+  }
+
+  .project-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--aq-border);
+    padding: 0.75rem;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .sidebar-link {
+    padding: 0.45rem 0.65rem;
+    font-size: 0.8125rem;
+  }
+
+  .sidebar-back {
+    display: none;
+  }
+
+  .project-content {
+    padding: 1rem;
+  }
 }
 </style>
