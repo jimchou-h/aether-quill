@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   buildChapterOptimizeRetrievalQuery,
+  buildEmbeddingRetrievalQuery,
   buildGenerationRetrievalQuery,
   buildRetrievalQuery,
   buildStructuredKnowledgeEvidence,
   formatEvidence,
   resolveChapterScopedEmbeddingQuery,
   resolveMemoryChapterSummaryEmbeddingQuery,
+  resolveRetrievalMinScore,
   MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS,
   MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS,
 } from './knowledge-retrieval';
@@ -250,13 +252,69 @@ describe('buildStructuredKnowledgeEvidence', () => {
 });
 
 describe('buildRetrievalQuery', () => {
-  it('joins goal and outline', () => {
-    const q = buildRetrievalQuery(
-      { goal: '逃亡', pov: '第三人称' },
-      { outlineSummary: '卷一', personaProfile: '未配置人物设定' }
-    );
+  it('joins goal and task fields without outline or persona profile', () => {
+    const q = buildRetrievalQuery({
+      goal: '逃亡',
+      pov: '第三人称',
+      mustInclude: ['雨天'],
+      appearingCharacters: ['林策', '反派'],
+    });
     assert.ok(q.includes('逃亡'));
     assert.ok(q.includes('第三人称'));
-    assert.ok(q.includes('卷一'));
+    assert.ok(q.includes('雨天'));
+    assert.ok(q.includes('林策'));
+    assert.ok(q.includes('反派'));
+    assert.ok(!q.includes('卷一大纲全文'));
+    assert.ok(!q.includes('主角长篇设定'));
+  });
+});
+
+describe('buildEmbeddingRetrievalQuery', () => {
+  const project = {
+    outlineSummary: '大纲A'.repeat(200),
+    personaProfile: '人物B'.repeat(200),
+  };
+
+  it('includes user prompt and task fields but not full outline/persona', () => {
+    const q = buildEmbeddingRetrievalQuery('续写', project, {
+      task: {
+        goal: '揭露反派',
+        mustInclude: ['密室'],
+        appearingCharacters: ['林天'],
+      },
+    });
+    assert.ok(q.includes('续写'));
+    assert.ok(q.includes('揭露反派'));
+    assert.ok(q.includes('密室'));
+    assert.ok(q.includes('林天'));
+    assert.ok(!q.includes(project.outlineSummary));
+    assert.ok(!q.includes(project.personaProfile));
+  });
+
+  it('omits outline/persona when task is not an object', () => {
+    const q = buildEmbeddingRetrievalQuery('仅 prompt', project, { task: 'write.chapter' });
+    assert.equal(q, '仅 prompt');
+    assert.ok(!q.includes('大纲A'));
+  });
+});
+
+describe('resolveRetrievalMinScore', () => {
+  it('returns explicit value when provided', () => {
+    assert.equal(resolveRetrievalMinScore(0.35), 0.35);
+    assert.equal(resolveRetrievalMinScore(0), 0);
+  });
+
+  it('falls back to env default when not provided', () => {
+    const prev = process.env.RETRIEVAL_MIN_SCORE;
+    process.env.RETRIEVAL_MIN_SCORE = '0.25';
+    try {
+      assert.equal(resolveRetrievalMinScore(), 0.25);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.RETRIEVAL_MIN_SCORE;
+      } else {
+        process.env.RETRIEVAL_MIN_SCORE = prev;
+      }
+    }
   });
 });
