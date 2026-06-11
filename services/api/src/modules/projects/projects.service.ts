@@ -19,8 +19,8 @@ import {
 import {
   buildFallbackPersonaState,
   clampPersonaStateText,
-  normalizePersonaStateOutput,
   parseChapterPersonaStatesFromModelContent,
+  resolvePersonaStateText,
   trimForPrompt,
 } from './persona-state.util';
 import {
@@ -28,6 +28,7 @@ import {
   normalizePersonaSnapshot,
   resolvePersonaSnapshotAsOfChapter,
   snapshotFromLegacyState,
+  tryParsePersonaSnapshotFromText,
   upsertPersonaChapterState,
   type PersonaChapterStateRecord,
   type PersonaSnapshot,
@@ -69,6 +70,7 @@ import {
   normalizeSelectedEventIds,
   parseExtractedRelationEventCandidates,
   resolveRelationEventActors,
+  softDeleteChapterRelationEvents,
   RELATION_EVENT_SELECTED_MAX_COUNT,
   RELATION_EVENT_SUMMARY_MAX_LENGTH,
 } from './relation-event.util';
@@ -1715,9 +1717,15 @@ export class ProjectsService implements OnModuleInit {
       throw new BadGatewayException(message);
     }
 
-    const existingEvents = this.relationEventsStore
-      .get(projectId)!
-      .filter((event) => !event.deletedAt);
+    const projectEvents = this.relationEventsStore.get(projectId)!;
+    const projectPersonas = this.personasStore.get(projectId)!;
+    const removedIds = softDeleteChapterRelationEvents(projectEvents, normalizedChapterNo);
+    for (const eventId of removedIds) {
+      unlinkRelationEventFromPersonas(eventId, projectPersonas);
+    }
+    const removedCount = removedIds.length;
+
+    const existingEvents = projectEvents.filter((event) => !event.deletedAt);
     const existingKeys = new Set(
       existingEvents.map((event) =>
         normalizeRelationEventDedupeKey({
@@ -1769,18 +1777,19 @@ export class ProjectsService implements OnModuleInit {
         deletedAt: null,
       };
 
-      this.relationEventsStore.get(projectId)!.push(event);
-      linkRelationEventToPersonas(event, this.personasStore.get(projectId)!);
+      projectEvents.push(event);
+      linkRelationEventToPersonas(event, projectPersonas);
       existingKeys.add(dedupeKey);
       createdEvents.push(event);
     }
 
-    if (createdEvents.length > 0) {
+    if (createdEvents.length > 0 || removedCount > 0) {
       this.persistState();
     }
 
     return {
       chapterNo: normalizedChapterNo,
+      removedCount,
       createdCount: createdEvents.length,
       skippedCount,
       events: createdEvents,
@@ -3518,12 +3527,16 @@ export class ProjectsService implements OnModuleInit {
           snapshotFromLegacyState(persona.state),
       });
 
-      const normalizedState = clampPersonaStateText(nextState);
-      if (normalizedState && normalizedState !== persona.state) {
-        persona.state = normalizedState;
+      const snapshot =
+        tryParsePersonaSnapshotFromText(nextState) ??
+        snapshotFromLegacyState(resolvePersonaStateText(nextState) || persona.state);
+      const summaryLine =
+        buildSummaryLineFromSnapshot(snapshot) ||
+        resolvePersonaStateText(nextState) ||
+        clampPersonaStateText(nextState);
+      if (summaryLine && summaryLine !== persona.state) {
+        persona.state = summaryLine;
       }
-      const snapshot = snapshotFromLegacyState(normalizedState || persona.state);
-      const summaryLine = buildSummaryLineFromSnapshot(snapshot) || normalizedState || persona.state;
       persona.chapterStates = upsertPersonaChapterState(persona.chapterStates, {
         chapterNo,
         appeared: true,
@@ -3574,19 +3587,10 @@ export class ProjectsService implements OnModuleInit {
         { timeout: 90000 }
       );
 
-      const generated = normalizePersonaStateOutput(String(data?.content || ''));
-      if (generated) {
-        return clampPersonaStateText(generated);
-      }
-
-      try {
-        const snapshot = normalizePersonaSnapshot(JSON.parse(String(data?.content || '{}')));
-        const summary = buildSummaryLineFromSnapshot(snapshot);
-        if (summary) {
-          return summary;
-        }
-      } catch {
-        // fall through
+      const rawContent = String(data?.content || '').trim();
+      const resolved = resolvePersonaStateText(rawContent);
+      if (resolved) {
+        return clampPersonaStateText(resolved);
       }
 
       return clampPersonaStateText(fallbackState);

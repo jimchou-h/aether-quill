@@ -1800,6 +1800,7 @@ export interface SummaryJob {
 
 export interface ChapterRelationEventGenerateResult {
   chapterNo: number;
+  removedCount: number;
   createdCount: number;
   skippedCount: number;
   events: RelationEventItem[];

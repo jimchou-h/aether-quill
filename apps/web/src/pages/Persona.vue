@@ -12,6 +12,7 @@ import AppModal from '../components/common/AppModal.vue';
 import PersonaCardView from '../components/personas/PersonaCardView.vue';
 import PersonaRelationGraph from '../components/personas/PersonaRelationGraph.vue';
 import { presentError, presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
+import { formatPersonaStateDisplay } from '../utils/personaStateDisplay';
 
 type PersonaViewMode = 'table' | 'cards' | 'graph';
 
@@ -80,7 +81,8 @@ function startEdit(persona: PersonaItem) {
   editingPersonaId.value = persona.id;
   personaName.value = persona.name;
   personaProfile.value = persona.profile;
-  personaState.value = persona.state === '待更新' ? '' : persona.state;
+  const displayState = formatPersonaStateDisplay(persona.state);
+  personaState.value = displayState === '待更新' ? '' : displayState;
   showPersonaModal.value = true;
 }
 
@@ -352,7 +354,7 @@ onMounted(() => {
                   </span>
                 </td>
                 <td class="profile-cell" :title="persona.profile">{{ persona.profile }}</td>
-                <td>{{ persona.state || '待更新' }}</td>
+                <td>{{ formatPersonaStateDisplay(persona.state) }}</td>
                 <td class="actions-col">
                   <div class="row-actions">
                     <button class="table-button" type="button" @click="startEdit(persona)">

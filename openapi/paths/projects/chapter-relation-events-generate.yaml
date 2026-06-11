@@ -2,7 +2,8 @@ post:
   tags:
     - Projects
   summary: Generate relation events from a chapter
-  description: Extract protagonist relation events from chapter content and persist new entries
+  description: |
+    从章节正文抽取关系事件并写入。重新生成时会先软删除该章已有关系事件，再写入本次抽取结果。
   security:
     - BearerAuth: []
   parameters:

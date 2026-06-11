@@ -16,6 +16,31 @@ export interface ExtractedRelationEventCandidate {
   evidenceSnippet?: string;
 }
 
+export interface RelationEventSoftDeleteRecord {
+  id: string;
+  chapterNo: number | null;
+  deletedAt: Date | null;
+  updatedAt: Date;
+}
+
+/** 重新生成某章关系事件前，软删除该章已有未删除条目 */
+export function softDeleteChapterRelationEvents(
+  events: RelationEventSoftDeleteRecord[],
+  chapterNo: number,
+  now = new Date()
+): string[] {
+  const removedIds: string[] = [];
+  for (const event of events) {
+    if (event.deletedAt || event.chapterNo !== chapterNo) {
+      continue;
+    }
+    event.deletedAt = now;
+    event.updatedAt = now;
+    removedIds.push(event.id);
+  }
+  return removedIds;
+}
+
 export function normalizeRelationEventDedupeKey(input: {
   chapterNo: number | null;
   protagonist: string;

@@ -1,6 +1,7 @@
 import {
   buildSummaryLineFromSnapshot,
   normalizePersonaSnapshot,
+  tryParsePersonaSnapshotFromText,
   type PersonaSnapshot,
 } from './persona-snapshot.util';
 
@@ -37,7 +38,7 @@ export function normalizePersonaStateOutput(raw: string) {
   return normalized || null;
 }
 
-export const PERSONA_STATE_MAX_LENGTH = 60;
+export const PERSONA_STATE_MAX_LENGTH = 120;
 
 export interface ChapterPersonaStateItem {
   name: string;
@@ -48,14 +49,31 @@ export interface ChapterPersonaStateItem {
   summaryLine?: string;
 }
 
-export function clampPersonaStateText(state: string): string {
-  const normalized = normalizePersonaStateOutput(state) || state.trim();
+export function resolvePersonaStateText(raw: string): string {
+  const normalized = normalizePersonaStateOutput(raw) || raw.trim();
   if (!normalized) {
     return '';
   }
-  return normalized.length > PERSONA_STATE_MAX_LENGTH
-    ? normalized.slice(0, PERSONA_STATE_MAX_LENGTH)
-    : normalized;
+
+  const fromJson = tryParsePersonaSnapshotFromText(normalized);
+  if (fromJson) {
+    return buildSummaryLineFromSnapshot(fromJson);
+  }
+
+  if (normalized === '待更新') {
+    return '';
+  }
+  return normalized;
+}
+
+export function clampPersonaStateText(state: string): string {
+  const resolved = resolvePersonaStateText(state);
+  if (!resolved) {
+    return '';
+  }
+  return resolved.length > PERSONA_STATE_MAX_LENGTH
+    ? resolved.slice(0, PERSONA_STATE_MAX_LENGTH)
+    : resolved;
 }
 
 export function parseChapterPersonaStatesFromModelContent(raw: unknown): ChapterPersonaStateItem[] {
@@ -87,12 +105,18 @@ export function parseChapterPersonaStatesFromModelContent(raw: unknown): Chapter
     const record = item as Record<string, unknown>;
     const name = typeof record.name === 'string' ? record.name.trim() : '';
     const appeared = record.appeared === true;
-    const snapshot = normalizePersonaSnapshot(record.snapshot);
+    let snapshot = normalizePersonaSnapshot(record.snapshot);
     const legacyState = typeof record.state === 'string' ? record.state.trim() : '';
+    if (Object.keys(snapshot).length === 0 && legacyState) {
+      snapshot = tryParsePersonaSnapshotFromText(legacyState) ?? snapshot;
+    }
     const summaryLineRaw =
-      typeof record.summaryLine === 'string' ? record.summaryLine.trim() : legacyState;
+      typeof record.summaryLine === 'string' ? record.summaryLine.trim() : '';
     const summaryLine = (
-      summaryLineRaw || buildSummaryLineFromSnapshot(snapshot) || legacyState
+      summaryLineRaw ||
+      buildSummaryLineFromSnapshot(snapshot) ||
+      resolvePersonaStateText(legacyState) ||
+      legacyState
     ).slice(0, 120);
     if (!name || !summaryLine) {
       continue;

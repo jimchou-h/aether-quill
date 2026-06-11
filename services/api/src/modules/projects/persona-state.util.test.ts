@@ -5,6 +5,7 @@ import {
   clampPersonaStateText,
   normalizePersonaStateOutput,
   parseChapterPersonaStatesFromModelContent,
+  resolvePersonaStateText,
   trimForPrompt,
 } from './persona-state.util';
 
@@ -36,8 +37,17 @@ test('normalizePersonaStateOutput strips label and blank lines', () => {
 });
 
 test('clampPersonaStateText truncates long state', () => {
-  const longState = '状'.repeat(80);
-  assert.equal(clampPersonaStateText(longState).length, 60);
+  const longState = '状'.repeat(140);
+  assert.equal(clampPersonaStateText(longState).length, 120);
+});
+
+test('resolvePersonaStateText converts snapshot json to summary line', () => {
+  const raw =
+    '{"clothing":"穿着休闲装（长裤和T恤）","appearance":"顶级神颜，180cm，肌肉发达","status":"冷静"}';
+  const resolved = resolvePersonaStateText(raw);
+  assert.ok(resolved.includes('着装：穿着休闲装'));
+  assert.ok(resolved.includes('外貌：顶级神颜'));
+  assert.ok(resolved.includes('状态：冷静'));
 });
 
 test('parseChapterPersonaStatesFromModelContent parses fenced json array', () => {
