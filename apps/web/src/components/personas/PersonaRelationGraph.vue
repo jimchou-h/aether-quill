@@ -119,6 +119,74 @@ function nodeRadius(nodeData: GraphNode): number {
   return Math.min(26, 18 + Math.min(nodeData.weight, 4) * 2);
 }
 
+function nodeCollideRadius(nodeData: GraphNode): number {
+  const circle = nodeRadius(nodeData);
+  const labelHalfWidth = Math.min(nodeData.name.length, 8) * 6.5;
+  return Math.max(circle + 42, labelHalfWidth + 14, 52);
+}
+
+function graphHeight(nodeCount: number): number {
+  return Math.max(560, Math.min(760, 420 + nodeCount * 28));
+}
+
+function linkDistance(nodeCount: number, isIdentity: boolean): number {
+  const base = isIdentity ? 200 : 170;
+  return Math.max(base, 130 + nodeCount * 10);
+}
+
+function chargeStrength(nodeCount: number): number {
+  return -Math.max(520, 380 + nodeCount * 35);
+}
+
+function initializeNodePositions(
+  nodes: GraphNode[],
+  width: number,
+  height: number,
+  linkCount: number
+) {
+  const cx = width / 2;
+  const cy = height / 2;
+  const densityFactor = linkCount === 0 ? 0.42 : nodes.length > 12 ? 0.38 : 0.34;
+  const spread = Math.min(width, height) * densityFactor;
+  nodes.forEach((node, index) => {
+    const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1) - Math.PI / 2;
+    node.x = cx + Math.cos(angle) * spread;
+    node.y = cy + Math.sin(angle) * spread;
+  });
+}
+
+function formatNodeLabel(name: string): string {
+  if (name.length <= 8) {
+    return name;
+  }
+  return `${name.slice(0, 7)}…`;
+}
+
+function formatLinkLabel(label: string): string {
+  if (label.length <= 10) {
+    return label;
+  }
+  return `${label.slice(0, 9)}…`;
+}
+
+function linkLabelPosition(linkData: SimLink, offset = 14) {
+  const source = linkData.source as GraphNode;
+  const target = linkData.target as GraphNode;
+  const sx = source.x ?? 0;
+  const sy = source.y ?? 0;
+  const tx = target.x ?? 0;
+  const ty = target.y ?? 0;
+  const mx = (sx + tx) / 2;
+  const my = (sy + ty) / 2;
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  return {
+    x: mx - (dy / len) * offset,
+    y: my + (dx / len) * offset,
+  };
+}
+
 function linkPath(linkData: SimLink): string {
   const source = linkData.source as GraphNode;
   const target = linkData.target as GraphNode;
@@ -156,13 +224,14 @@ function renderGraph() {
   }
 
   const width = container.clientWidth || 800;
-  const height = 520;
   const { nodes, links } = toSimulationData(graphData.value.links);
   const isIdentity = graphMode.value === 'identity';
+  const height = graphHeight(nodes.length);
+  initializeNodePositions(nodes, width, height, links.length);
 
   const svg = d3.select(svgEl);
   svg.selectAll('*').remove();
-  svg.attr('viewBox', `0 0 ${width} ${height}`);
+  svg.attr('viewBox', `0 0 ${width} ${height}`).style('height', `${height}px`);
 
   const defs = svg.append('defs');
 
@@ -252,15 +321,22 @@ function renderGraph() {
       d3
         .forceLink<GraphNode, SimLink>(links)
         .id((node) => node.id)
-        .distance(isIdentity ? 160 : 150)
-        .strength(isIdentity ? 0.55 : 0.45)
+        .distance(linkDistance(nodes.length, isIdentity))
+        .strength(isIdentity ? 0.42 : 0.38)
     )
-    .force('charge', d3.forceManyBody().strength(-420))
-    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('charge', d3.forceManyBody().strength(chargeStrength(nodes.length)))
+    .force('center', d3.forceCenter(width / 2, height / 2).strength(0.08))
     .force(
       'collide',
-      d3.forceCollide().radius((node) => nodeRadius(node as GraphNode) + 28)
-    );
+      d3
+        .forceCollide<GraphNode>()
+        .radius((node) => nodeCollideRadius(node))
+        .strength(0.92)
+        .iterations(3)
+    )
+    .alpha(0.92)
+    .alphaDecay(0.028)
+    .velocityDecay(0.42);
 
   const linkGroup = zoomLayer.append('g').attr('class', 'links');
 
@@ -279,16 +355,36 @@ function renderGraph() {
 
   link.append('title').text((linkData) => linkData.tooltip);
 
+  const linkBadgeData = links.filter((item) =>
+    isIdentity ? Boolean(item.label) : item.strength > 1
+  );
+
   const linkBadge = linkGroup
-    .selectAll<SVGTextElement, SimLink>('text')
-    .data(links.filter((item) => (isIdentity ? Boolean(item.label) : item.strength > 1)))
-    .join('text')
+    .selectAll<SVGGElement, SimLink>('g.link-badge')
+    .data(linkBadgeData)
+    .join('g')
+    .attr('class', 'link-badge')
+    .attr('pointer-events', 'none');
+
+  linkBadge
+    .append('rect')
+    .attr('class', 'link-badge-bg')
+    .attr('rx', 4)
+    .attr('ry', 4)
+    .attr('fill', 'rgb(255 255 255 / 92%)')
+    .attr('stroke', '#c7d2fe')
+    .attr('stroke-width', 1);
+
+  linkBadge
+    .append('text')
     .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
     .attr('font-size', isIdentity ? 11 : 10)
     .attr('font-weight', 600)
     .attr('fill', '#4338ca')
-    .attr('pointer-events', 'none')
-    .text((linkData) => linkData.label);
+    .text((linkData) => formatLinkLabel(linkData.label));
+
+  linkBadge.append('title').text((linkData) => linkData.label);
 
   const node = zoomLayer
     .append('g')
@@ -321,6 +417,8 @@ function renderGraph() {
     });
 
   node.call(dragBehavior);
+
+  node.append('title').text((nodeData) => nodeData.name);
 
   node
     .append('circle')
@@ -358,8 +456,8 @@ function renderGraph() {
   node
     .append('text')
     .attr('class', 'node-label')
-    .text((nodeData) => nodeData.name)
-    .attr('y', (nodeData) => nodeRadius(nodeData) + 16)
+    .text((nodeData) => formatNodeLabel(nodeData.name))
+    .attr('y', (nodeData) => nodeRadius(nodeData) + 20)
     .attr('text-anchor', 'middle')
     .attr('font-size', 12)
     .attr('font-weight', (nodeData) => (nodeData.id === props.selectedPersonaId ? 700 : 500))
@@ -369,17 +467,25 @@ function renderGraph() {
   simulation.on('tick', () => {
     link.attr('d', linkPath);
 
-    linkBadge
-      .attr('x', (linkData) => {
-        const source = linkData.source as GraphNode;
-        const target = linkData.target as GraphNode;
-        return ((source.x ?? 0) + (target.x ?? 0)) / 2;
-      })
-      .attr('y', (linkData) => {
-        const source = linkData.source as GraphNode;
-        const target = linkData.target as GraphNode;
-        return ((source.y ?? 0) + (target.y ?? 0)) / 2 - 4;
-      });
+    linkBadge.attr('transform', (linkData) => {
+      const { x, y } = linkLabelPosition(linkData);
+      return `translate(${x},${y})`;
+    });
+
+    linkBadge.each(function () {
+      const group = d3.select(this);
+      const textNode = group.select('text').node() as SVGTextElement | null;
+      const rect = group.select('rect');
+      if (!textNode) {
+        return;
+      }
+      const bbox = textNode.getBBox();
+      rect
+        .attr('x', bbox.x - 5)
+        .attr('y', bbox.y - 3)
+        .attr('width', bbox.width + 10)
+        .attr('height', bbox.height + 6);
+    });
 
     node.attr('transform', (nodeData) => `translate(${nodeData.x ?? 0},${nodeData.y ?? 0})`);
   });
@@ -659,7 +765,8 @@ watch(
 .graph-svg {
   display: block;
   width: 100%;
-  height: 520px;
+  min-height: 560px;
+  height: clamp(560px, 62vh, 760px);
   border-radius: var(--aq-radius-xs);
   border: 1px solid var(--aq-border);
   background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
