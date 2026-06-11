@@ -55,7 +55,7 @@ export interface PersistedProjectState {
       status: 'draft' | 'published';
       relationEventIds?: string[];
       appearedChapterNos?: number[];
-        lastAppearedChapterNo?: number | null;
+      lastAppearedChapterNo?: number | null;
       chapterStates?: Array<{
         chapterNo: number;
         appeared: boolean;
@@ -145,6 +145,21 @@ export interface PersistedProjectState {
       createdAt: string;
       updatedAt: string;
       deletedAt: string | null;
+    }>
+  >;
+  identityRelations: Record<
+    string,
+    Array<{
+      id: string;
+      projectId: string;
+      fromPersonaId: string;
+      toPersonaId: string;
+      relation: string;
+      source: 'llm' | 'manual';
+      chapterNo: number | null;
+      evidenceSnippet?: string;
+      createdAt: string;
+      updatedAt: string;
     }>
   >;
 }

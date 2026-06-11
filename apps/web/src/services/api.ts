@@ -247,6 +247,7 @@ export const apiClient = {
       settings: ProjectSettings;
       personas: PersonaItem[];
       knowledge: KnowledgeItem;
+      identityRelations: components['schemas']['PersonaIdentityRelation'][];
       latestIndexJob: IndexJob | null;
       latestSummaryJob: SummaryJob | null;
     }>(response.data);
@@ -821,8 +822,8 @@ export const apiClient = {
         })),
         chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
         chapterSummaryMemoryCount:
-          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
-          3,
+          (workspace.settings as { chapterSummaryMemoryCount?: number })
+            .chapterSummaryMemoryCount ?? 3,
         generationTemperature: workspace.settings.generationTemperature,
         selectedRelationMemory: buildRelationMemoryBlock(selectedEvents),
         usedRelationEvents: selectedEvents,
@@ -1859,6 +1860,9 @@ export interface PromptConfigVersionItem {
   createdAt: string;
   isPublished: boolean;
 }
+
+export type PersonaIdentityRelationItem = components['schemas']['PersonaIdentityRelation'];
+export type ProjectWorkspaceSnapshot = components['schemas']['ProjectWorkspaceSnapshot'];
 
 export interface RelationEventItem {
   id: string;

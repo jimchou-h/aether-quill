@@ -72,6 +72,12 @@ import {
   RELATION_EVENT_SELECTED_MAX_COUNT,
   RELATION_EVENT_SUMMARY_MAX_LENGTH,
 } from './relation-event.util';
+import {
+  buildIdentityRelationMemoryBlock,
+  mergeIdentityRelationCandidates,
+  parseExtractedIdentityRelationCandidates,
+  type PersonaIdentityRelationRecord,
+} from './identity-relation.util';
 import type { ChapterStructuredInfoPersisted } from './persisted-workspace.types';
 import { DocumentsService } from '../documents/documents.service';
 import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
@@ -323,6 +329,7 @@ export interface WorkspaceSnapshot {
   settings: ProjectSettings;
   personas: PersonaRecord[];
   knowledge: KnowledgeRecord;
+  identityRelations: PersonaIdentityRelationRecord[];
   latestIndexJob: IndexJobRecord | null;
   latestSummaryJob: SummaryJobRecord | null;
 }
@@ -355,6 +362,7 @@ type RestoredWorkspace = {
   indexJobs: Record<string, IndexJobRecord[]>;
   summarizeJobs: Record<string, SummaryJobRecord[]>;
   relationEvents: Record<string, RelationEventRecord[]>;
+  identityRelations: Record<string, PersonaIdentityRelationRecord[]>;
 };
 
 @Injectable()
@@ -381,6 +389,7 @@ export class ProjectsService implements OnModuleInit {
   private readonly indexJobsStore = new Map<string, IndexJobRecord[]>();
   private readonly summarizeJobsStore = new Map<string, SummaryJobRecord[]>();
   private readonly relationEventsStore = new Map<string, RelationEventRecord[]>();
+  private readonly identityRelationsStore = new Map<string, PersonaIdentityRelationRecord[]>();
 
   private persistenceResolve!: () => void;
   readonly persistenceReady: Promise<void>;
@@ -488,6 +497,7 @@ export class ProjectsService implements OnModuleInit {
     this.indexJobsStore.delete(id);
     this.summarizeJobsStore.delete(id);
     this.relationEventsStore.delete(id);
+    this.identityRelationsStore.delete(id);
     this.persistState();
 
     return { id };
@@ -529,7 +539,15 @@ export class ProjectsService implements OnModuleInit {
     const latestIndexJob = this.getLatestIndexJob(id);
     const latestSummaryJob = this.getLatestSummaryJob(id);
 
-    return { project, settings, personas, knowledge, latestIndexJob, latestSummaryJob };
+    return {
+      project,
+      settings,
+      personas,
+      knowledge,
+      identityRelations: this.identityRelationsStore.get(id) ?? [],
+      latestIndexJob,
+      latestSummaryJob,
+    };
   }
 
   getExportBundle(projectId: string, userId?: string): ProjectExportBundle {
@@ -3069,6 +3087,7 @@ export class ProjectsService implements OnModuleInit {
       indexJobs: {},
       summarizeJobs: {},
       relationEvents: {},
+      identityRelations: {},
     };
 
     for (const [projectId, settings] of this.settingsStore.entries()) {
@@ -3134,6 +3153,14 @@ export class ProjectsService implements OnModuleInit {
         createdAt: event.createdAt.toISOString(),
         updatedAt: event.updatedAt.toISOString(),
         deletedAt: event.deletedAt ? event.deletedAt.toISOString() : null,
+      }));
+    }
+
+    for (const [projectId, relations] of this.identityRelationsStore.entries()) {
+      payload.identityRelations[projectId] = relations.map((relation) => ({
+        ...relation,
+        createdAt: relation.createdAt.toISOString(),
+        updatedAt: relation.updatedAt.toISOString(),
       }));
     }
 
@@ -3299,6 +3326,26 @@ export class ProjectsService implements OnModuleInit {
           }),
         ])
       ),
+      identityRelations: Object.fromEntries(
+        Object.entries(parsed.identityRelations || {}).map(([projectId, relations]) => [
+          projectId,
+          (relations || []).map((relation) => ({
+            id: relation.id,
+            projectId: relation.projectId,
+            fromPersonaId: relation.fromPersonaId,
+            toPersonaId: relation.toPersonaId,
+            relation: relation.relation,
+            source: relation.source === 'manual' ? 'manual' : 'llm',
+            chapterNo:
+              typeof relation.chapterNo === 'number' && Number.isFinite(relation.chapterNo)
+                ? relation.chapterNo
+                : null,
+            evidenceSnippet: relation.evidenceSnippet,
+            createdAt: new Date(relation.createdAt),
+            updatedAt: new Date(relation.updatedAt),
+          })),
+        ])
+      ),
     };
   }
 
@@ -3311,12 +3358,14 @@ export class ProjectsService implements OnModuleInit {
     this.indexJobsStore.clear();
     this.summarizeJobsStore.clear();
     this.relationEventsStore.clear();
+    this.identityRelationsStore.clear();
     this.hydrateMap(this.settingsStore, restored.settings);
     this.hydrateMap(this.personasStore, restored.personas);
     this.hydrateMap(this.knowledgeStore, restored.knowledge);
     this.hydrateMap(this.indexJobsStore, restored.indexJobs);
     this.hydrateMap(this.summarizeJobsStore, restored.summarizeJobs);
     this.hydrateMap(this.relationEventsStore, restored.relationEvents);
+    this.hydrateMap(this.identityRelationsStore, restored.identityRelations ?? {});
   }
 
   private hydrateMap<T>(target: Map<string, T>, source: Record<string, T>) {
@@ -3627,6 +3676,13 @@ export class ProjectsService implements OnModuleInit {
         chapter.summarySource = result.summarySource;
         chapter.summaryUpdatedAt = new Date();
         chapter.updatedAt = new Date();
+        if (result.summarySource === 'llm') {
+          try {
+            await this.extractAndMergeIdentityRelationsFromChapter(projectId, chapter);
+          } catch {
+            // 身份关系抽取失败不阻断摘要任务
+          }
+        }
         void this.indexChapterSummaryVector(projectId, chapter).catch(() => undefined);
         job.summaries.push({
           chapterNo: chapter.chapterNo,
@@ -3663,6 +3719,60 @@ export class ProjectsService implements OnModuleInit {
       { title: chapter.title, summary },
       { timeout: 30000 }
     );
+  }
+
+  private async extractAndMergeIdentityRelationsFromChapter(
+    projectId: string,
+    chapter: ChapterRecord
+  ): Promise<void> {
+    if (!chapter.content.trim()) {
+      return;
+    }
+
+    const personas = this.personasStore.get(projectId) ?? [];
+    const personaNames = personas.map((item) => item.name).filter(Boolean);
+    if (personaNames.length < 2) {
+      return;
+    }
+
+    let candidates;
+    try {
+      const response = await axios.post<{ relations?: unknown }>(
+        `${this.getRagOrchestratorUrl()}/api/extract/identity-relations`,
+        {
+          chapterNo: chapter.chapterNo,
+          title: chapter.title,
+          content: chapter.content,
+          personaNames,
+        },
+        { timeout: 120000 }
+      );
+      candidates = parseExtractedIdentityRelationCandidates(
+        response.data?.relations ?? response.data
+      );
+    } catch {
+      return;
+    }
+
+    if (candidates.length === 0) {
+      return;
+    }
+
+    const existing = this.identityRelationsStore.get(projectId) ?? [];
+    const merged = mergeIdentityRelationCandidates({
+      projectId,
+      chapterNo: chapter.chapterNo,
+      existing,
+      candidates,
+      personas,
+    });
+
+    if (merged.addedCount === 0 && merged.updatedCount === 0) {
+      return;
+    }
+
+    this.identityRelationsStore.set(projectId, merged.records);
+    this.persistState();
   }
 
   private async summarizeChapterContent(chapter: ChapterRecord): Promise<ChapterSummaryResult> {
@@ -3740,6 +3850,10 @@ export class ProjectsService implements OnModuleInit {
 
     if (!this.relationEventsStore.has(projectId)) {
       this.relationEventsStore.set(projectId, []);
+    }
+
+    if (!this.identityRelationsStore.has(projectId)) {
+      this.identityRelationsStore.set(projectId, []);
     }
   }
 
@@ -3968,6 +4082,8 @@ export class ProjectsService implements OnModuleInit {
     const docs = this.documentsService.findAll(projectId);
 
     const personaConsistencyNotes = this.buildPersonaGraphConsistencyNotes(projectId, personas);
+    const identityRelations = this.identityRelationsStore.get(projectId) ?? [];
+    const identityRelationMemory = buildIdentityRelationMemoryBlock(identityRelations, personas);
 
     await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
       systemPromptText: settings.systemPromptText,
@@ -3988,6 +4104,7 @@ export class ProjectsService implements OnModuleInit {
         docType: doc.docType,
       })),
       selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
+      identityRelationMemory,
       usedRelationEvents,
       personaConsistencyNotes,
       personas: personas.map((persona) => ({

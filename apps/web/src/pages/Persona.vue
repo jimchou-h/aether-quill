@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import {
   apiClient,
   type DocumentItem,
+  type PersonaIdentityRelationItem,
   type PersonaItem,
   type RelationEventItem,
 } from '../services/api';
@@ -29,6 +30,7 @@ const projectName = shallowRef('project');
 const viewMode = ref<PersonaViewMode>('table');
 const selectedPersonaId = ref<string | null>(null);
 const relationEvents = ref<RelationEventItem[]>([]);
+const identityRelations = ref<PersonaIdentityRelationItem[]>([]);
 const documents = ref<DocumentItem[]>([]);
 
 const personaName = shallowRef('');
@@ -107,6 +109,7 @@ async function loadData() {
       lastAppearedChapterNo: persona.lastAppearedChapterNo ?? null,
     }));
     relationEvents.value = events;
+    identityRelations.value = workspace.identityRelations ?? [];
     documents.value = docsPayload.map((doc) => ({
       ...doc,
       content: doc.content ?? '',
@@ -321,6 +324,7 @@ onMounted(() => {
           v-else-if="viewMode === 'graph'"
           :personas="personas"
           :relation-events="relationEvents"
+          :identity-relations="identityRelations"
           :selected-persona-id="selectedPersonaId"
           @select-persona="handleSelectPersona"
         />

@@ -113,6 +113,7 @@ interface ProjectContext {
   /** 项目知识库文档全文列表，用于标题匹配后整文注入 */
   knowledgeDocuments?: KnowledgeDocumentPayload[];
   selectedRelationMemory?: string;
+  identityRelationMemory?: string;
   usedRelationEvents?: Array<{
     id: string;
     protagonist: string;
@@ -186,6 +187,7 @@ async function getGenerationContext(
     priorChapterTailChars: ctx.priorChapterTailChars,
     contextExcerptMaxChars: ctx.contextExcerptMaxChars,
     selectedRelationMemory: ctx.selectedRelationMemory,
+    identityRelationMemory: ctx.identityRelationMemory,
     currentChapterNo,
     personas: ctx.personas,
     includeNextChapterHead: options?.includeNextChapterHead,
@@ -340,6 +342,40 @@ app.post('/api/extract/chapter-personas', async (req, res) => {
   }
 });
 
+app.post('/api/extract/identity-relations', async (req, res) => {
+  const chapterNo = Number(req.body?.chapterNo || 0);
+  const title = String(req.body?.title || '').trim();
+  const content = String(req.body?.content || '');
+  const personaNames = Array.isArray(req.body?.personaNames)
+    ? req.body.personaNames
+        .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+    : [];
+
+  if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+    res.status(400).json({ message: 'chapterNo 必须为正整数' });
+    return;
+  }
+
+  if (!content.trim()) {
+    res.status(400).json({ message: 'content 不能为空' });
+    return;
+  }
+
+  try {
+    const relations = await generationService.extractChapterIdentityRelations({
+      chapterNo,
+      title,
+      content,
+      personaNames,
+    });
+    res.json({ relations });
+  } catch (error) {
+    console.error('Identity relation extraction failed:', error);
+    res.status(502).json({ message: '身份关系抽取失败' });
+  }
+});
+
 app.post('/api/extract/relation-events', async (req, res) => {
   const chapterNo = Number(req.body?.chapterNo || 0);
   const title = String(req.body?.title || '').trim();
@@ -421,6 +457,9 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
   if (typeof payload.selectedRelationMemory === 'string') {
     context.selectedRelationMemory = payload.selectedRelationMemory;
+  }
+  if (typeof payload.identityRelationMemory === 'string') {
+    context.identityRelationMemory = payload.identityRelationMemory;
   }
   if (Array.isArray(payload.usedRelationEvents)) {
     context.usedRelationEvents = payload.usedRelationEvents;

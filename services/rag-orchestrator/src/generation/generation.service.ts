@@ -7,6 +7,10 @@ import {
 import { TraceRecord, GenerateRequest } from './types';
 import { consumeProviderSseStreamChunk, flushProviderSseStreamBuffer } from './provider-sse-stream';
 import { TraceStore, TraceQuery, TraceStats } from './trace-store';
+import {
+  buildChapterIdentityRelationExtractPrompt,
+  parseIdentityRelationsFromModelContent,
+} from './identity-relation-extract';
 
 export interface GenerationContext {
   /** 项目级 systemPromptText（Settings） */
@@ -494,6 +498,27 @@ export class GenerationService {
       temperature: 0.2,
     });
     return this.parseChapterPersonaStatesFromModelContent(result.content);
+  }
+
+  async extractChapterIdentityRelations(input: {
+    chapterNo: number;
+    title: string;
+    content: string;
+    personaNames: string[];
+  }): Promise<
+    Array<{
+      from: string;
+      to: string;
+      relation: string;
+      evidenceSnippet?: string;
+    }>
+  > {
+    const prompt = buildChapterIdentityRelationExtractPrompt(input);
+    const result = await this.callProviderApi(prompt, {
+      maxTokens: 1536,
+      temperature: 0.2,
+    });
+    return parseIdentityRelationsFromModelContent(result.content);
   }
 
   async extractChapterRelationEvents(input: {
