@@ -469,6 +469,7 @@ components:
       type: object
       required:
         - chapterNo
+        - removedCount
         - createdCount
         - skippedCount
         - events
@@ -476,6 +477,10 @@ components:
         chapterNo:
           type: integer
           minimum: 1
+        removedCount:
+          type: integer
+          minimum: 0
+          description: 重新生成前软删除的该章既有关系事件条数
         createdCount:
           type: integer
           minimum: 0

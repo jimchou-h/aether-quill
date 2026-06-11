@@ -11,6 +11,7 @@ import {
   buildChapterIdentityRelationExtractPrompt,
   parseIdentityRelationsFromModelContent,
 } from './identity-relation-extract';
+import { buildSummaryLineFromSnapshot } from '../context/persona-snapshot';
 
 export interface GenerationContext {
   /** 项目级 systemPromptText（Settings） */
@@ -446,8 +447,9 @@ export class GenerationService {
           }
         : undefined;
       const summaryLineRaw =
-        typeof record.summaryLine === 'string' ? record.summaryLine.trim().slice(0, 120) : legacyState;
-      const summaryLine = summaryLineRaw || legacyState;
+        typeof record.summaryLine === 'string' ? record.summaryLine.trim().slice(0, 120) : '';
+      const summaryLine =
+        summaryLineRaw || buildSummaryLineFromSnapshot(snapshot ?? {}) || legacyState;
       if (!name || !summaryLine) {
         continue;
       }

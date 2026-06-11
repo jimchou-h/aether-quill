@@ -14,6 +14,7 @@ import {
   findUnselectedRelationSuggestions,
 } from '../../utils/personaGraph';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
+import { formatPersonaStateDisplay } from '../../utils/personaStateDisplay';
 import {
   hasStructuredInfoForKnowledgeMatch,
   normalizeWorkbenchChapterNo,
@@ -127,7 +128,7 @@ const absentWarnings = computed(() =>
 const personaStateByName = computed(() => {
   const map = new Map<string, string>();
   for (const persona of props.personas) {
-    map.set(persona.name, persona.state || '待更新');
+    map.set(persona.name, formatPersonaStateDisplay(persona.state));
   }
   return map;
 });

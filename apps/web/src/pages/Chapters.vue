@@ -289,9 +289,12 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
     message.value = presentInfo(`第${chapterNo}章关系事件生成中...`);
     const result = await apiClient.generateChapterRelationEvents(projectId.value, chapterNo);
 
+    const removedHint =
+      result.removedCount > 0 ? `，已清除该章旧事件 ${result.removedCount} 条` : '';
+
     if (result.createdCount > 0) {
       message.value = presentSuccess(
-        `第${chapterNo}章已新增 ${result.createdCount} 条关系事件` +
+        `第${chapterNo}章已写入 ${result.createdCount} 条关系事件${removedHint}` +
           (result.skippedCount > 0 ? `，跳过 ${result.skippedCount} 条重复` : '')
       );
       return;
@@ -299,12 +302,14 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
 
     if (result.skippedCount > 0) {
       message.value = presentInfo(
-        `第${chapterNo}章未新增关系事件，跳过 ${result.skippedCount} 条重复`
+        `第${chapterNo}章未写入新关系事件${removedHint}，跳过 ${result.skippedCount} 条重复`
       );
       return;
     }
 
-    message.value = presentInfo(`第${chapterNo}章未识别到可写入的关系事件`);
+    message.value = presentInfo(
+      `第${chapterNo}章未识别到可写入的关系事件${removedHint}`
+    );
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '生成关系事件失败');
   } finally {

@@ -7,6 +7,7 @@ import {
   normalizeSelectedEventIds,
   parseExtractedRelationEventCandidates,
   resolveRelationEventActors,
+  softDeleteChapterRelationEvents,
 } from './relation-event.util';
 
 test('buildRelationMemoryBlock returns empty string for no events', () => {
@@ -76,6 +77,36 @@ test('parseExtractedRelationEventCandidates parses fenced json arrays', () => {
   assert.equal(candidates[0]?.counterparty, '女主A');
   assert.equal(candidates[0]?.summary, '误会加深');
   assert.equal(candidates[0]?.evidenceSnippet, '她转身离开');
+});
+
+test('softDeleteChapterRelationEvents soft-deletes only matching chapter', () => {
+  const now = new Date('2026-06-11T00:00:00.000Z');
+  const events = [
+    {
+      id: 'e1',
+      chapterNo: 3,
+      deletedAt: null,
+      updatedAt: new Date('2026-06-10T00:00:00.000Z'),
+    },
+    {
+      id: 'e2',
+      chapterNo: 4,
+      deletedAt: null,
+      updatedAt: new Date('2026-06-10T00:00:00.000Z'),
+    },
+    {
+      id: 'e3',
+      chapterNo: 3,
+      deletedAt: new Date('2026-06-09T00:00:00.000Z'),
+      updatedAt: new Date('2026-06-09T00:00:00.000Z'),
+    },
+  ];
+
+  const removedIds = softDeleteChapterRelationEvents(events, 3, now);
+  assert.deepEqual(removedIds, ['e1']);
+  assert.ok(events[0]?.deletedAt);
+  assert.equal(events[1]?.deletedAt, null);
+  assert.equal(events[2]?.deletedAt?.toISOString(), '2026-06-09T00:00:00.000Z');
 });
 
 test('parseExtractedRelationEventCandidates skips invalid items', () => {

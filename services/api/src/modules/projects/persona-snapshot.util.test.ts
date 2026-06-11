@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   buildPersonaSnapshotsForPrompt,
   buildSummaryLineFromSnapshot,
+  formatPersonaStateDisplay,
   resolvePersonaSnapshotAsOfChapter,
+  tryParsePersonaSnapshotFromText,
   upsertPersonaChapterState,
 } from './persona-snapshot.util';
 
@@ -55,6 +57,19 @@ test('upsertPersonaChapterState replaces same chapter', () => {
   });
   assert.equal(second.length, 1);
   assert.equal(second[0]?.snapshot.clothing, '新西装');
+});
+
+test('tryParsePersonaSnapshotFromText parses broken json prefix', () => {
+  const raw =
+    '{"clothing":"穿着休闲装（长裤和T恤）","appearance":"顶级神颜，180cm，肌肉发达，8块腹';
+  const snapshot = tryParsePersonaSnapshotFromText(raw);
+  assert.equal(snapshot?.clothing, '穿着休闲装（长裤和T恤）');
+  assert.ok(snapshot?.appearance?.includes('顶级神颜'));
+});
+
+test('formatPersonaStateDisplay renders summary line instead of raw json', () => {
+  const raw = '{"clothing":"深灰西装","status":"冷静"}';
+  assert.equal(formatPersonaStateDisplay(raw), '着装：深灰西装；状态：冷静');
 });
 
 test('buildPersonaSnapshotsForPrompt uses as-of chapter snapshots', () => {

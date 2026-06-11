@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import type { DocumentItem, PersonaItem, RelationEventItem } from '../../services/api';
 import { buildPersonaTimeline, getPersonaRelationEvents } from '../../utils/personaGraph';
+import { formatPersonaStateDisplay } from '../../utils/personaStateDisplay';
 
 const props = defineProps<{
   projectId: string;
@@ -90,7 +91,7 @@ function jumpToChapter(chapterNo: number) {
         @click="jumpToPersona(persona.id)"
       >
         <strong>{{ persona.name }}</strong>
-        <span>{{ persona.state || '待更新' }}</span>
+        <span>{{ formatPersonaStateDisplay(persona.state) }}</span>
       </button>
     </aside>
 
@@ -99,7 +100,7 @@ function jumpToChapter(chapterNo: number) {
         <h3>{{ selectedPersona.name }}</h3>
         <p>
           状态：{{ selectedPersona.status === 'published' ? '已发布' : '草稿' }} · 人物状态：{{
-            selectedPersona.state || '待更新'
+            formatPersonaStateDisplay(selectedPersona.state)
           }}
         </p>
         <p>出场章节：{{ formatAppearance(selectedPersona) }}</p>

@@ -44,12 +44,66 @@ export function normalizePersonaSnapshot(raw: unknown): PersonaSnapshot {
   };
 }
 
+const SNAPSHOT_JSON_FIELD_RE =
+  /"(clothing|appearance|status|location|possessions)"\s*:\s*"((?:\\.|[^"\\])*)(?:"|$)/gu;
+
+function unescapeJsonString(value: string): string {
+  return value.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+}
+
+function extractSnapshotFieldsFromBrokenJson(text: string): PersonaSnapshot {
+  const snapshot: PersonaSnapshot = {};
+  for (const match of text.matchAll(SNAPSHOT_JSON_FIELD_RE)) {
+    const field = match[1] as keyof PersonaSnapshot;
+    const rawValue = unescapeJsonString(match[2] ?? '');
+    const normalized = clampField(rawValue);
+    if (normalized) {
+      snapshot[field] = normalized;
+    }
+  }
+  return snapshot;
+}
+
+export function tryParsePersonaSnapshotFromText(text: string | undefined): PersonaSnapshot | null {
+  const trimmed = text?.trim();
+  if (!trimmed || trimmed === '待更新' || !trimmed.startsWith('{')) {
+    return null;
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonText = (fenced ? fenced[1] : trimmed).trim();
+
+  try {
+    const parsed = normalizePersonaSnapshot(JSON.parse(jsonText));
+    return Object.keys(parsed).length > 0 ? parsed : null;
+  } catch {
+    const partial = normalizePersonaSnapshot(extractSnapshotFieldsFromBrokenJson(jsonText));
+    return Object.keys(partial).length > 0 ? partial : null;
+  }
+}
+
 export function snapshotFromLegacyState(state: string | undefined): PersonaSnapshot {
   const trimmed = state?.trim();
   if (!trimmed || trimmed === '待更新') {
     return {};
   }
+  const parsed = tryParsePersonaSnapshotFromText(trimmed);
+  if (parsed) {
+    return parsed;
+  }
   return { status: clampField(trimmed) };
+}
+
+export function formatPersonaStateDisplay(state: string | undefined): string {
+  const trimmed = state?.trim();
+  if (!trimmed || trimmed === '待更新') {
+    return '待更新';
+  }
+  const summaryLine = buildSummaryLineFromSnapshot(snapshotFromLegacyState(trimmed));
+  if (summaryLine) {
+    return summaryLine;
+  }
+  return trimmed;
 }
 
 export function buildSummaryLineFromSnapshot(snapshot: PersonaSnapshot): string {

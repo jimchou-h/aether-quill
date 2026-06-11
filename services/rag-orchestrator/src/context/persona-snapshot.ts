@@ -26,6 +26,30 @@ export interface PersonaContextPayload {
 
 const SUMMARY_LINE_LIMIT = 120;
 
+export function buildSummaryLineFromSnapshot(snapshot: PersonaSnapshot): string {
+  const parts: string[] = [];
+  if (snapshot.clothing) {
+    parts.push(`着装：${snapshot.clothing}`);
+  }
+  if (snapshot.appearance) {
+    parts.push(`外貌：${snapshot.appearance}`);
+  }
+  if (snapshot.status) {
+    parts.push(`状态：${snapshot.status}`);
+  }
+  if (snapshot.location) {
+    parts.push(`位置：${snapshot.location}`);
+  }
+  if (snapshot.possessions) {
+    parts.push(`持有：${snapshot.possessions}`);
+  }
+  const line = parts.join('；');
+  if (!line) {
+    return '';
+  }
+  return line.length > SUMMARY_LINE_LIMIT ? line.slice(0, SUMMARY_LINE_LIMIT) : line;
+}
+
 export function resolvePersonaSnapshotAsOfChapter(
   chapterStates: PersonaChapterStateRecord[] | undefined,
   asOfBeforeChapterNo: number
