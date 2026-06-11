@@ -1,3 +1,4 @@
+import { getResolvedRagInfrastructureEnv } from '@aether-quill/config';
 import { clampKnowledgeDocQuota } from '../context/generation-preferences';
 import { Reranker } from './reranker';
 import {
@@ -5,10 +6,7 @@ import {
   buildFullDocumentsFromTitleMatches,
   type RetrievalFullDocument,
 } from './retrieval-enrichment';
-import {
-  formatCroppedDocumentContent,
-  pickTopParagraphs,
-} from './paragraph-crop';
+import { formatCroppedDocumentContent, pickTopParagraphs } from './paragraph-crop';
 import {
   assembleStructuredEvidenceText,
   formatKnowledgeEvidenceBlock,
@@ -51,7 +49,7 @@ export function buildGenerationRetrievalQuery(
   const isTaskObject = typeof task === 'object' && task !== null && !Array.isArray(task);
 
   if (isTaskObject) {
-    const tail = buildRetrievalQuery(task as Record<string, unknown>, projectCtx);
+    const tail = buildRetrievalQuery(task as Record<string, unknown>);
     if (tail.trim()) {
       parts.push(tail.trim());
     }
@@ -198,10 +196,19 @@ export function resolveMemoryChapterSummaryEmbeddingQuery(input: {
   return raw.slice(0, MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS);
 }
 
-export function buildRetrievalQuery(
-  task: Record<string, unknown>,
-  context: { outlineSummary: string; personaProfile: string }
-): string {
+function appendAppearingCharacters(parts: string[], task: Record<string, unknown>): void {
+  if (Array.isArray(task.appearingCharacters)) {
+    const chars = task.appearingCharacters.map(String).filter(Boolean);
+    if (chars.length > 0) {
+      parts.push(chars.join(' '));
+    }
+  }
+}
+
+/**
+ * 向量 embedding 用检索 query：聚焦任务意图，不拼全量大纲/人物档案。
+ */
+export function buildRetrievalQuery(task: Record<string, unknown>): string {
   const parts: string[] = [];
   const goal = typeof task.goal === 'string' ? task.goal.replace(/\\n/g, '\n') : '';
   if (goal.trim()) {
@@ -215,6 +222,8 @@ export function buildRetrievalQuery(
     }
   }
 
+  appendAppearingCharacters(parts, task);
+
   if (Array.isArray(task.avoid)) {
     const avoid = task.avoid.map(String).filter(Boolean);
     if (avoid.length > 0) {
@@ -226,15 +235,49 @@ export function buildRetrievalQuery(
     parts.push(task.pov.trim());
   }
 
-  if (context.outlineSummary.trim()) {
-    parts.push(context.outlineSummary.trim());
-  }
-
-  if (context.personaProfile.trim() && context.personaProfile !== '未配置人物设定') {
-    parts.push(context.personaProfile.trim());
-  }
-
   return parts.join('\n');
+}
+
+/**
+ * 无章节锚定时的 embedding query：用户 prompt + 任务字段，不含大纲/人物全文。
+ */
+export function buildEmbeddingRetrievalQuery(
+  userPrompt: string,
+  projectCtx: { outlineSummary: string; personaProfile: string },
+  extraContext?: Record<string, unknown>
+): string {
+  const parts: string[] = [];
+  const trimmed = userPrompt.trim();
+  if (trimmed) {
+    parts.push(trimmed);
+  }
+
+  const task = extraContext?.task;
+  const isTaskObject = typeof task === 'object' && task !== null && !Array.isArray(task);
+  if (isTaskObject) {
+    const tail = buildRetrievalQuery(task as Record<string, unknown>);
+    if (tail.trim()) {
+      parts.push(tail.trim());
+    }
+  }
+
+  return parts.join('\n\n');
+}
+
+export function resolveRetrievalMinScore(explicit?: number): number {
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  try {
+    return getResolvedRagInfrastructureEnv().retrievalMinScore;
+  } catch {
+    const raw = process.env.RETRIEVAL_MIN_SCORE;
+    if (raw === undefined || raw.trim() === '') {
+      return 0.2;
+    }
+    const n = Number.parseFloat(raw);
+    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.2;
+  }
 }
 
 export function formatEvidence(chunks: ChunkWithEmbedding[]): string {
@@ -289,7 +332,7 @@ export async function retrieveKnowledgeForDraft(
     query: trimmed,
     projectId,
     topK,
-    minScore: options?.minScore ?? 0,
+    minScore: resolveRetrievalMinScore(options?.minScore),
     ...(embedOpt !== undefined ? { embeddingQuery: embedOpt } : {}),
   });
   const reranked = reranker.rerank(trimmed, retrieved, topN);
@@ -418,9 +461,7 @@ export function buildStructuredKnowledgeEvidence(
 ): StructuredKnowledgeRetrievalResult {
   const ch = kbCtx.chapters.find((c) => c.chapterNo === chapterNo);
   const matchingText = ch?.structuredMatchingText?.trim() ?? '';
-  const knowledgeDocuments = normalizeKnowledgeDocumentsForRetrieval(
-    kbCtx.knowledgeDocuments
-  );
+  const knowledgeDocuments = normalizeKnowledgeDocumentsForRetrieval(kbCtx.knowledgeDocuments);
 
   if (!matchingText) {
     return {
@@ -439,12 +480,8 @@ export function buildStructuredKnowledgeEvidence(
   const scanLimit = personaTopN + otherTopN + 20;
 
   const ranked = pickTopTitleMatchedDocuments(matchingText, knowledgeDocuments, scanLimit);
-  const personaPicked = ranked
-    .filter((d) => isPersonaCardDoc(d.docType))
-    .slice(0, personaTopN);
-  const otherPicked = ranked
-    .filter((d) => !isPersonaCardDoc(d.docType))
-    .slice(0, otherTopN);
+  const personaPicked = ranked.filter((d) => isPersonaCardDoc(d.docType)).slice(0, personaTopN);
+  const otherPicked = ranked.filter((d) => !isPersonaCardDoc(d.docType)).slice(0, otherTopN);
   const picked = [...personaPicked, ...otherPicked];
 
   const fullDocuments: RetrievalFullDocument[] = [
@@ -477,7 +514,9 @@ export function buildStructuredKnowledgeEvidence(
     includedIndices,
     trimmedBlocks
   );
-  const evidenceDocumentIds = includedIndices.map((i) => fullDocuments[i]?.documentId).filter(Boolean);
+  const evidenceDocumentIds = includedIndices
+    .map((i) => fullDocuments[i]?.documentId)
+    .filter(Boolean);
 
   const chunks: ChunkWithEmbedding[] = picked.map((d, i) => {
     const isPersona = isPersonaCardDoc(d.docType);

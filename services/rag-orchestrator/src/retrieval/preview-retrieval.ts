@@ -15,7 +15,9 @@ import { buildPersonaSnapshotSection } from '../context/persona-snapshot';
 import {
   buildStructuredKnowledgeEvidence,
   retrieveKnowledgeForDraft,
+  buildEmbeddingRetrievalQuery,
   buildGenerationRetrievalQuery,
+  resolveChapterScopedEmbeddingQuery,
   resolveMemoryChapterSummaryEmbeddingQuery,
   type KnowledgeDocumentForMatch,
 } from './knowledge-retrieval';
@@ -153,18 +155,22 @@ export async function runPreviewRetrieval(
         }
       : undefined;
 
-    const sr = buildStructuredKnowledgeEvidence(chapterNo, {
+    const sr = buildStructuredKnowledgeEvidence(
       chapterNo,
-      chapters: mapChaptersForStructuredKnowledgeMatch(
-        projectCtx.chapters.map((c) => ({
-          chapterNo: c.chapterNo,
-          structuredMatchingText: c.structuredMatchingText,
-        })),
+      {
         chapterNo,
-        optimizeBoost
-      ),
-      knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
-    }, { personaTopN: personaQuota, otherTopN: otherQuota });
+        chapters: mapChaptersForStructuredKnowledgeMatch(
+          projectCtx.chapters.map((c) => ({
+            chapterNo: c.chapterNo,
+            structuredMatchingText: c.structuredMatchingText,
+          })),
+          chapterNo,
+          optimizeBoost
+        ),
+        knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
+      },
+      { personaTopN: personaQuota, otherTopN: otherQuota }
+    );
     structuredEvidenceText = sr.evidenceText;
     structuredMatchingQuery = sr.query.trim();
 
@@ -189,9 +195,23 @@ export async function runPreviewRetrieval(
       });
     }
   } else if (query.trim()) {
+    const chapterScopedEmbeddingQuery =
+      chapterNo > 0
+        ? resolveChapterScopedEmbeddingQuery(
+            { chapters: projectCtx.chapters },
+            chapterNo,
+            chapterNo
+          )
+        : undefined;
+    const embeddingQuery =
+      chapterScopedEmbeddingQuery !== undefined && chapterScopedEmbeddingQuery.trim()
+        ? chapterScopedEmbeddingQuery
+        : buildEmbeddingRetrievalQuery(prompt, projectCtx, input.extraContext);
+
     const retrieval = await retrieveKnowledgeForDraft(vectorStore, reranker, projectId, query, {
       apiBaseUrl,
       enrichFullDocuments: true,
+      embeddingQuery,
     });
     for (const doc of retrieval.fullDocuments ?? []) {
       const pool = doc.docType === 'persona_card' ? 'persona_card' : 'other_docs';

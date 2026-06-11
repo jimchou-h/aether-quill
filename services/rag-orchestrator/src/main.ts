@@ -6,6 +6,7 @@ import { Reranker } from './retrieval/reranker';
 import { ChunkWithEmbedding } from './retrieval/types';
 import {
   buildChapterOptimizeRetrievalQuery,
+  buildEmbeddingRetrievalQuery,
   buildGenerationRetrievalQuery,
   buildRetrievalQuery,
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
@@ -498,7 +499,9 @@ app.post('/api/projects/:projectId/context', (req, res) => {
                     clothing:
                       typeof snapshotRaw.clothing === 'string' ? snapshotRaw.clothing : undefined,
                     appearance:
-                      typeof snapshotRaw.appearance === 'string' ? snapshotRaw.appearance : undefined,
+                      typeof snapshotRaw.appearance === 'string'
+                        ? snapshotRaw.appearance
+                        : undefined,
                     status: typeof snapshotRaw.status === 'string' ? snapshotRaw.status : undefined,
                     location:
                       typeof snapshotRaw.location === 'string' ? snapshotRaw.location : undefined,
@@ -509,9 +512,7 @@ app.post('/api/projects/:projectId/context', (req, res) => {
                   },
                   summaryLine: typeof cs.summaryLine === 'string' ? cs.summaryLine : '',
                   updatedAt:
-                    typeof cs.updatedAt === 'string'
-                      ? cs.updatedAt
-                      : new Date().toISOString(),
+                    typeof cs.updatedAt === 'string' ? cs.updatedAt : new Date().toISOString(),
                 },
               ];
             })
@@ -840,7 +841,9 @@ app.post('/api/generate', async (req, res) => {
           enrichFullDocuments: true,
           ...(chapterScopedEmbeddingQuery !== undefined
             ? { embeddingQuery: chapterScopedEmbeddingQuery }
-            : {}),
+            : {
+                embeddingQuery: buildEmbeddingRetrievalQuery(String(prompt), projectCtx, extra),
+              }),
         }
       );
       retrievedEvidence = retrieval.evidenceText;
@@ -1015,7 +1018,7 @@ app.post('/api/generate/draft', async (req, res) => {
   writeSse({ event: 'retrieving' });
 
   const taskRecord = task as Record<string, unknown>;
-  const fallbackQuery = buildRetrievalQuery(taskRecord, context);
+  const fallbackQuery = buildRetrievalQuery(taskRecord);
   const kbCtx = {
     chapterNo,
     chapters: context.chapters.map((c) => ({
@@ -1065,7 +1068,10 @@ app.post('/api/generate/draft', async (req, res) => {
   writeSse({ event: 'building_prompt' });
 
   const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, context);
-  const generationContext = await getGenerationContext(projectId, chapterNo > 0 ? chapterNo : undefined);
+  const generationContext = await getGenerationContext(
+    projectId,
+    chapterNo > 0 ? chapterNo : undefined
+  );
   const draftNarrativeMeta = generationContext.narrativeMeta;
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
   generationContext.systemPromptText = WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT;
@@ -1078,9 +1084,7 @@ app.post('/api/generate/draft', async (req, res) => {
       mustInclude: Array.isArray(task.mustInclude) ? task.mustInclude : [],
       avoid: Array.isArray(task.avoid) ? task.avoid : [],
       targetWords: task.targetWords,
-      appearingCharacters: Array.isArray(task.appearingCharacters)
-        ? task.appearingCharacters
-        : [],
+      appearingCharacters: Array.isArray(task.appearingCharacters) ? task.appearingCharacters : [],
     },
     confirmedOutlineText
   );
