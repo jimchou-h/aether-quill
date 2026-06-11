@@ -640,8 +640,8 @@ onMounted(() => {
 }
 
 .primary-button {
-  background: #1d4ed8;
-  color: #fff;
+  background: var(--aq-primary);
+  color: var(--aq-text-inverse);
   border: none;
   white-space: nowrap;
 }

@@ -1,24 +1,24 @@
-/* 写作工作台设计令牌（局部引用，不污染全局） */
+/* 写作工作台设计令牌（引用全局令牌，保持局部别名兼容） */
 .wb-root {
-  --wb-bg: #f4f6f9;
-  --wb-surface: #ffffff;
-  --wb-surface-muted: #f8fafc;
-  --wb-border: #e2e8f0;
-  --wb-border-strong: #cbd5e1;
-  --wb-text: #0f172a;
-  --wb-text-secondary: #64748b;
-  --wb-text-muted: #94a3b8;
-  --wb-primary: #4f46e5;
-  --wb-primary-hover: #4338ca;
-  --wb-primary-soft: #eef2ff;
-  --wb-success: #059669;
-  --wb-success-soft: #ecfdf5;
-  --wb-warning: #d97706;
-  --wb-warning-soft: #fffbeb;
-  --wb-danger: #dc2626;
-  --wb-danger-soft: #fef2f2;
-  --wb-radius: 14px;
-  --wb-radius-sm: 10px;
-  --wb-shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 8px 24px rgb(15 23 42 / 6%);
-  --wb-font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --wb-bg: var(--aq-bg);
+  --wb-surface: var(--aq-surface);
+  --wb-surface-muted: var(--aq-surface-muted);
+  --wb-border: var(--aq-border);
+  --wb-border-strong: var(--aq-border-strong);
+  --wb-text: var(--aq-text);
+  --wb-text-secondary: var(--aq-text-secondary);
+  --wb-text-muted: var(--aq-text-muted);
+  --wb-primary: var(--aq-primary);
+  --wb-primary-hover: var(--aq-primary-hover);
+  --wb-primary-soft: var(--aq-primary-soft);
+  --wb-success: var(--aq-success);
+  --wb-success-soft: var(--aq-success-soft);
+  --wb-warning: var(--aq-warning);
+  --wb-warning-soft: var(--aq-warning-soft);
+  --wb-danger: var(--aq-danger);
+  --wb-danger-soft: var(--aq-danger-soft);
+  --wb-radius: var(--aq-radius);
+  --wb-radius-sm: var(--aq-radius-sm);
+  --wb-shadow: var(--aq-shadow);
+  --wb-font: var(--aq-font);
 }

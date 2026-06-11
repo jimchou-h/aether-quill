@@ -738,8 +738,8 @@ onUnmounted(() => {
 }
 
 .primary-button {
-  background: #111827;
-  color: #fff;
+  background: var(--aq-primary);
+  color: var(--aq-text-inverse);
   border: none;
   border-radius: 6px;
   padding: 0.45rem 0.8rem;
@@ -749,9 +749,9 @@ onUnmounted(() => {
 }
 
 .secondary-button {
-  background: #fff;
-  color: #111827;
-  border: 1px solid #d1d5db;
+  background: var(--aq-surface);
+  color: var(--aq-text);
+  border: 1px solid var(--aq-border-strong);
   border-radius: 6px;
   padding: 0.45rem 0.8rem;
   cursor: pointer;
@@ -798,7 +798,7 @@ onUnmounted(() => {
   padding: 0.5rem 0.7rem;
   border: none;
   background: transparent;
-  color: #111827;
+  color: var(--aq-text);
   font-size: 0.85rem;
   text-align: left;
   cursor: pointer;
@@ -865,6 +865,6 @@ onUnmounted(() => {
 }
 
 .modal-close:hover {
-  color: #111827;
+  color: var(--aq-text);
 }
 </style>

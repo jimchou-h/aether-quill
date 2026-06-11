@@ -734,8 +734,8 @@ defineExpose({ resetForm });
 
 .chip-button-active {
   background: #eff6ff;
-  border-color: #93c5fd;
-  color: #1d4ed8;
+  border-color: var(--wb-primary-muted, var(--aq-primary-muted));
+  color: var(--wb-primary);
 }
 
 .secondary-button {
@@ -751,8 +751,8 @@ defineExpose({ resetForm });
 
 .primary-button {
   border: none;
-  background: #1d4ed8;
-  color: #fff;
+  background: var(--wb-primary);
+  color: var(--aq-text-inverse);
   border-radius: 8px;
   padding: 0.6rem 1.1rem;
   cursor: pointer;

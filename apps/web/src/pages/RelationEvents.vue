@@ -55,34 +55,4 @@ onMounted(() => {
   margin: 0 auto;
   padding: 0.25rem 0 1.5rem;
 }
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
-.page-subtitle {
-  margin: 0.35rem 0 0;
-  color: #6b7280;
-  font-size: 0.9rem;
-}
-
-.message {
-  margin: 0;
-  padding: 0.55rem 0.7rem;
-  border-radius: 8px;
-  font-size: 0.88rem;
-}
-
-.message-error {
-  background: #fef2f2;
-  color: #991b1b;
-}
 </style>
