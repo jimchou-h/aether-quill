@@ -173,6 +173,8 @@ export async function loadWorkspaceFromPostgres(
     indexJobs,
     summarizeJobs,
     relationEvents,
+    /** JSON 主存；PG 专项表未建前从 PG 加载时为空，由 JSON 镜像补全 */
+    identityRelations: {},
   };
 }
 

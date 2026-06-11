@@ -336,6 +336,67 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/projects/{id}/workspace': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get project workspace snapshot
+     * @description 返回项目写作工作区快照（含 identityRelations 身份关系）
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Workspace snapshot retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['ProjectWorkspaceSnapshot'];
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/projects/{id}': {
     parameters: {
       query?: never;
@@ -1961,6 +2022,114 @@ export interface components {
       priorChaptersMissingSummary: number[];
       recommendedActions: Array<'batch_summarize'>;
     };
+    PersonaSnapshot: {
+      clothing?: string;
+      appearance?: string;
+      status?: string;
+      location?: string;
+      possessions?: string;
+    };
+    PersonaChapterStateRecord: {
+      chapterNo: number;
+      appeared: boolean;
+      snapshot: components['schemas']['PersonaSnapshot'];
+      summaryLine: string;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    Persona: {
+      id: string;
+      name: string;
+      profile: string;
+      state: string;
+      /** @enum {string} */
+      status: 'draft' | 'published';
+      relationEventIds: string[];
+      appearedChapterNos: number[];
+      lastAppearedChapterNo?: number | null;
+      chapterStates?: components['schemas']['PersonaChapterStateRecord'][];
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    PersonaIdentityRelation: {
+      id: string;
+      projectId: string;
+      /** @description 关系主体人物 ID（from 是 to 的 relation） */
+      fromPersonaId: string;
+      /** @description 关系客体人物 ID */
+      toPersonaId: string;
+      /** @description 身份称谓，如「师父」表示 from 是 to 的师父 */
+      relation: string;
+      /** @enum {string} */
+      source: 'llm' | 'manual';
+      chapterNo: number | null;
+      evidenceSnippet?: string;
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    WorkspaceChapterStructuredInfo: {
+      matchingText: string;
+      keywords?: string[];
+      personaKeywordSupplements?: string[];
+      narrativeSummary?: string;
+      /** @enum {string} */
+      parseSource?: 'workbench' | 'chapter';
+      parsedAt?: string;
+      lastError?: string;
+    };
+    WorkspaceChapter: {
+      chapterNo: number;
+      title: string;
+      content: string;
+      contentHash?: string;
+      summary: string;
+      /** @enum {string} */
+      summarySource?: 'llm' | 'fallback';
+      /** Format: date-time */
+      summaryUpdatedAt?: string;
+      structuredInfo?: components['schemas']['WorkspaceChapterStructuredInfo'];
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    ProjectKnowledgeSnapshot: {
+      outlineSummary: string;
+      chapters: components['schemas']['WorkspaceChapter'][];
+      workbenchStructuredByChapter?: Record<
+        string,
+        components['schemas']['WorkspaceChapterStructuredInfo']
+      >;
+      indexVersion: number;
+      /** Format: date-time */
+      lastIndexedAt: string | null;
+    };
+    IndexJob: {
+      id: string;
+      projectId: string;
+      /** @enum {string} */
+      mode: 'full' | 'incremental';
+      /** @enum {string} */
+      status: 'processing' | 'completed' | 'failed';
+      totalChapters: number;
+      processedChapters: number;
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      completedAt?: string | null;
+      errorMessage?: string | null;
+    };
+    ProjectWorkspaceSnapshot: {
+      project: components['schemas']['Project'];
+      settings: components['schemas']['ProjectSettings'];
+      personas: components['schemas']['Persona'][];
+      knowledge: components['schemas']['ProjectKnowledgeSnapshot'];
+      identityRelations: components['schemas']['PersonaIdentityRelation'][];
+      latestIndexJob: components['schemas']['IndexJob'] | null;
+      latestSummaryJob: components['schemas']['ChapterSummaryJob'] | null;
+    };
     DocType: 'persona_card' | 'world_setting' | 'reference' | 'lore' | 'other';
     Document: {
       /** Format: uuid */
@@ -2031,7 +2200,7 @@ export interface components {
       projectId: string;
       /** @enum {string} */
       scope: 'single' | 'batch';
-      chapterNo?: number | null;
+      chapterNo: number | null;
       /** @enum {string} */
       status: 'processing' | 'completed' | 'failed';
       totalChapters: number;
@@ -2041,8 +2210,8 @@ export interface components {
       /** Format: date-time */
       createdAt: string;
       /** Format: date-time */
-      completedAt?: string | null;
-      errorMessage?: string | null;
+      completedAt: string | null;
+      errorMessage: string | null;
     };
     PromptConfig: {
       /** Format: uuid */

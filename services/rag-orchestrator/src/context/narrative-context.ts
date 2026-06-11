@@ -42,6 +42,7 @@ export type NarrativeContextBuildInput = {
   priorChapterTailChars: number;
   contextExcerptMaxChars: number;
   selectedRelationMemory?: string;
+  identityRelationMemory?: string;
   currentChapterNo?: number;
   /** 全部人物及其按章快照，用于【人物当前快照】段 */
   personas?: PersonaContextPayload[];
@@ -126,6 +127,9 @@ export async function buildNarrativeContextText(
   }
   if (input.outlineSummary?.trim()) {
     sections.push(`【大纲总结】\n${input.outlineSummary.trim()}`);
+  }
+  if (input.identityRelationMemory?.trim()) {
+    sections.push(input.identityRelationMemory.trim());
   }
   if (input.selectedRelationMemory?.trim()) {
     sections.push(`【已选关系事件备忘】\n${input.selectedRelationMemory.trim()}`);

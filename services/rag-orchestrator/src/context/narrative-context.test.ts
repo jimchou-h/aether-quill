@@ -112,3 +112,21 @@ test('buildNarrativeContextText omits next chapter head without optimize flag', 
   assert.equal(result.text.includes('【下章衔接】'), false);
   assert.equal(result.meta.next_chapter_head_injected, false);
 });
+
+test('buildNarrativeContextText includes identity relation memory block', async () => {
+  const result = await buildNarrativeContextText({
+    projectId: 'p1',
+    personaProfile: '未配置人物设定',
+    outlineSummary: '',
+    chapters: [{ chapterNo: 1, title: '一', summary: 's1', content: 'c1' }],
+    chapterSummaryPromptCount: 0,
+    chapterSummaryMemoryCount: 0,
+    priorChapterTailChars: 0,
+    contextExcerptMaxChars: 400,
+    currentChapterNo: 2,
+    identityRelationMemory: '【人物身份关系】\n- 沈镜川 → 叶清歌：师父',
+  });
+
+  assert.ok(result.text.includes('【人物身份关系】'));
+  assert.ok(result.text.includes('沈镜川 → 叶清歌：师父'));
+});

@@ -39,6 +39,8 @@ paths:
     $ref: './paths/projects/by-id.yaml'
   /api/projects/{id}/settings:
     $ref: './paths/projects/project-settings.yaml'
+  /api/projects/{id}/workspace:
+    $ref: './paths/projects/workspace.yaml'
   /api/projects/{id}/stats:
     $ref: './paths/projects/project-stats.yaml'
   /api/projects/{id}/documents:
@@ -418,12 +420,15 @@ components:
         - id
         - projectId
         - scope
+        - chapterNo
         - status
         - totalChapters
         - processedChapters
         - chapterNos
         - summaries
         - createdAt
+        - completedAt
+        - errorMessage
       properties:
         id:
           type: string
@@ -613,6 +618,8 @@ components:
         - profile
         - state
         - status
+        - relationEventIds
+        - appearedChapterNos
         - createdAt
         - updatedAt
       properties:
@@ -789,6 +796,196 @@ components:
         chapterNo:
           type: integer
           nullable: true
+    PersonaIdentityRelation:
+      type: object
+      required:
+        - id
+        - projectId
+        - fromPersonaId
+        - toPersonaId
+        - relation
+        - source
+        - chapterNo
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        fromPersonaId:
+          type: string
+          description: 关系主体人物 ID（from 是 to 的 relation）
+        toPersonaId:
+          type: string
+          description: 关系客体人物 ID
+        relation:
+          type: string
+          description: 身份称谓，如「师父」表示 from 是 to 的师父
+        source:
+          type: string
+          enum: [llm, manual]
+        chapterNo:
+          type: integer
+          nullable: true
+          description: 最近确认该关系的章节号
+        evidenceSnippet:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    WorkspaceChapterStructuredInfo:
+      type: object
+      required:
+        - matchingText
+      properties:
+        matchingText:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+        personaKeywordSupplements:
+          type: array
+          items:
+            type: string
+        narrativeSummary:
+          type: string
+        parseSource:
+          type: string
+          enum: [workbench, chapter]
+        parsedAt:
+          type: string
+        lastError:
+          type: string
+    WorkspaceChapter:
+      type: object
+      required:
+        - chapterNo
+        - title
+        - content
+        - summary
+        - updatedAt
+      properties:
+        chapterNo:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+        content:
+          type: string
+        contentHash:
+          type: string
+        summary:
+          type: string
+        summarySource:
+          type: string
+          enum: [llm, fallback]
+        summaryUpdatedAt:
+          type: string
+          format: date-time
+        structuredInfo:
+          $ref: '#/components/schemas/WorkspaceChapterStructuredInfo'
+        updatedAt:
+          type: string
+          format: date-time
+    ProjectKnowledgeSnapshot:
+      type: object
+      required:
+        - outlineSummary
+        - chapters
+        - indexVersion
+        - lastIndexedAt
+      properties:
+        outlineSummary:
+          type: string
+        chapters:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceChapter'
+        workbenchStructuredByChapter:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/WorkspaceChapterStructuredInfo'
+          description: 工作台预写章节的结构化匹配（键为章号字符串）
+        indexVersion:
+          type: integer
+        lastIndexedAt:
+          type: string
+          format: date-time
+          nullable: true
+    IndexJob:
+      type: object
+      required:
+        - id
+        - projectId
+        - mode
+        - status
+        - totalChapters
+        - processedChapters
+        - createdAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        mode:
+          type: string
+          enum: [full, incremental]
+        status:
+          type: string
+          enum: [processing, completed, failed]
+        totalChapters:
+          type: integer
+        processedChapters:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+    ProjectWorkspaceSnapshot:
+      type: object
+      required:
+        - project
+        - settings
+        - personas
+        - knowledge
+        - identityRelations
+        - latestIndexJob
+        - latestSummaryJob
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+        settings:
+          $ref: '#/components/schemas/ProjectSettings'
+        personas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Persona'
+        knowledge:
+          $ref: '#/components/schemas/ProjectKnowledgeSnapshot'
+        identityRelations:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersonaIdentityRelation'
+          description: 项目级稳定身份关系（LLM 摘要抽取或后续手动维护）
+        latestIndexJob:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/IndexJob'
+        latestSummaryJob:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ChapterSummaryJob'
     UsedRelationEvent:
       type: object
       required:

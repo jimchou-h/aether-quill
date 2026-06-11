@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import * as d3 from 'd3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { PersonaItem, RelationEventItem } from '../../services/api';
+import type {
+  PersonaIdentityRelationItem,
+  PersonaItem,
+  RelationEventItem,
+} from '../../services/api';
+import {
+  buildEventRelationGraph,
+  buildIdentityRelationGraph,
+  type PersonaGraphLink,
+} from '../../utils/personaGraph';
 
 const props = defineProps<{
   personas: PersonaItem[];
   relationEvents: RelationEventItem[];
+  identityRelations: PersonaIdentityRelationItem[];
   selectedPersonaId: string | null;
 }>();
 
@@ -13,140 +23,103 @@ const emit = defineEmits<{
   selectPersona: [personaId: string];
 }>();
 
+type GraphMode = 'identity' | 'events';
+
 const containerRef = ref<HTMLDivElement | null>(null);
 const svgRef = ref<SVGSVGElement | null>(null);
+const graphMode = ref<GraphMode>('identity');
 const chapterFrom = ref<number | ''>('');
 const chapterTo = ref<number | ''>('');
 const keyword = ref('');
 
-let simulation: d3.Simulation<GraphNode, undefined> | null = null;
-let resizeObserver: ResizeObserver | null = null;
-
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
   name: string;
-  eventCount: number;
+  weight: number;
 }
 
-interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
+interface SimLink extends d3.SimulationLinkDatum<GraphNode> {
   id: string;
-  summary: string;
-  eventCount: number;
+  label: string;
+  tooltip: string;
+  strength: number;
+  directed?: boolean;
 }
 
-const filteredEvents = computed(() => {
-  const from = Number(chapterFrom.value);
-  const to = Number(chapterTo.value);
-  const key = keyword.value.trim().toLowerCase();
+let simulation: d3.Simulation<GraphNode, undefined> | null = null;
+let resizeObserver: ResizeObserver | null = null;
 
-  return props.relationEvents.filter((event) => {
-    if (typeof event.chapterNo === 'number') {
-      if (Number.isFinite(from) && from > 0 && event.chapterNo < from) {
-        return false;
-      }
-      if (Number.isFinite(to) && to > 0 && event.chapterNo > to) {
-        return false;
-      }
-    }
-    if (!key) {
-      return true;
-    }
-    const haystack = [event.protagonist, event.counterparty, event.summary]
-      .join(' ')
-      .toLowerCase();
-    return haystack.includes(key);
+const graphData = computed(() => {
+  if (graphMode.value === 'identity') {
+    return buildIdentityRelationGraph(props.personas, props.identityRelations);
+  }
+  return buildEventRelationGraph(props.personas, props.relationEvents, {
+    chapterFrom: chapterFrom.value,
+    chapterTo: chapterTo.value,
+    keyword: keyword.value,
   });
 });
 
-const graphStats = computed(() => {
-  const { nodes, links } = buildGraphData();
-  return { nodeCount: nodes.length, linkCount: links.length };
-});
+const graphStats = computed(() => ({
+  nodeCount: graphData.value.nodes.length,
+  linkCount: graphData.value.links.length,
+}));
+
+const graphDesc = computed(() =>
+  graphMode.value === 'identity'
+    ? '展示师徒、恋人等稳定身份关系；摘要生成时会自动识别并更新。'
+    : '基于关系事件自动生成，反映剧情互动频次。'
+);
 
 const showEmptyHint = computed(
-  () => graphStats.value.nodeCount === 0 && !props.personas.length
+  () => graphStats.value.nodeCount === 0 && props.personas.length === 0
 );
 
 const showNoRelationHint = computed(
   () => props.personas.length > 0 && graphStats.value.linkCount === 0
 );
 
-function buildGraphData() {
-  const events = filteredEvents.value;
-  const nodeMap = new Map<string, GraphNode>();
+const noRelationHint = computed(() =>
+  graphMode.value === 'identity'
+    ? '暂无身份关系。可为章节生成摘要后自动识别，或在关系事件中维护剧情事实。'
+    : '当前筛选条件下没有可连接的关系事件，可调整章节范围或添加关系事件。'
+);
 
-  for (const persona of props.personas) {
-    nodeMap.set(persona.id, {
-      id: persona.id,
-      name: persona.name,
-      eventCount: 0,
-    });
-  }
+function toSimulationData(links: PersonaGraphLink[]) {
+  const nodes: GraphNode[] = graphData.value.nodes.map((node) => ({
+    id: node.id,
+    name: node.name,
+    weight: node.weight,
+  }));
 
-  const pairCount = new Map<string, number>();
-  const pairEvents = new Map<string, RelationEventItem[]>();
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const simLinks: SimLink[] = [];
 
-  for (const event of events) {
-    const sourceId =
-      event.protagonistPersonaId ||
-      props.personas.find((persona) => persona.name === event.protagonist)?.id;
-    const targetId =
-      event.counterpartyPersonaId ||
-      props.personas.find((persona) => persona.name === event.counterparty)?.id;
-    if (!sourceId || !targetId || sourceId === targetId) {
+  for (const link of links) {
+    const source = nodeById.get(link.sourceId);
+    const target = nodeById.get(link.targetId);
+    if (!source || !target) {
       continue;
     }
-
-    const pairKey = [sourceId, targetId].sort().join('|');
-    pairCount.set(pairKey, (pairCount.get(pairKey) ?? 0) + 1);
-    const bucket = pairEvents.get(pairKey) ?? [];
-    bucket.push(event);
-    pairEvents.set(pairKey, bucket);
-
-    const source = nodeMap.get(sourceId);
-    const target = nodeMap.get(targetId);
-    if (source) {
-      source.eventCount += 1;
-    }
-    if (target) {
-      target.eventCount += 1;
-    }
-  }
-
-  const links: GraphLink[] = [];
-  for (const [pairKey, count] of pairCount.entries()) {
-    const [source, target] = pairKey.split('|');
-    const sample = pairEvents.get(pairKey)?.[0];
-    links.push({
+    simLinks.push({
+      id: link.id,
       source,
       target,
-      id: pairKey,
-      summary:
-        pairEvents
-          .get(pairKey)
-          ?.map((event) => `第${event.chapterNo ?? '?'}章 ${event.summary}`)
-          .join('\n') || '',
-      eventCount: count,
+      label: link.label,
+      tooltip: link.tooltip,
+      strength: link.strength,
+      directed: link.directed,
     });
-    if (sample && !nodeMap.has(source)) {
-      nodeMap.set(source, { id: source, name: sample.protagonist, eventCount: count });
-    }
-    if (sample && !nodeMap.has(target)) {
-      nodeMap.set(target, { id: target, name: sample.counterparty, eventCount: count });
-    }
   }
 
-  return {
-    nodes: [...nodeMap.values()],
-    links,
-  };
+  return { nodes, links: simLinks };
 }
 
 function nodeRadius(nodeData: GraphNode): number {
-  return Math.min(26, 18 + Math.min(nodeData.eventCount, 4) * 2);
+  return Math.min(26, 18 + Math.min(nodeData.weight, 4) * 2);
 }
 
-function linkPath(linkData: GraphLink): string {
+function linkPath(linkData: SimLink): string {
   const source = linkData.source as GraphNode;
   const target = linkData.target as GraphNode;
   const sx = source.x ?? 0;
@@ -171,6 +144,10 @@ function resetFilters() {
   keyword.value = '';
 }
 
+function setGraphMode(mode: GraphMode) {
+  graphMode.value = mode;
+}
+
 function renderGraph() {
   const container = containerRef.value;
   const svgEl = svgRef.value;
@@ -180,7 +157,8 @@ function renderGraph() {
 
   const width = container.clientWidth || 800;
   const height = 520;
-  const { nodes, links } = buildGraphData();
+  const { nodes, links } = toSimulationData(graphData.value.links);
+  const isIdentity = graphMode.value === 'identity';
 
   const svg = d3.select(svgEl);
   svg.selectAll('*').remove();
@@ -200,6 +178,21 @@ function renderGraph() {
     .attr('r', 1)
     .attr('fill', '#cbd5e1')
     .attr('opacity', 0.55);
+
+  if (isIdentity) {
+    defs
+      .append('marker')
+      .attr('id', 'graph-arrow')
+      .attr('viewBox', '0 -4 8 8')
+      .attr('refX', 24)
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-4L8,0L0,4')
+      .attr('fill', '#6366f1');
+  }
 
   const nodeGradient = defs
     .append('linearGradient')
@@ -228,7 +221,12 @@ function renderGraph() {
     .attr('y', '-50%')
     .attr('width', '200%')
     .attr('height', '200%');
-  shadow.append('feDropShadow').attr('dx', 0).attr('dy', 2).attr('stdDeviation', 3).attr('flood-opacity', 0.18);
+  shadow
+    .append('feDropShadow')
+    .attr('dx', 0)
+    .attr('dy', 2)
+    .attr('stdDeviation', 3)
+    .attr('flood-opacity', 0.18);
 
   svg
     .append('rect')
@@ -252,39 +250,45 @@ function renderGraph() {
     .force(
       'link',
       d3
-        .forceLink<GraphNode, GraphLink>(links)
+        .forceLink<GraphNode, SimLink>(links)
         .id((node) => node.id)
-        .distance(150)
-        .strength(0.45)
+        .distance(isIdentity ? 160 : 150)
+        .strength(isIdentity ? 0.55 : 0.45)
     )
     .force('charge', d3.forceManyBody().strength(-420))
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collide', d3.forceCollide().radius((node) => nodeRadius(node as GraphNode) + 28));
+    .force(
+      'collide',
+      d3.forceCollide().radius((node) => nodeRadius(node as GraphNode) + 28)
+    );
 
   const linkGroup = zoomLayer.append('g').attr('class', 'links');
 
   const link = linkGroup
-    .selectAll<SVGPathElement, GraphLink>('path')
+    .selectAll<SVGPathElement, SimLink>('path')
     .data(links)
     .join('path')
     .attr('fill', 'none')
-    .attr('stroke', '#a5b4fc')
-    .attr('stroke-opacity', 0.75)
-    .attr('stroke-width', (linkData) => Math.min(6, 1.2 + linkData.eventCount * 0.8))
-    .attr('stroke-linecap', 'round');
+    .attr('stroke', isIdentity ? '#818cf8' : '#a5b4fc')
+    .attr('stroke-opacity', 0.85)
+    .attr('stroke-width', (linkData) =>
+      isIdentity ? 2 : Math.min(6, 1.2 + linkData.strength * 0.8)
+    )
+    .attr('stroke-linecap', 'round')
+    .attr('marker-end', isIdentity ? 'url(#graph-arrow)' : null);
 
-  link.append('title').text((linkData) => linkData.summary);
+  link.append('title').text((linkData) => linkData.tooltip);
 
   const linkBadge = linkGroup
-    .selectAll<SVGTextElement, GraphLink>('text')
-    .data(links.filter((item) => item.eventCount > 1))
+    .selectAll<SVGTextElement, SimLink>('text')
+    .data(links.filter((item) => (isIdentity ? Boolean(item.label) : item.strength > 1)))
     .join('text')
     .attr('text-anchor', 'middle')
-    .attr('font-size', 10)
+    .attr('font-size', isIdentity ? 11 : 10)
     .attr('font-weight', 600)
     .attr('fill', '#4338ca')
     .attr('pointer-events', 'none')
-    .text((linkData) => String(linkData.eventCount));
+    .text((linkData) => linkData.label);
 
   const node = zoomLayer
     .append('g')
@@ -332,7 +336,9 @@ function renderGraph() {
     .attr('class', 'node-circle')
     .attr('r', (nodeData) => nodeRadius(nodeData))
     .attr('fill', (nodeData) =>
-      nodeData.id === props.selectedPersonaId ? 'url(#node-gradient-selected)' : 'url(#node-gradient-default)'
+      nodeData.id === props.selectedPersonaId
+        ? 'url(#node-gradient-selected)'
+        : 'url(#node-gradient-default)'
     )
     .attr('stroke', (nodeData) => (nodeData.id === props.selectedPersonaId ? '#312e81' : '#6366f1'))
     .attr('stroke-width', (nodeData) => (nodeData.id === props.selectedPersonaId ? 2.5 : 1.5))
@@ -359,15 +365,6 @@ function renderGraph() {
     .attr('font-weight', (nodeData) => (nodeData.id === props.selectedPersonaId ? 700 : 500))
     .attr('fill', '#0f172a')
     .attr('pointer-events', 'none');
-
-  node
-    .on('mouseenter', function () {
-      d3.select(this).select('.node-circle').attr('stroke-width', 2.5);
-    })
-    .on('mouseleave', function (_, nodeData) {
-      const selected = nodeData.id === props.selectedPersonaId;
-      d3.select(this).select('.node-circle').attr('stroke-width', selected ? 2.5 : 1.5);
-    });
 
   simulation.on('tick', () => {
     link.attr('d', linkPath);
@@ -402,7 +399,16 @@ onBeforeUnmount(() => {
 });
 
 watch(
-  () => [props.personas, props.relationEvents, filteredEvents.value, props.selectedPersonaId],
+  () => [
+    props.personas,
+    props.relationEvents,
+    props.identityRelations,
+    props.selectedPersonaId,
+    graphMode.value,
+    chapterFrom.value,
+    chapterTo.value,
+    keyword.value,
+  ],
   () => renderGraph()
 );
 </script>
@@ -412,15 +418,38 @@ watch(
     <div class="graph-header">
       <div class="graph-header-main">
         <h4 class="graph-title">角色关系图</h4>
-        <p class="graph-desc">基于关系事件自动生成，点击节点可定位人物。</p>
+        <p class="graph-desc">{{ graphDesc }}</p>
       </div>
       <div class="graph-stats">
         <span class="stat-chip">{{ graphStats.nodeCount }} 角色</span>
-        <span class="stat-chip">{{ graphStats.linkCount }} 关系</span>
+        <span class="stat-chip">{{ graphStats.linkCount }} 连线</span>
       </div>
     </div>
 
-    <div class="graph-toolbar">
+    <div class="graph-mode-switch" role="tablist" aria-label="关系图视图">
+      <button
+        type="button"
+        class="mode-button"
+        :class="{ active: graphMode === 'identity' }"
+        role="tab"
+        :aria-selected="graphMode === 'identity'"
+        @click="setGraphMode('identity')"
+      >
+        身份关系
+      </button>
+      <button
+        type="button"
+        class="mode-button"
+        :class="{ active: graphMode === 'events' }"
+        role="tab"
+        :aria-selected="graphMode === 'events'"
+        @click="setGraphMode('events')"
+      >
+        剧情事件
+      </button>
+    </div>
+
+    <div v-if="graphMode === 'events'" class="graph-toolbar">
       <div class="toolbar-field">
         <span class="toolbar-label">章节从</span>
         <input
@@ -462,16 +491,19 @@ watch(
       <svg ref="svgRef" class="graph-svg" role="img" aria-label="角色关系力导向图" />
       <div v-if="showEmptyHint" class="graph-overlay">
         <p class="overlay-title">暂无可展示的角色</p>
-        <p class="overlay-desc">请先在人物清单中新增人物，并维护关系事件。</p>
+        <p class="overlay-desc">请先在人物清单中新增人物。</p>
       </div>
       <div v-else-if="showNoRelationHint" class="graph-overlay graph-overlay--muted">
         <p class="overlay-title">暂无关系连线</p>
-        <p class="overlay-desc">当前筛选条件下没有可连接的关系事件，可调整章节范围或添加关系事件。</p>
+        <p class="overlay-desc">{{ noRelationHint }}</p>
       </div>
       <div class="graph-legend" aria-hidden="true">
         <span class="legend-item"><span class="legend-dot legend-dot--default" />人物</span>
         <span class="legend-item"><span class="legend-dot legend-dot--selected" />已选中</span>
-        <span class="legend-item"><span class="legend-line" />关系事件</span>
+        <span v-if="graphMode === 'identity'" class="legend-item"
+          ><span class="legend-line legend-line--directed" />身份关系</span
+        >
+        <span v-else class="legend-item"><span class="legend-line" />剧情事件</span>
       </div>
       <p class="graph-tip">滚轮缩放 · 拖拽节点 · 点击选中</p>
     </div>
@@ -524,6 +556,43 @@ watch(
   font-weight: 600;
 }
 
+.graph-mode-switch {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  margin-bottom: 0.85rem;
+  border-radius: var(--aq-radius-xs);
+  background: var(--aq-surface-muted);
+  border: 1px solid var(--aq-border);
+}
+
+.mode-button {
+  border: none;
+  background: transparent;
+  color: var(--aq-text-secondary);
+  border-radius: calc(var(--aq-radius-xs) - 2px);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background var(--aq-transition),
+    color var(--aq-transition);
+}
+
+.mode-button.active {
+  background: var(--aq-surface);
+  color: var(--aq-primary-hover);
+  box-shadow: var(--aq-shadow-sm);
+  font-weight: 600;
+}
+
+.mode-button:focus-visible {
+  outline: 2px solid var(--aq-primary);
+  outline-offset: 1px;
+}
+
 .graph-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -562,7 +631,9 @@ watch(
   font-family: inherit;
   color: var(--aq-text);
   background: var(--aq-surface);
-  transition: border-color var(--aq-transition), box-shadow var(--aq-transition);
+  transition:
+    border-color var(--aq-transition),
+    box-shadow var(--aq-transition);
 }
 
 .toolbar-input--wide {
@@ -667,6 +738,10 @@ watch(
   width: 1rem;
   height: 0;
   border-top: 2px solid #a5b4fc;
+}
+
+.legend-line--directed {
+  border-top-color: #818cf8;
 }
 
 .graph-tip {
