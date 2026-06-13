@@ -85,6 +85,8 @@ paths:
     $ref: './paths/drafts/generate-draft.yaml'
   /api/projects/{id}/knowledge/chapters/summarize:
     $ref: './paths/projects/chapter-summarize-batch.yaml'
+  /api/projects/{id}/knowledge/chapters/rebuild-summary-memory:
+    $ref: './paths/projects/chapter-rebuild-summary-memory.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/summarize:
     $ref: './paths/projects/chapter-summarize-by-no.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/relation-events/generate:
@@ -465,6 +467,47 @@ components:
         errorMessage:
           type: string
           nullable: true
+    ChapterSummaryMemoryRebuildResult:
+      type: object
+      required:
+        - source
+        - total
+        - indexed
+        - failed
+        - skipped
+        - chapters
+      properties:
+        source:
+          type: string
+          enum: [existing, content_fallback]
+        total:
+          type: integer
+        indexed:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        chapters:
+          type: array
+          items:
+            type: object
+            required:
+              - chapterNo
+              - status
+            properties:
+              chapterNo:
+                type: integer
+              status:
+                type: string
+                enum: [indexed, skipped, failed]
+              summaryChars:
+                type: integer
+              summarySource:
+                type: string
+                enum: [llm, fallback]
+              error:
+                type: string
     ChapterRelationEventGenerateResult:
       type: object
       required:

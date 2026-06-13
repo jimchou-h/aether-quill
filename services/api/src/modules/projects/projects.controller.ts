@@ -208,6 +208,17 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/rebuild-summary-memory')
+  rebuildChapterSummaryMemory(
+    @Param('id') id: string,
+    @Body() data: { chapterNos?: number[]; source?: 'existing' | 'content_fallback' } = {},
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.rebuildChapterSummaryMemory(id, data, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/summarize')
   createSingleChapterSummaryJob(
     @Param('id') id: string,

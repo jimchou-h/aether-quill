@@ -1,3 +1,15 @@
+/**
+ * 向量检索 — Qdrant 封装
+ *
+ * 流程：embeddingQuery → EmbeddingProvider → Qdrant search（按 project 独立 collection）
+ *
+ * - `query`：用于上游 rerank 的完整文本
+ * - `embeddingQuery`（可选）：仅该文本参与 embedding；传空串则跳过向量检索
+ *
+ * Worker 入库的 chunk payload 含 content / document_id / docTitle 等字段；
+ * 检索失败时返回空数组（main 层对部分端点有关键词 fallback）。
+ */
+
 import { getEmbeddingProvider } from '@aether-quill/model-providers';
 import { getResolvedRagInfrastructureEnv } from '@aether-quill/config';
 import { ChunkWithEmbedding } from './types';

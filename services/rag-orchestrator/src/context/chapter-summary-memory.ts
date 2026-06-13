@@ -1,3 +1,12 @@
+/**
+ * 章节摘要语义记忆 — Qdrant 独立点位
+ *
+ * - **写入**：API 在「生成摘要」、章节正文保存/优化应用后调用 `indexChapterSummaryInQdrant`
+ * - **读取**：`buildNarrativeContextText` 通过 `retrieveMemoryChapterSummaries` 按当前写作意图检索相关历史章
+ *
+ * 与「近期章节摘要」区别：近期是确定性取最近 N 章；语义记忆是向量相似度补充，且排除已注入的近期章。
+ */
+
 import { getEmbeddingProvider } from '@aether-quill/model-providers';
 import { createHash } from 'node:crypto';
 import {

@@ -1,0 +1,63 @@
+post:
+  tags:
+    - Projects
+  summary: Rebuild chapter summary memory vectors (no LLM)
+  description: |
+    将章节摘要写入 Qdrant 语义记忆，不调用 LLM。
+    - `source=existing`（默认）：使用章节已有 summary（含 LLM 摘要）原样入库，不改 DB
+    - `source=content_fallback`：用正文前 160 字刷新 summary 后入库
+    可选 `chapterNos` 限定章号。
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: false
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            chapterNos:
+              type: array
+              items:
+                type: integer
+                minimum: 1
+            source:
+              type: string
+              enum: [existing, content_fallback]
+              default: existing
+  responses:
+    '200':
+      description: Rebuild result
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterSummaryMemoryRebuildResult'
+    '400':
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

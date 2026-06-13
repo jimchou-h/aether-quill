@@ -1,4 +1,9 @@
-/** 与 API `persona-snapshot.util.ts` 保持语义一致（编排层只读格式化） */
+/**
+ * 人物快照格式化（与 API `persona-snapshot.util.ts` 语义一致，编排层只读）
+ *
+ * `resolvePersonaSnapshotAsOfChapter`：取 currentChapterNo 之前最近一条按章状态记录。
+ * `buildPersonaSnapshotSection`：输出【人物当前快照】段，供叙事上下文注入。
+ */
 
 export interface PersonaSnapshot {
   clothing?: string;
