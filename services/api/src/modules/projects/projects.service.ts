@@ -17,6 +17,14 @@ import {
   type ChapterSummarySource,
 } from './chapter-summary.util';
 import {
+  isRetryableChapterSummaryIndexError,
+  resolveChapterSummaryIndexDelayMs,
+  resolveChapterSummaryIndexMaxRetries,
+  resolveChapterSummaryIndexRetryBaseMs,
+  resolveChapterSummaryIndexRetryDelayMs,
+  sleep,
+} from './chapter-summary-index.util';
+import {
   buildFallbackPersonaState,
   clampPersonaStateText,
   parseChapterPersonaStatesFromModelContent,
@@ -1097,6 +1105,13 @@ export class ProjectsService implements OnModuleInit {
 
     this.persistState();
 
+    void this.indexChapterSummaryVector(projectId, targetChapter).catch((error) => {
+      console.error(
+        `[indexChapterSummaryVector] project=${projectId} chapter=${chapterNo} failed:`,
+        error
+      );
+    });
+
     const settings = this.settingsStore.get(projectId)!;
     const pendingActions = this.buildChapterPendingActions(settings);
 
@@ -1667,6 +1682,121 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`未找到摘要任务: ${jobId}`);
     }
     return job;
+  }
+
+  /**
+   * 重建语义记忆向量（Qdrant），不调用 LLM。
+   *
+   * - `existing`：将章节已有 summary（含 LLM 摘要）原样写入向量库，不改 DB
+   * - `content_fallback`：用正文前 160 字刷新 summary 并写入向量库
+   */
+  async rebuildChapterSummaryMemory(
+    projectId: string,
+    payload: {
+      chapterNos?: number[];
+      source?: 'existing' | 'content_fallback';
+    } = {},
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const source = payload.source === 'content_fallback' ? 'content_fallback' : 'existing';
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const requested = Array.isArray(payload.chapterNos)
+      ? payload.chapterNos
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item) && item > 0)
+      : [];
+
+    const pool =
+      requested.length > 0
+        ? requested
+            .map((chapterNo) => knowledge.chapters.find((item) => item.chapterNo === chapterNo))
+            .filter((chapter): chapter is ChapterRecord => Boolean(chapter))
+        : knowledge.chapters;
+
+    if (pool.length === 0) {
+      throw new BadRequestException('没有可处理的章节');
+    }
+
+    const now = new Date();
+    const chapters: Array<{
+      chapterNo: number;
+      status: 'indexed' | 'skipped' | 'failed';
+      summaryChars?: number;
+      summarySource?: ChapterSummarySource;
+      error?: string;
+    }> = [];
+    let indexed = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    for (let i = 0; i < pool.length; i++) {
+      const chapter = pool[i]!;
+      if (source === 'existing') {
+        const summary = chapter.summary?.trim();
+        if (!summary) {
+          skipped += 1;
+          chapters.push({ chapterNo: chapter.chapterNo, status: 'skipped' });
+          continue;
+        }
+      } else if (!chapter.content.trim()) {
+        skipped += 1;
+        chapters.push({ chapterNo: chapter.chapterNo, status: 'skipped' });
+        continue;
+      }
+
+      if (source === 'content_fallback') {
+        const summaryFields = resolveChapterSummaryOnContentWrite({
+          content: chapter.content,
+          existing: chapter,
+          now,
+        });
+        chapter.summary = summaryFields.summary;
+        chapter.summarySource = summaryFields.summarySource;
+        chapter.summaryUpdatedAt = summaryFields.summaryUpdatedAt;
+        chapter.updatedAt = now;
+      }
+
+      try {
+        await this.indexChapterSummaryVectorWithRateLimit(projectId, chapter, {
+          throttleBefore: i > 0,
+        });
+        indexed += 1;
+        chapters.push({
+          chapterNo: chapter.chapterNo,
+          status: 'indexed',
+          summaryChars: chapter.summary.trim().length,
+          summarySource: chapter.summarySource,
+        });
+      } catch (error) {
+        failed += 1;
+        chapters.push({
+          chapterNo: chapter.chapterNo,
+          status: 'failed',
+          error: error instanceof Error ? error.message : '向量索引失败',
+        });
+      }
+    }
+
+    if (indexed > 0 || source === 'content_fallback') {
+      knowledge.indexVersion += 1;
+      knowledge.lastIndexedAt = now;
+      this.persistState();
+    }
+
+    return {
+      source,
+      total: pool.length,
+      indexed,
+      failed,
+      skipped,
+      chapters,
+    };
   }
 
   async generateChapterRelationEvents(projectId: string, chapterNo: number, userId?: string) {
@@ -2739,9 +2869,19 @@ export class ProjectsService implements OnModuleInit {
       throw error;
     }
 
+    const now = new Date();
+    const summaryFields = resolveChapterSummaryOnContentWrite({
+      content: draftText,
+      existing: chapter,
+      now,
+    });
+
     chapter.content = draftText;
     chapter.contentHash = hashChapterContent(draftText);
-    chapter.updatedAt = new Date();
+    chapter.summary = summaryFields.summary;
+    chapter.summarySource = summaryFields.summarySource;
+    chapter.summaryUpdatedAt = summaryFields.summaryUpdatedAt;
+    chapter.updatedAt = now;
     knowledge.indexVersion += 1;
 
     const settingsForApply = this.settingsStore.get(projectId)!;
@@ -2755,6 +2895,13 @@ export class ProjectsService implements OnModuleInit {
     }
     this.relinkRelationEventsForProject(projectId);
     this.persistState();
+
+    void this.indexChapterSummaryVector(projectId, chapter).catch((error) => {
+      console.error(
+        `[indexChapterSummaryVector] project=${projectId} chapter=${normalizedChapterNo} failed:`,
+        error
+      );
+    });
 
     return {
       chapter: {
@@ -3674,7 +3821,8 @@ export class ProjectsService implements OnModuleInit {
     const knowledge = this.knowledgeStore.get(projectId)!;
 
     try {
-      for (const chapter of chapters) {
+      for (let i = 0; i < chapters.length; i++) {
+        const chapter = chapters[i]!;
         const result = await this.summarizeChapterContent(chapter);
         chapter.summary = result.summary;
         chapter.summarySource = result.summarySource;
@@ -3687,7 +3835,9 @@ export class ProjectsService implements OnModuleInit {
             // 身份关系抽取失败不阻断摘要任务
           }
         }
-        void this.indexChapterSummaryVector(projectId, chapter).catch(() => undefined);
+        await this.indexChapterSummaryVectorWithRateLimit(projectId, chapter, {
+          throttleBefore: i > 0,
+        });
         job.summaries.push({
           chapterNo: chapter.chapterNo,
           summary: result.summary,
@@ -3723,6 +3873,36 @@ export class ProjectsService implements OnModuleInit {
       { title: chapter.title, summary },
       { timeout: 30000 }
     );
+  }
+
+  /** 批量写入向量库时限速 + 可重试（单章保存仍走 indexChapterSummaryVector） */
+  private async indexChapterSummaryVectorWithRateLimit(
+    projectId: string,
+    chapter: ChapterRecord,
+    options?: { throttleBefore?: boolean }
+  ): Promise<void> {
+    if (options?.throttleBefore) {
+      await sleep(resolveChapterSummaryIndexDelayMs());
+    }
+
+    const maxRetries = resolveChapterSummaryIndexMaxRetries();
+    const retryBaseMs = resolveChapterSummaryIndexRetryBaseMs();
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await this.indexChapterSummaryVector(projectId, chapter);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= maxRetries || !isRetryableChapterSummaryIndexError(error)) {
+          throw error;
+        }
+        await sleep(resolveChapterSummaryIndexRetryDelayMs(attempt, retryBaseMs));
+      }
+    }
+
+    throw lastError;
   }
 
   private async extractAndMergeIdentityRelationsFromChapter(

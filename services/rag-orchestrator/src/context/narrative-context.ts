@@ -1,4 +1,15 @@
-/** AQ-224：分层叙事上下文拼装（前章衔接 + 近期摘要 + 语义记忆） */
+/**
+ * 叙事上下文拼装（AQ-224）
+ *
+ * 按固定顺序拼接多段文本，写入 LLM 的【叙事上下文】（与【检索证据】分离）：
+ *
+ * 1. 【前章衔接】     — 上一章正文尾部（priorChapterTailChars 预算）
+ * 2. 【人物当前快照】 — 截至 currentChapterNo-1 的按章人物状态
+ * 3. 【近期章节摘要】 — 当前章之前最近 N 章摘要（无摘要时用正文摘录降级）
+ * 4. 【语义记忆章节】 — Qdrant 检索历史章节摘要（与近期摘要去重）
+ * 5. 【人物设定】【大纲总结】【关系备忘】
+ * 6. 【下章衔接】     — 仅章节优化链路：第 N+1 章开头锚点（只读，防抢跑）
+ */
 
 import { retrieveMemoryChapterSummaries } from './chapter-summary-memory';
 import {
@@ -70,6 +81,7 @@ export async function buildNarrativeContextText(
   const excerptMax = clampContextExcerptMaxChars(input.contextExcerptMaxChars);
   const currentChapterNo = input.currentChapterNo;
 
+  // §1 前章正文尾部衔接
   let priorTail = resolvePriorChapterTail(input.chapters, currentChapterNo ?? 0, tailChars);
   if (currentChapterNo && currentChapterNo > 1 && !priorTail.skipped && priorTail.text) {
     sections.push(`【前章衔接】\n${priorTail.text}`);
@@ -77,6 +89,7 @@ export async function buildNarrativeContextText(
     priorTail = { ...priorTail, skipped: true };
   }
 
+  // §2 人物快照（截至写本章前的最新按章状态）
   const snapshotSection = buildPersonaSnapshotSection({
     personas: input.personas ?? [],
     currentChapterNo,
@@ -85,6 +98,7 @@ export async function buildNarrativeContextText(
     sections.push(snapshotSection.text);
   }
 
+  // §3 近期章节摘要（确定性选取，非向量）
   const maxCount = clampChapterSummaryPromptCount(input.chapterSummaryPromptCount);
   const prior = pickPriorChapterSummariesForPrompt(input.chapters, {
     currentChapterNo,
@@ -100,6 +114,7 @@ export async function buildNarrativeContextText(
     sections.push(`【近期章节摘要】\n${prior.map(formatPriorPoolEntry).join('\n')}`);
   }
 
+  // §4 语义记忆：用 structuredMatchingText 做 embedding，从 Qdrant 捞相关历史章摘要
   const memoryMax = clampChapterSummaryMemoryCount(input.chapterSummaryMemoryCount);
   if (memoryMax > 0) {
     const memoryQuery = resolveMemoryChapterSummaryEmbeddingQuery({
@@ -122,6 +137,7 @@ export async function buildNarrativeContextText(
     }
   }
 
+  // §5 静态设定与关系备忘
   if (input.personaProfile && input.personaProfile !== '未配置人物设定') {
     sections.push(`【人物设定】\n${input.personaProfile}`);
   }
@@ -135,6 +151,7 @@ export async function buildNarrativeContextText(
     sections.push(`【已选关系事件备忘】\n${input.selectedRelationMemory.trim()}`);
   }
 
+  // §6 下章开头锚点（章节优化专用，防止改写时与下章冲突）
   let nextHead = resolveNextChapterHead(input.chapters, currentChapterNo ?? 0, tailChars);
   if (input.includeNextChapterHead && currentChapterNo && !nextHead.skipped && nextHead.text) {
     sections.push(

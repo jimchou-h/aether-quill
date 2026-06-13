@@ -1,3 +1,20 @@
+/**
+ * 知识检索编排 — query 构造、向量检索、结构化标题匹配
+ *
+ * 两套证据路径：
+ *
+ * 1. **向量路径** `retrieveKnowledgeForDraft`
+ *    invalidate → embed → Qdrant topK → rerank topN →（可选）按 document 聚合拉全文 enrich
+ *
+ * 2. **结构化路径** `buildStructuredKnowledgeEvidence`
+ *    章节 `structuredMatchingText` ↔ 知识库文档标题打分 → 角色卡全文 + 其他文档段落裁剪
+ *    → token 预算裁剪后输出 evidenceText（不经过 Qdrant）
+ *
+ * Query 分层：
+ * - `buildGenerationRetrievalQuery`：rerank/展示用，可含大纲摘要
+ * - `buildEmbeddingRetrievalQuery` / `resolveChapterScopedEmbeddingQuery`：仅任务意图进 embedding
+ */
+
 import { getResolvedRagInfrastructureEnv } from '@aether-quill/config';
 import { clampKnowledgeDocQuota } from '../context/generation-preferences';
 import { Reranker } from './reranker';

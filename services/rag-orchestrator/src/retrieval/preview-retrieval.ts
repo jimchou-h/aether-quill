@@ -1,3 +1,10 @@
+/**
+ * 检索预览 — 前端调试「本次生成会注入哪些上下文/证据」
+ *
+ * 汇总各证据池（前章衔接、人物快照、角色卡、其他文档、近期章、语义记忆）的候选条目，
+ * 并计算 token 预算占用，不实际调用 LLM。
+ */
+
 import { retrieveMemoryChapterSummaries } from '../context/chapter-summary-memory';
 import {
   clampChapterSummaryMemoryCount,

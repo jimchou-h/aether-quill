@@ -8,7 +8,11 @@ export function buildFallbackChapterSummary(content: string): string {
   return compact.length > 160 ? `${compact.slice(0, 160)}...` : compact;
 }
 
-/** 正文变更写入时：保留已有 LLM 语义摘要，仅对规则摘要或空摘要回退为正文截取 */
+/**
+ * 正文变更写入时的摘要字段。
+ * 正文一旦变更即回退为正文截取（fallback），避免「近期摘要 / 语义记忆」仍引用旧 LLM 摘要。
+ * 完整语义摘要需用户再次点击「生成摘要」。
+ */
 export function resolveChapterSummaryOnContentWrite(input: {
   content: string;
   existing?: {
@@ -23,23 +27,8 @@ export function resolveChapterSummaryOnContentWrite(input: {
   summaryUpdatedAt: Date;
 } {
   const now = input.now ?? new Date();
-  const fallback = buildFallbackChapterSummary(input.content);
-  const existing = input.existing;
-
-  if (
-    existing?.summarySource === 'llm' &&
-    typeof existing.summary === 'string' &&
-    existing.summary.trim()
-  ) {
-    return {
-      summary: existing.summary.trim(),
-      summarySource: 'llm',
-      summaryUpdatedAt: existing.summaryUpdatedAt ?? now,
-    };
-  }
-
   return {
-    summary: fallback,
+    summary: buildFallbackChapterSummary(input.content),
     summarySource: 'fallback',
     summaryUpdatedAt: now,
   };

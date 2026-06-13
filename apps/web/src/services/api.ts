@@ -500,6 +500,17 @@ export const apiClient = {
     return this.unwrapPayload<SummaryJob>(response.data);
   },
 
+  async rebuildChapterSummaryMemory(
+    projectId: string,
+    payload: { chapterNos?: number[]; source?: 'existing' | 'content_fallback' } = {}
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/rebuild-summary-memory`,
+      payload
+    );
+    return this.unwrapPayload<ChapterSummaryMemoryRebuildResult>(response.data);
+  },
+
   async getSummaryJob(projectId: string, jobId: string) {
     const response = await http.get(`/api/projects/${projectId}/knowledge/summarize/${jobId}`);
     return this.unwrapPayload<SummaryJob>(response.data);
@@ -1796,6 +1807,21 @@ export interface SummaryJob {
   createdAt: string;
   completedAt: string | null;
   errorMessage: string | null;
+}
+
+export interface ChapterSummaryMemoryRebuildResult {
+  source: 'existing' | 'content_fallback';
+  total: number;
+  indexed: number;
+  failed: number;
+  skipped: number;
+  chapters: Array<{
+    chapterNo: number;
+    status: 'indexed' | 'skipped' | 'failed';
+    summaryChars?: number;
+    summarySource?: ChapterSummarySource;
+    error?: string;
+  }>;
 }
 
 export interface ChapterRelationEventGenerateResult {

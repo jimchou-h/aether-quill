@@ -1,3 +1,9 @@
+/**
+ * 轻量一致性检查（规则/正则，非 LLM）
+ *
+ * 在 `/api/generate/draft` 流式结束后运行，检查人物档案、时间线、叙事视角等简单冲突。
+ */
+
 import {
   ConsistencyCheckResult,
   ConsistencyReport,

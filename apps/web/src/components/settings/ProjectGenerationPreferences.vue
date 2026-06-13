@@ -26,6 +26,7 @@ const saved = ref<{
 
 const loading = ref(false);
 const saving = ref(false);
+const rebuildingMemory = ref(false);
 const errorMessage = ref('');
 const message = ref('');
 
@@ -75,6 +76,55 @@ async function load() {
     errorMessage.value = presentErrorFromCaught(error, '加载生成偏好失败');
   } finally {
     loading.value = false;
+  }
+}
+
+function formatRebuildMemoryResult(
+  result: Awaited<ReturnType<typeof apiClient.rebuildChapterSummaryMemory>>
+): string {
+  const parts = [`已写入 ${result.indexed} 章`];
+  if (result.skipped > 0) {
+    parts.push(`${result.skipped} 章跳过（无摘要）`);
+  }
+  if (result.failed > 0) {
+    parts.push(`${result.failed} 章失败`);
+  }
+  return parts.join('，');
+}
+
+async function handleSyncExistingSummaryMemory() {
+  rebuildingMemory.value = true;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    const result = await apiClient.rebuildChapterSummaryMemory(props.projectId, {
+      source: 'existing',
+    });
+    message.value = presentSuccess(
+      `${formatRebuildMemoryResult(result)}语义记忆（使用已有 LLM 摘要，不消耗 token）`
+    );
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '同步已有摘要失败');
+  } finally {
+    rebuildingMemory.value = false;
+  }
+}
+
+async function handleRebuildSummaryMemoryFromContent() {
+  rebuildingMemory.value = true;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    const result = await apiClient.rebuildChapterSummaryMemory(props.projectId, {
+      source: 'content_fallback',
+    });
+    message.value = presentSuccess(
+      `${formatRebuildMemoryResult(result)}语义记忆（正文前 160 字，不消耗 LLM token）`
+    );
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '从正文重建语义记忆失败');
+  } finally {
+    rebuildingMemory.value = false;
   }
 }
 
@@ -155,6 +205,27 @@ onMounted(() => {
         />
       </div>
       <p class="field-hint inline-hint">范围 0~10；默认 3。对历史章节摘要做向量检索的相关条数。</p>
+      <div class="memory-rebuild-row">
+        <button
+          class="primary-button memory-action-button"
+          type="button"
+          :disabled="rebuildingMemory"
+          @click="handleSyncExistingSummaryMemory"
+        >
+          {{ rebuildingMemory ? '同步中...' : '同步已有摘要到向量库' }}
+        </button>
+        <button
+          class="secondary-button"
+          type="button"
+          :disabled="rebuildingMemory"
+          @click="handleRebuildSummaryMemoryFromContent"
+        >
+          从正文截取重建
+        </button>
+      </div>
+      <p class="field-hint inline-hint memory-rebuild-hint">
+        已用「生成摘要」产生 LLM 摘要时，点「同步已有摘要」即可写入 Qdrant，不再次调用模型。批量同步会自动限速，章数多时请耐心等待。无摘要的章会跳过。
+      </p>
 
       <div class="row">
         <label class="field-label" for="aq-prior-tail">前章衔接字数</label>
@@ -350,6 +421,38 @@ onMounted(() => {
 }
 
 .primary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.memory-rebuild-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.35rem;
+}
+
+.memory-action-button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.memory-rebuild-hint {
+  margin: 0 0 0.85rem;
+}
+
+.secondary-button {
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.secondary-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

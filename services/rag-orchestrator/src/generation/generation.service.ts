@@ -1,3 +1,15 @@
+/**
+ * 生成服务 — LLM 调用与 Prompt 拼装
+ *
+ * Prompt 最终结构（`buildPrompt`）：
+ *   【系统指令】→【叙事上下文】→【检索证据】→【用户需求】
+ *
+ * 叙事上下文由 `context/narrative-context` 在 main 层预先拼装；
+ * 检索证据由 `retrieval/knowledge-retrieval` 在 main 层注入 `GenerationContext.retrievedEvidence`。
+ *
+ * 除主生成外，本类还承载章节摘要、人物状态、关系事件、结构化信息解析等「单次 LLM 调用」任务。
+ */
+
 import axios from 'axios';
 import {
   hasMultiPersonaCardEvidence,
@@ -12,6 +24,7 @@ import {
   parseIdentityRelationsFromModelContent,
 } from './identity-relation-extract';
 import { buildSummaryLineFromSnapshot } from '../context/persona-snapshot';
+import { logAssembledWriteChapterPrompt } from './generation-prompt-log';
 
 export interface GenerationContext {
   /** 项目级 systemPromptText（Settings） */
@@ -36,6 +49,7 @@ interface ProviderRuntimeConfig {
 export class GenerationService {
   private readonly traceStore = new TraceStore();
 
+  /** 将系统指令、叙事上下文、检索证据、用户 prompt 拼成单条 user message */
   buildPrompt(context: GenerationContext, userPrompt: string): string {
     const sections: string[] = [];
 
@@ -55,7 +69,6 @@ export class GenerationService {
         evidence = `${MULTI_PERSONA_WRITING_GUARD}\n\n${evidence}`;
       }
       sections.push(`【检索证据】\n${evidence}`);
-      console.log(evidence);
     }
 
     sections.push(`【用户需求】\n${userPrompt}`);
@@ -102,8 +115,16 @@ export class GenerationService {
     return this.traceStore.getStats().total;
   }
 
+  private recordAssembledPrompt(trace: TraceRecord, prompt: string): void {
+    logAssembledWriteChapterPrompt(trace, prompt);
+    this.updateTrace(trace.id, {
+      context: { assembled_prompt: prompt },
+    });
+  }
+
   async generateNonStream(trace: TraceRecord, context: GenerationContext): Promise<string> {
     const prompt = this.buildPrompt(context, trace.prompt);
+    this.recordAssembledPrompt(trace, prompt);
     this.updateTrace(trace.id, { status: 'generating' });
 
     const provider = this.resolveProviderConfig();
@@ -140,6 +161,7 @@ export class GenerationService {
     context: GenerationContext
   ): AsyncGenerator<string, void, unknown> {
     const prompt = this.buildPrompt(context, trace.prompt);
+    this.recordAssembledPrompt(trace, prompt);
     this.updateTrace(trace.id, { status: 'generating' });
     let fullContent = '';
 
@@ -164,6 +186,8 @@ export class GenerationService {
       throw error;
     }
   }
+
+  // ─── Provider 适配（DeepSeek / SiliconFlow，OpenAI 兼容 chat/completions）──
 
   private resolveProviderConfig(): ProviderRuntimeConfig {
     const apiKey =
@@ -194,6 +218,8 @@ export class GenerationService {
       temperature: Number(process.env.PROVIDER_TEMPERATURE || 0.7),
     };
   }
+
+  // ─── 章节工具类 LLM 任务（无 RAG，单次非流式调用）────────────────────
 
   buildChapterSummaryPrompt(input: { chapterNo: number; title: string; content: string }): string {
     return [

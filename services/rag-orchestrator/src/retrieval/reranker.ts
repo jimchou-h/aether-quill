@@ -1,3 +1,12 @@
+/**
+ * 检索结果重排
+ *
+ * 默认：向量分（Qdrant score）与词汇相关分加权融合，再按 documentId 做多样性截断（每文档最多 N chunk）。
+ * 可选：环境变量启用 cross-encoder 时，用 cross-encoder 分替代词汇分参与融合。
+ *
+ * 词汇分考量：query token 命中率、标题/metadata 加分、chunk 位置、短语精确匹配。
+ */
+
 import type { CrossEncoderScorer } from './cross-encoder-scorer';
 import { isCrossEncoderRerankEnabled } from './cross-encoder-scorer';
 import {

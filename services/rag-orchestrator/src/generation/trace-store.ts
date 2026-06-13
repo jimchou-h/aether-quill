@@ -1,3 +1,9 @@
+/**
+ * 生成 Trace 持久化 — 记录每次 LLM 调用的 prompt、上下文、状态与用量
+ *
+ * 默认写入 `data/traces.json`（进程内 + 文件双写），供前端追溯引用证据与检索 query。
+ */
+
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { TraceRecord } from './types';

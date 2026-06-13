@@ -1,3 +1,10 @@
+/**
+ * 向量检索结果增强 — chunk → 文档级证据
+ *
+ * rerank 后的 chunk 按 documentId 聚合，批量从 API 拉取文档元数据，
+ * 角色卡保留全文，其他类型按命中 chunk 裁剪段落，最终格式化为【检索证据】文本。
+ */
+
 import {
   aggregateChunksByDocument,
   buildDocumentHitReason,

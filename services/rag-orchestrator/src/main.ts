@@ -1,3 +1,32 @@
+/**
+ * RAG Orchestrator — HTTP 入口与生成流水线编排
+ *
+ * ## 服务职责
+ *
+ * API 服务（NestJS）在写作/优化前会把项目快照 POST 到 `/api/projects/:id/context`，
+ * 本服务在内存中维护 `projectContextStore`，供检索与 prompt 拼装读取。
+ *
+ * ## 两条主生成链路
+ *
+ * 1. **POST /api/generate** — 通用生成（续写、章节优化 plan/draft、大纲等）
+ *    - 有 `chapterNo` 锚定 → 走「结构化知识库」：用章节的 `structuredMatchingText` 与知识库文档标题匹配，整文/段落裁剪注入
+ *    - 无章节锚定 → 走向量检索：embedding → Qdrant topK → Reranker topN → 证据块
+ * 2. **POST /api/generate/draft** — 写作工作台正文（须先有 `confirmedOutlineText`）
+ *    - 仅走结构化知识库路径；无 `structuredMatchingText` 时跳过 KB 证据并告警
+ *
+ * ## 上下文 vs 证据（写入 LLM prompt 的两段）
+ *
+ * - **叙事上下文**（`narrative-context`）：前章衔接、人物快照、近期摘要、语义记忆、大纲、关系备忘
+ * - **检索证据**（`knowledge-retrieval`）：向量 chunk 或标题匹配后的知识库全文/裁剪段落
+ *
+ * ## 目录对照
+ *
+ * - `context/`   — 叙事上下文拼装、人物快照、章节摘要向量记忆
+ * - `retrieval/` — 向量检索、重排、标题匹配、token 预算裁剪
+ * - `generation/`— Prompt 拼装、LLM 调用、Trace、各类抽取任务
+ * - `consistency/` — 生成后轻量规则检查（非 LLM）
+ */
+
 import { loadEnv } from './config/load-env';
 import { assertRagInfrastructureEnv, getResolvedRagInfrastructureEnv } from '@aether-quill/config';
 import express from 'express';
@@ -126,6 +155,7 @@ interface ProjectContext {
   updatedAt: string;
 }
 
+/** 按 projectId 缓存的项目快照；由 API 在生成前通过 POST /context 同步，重启后丢失 */
 const projectContextStore = new Map<string, ProjectContext>();
 
 function patchProjectContextDefaults(ctx: ProjectContext) {
@@ -213,6 +243,8 @@ function keywordScore(query: string, text: string) {
   return words.reduce((score, word) => score + (loweredText.includes(word) ? 1 : 0), 0);
 }
 
+// ─── 健康检查 & 可观测性 ─────────────────────────────────────────────
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'rag-orchestrator', timestamp: new Date().toISOString() });
 });
@@ -239,11 +271,15 @@ app.get('/', (_req, res) => {
   res.json({ message: 'RAG Orchestrator Service', version: '1.0.0' });
 });
 
+// ─── 项目上下文同步（API → 编排层内存快照）────────────────────────────
+
 app.get('/api/projects/:projectId/context', (req, res) => {
   const projectId = req.params.projectId;
   const context = getOrCreateContext(projectId);
   res.json(context);
 });
+
+// ─── 章节工具：摘要 / 状态抽取 / 关系抽取 / 结构化解析（均直连 LLM，无 RAG）──
 
 app.post('/api/summarize', async (req, res) => {
   const chapterNo = Number(req.body?.chapterNo || 0);
@@ -565,6 +601,8 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   res.json(context);
 });
 
+// ─── 检索预览 & 章节摘要向量索引 ─────────────────────────────────────
+
 app.post('/api/preview-retrieval', async (req, res) => {
   const body = req.body as {
     projectId?: string;
@@ -620,6 +658,8 @@ app.post('/api/projects/:projectId/chapters/:chapterNo/index-summary', async (re
     res.status(500).json({ error: 'Index chapter summary failed' });
   }
 });
+
+// ─── 底层检索 API（调试 / 独立调用；生产主链路在 /api/generate 内联）────────
 
 app.post('/api/retrieve', async (req, res) => {
   const { query, projectId, topK = 30, minScore = 0 } = req.body;
@@ -747,6 +787,8 @@ app.post('/api/consistency/check', (req, res) => {
   }
 });
 
+// ─── 主生成：检索 → 叙事上下文 → LLM（SSE 或 JSON）────────────────────
+
 app.post('/api/generate', async (req, res) => {
   const {
     projectId,
@@ -771,6 +813,7 @@ app.post('/api/generate', async (req, res) => {
       ? chapterNoRaw
       : Number(chapterNoRaw);
 
+  // Step 1: 构造检索 query（章节优化用 instruction+摘要；其余用 prompt+任务字段）
   let retrievalQuery: string;
   if (
     (tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
@@ -802,6 +845,7 @@ app.post('/api/generate', async (req, res) => {
       ? draftChapterFromTask
       : extraChapterNo;
   const narrativeCurrentChapter = structuredChapterNo > 0 ? structuredChapterNo : undefined;
+  /** 有章节号时优先走标题匹配知识库，不走 Qdrant chunk 检索 */
   const useStructuredChapterKb = structuredChapterNo > 0;
   const chapterScopedEmbeddingQuery = resolveChapterScopedEmbeddingQuery(
     projectCtx,
@@ -818,6 +862,7 @@ app.post('/api/generate', async (req, res) => {
   let retrievedChunkIds: string[] = [];
   let retrievedEvidence = '';
   let retrievedFullDocuments: Array<Record<string, unknown>> = [];
+  // Step 2: 检索证据 — 结构化 KB（标题匹配）或向量检索（Qdrant + rerank）
   try {
     if (useStructuredChapterKb) {
       const optimizeInstruction =
@@ -893,6 +938,7 @@ app.post('/api/generate', async (req, res) => {
     console.error('Generate retrieval failed:', error);
   }
 
+  // Step 3: 拼装叙事上下文（与检索证据分离，见 GenerationService.buildPrompt）
   const generationContext = await getGenerationContext(projectId, narrativeCurrentChapter, {
     includeNextChapterHead: isChapterOptimizeTemplateKey(tk),
   });
@@ -1016,6 +1062,8 @@ const WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT = [
   '3) 保持与【叙事上下文】及【检索证据】（如有）一致；',
   '4) 直接输出小说正文，不要输出大纲、说明或 Markdown 标题。',
 ].join('\n');
+
+// ─── 写作工作台正文：结构化 KB + 确认大纲 + 多阶段 SSE ─────────────────
 
 app.post('/api/generate/draft', async (req, res) => {
   const {
