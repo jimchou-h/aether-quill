@@ -20,5 +20,6 @@
   --wb-radius: var(--aq-radius);
   --wb-radius-sm: var(--aq-radius-sm);
   --wb-shadow: var(--aq-shadow);
+  --wb-primary-muted: var(--aq-primary-muted);
   --wb-font: var(--aq-font);
 }

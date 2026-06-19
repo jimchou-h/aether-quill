@@ -260,7 +260,7 @@ function renderGraph() {
       .attr('orient', 'auto')
       .append('path')
       .attr('d', 'M0,-4L8,0L0,4')
-      .attr('fill', '#6366f1');
+      .attr('fill', '#0d9488');
   }
 
   const nodeGradient = defs
@@ -270,8 +270,8 @@ function renderGraph() {
     .attr('y1', '0%')
     .attr('x2', '100%')
     .attr('y2', '100%');
-  nodeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#eef2ff');
-  nodeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#c7d2fe');
+  nodeGradient.append('stop').attr('offset', '0%').attr('stop-color', '#f0fdfa');
+  nodeGradient.append('stop').attr('offset', '100%').attr('stop-color', '#99f6e4');
 
   const selectedGradient = defs
     .append('linearGradient')
@@ -280,8 +280,8 @@ function renderGraph() {
     .attr('y1', '0%')
     .attr('x2', '100%')
     .attr('y2', '100%');
-  selectedGradient.append('stop').attr('offset', '0%').attr('stop-color', '#6366f1');
-  selectedGradient.append('stop').attr('offset', '100%').attr('stop-color', '#4338ca');
+  selectedGradient.append('stop').attr('offset', '0%').attr('stop-color', '#14b8a6');
+  selectedGradient.append('stop').attr('offset', '100%').attr('stop-color', '#0f766e');
 
   const shadow = defs
     .append('filter')
@@ -345,7 +345,7 @@ function renderGraph() {
     .data(links)
     .join('path')
     .attr('fill', 'none')
-    .attr('stroke', isIdentity ? '#818cf8' : '#a5b4fc')
+    .attr('stroke', isIdentity ? '#14b8a6' : '#5eead4')
     .attr('stroke-opacity', 0.85)
     .attr('stroke-width', (linkData) =>
       isIdentity ? 2 : Math.min(6, 1.2 + linkData.strength * 0.8)
@@ -372,7 +372,7 @@ function renderGraph() {
     .attr('rx', 4)
     .attr('ry', 4)
     .attr('fill', 'rgb(255 255 255 / 92%)')
-    .attr('stroke', '#c7d2fe')
+    .attr('stroke', '#99f6e4')
     .attr('stroke-width', 1);
 
   linkBadge
@@ -381,7 +381,7 @@ function renderGraph() {
     .attr('dominant-baseline', 'central')
     .attr('font-size', isIdentity ? 11 : 10)
     .attr('font-weight', 600)
-    .attr('fill', '#4338ca')
+    .attr('fill', '#0f766e')
     .text((linkData) => formatLinkLabel(linkData.label));
 
   linkBadge.append('title').text((linkData) => linkData.label);
@@ -425,7 +425,7 @@ function renderGraph() {
     .attr('class', 'node-halo')
     .attr('r', (nodeData) => nodeRadius(nodeData) + 6)
     .attr('fill', 'none')
-    .attr('stroke', '#818cf8')
+    .attr('stroke', '#14b8a6')
     .attr('stroke-width', 2)
     .attr('opacity', (nodeData) => (nodeData.id === props.selectedPersonaId ? 0.85 : 0));
 
@@ -438,7 +438,7 @@ function renderGraph() {
         ? 'url(#node-gradient-selected)'
         : 'url(#node-gradient-default)'
     )
-    .attr('stroke', (nodeData) => (nodeData.id === props.selectedPersonaId ? '#312e81' : '#6366f1'))
+    .attr('stroke', (nodeData) => (nodeData.id === props.selectedPersonaId ? '#115e59' : '#0d9488'))
     .attr('stroke-width', (nodeData) => (nodeData.id === props.selectedPersonaId ? 2.5 : 1.5))
     .attr('filter', 'url(#node-shadow)');
 
@@ -450,7 +450,7 @@ function renderGraph() {
     .attr('dominant-baseline', 'central')
     .attr('font-size', (nodeData) => Math.max(13, nodeRadius(nodeData) * 0.62))
     .attr('font-weight', 700)
-    .attr('fill', (nodeData) => (nodeData.id === props.selectedPersonaId ? '#fff' : '#4338ca'))
+    .attr('fill', (nodeData) => (nodeData.id === props.selectedPersonaId ? '#fff' : '#0f766e'))
     .attr('pointer-events', 'none');
 
   node
@@ -461,7 +461,7 @@ function renderGraph() {
     .attr('text-anchor', 'middle')
     .attr('font-size', 12)
     .attr('font-weight', (nodeData) => (nodeData.id === props.selectedPersonaId ? 700 : 500))
-    .attr('fill', '#0f172a')
+    .attr('fill', '#134e4a')
     .attr('pointer-events', 'none');
 
   simulation.on('tick', () => {
@@ -750,7 +750,7 @@ watch(
 .toolbar-input:focus {
   outline: none;
   border-color: var(--aq-primary);
-  box-shadow: 0 0 0 3px rgb(79 70 229 / 12%);
+  box-shadow: var(--aq-ring);
 }
 
 .toolbar-reset {
@@ -769,7 +769,7 @@ watch(
   height: clamp(560px, 62vh, 760px);
   border-radius: var(--aq-radius-xs);
   border: 1px solid var(--aq-border);
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  background: linear-gradient(180deg, #fafaf8 0%, #f0fdfa 100%);
 }
 
 .graph-overlay {
@@ -832,23 +832,23 @@ watch(
   width: 0.65rem;
   height: 0.65rem;
   border-radius: 50%;
-  border: 1.5px solid #6366f1;
-  background: #eef2ff;
+  border: 1.5px solid var(--aq-primary);
+  background: var(--aq-primary-soft);
 }
 
 .legend-dot--selected {
-  border-color: #312e81;
-  background: #6366f1;
+  border-color: var(--aq-primary-hover);
+  background: var(--aq-primary);
 }
 
 .legend-line {
   width: 1rem;
   height: 0;
-  border-top: 2px solid #a5b4fc;
+  border-top: 2px solid var(--aq-primary-muted);
 }
 
 .legend-line--directed {
-  border-top-color: #818cf8;
+  border-top-color: var(--aq-secondary, #14b8a6);
 }
 
 .graph-tip {

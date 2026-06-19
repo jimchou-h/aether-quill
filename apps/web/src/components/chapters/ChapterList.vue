@@ -657,7 +657,7 @@ defineExpose({ clearEditing });
 }
 
 .keyword-tag--supplement {
-  border-color: #93c5fd;
+  border-color: var(--aq-primary-muted);
   background: #eff6ff;
   color: #1e40af;
 }

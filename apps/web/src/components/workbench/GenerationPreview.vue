@@ -207,7 +207,7 @@ const emit = defineEmits<{
 }
 
 .phase-step--active {
-  color: #1d4ed8;
+  color: var(--aq-primary);
   font-weight: 600;
 }
 
@@ -315,12 +315,17 @@ const emit = defineEmits<{
 
 .wb-btn--primary {
   border: none;
-  background: var(--wb-primary, #4f46e5);
+  background: var(--wb-primary, #0d9488);
   color: #fff;
+  transition: background var(--aq-transition-fast), transform var(--aq-transition-fast);
 }
 
 .wb-btn--primary:hover:not(:disabled) {
-  background: var(--wb-primary-hover, #4338ca);
+  background: var(--wb-primary-hover, #0f766e);
+}
+
+.wb-btn--primary:active:not(:disabled) {
+  transform: scale(var(--aq-press-scale));
 }
 
 .wb-btn--ghost {

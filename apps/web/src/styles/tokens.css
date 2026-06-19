@@ -1,12 +1,16 @@
-/* Aether Quill 全局设计令牌 */
+/* Aether Quill 全局设计令牌 — Flat Design / Content First (ui-ux-pro-max) */
 :root {
-  /* 品牌色 */
-  --aq-primary: #4f46e5;
-  --aq-primary-hover: #4338ca;
-  --aq-primary-soft: #eef2ff;
-  --aq-primary-muted: #c7d2fe;
-  --aq-accent: #d97706;
-  --aq-accent-soft: #fffbeb;
+  /* 品牌色 — Teal 专注写作 */
+  --aq-primary: #0d9488;
+  --aq-primary-hover: #0f766e;
+  --aq-primary-soft: #f0fdfa;
+  --aq-primary-muted: #99f6e4;
+  --aq-secondary: #14b8a6;
+
+  /* 行动色 — Orange CTA */
+  --aq-accent: #ea580c;
+  --aq-accent-hover: #c2410c;
+  --aq-accent-soft: #fff7ed;
 
   /* 语义色 */
   --aq-success: #059669;
@@ -17,41 +21,56 @@
   --aq-danger-soft: #fef2f2;
   --aq-danger-border: #fecaca;
 
-  /* 表面与背景 */
-  --aq-bg: #f4f6f9;
-  --aq-bg-subtle: #eef1f6;
+  /* 表面与背景 — 纸感暖白 */
+  --aq-bg: #fafaf8;
+  --aq-bg-subtle: #f0fdfa;
   --aq-surface: #ffffff;
-  --aq-surface-muted: #f8fafc;
+  --aq-surface-muted: #f8fafa;
   --aq-surface-elevated: #ffffff;
 
-  /* 边框 */
-  --aq-border: #e2e8f0;
-  --aq-border-strong: #cbd5e1;
+  /* 边框 — 低对比、扁平 */
+  --aq-border: #d5ede9;
+  --aq-border-strong: #99f6e4;
 
   /* 文字 */
-  --aq-text: #0f172a;
-  --aq-text-secondary: #64748b;
-  --aq-text-muted: #94a3b8;
+  --aq-text: #134e4a;
+  --aq-text-secondary: #5f7a76;
+  --aq-text-muted: #94a8a4;
   --aq-text-inverse: #ffffff;
 
-  /* 圆角与阴影 */
-  --aq-radius: 14px;
-  --aq-radius-sm: 10px;
+  /* 圆角 — 几何、克制 */
+  --aq-radius: 12px;
+  --aq-radius-sm: 8px;
   --aq-radius-xs: 6px;
-  --aq-shadow-sm: 0 1px 2px rgb(15 23 42 / 6%);
-  --aq-shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 8px 24px rgb(15 23 42 / 6%);
-  --aq-shadow-lg: 0 12px 40px rgb(15 23 42 / 12%);
+
+  /* 阴影 — Flat：默认无阴影，仅浮层保留轻量 */
+  --aq-shadow-sm: none;
+  --aq-shadow: none;
+  --aq-shadow-lg: 0 4px 24px rgb(19 78 74 / 8%);
 
   /* 布局 */
   --aq-header-height: 56px;
-  --aq-sidebar-width: 220px;
+  --aq-sidebar-width: 232px;
   --aq-content-max-width: 1200px;
   --aq-page-padding: 1.5rem;
 
-  /* 字体 */
+  /* 间距尺度 (4/8dp) */
+  --aq-space-xs: 0.25rem;
+  --aq-space-sm: 0.5rem;
+  --aq-space-md: 1rem;
+  --aq-space-lg: 1.5rem;
+  --aq-space-xl: 2rem;
+  --aq-space-2xl: 3rem;
+
+  /* 字体 — 中文正文 + 衬线标题（写作/编辑气质） */
   --aq-font: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --aq-font-display: 'Noto Serif SC', Georgia, 'Times New Roman', serif;
 
   /* 动效 */
-  --aq-transition: 0.2s ease;
+  --aq-transition: 0.2s ease-out;
+  --aq-transition-fast: 0.15s ease-out;
+  --aq-press-scale: 0.97;
+
+  /* 焦点环 */
+  --aq-ring: 0 0 0 3px rgb(13 148 136 / 18%);
 }

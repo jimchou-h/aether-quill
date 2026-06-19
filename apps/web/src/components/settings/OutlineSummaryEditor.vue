@@ -152,8 +152,8 @@ onMounted(() => {
 
 .field-textarea:focus {
   outline: none;
-  border-color: #1d4ed8;
-  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.1);
+  border-color: var(--aq-primary);
+  box-shadow: var(--aq-ring);
 }
 
 .action-bar {
@@ -167,7 +167,7 @@ onMounted(() => {
   font-size: 0.85rem;
   cursor: pointer;
   border: none;
-  background: #1d4ed8;
+  background: var(--aq-primary);
   color: #fff;
 }
 

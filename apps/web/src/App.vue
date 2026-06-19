@@ -32,7 +32,8 @@ const antdLocale = zhCN;
 
 const antdTheme = {
   token: {
-    colorPrimary: '#4f46e5',
+    colorPrimary: '#0d9488',
+    colorInfo: '#0d9488',
     borderRadius: 8,
     fontFamily: "'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   },
@@ -87,13 +88,12 @@ function handleLogout() {
   align-items: center;
   justify-content: space-between;
   height: var(--aq-header-height);
-  padding: 0 1.5rem;
+  padding: 0 var(--aq-space-lg);
   background: var(--aq-surface);
-  border-bottom: 1px solid var(--aq-border);
+  border-bottom: 2px solid var(--aq-border);
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: var(--aq-shadow-sm);
 }
 
 .header-left {
@@ -104,14 +104,19 @@ function handleLogout() {
 .header-brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--aq-space-sm);
   text-decoration: none;
   color: var(--aq-text);
-  transition: opacity var(--aq-transition);
+  transition: opacity var(--aq-transition-fast);
+  cursor: pointer;
 }
 
 .header-brand:hover {
-  opacity: 0.85;
+  opacity: 0.88;
+}
+
+.header-brand:active {
+  transform: scale(var(--aq-press-scale));
 }
 
 .brand-mark {
@@ -121,7 +126,7 @@ function handleLogout() {
   width: 2rem;
   height: 2rem;
   border-radius: var(--aq-radius-xs);
-  background: linear-gradient(135deg, var(--aq-primary) 0%, #6366f1 100%);
+  background: var(--aq-primary);
   color: var(--aq-text-inverse);
   font-family: var(--aq-font-display);
   font-size: 1rem;

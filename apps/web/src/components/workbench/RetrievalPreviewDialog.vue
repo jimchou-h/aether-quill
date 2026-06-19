@@ -155,7 +155,7 @@ function handleConfirm() {
 
 .canonical-name {
   font-size: 0.75rem;
-  color: #1d4ed8;
+  color: var(--aq-primary);
 }
 
 .score {

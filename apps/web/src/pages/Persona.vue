@@ -512,18 +512,19 @@ onMounted(() => {
 }
 
 .view-switch-button {
-  border: 1px solid #d1d5db;
-  background: #fff;
+  border: 1px solid var(--aq-border-strong);
+  background: var(--aq-surface);
   border-radius: 999px;
   padding: 0.3rem 0.75rem;
   cursor: pointer;
   font-size: 0.85rem;
+  transition: background var(--aq-transition-fast), border-color var(--aq-transition-fast);
 }
 
 .view-switch-button.active {
-  border-color: #4f46e5;
-  background: #eef2ff;
-  color: #312e81;
+  border-color: var(--aq-primary);
+  background: var(--aq-primary-soft);
+  color: var(--aq-primary-hover);
 }
 
 .panel-title {

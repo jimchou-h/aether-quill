@@ -440,7 +440,7 @@ onMounted(() => {
 }
 
 .primary-button {
-  background: #1d4ed8;
+  background: var(--aq-primary);
   color: #fff;
   border: none;
 }

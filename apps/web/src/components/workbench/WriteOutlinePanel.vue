@@ -181,7 +181,7 @@ function handleGenerateDraft() {
 
 .outline-status--busy {
   background: var(--wb-primary-soft);
-  border-color: #c7d2fe;
+  border-color: var(--wb-primary-muted, var(--aq-primary-muted));
   color: var(--wb-primary);
 }
 

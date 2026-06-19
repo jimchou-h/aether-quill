@@ -229,18 +229,17 @@ onMounted(() => {
   justify-content: space-between;
   gap: 1rem;
   padding: 1.25rem;
-  border: 1px solid var(--aq-border);
+  border: 2px solid var(--aq-border);
   border-radius: var(--aq-radius-sm);
   background: var(--aq-surface);
-  box-shadow: var(--aq-shadow-sm);
   transition:
-    border-color var(--aq-transition),
-    box-shadow var(--aq-transition);
+    border-color var(--aq-transition-fast),
+    background var(--aq-transition-fast);
 }
 
 .project-card:hover {
   border-color: var(--aq-primary-muted);
-  box-shadow: var(--aq-shadow);
+  background: var(--aq-bg-subtle);
 }
 
 .project-title {

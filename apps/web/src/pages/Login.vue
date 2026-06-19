@@ -97,11 +97,11 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  padding: 1.5rem;
+  min-height: 100dvh;
+  padding: var(--aq-space-lg);
   background:
-    radial-gradient(ellipse 80% 60% at 50% -10%, rgb(79 70 229 / 14%), transparent),
-    radial-gradient(ellipse 60% 50% at 100% 100%, rgb(217 119 6 / 8%), transparent),
+    radial-gradient(circle at 12% 18%, rgb(13 148 136 / 10%), transparent 42%),
+    radial-gradient(circle at 88% 82%, rgb(234 88 12 / 6%), transparent 38%),
     var(--aq-bg);
 }
 
@@ -109,9 +109,8 @@ async function handleLogin() {
   width: min(420px, 100%);
   padding: 2.5rem 2rem;
   background: var(--aq-surface);
-  border: 1px solid var(--aq-border);
+  border: 2px solid var(--aq-border);
   border-radius: var(--aq-radius);
-  box-shadow: var(--aq-shadow-lg);
 }
 
 .login-brand {
@@ -127,7 +126,7 @@ async function handleLogin() {
   height: 3rem;
   margin-bottom: 1rem;
   border-radius: var(--aq-radius-sm);
-  background: linear-gradient(135deg, var(--aq-primary) 0%, #6366f1 100%);
+  background: var(--aq-primary);
   color: var(--aq-text-inverse);
   font-family: var(--aq-font-display);
   font-size: 1.35rem;
