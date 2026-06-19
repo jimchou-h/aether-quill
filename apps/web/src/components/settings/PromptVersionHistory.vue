@@ -163,8 +163,8 @@ async function handleRollbackTo(version: number) {
 }
 
 .dot-current {
-  background: #1d4ed8;
-  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.2);
+  background: var(--aq-primary);
+  box-shadow: var(--aq-ring);
 }
 
 .version-body {

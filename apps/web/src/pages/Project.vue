@@ -61,10 +61,10 @@ const navItems = [
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem 0.75rem;
+  gap: var(--aq-space-sm);
+  padding: var(--aq-space-md) 0.75rem;
   background: var(--aq-surface);
-  border-right: 1px solid var(--aq-border);
+  border-right: 2px solid var(--aq-border);
 }
 
 .sidebar-back {
@@ -89,26 +89,31 @@ const navItems = [
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.55rem 0.75rem;
+  padding: 0.6rem 0.75rem;
   border-radius: var(--aq-radius-xs);
   text-decoration: none;
   color: var(--aq-text-secondary);
   font-size: 0.875rem;
   font-weight: 500;
   transition:
-    background var(--aq-transition),
-    color var(--aq-transition);
+    background var(--aq-transition-fast),
+    color var(--aq-transition-fast);
+  cursor: pointer;
 }
 
 .sidebar-link:hover {
-  background: var(--aq-surface-muted);
+  background: var(--aq-bg-subtle);
   color: var(--aq-text);
 }
 
 .sidebar-link.router-link-active {
-  background: var(--aq-primary-soft);
-  color: var(--aq-primary);
+  background: var(--aq-primary);
+  color: var(--aq-text-inverse);
   font-weight: 600;
+}
+
+.sidebar-link.router-link-active .sidebar-icon {
+  color: var(--aq-text-inverse);
 }
 
 .sidebar-icon {

@@ -19,6 +19,7 @@ body {
   line-height: 1.6;
   color: var(--aq-text);
   background: var(--aq-bg);
+  touch-action: manipulation;
 }
 
 #app {
@@ -60,13 +61,12 @@ body {
   line-height: 1.55;
 }
 
-/* 共享卡片 */
+/* 共享卡片 — Flat：边框分区，无阴影 */
 .aq-card {
   background: var(--aq-surface);
   border: 1px solid var(--aq-border);
   border-radius: var(--aq-radius-sm);
   padding: 1.25rem;
-  box-shadow: var(--aq-shadow-sm);
 }
 
 .aq-card--muted {
@@ -113,7 +113,7 @@ body {
 .aq-field-select:focus {
   outline: none;
   border-color: var(--aq-primary);
-  box-shadow: 0 0 0 3px rgb(79 70 229 / 12%);
+  box-shadow: var(--aq-ring);
 }
 
 .aq-field-textarea {
@@ -145,13 +145,17 @@ body {
 }
 
 .aq-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 .aq-btn:focus-visible {
   outline: 2px solid var(--aq-primary);
   outline-offset: 2px;
+}
+
+.aq-btn:active:not(:disabled) {
+  transform: scale(var(--aq-press-scale));
 }
 
 .aq-btn-primary {
@@ -162,6 +166,16 @@ body {
 
 .aq-btn-primary:hover:not(:disabled) {
   background: var(--aq-primary-hover);
+}
+
+.aq-btn-accent {
+  border: none;
+  background: var(--aq-accent);
+  color: var(--aq-text-inverse);
+}
+
+.aq-btn-accent:hover:not(:disabled) {
+  background: var(--aq-accent-hover);
 }
 
 .aq-btn-secondary {
@@ -252,7 +266,6 @@ body {
   padding: 1.25rem;
   margin-bottom: 1rem;
   background: var(--aq-surface);
-  box-shadow: var(--aq-shadow-sm);
 }
 
 /* 兼容各页面 scoped 内重复定义的通用 class */
@@ -286,7 +299,6 @@ body {
   padding: 1.25rem;
   margin-bottom: 1rem;
   background: var(--aq-surface);
-  box-shadow: var(--aq-shadow-sm);
 }
 
 .panel-title {
@@ -328,7 +340,7 @@ body {
 .field-select:focus {
   outline: none;
   border-color: var(--aq-primary);
-  box-shadow: 0 0 0 3px rgb(79 70 229 / 12%);
+  box-shadow: var(--aq-ring);
 }
 
 .field-textarea {

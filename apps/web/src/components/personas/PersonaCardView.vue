@@ -177,16 +177,17 @@ function jumpToChapter(chapterNo: number) {
   align-items: flex-start;
   gap: 0.2rem;
   padding: 0.65rem 0.75rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--aq-border);
+  border-radius: var(--aq-radius-sm);
+  background: var(--aq-surface);
   cursor: pointer;
   text-align: left;
+  transition: border-color var(--aq-transition-fast), background var(--aq-transition-fast);
 }
 
 .persona-list-item.active {
-  border-color: #4f46e5;
-  background: #eef2ff;
+  border-color: var(--aq-primary);
+  background: var(--aq-primary-soft);
 }
 
 .persona-detail-card {
@@ -231,7 +232,7 @@ function jumpToChapter(chapterNo: number) {
 .link-button {
   border: none;
   background: none;
-  color: #4f46e5;
+  color: var(--aq-primary);
   cursor: pointer;
   padding: 0;
   font: inherit;

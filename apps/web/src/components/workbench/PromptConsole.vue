@@ -567,8 +567,8 @@ defineExpose({ resetForm });
 .field-input:focus,
 .field-textarea:focus {
   outline: none;
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--wb-primary, var(--aq-primary));
+  box-shadow: var(--aq-ring);
 }
 
 .field-textarea {
@@ -645,17 +645,22 @@ defineExpose({ resetForm });
 
 .wb-btn--primary {
   border: none;
-  background: var(--wb-primary, #4f46e5);
+  background: var(--wb-primary, #0d9488);
   color: #fff;
   min-height: 2.75rem;
   border-radius: var(--wb-radius-sm, 10px);
   font-size: 0.92rem;
   font-weight: 600;
   cursor: pointer;
+  transition: background var(--aq-transition-fast), transform var(--aq-transition-fast);
 }
 
 .wb-btn--primary:hover:not(:disabled) {
-  background: var(--wb-primary-hover, #4338ca);
+  background: var(--wb-primary-hover, #0f766e);
+}
+
+.wb-btn--primary:active:not(:disabled) {
+  transform: scale(var(--aq-press-scale));
 }
 
 .wb-btn--primary:disabled {
@@ -714,7 +719,7 @@ defineExpose({ resetForm });
 }
 
 .chip-button:hover {
-  border-color: #93c5fd;
+  border-color: var(--wb-primary-muted, var(--aq-primary-muted));
   background: #f0f5ff;
 }
 
@@ -800,7 +805,7 @@ defineExpose({ resetForm });
 }
 
 .event-option:hover {
-  border-color: #93c5fd;
+  border-color: var(--wb-primary-muted, var(--aq-primary-muted));
 }
 
 .event-option-text {
