@@ -758,6 +758,12 @@ export const apiClient = {
     } = {}
   ) {
     const workspace = await this.getWorkspace(projectId);
+    const promptConfigRes = await http.get(`/api/projects/${projectId}/prompt-config`);
+    const promptConfig = this.unwrapPayload<{ systemPromptText?: string }>(promptConfigRes.data);
+    const resolvedSystemPromptText =
+      (typeof promptConfig?.systemPromptText === 'string' &&
+        promptConfig.systemPromptText.trim()) ||
+      workspace.settings.systemPromptText;
     const activePersona =
       workspace.personas.find((persona) => persona.id === workspace.settings.activePersonaId) ||
       workspace.personas.find((persona) => persona.status === 'published') ||
@@ -781,7 +787,7 @@ export const apiClient = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        systemPromptText: workspace.settings.systemPromptText,
+        systemPromptText: resolvedSystemPromptText,
         personaProfile: activePersona
           ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
           : '未配置人物设定',

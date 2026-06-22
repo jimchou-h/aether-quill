@@ -90,6 +90,7 @@ import {
 } from './identity-relation.util';
 import type { ChapterStructuredInfoPersisted } from './persisted-workspace.types';
 import { DocumentsService } from '../documents/documents.service';
+import { PromptTemplatesService } from '../prompt-templates/prompt-templates.service';
 import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
 import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
@@ -407,7 +408,9 @@ export class ProjectsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => DocumentsService))
-    private readonly documentsService: DocumentsService
+    private readonly documentsService: DocumentsService,
+    @Inject(forwardRef(() => PromptTemplatesService))
+    private readonly promptTemplatesService: PromptTemplatesService
   ) {
     this.persistenceReady = new Promise<void>((resolve) => {
       this.persistenceResolve = resolve;
@@ -4270,7 +4273,7 @@ export class ProjectsService implements OnModuleInit {
     const identityRelationMemory = buildIdentityRelationMemoryBlock(identityRelations, personas);
 
     await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
-      systemPromptText: settings.systemPromptText,
+      systemPromptText: this.promptTemplatesService.resolveProjectSystemPromptText(projectId),
       personaProfile: activePersona
         ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
         : '未配置人物设定',
