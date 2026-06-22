@@ -49,6 +49,7 @@ import {
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
+import { mergeSystemPromptSections } from './generation/system-prompt.util';
 import {
   assertConfirmedOutlineText,
   buildWorkbenchDraftUserPrompt,
@@ -945,7 +946,10 @@ app.post('/api/generate', async (req, res) => {
   const narrativeMeta = generationContext.narrativeMeta;
 
   if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {
-    generationContext.systemPromptText = systemPromptOverride.trim();
+    generationContext.systemPromptText = mergeSystemPromptSections(
+      generationContext.systemPromptText,
+      systemPromptOverride
+    );
   }
 
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
@@ -1161,7 +1165,10 @@ app.post('/api/generate/draft', async (req, res) => {
   );
   const draftNarrativeMeta = generationContext.narrativeMeta;
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
-  generationContext.systemPromptText = WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT;
+  generationContext.systemPromptText = mergeSystemPromptSections(
+    generationContext.systemPromptText,
+    WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT
+  );
 
   const prompt = buildWorkbenchDraftUserPrompt(
     {
@@ -1187,7 +1194,7 @@ app.post('/api/generate/draft', async (req, res) => {
   const trace = await generationService.createTrace({
     prompt,
     projectId,
-    systemPrompt: WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT,
+    systemPrompt: generationContext.systemPromptText,
     context: {
       phase: 'write.chapter.draft',
       task,

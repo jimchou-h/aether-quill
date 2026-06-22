@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+  forwardRef,
+} from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { ProjectsService } from '../projects/projects.service';
@@ -67,6 +74,7 @@ export class PromptTemplatesService implements OnModuleInit {
   private readonly versions = new Map<string, TemplateVersion[]>();
 
   constructor(
+    @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
     private readonly prisma: PrismaService
   ) {
@@ -115,6 +123,29 @@ export class PromptTemplatesService implements OnModuleInit {
     return this.templates.filter((t) => t.projectId === projectId);
   }
 
+  /** 运行时注入 orchestrator 的项目级 systemPromptText（优先 system 模板，回退 settings） */
+  resolveProjectSystemPromptText(projectId: string): string {
+    this.projectsService.findOne(projectId);
+    const systemTemplate = this.templates.find(
+      (t) => t.projectId === projectId && t.category === 'system'
+    );
+    if (systemTemplate?.content?.trim()) {
+      return systemTemplate.content.trim();
+    }
+    return this.projectsService.getSettings(projectId).systemPromptText.trim();
+  }
+
+  private syncSystemPromptToProjectSettings(projectId: string, tmpl: TemplateRecord): void {
+    if (tmpl.category !== 'system') {
+      return;
+    }
+    const content = tmpl.content?.trim();
+    if (!content) {
+      return;
+    }
+    this.projectsService.updateSettings(projectId, { systemPromptText: content });
+  }
+
   findById(projectId: string, templateId: string): TemplateRecord {
     this.projectsService.findOne(projectId);
     const tmpl = this.templates.find((t) => t.id === templateId && t.projectId === projectId);
@@ -158,6 +189,7 @@ export class PromptTemplatesService implements OnModuleInit {
       },
     ]);
     this.persistState();
+    this.syncSystemPromptToProjectSettings(projectId, tmpl);
     return tmpl;
   }
 
@@ -199,6 +231,7 @@ export class PromptTemplatesService implements OnModuleInit {
     this.versions.set(templateId, tmplVersions);
 
     this.persistState();
+    this.syncSystemPromptToProjectSettings(projectId, tmpl);
     return tmpl;
   }
 
@@ -218,6 +251,7 @@ export class PromptTemplatesService implements OnModuleInit {
     tmpl.isPublished = true;
     tmpl.updatedAt = new Date();
     this.persistState();
+    this.syncSystemPromptToProjectSettings(projectId, tmpl);
 
     return {
       configId: templateId,
@@ -257,6 +291,7 @@ export class PromptTemplatesService implements OnModuleInit {
     this.versions.set(templateId, tmplVersions);
 
     this.persistState();
+    this.syncSystemPromptToProjectSettings(projectId, tmpl);
     return tmpl;
   }
 
