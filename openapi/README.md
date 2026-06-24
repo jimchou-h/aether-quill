@@ -19,7 +19,11 @@ openapi/
     │   ├── generation-traces.yaml   # GET /api/projects/:id/generation-traces
     │   ├── prompt-config.yaml       # GET/PUT /api/projects/:id/prompt-config
     │   ├── prompt-config-publish.yaml    # POST /api/projects/:id/prompt-config/publish
-    │   └── prompt-config-rollback.yaml  # POST /api/projects/:id/prompt-config/rollback
+    │   ├── prompt-config-rollback.yaml  # POST /api/projects/:id/prompt-config/rollback
+    │   ├── task-prompts.yaml              # GET /api/projects/:id/task-prompts
+    │   ├── task-prompt-by-key.yaml        # GET/PUT /api/projects/:id/task-prompts/:templateKey
+    │   ├── task-prompt-publish.yaml       # POST .../task-prompts/:templateKey/publish
+    │   └── task-prompt-rollback.yaml      # POST .../task-prompts/:templateKey/rollback
     ├── documents/
     │   ├── reindex.yaml            # POST /api/documents/:id/reindex
     │   └── chunks.yaml             # GET /api/documents/:id/chunks
@@ -57,6 +61,11 @@ openapi/
 - `PUT /api/projects/:id/prompt-config` - 更新 Prompt 配置（保存草稿）
 - `POST /api/projects/:id/prompt-config/publish` - 发布 Prompt 配置
 - `POST /api/projects/:id/prompt-config/rollback` - 回滚 Prompt 配置
+- `GET /api/projects/:id/task-prompts` - 任务 Prompt 列表（含仓库默认）
+- `GET /api/projects/:id/task-prompts/:templateKey` - 任务 Prompt 详情
+- `PUT /api/projects/:id/task-prompts/:templateKey` - 保存任务 Prompt 草稿
+- `POST /api/projects/:id/task-prompts/:templateKey/publish` - 发布任务 Prompt
+- `POST /api/projects/:id/task-prompts/:templateKey/rollback` - 回滚任务 Prompt
 
 ## 使用方法
 

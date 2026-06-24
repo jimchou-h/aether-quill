@@ -84,16 +84,39 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
   content: '章节优化-正文 system prompt（v1.0.0）',
 };
 
+/** 章节优化-错字检查（AQ-250 登记；运行时默认见 API `chapter-optimize.util`） */
+export const chapterOptimizeTypoCheckTemplate: PromptTemplate = {
+  id: 'chapter.optimize.typo-check',
+  name: '章节优化-错字检查',
+  version: '1.0.0',
+  category: 'task',
+  status: 'published',
+  systemPromptText:
+    '你是一位资深中文小说校对编辑。本步骤只输出 JSON issues 数组，不要 Markdown。',
+  content: '章节优化-错字检查 system prompt（v1.0.0）',
+};
+
+/** 章节优化-错字修正（AQ-250 登记） */
+export const chapterOptimizeTypoFixTemplate: PromptTemplate = {
+  id: 'chapter.optimize.typo-fix',
+  name: '章节优化-错字修正',
+  version: '1.0.0',
+  category: 'task',
+  status: 'published',
+  systemPromptText:
+    '你是一位资深中文小说校对编辑。本步骤直接输出修正后的完整正文纯文本。',
+  content: '章节优化-错字修正 system prompt（v1.0.0）',
+};
+
 /**
  * 通用章节续写（AQ-122）
  *
- * 运行时由 `services/rag-orchestrator` 的 `GenerationService.buildPrompt` 拼装为：
- * 【系统指令】← 项目 `systemPromptText`（或章节优化的 `systemPromptOverride`）
- * 【叙事上下文】← 人物 / 大纲 / 近期章节摘要 / 已选关系备忘
- * 【检索证据】← Qdrant 向量 TopK 召回 + 重排 TopN（`formatEvidence` 含 `chunk_id` 与文档标题）
- * 【用户需求】← 调用方 `prompt` 正文
+ * 运行时由 `services/rag-orchestrator` 的 `GenerationService.buildLlmMessages` 拼装为：
+ *   system ← 全局默认 + 项目 systemPromptText + 任务 taskSystemPrompt
+ *   user   ←【叙事上下文】【检索证据】【用户需求】
  *
- * 治理占位符 `{{narrativeContext}}` / `{{retrievedEvidence}}` 与上述中文分节一一对应，便于审计与模板 diff。
+ * 章节优化 task 默认以 `services/api/.../chapter-optimize.util.ts` 为扩展真源；
+ * 本包登记供治理审计，文本较短时以 util 常量为准。
  */
 /**
  * 写作工作台-章节大纲（AQ-217~AQ-219）
@@ -135,6 +158,8 @@ export const writeChapterTaskTemplate: PromptTemplate = {
 export const templateRegistry: Record<string, PromptTemplate> = {
   [chapterOptimizePlanTemplate.id]: chapterOptimizePlanTemplate,
   [chapterOptimizeDraftTemplate.id]: chapterOptimizeDraftTemplate,
+  [chapterOptimizeTypoCheckTemplate.id]: chapterOptimizeTypoCheckTemplate,
+  [chapterOptimizeTypoFixTemplate.id]: chapterOptimizeTypoFixTemplate,
   [writeChapterOutlineTemplate.id]: writeChapterOutlineTemplate,
   [writeChapterTaskTemplate.id]: writeChapterTaskTemplate,
 };

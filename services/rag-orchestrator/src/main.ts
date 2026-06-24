@@ -49,7 +49,8 @@ import {
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
 import { GenerationService, GenerationContext } from './generation/generation.service';
-import { mergeSystemPromptSections } from './generation/system-prompt.util';
+import { assembleSystemMessageContent } from './generation/system-prompt.util';
+import { resolveTaskSystemPromptFromContext } from './generation/task-prompt-defaults';
 import {
   assertConfirmedOutlineText,
   buildWorkbenchDraftUserPrompt,
@@ -129,6 +130,8 @@ interface KnowledgeDocumentPayload {
 
 interface ProjectContext {
   systemPromptText: string;
+  /** 项目已发布 task prompt（templateKey → system 文本） */
+  taskPrompts?: Record<string, string>;
   personaProfile: string;
   outlineSummary: string;
   chapters: ContextChapter[];
@@ -482,6 +485,15 @@ app.post('/api/projects/:projectId/context', (req, res) => {
 
   if (typeof payload.systemPromptText === 'string') {
     context.systemPromptText = payload.systemPromptText;
+  }
+  if (payload.taskPrompts && typeof payload.taskPrompts === 'object' && !Array.isArray(payload.taskPrompts)) {
+    const taskPrompts: Record<string, string> = {};
+    for (const [key, value] of Object.entries(payload.taskPrompts as Record<string, unknown>)) {
+      if (typeof key === 'string' && key.trim() && typeof value === 'string' && value.trim()) {
+        taskPrompts[key.trim()] = value.trim();
+      }
+    }
+    context.taskPrompts = taskPrompts;
   }
   if (typeof payload.personaProfile === 'string') {
     context.personaProfile = payload.personaProfile;
@@ -945,16 +957,22 @@ app.post('/api/generate', async (req, res) => {
   });
   const narrativeMeta = generationContext.narrativeMeta;
 
-  if (typeof systemPromptOverride === 'string' && systemPromptOverride.trim()) {
-    generationContext.systemPromptText = mergeSystemPromptSections(
-      generationContext.systemPromptText,
-      systemPromptOverride
-    );
+  const resolvedTaskSystemPrompt = resolveTaskSystemPromptFromContext({
+    templateKey: tk,
+    systemPromptOverride,
+    taskPrompts: projectCtx.taskPrompts,
+  });
+  if (resolvedTaskSystemPrompt) {
+    generationContext.taskSystemPrompt = resolvedTaskSystemPrompt;
   }
 
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
 
   const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, projectCtx);
+  const resolvedSystemPrompt = assembleSystemMessageContent({
+    systemPromptText: generationContext.systemPromptText,
+    taskSystemPrompt: generationContext.taskSystemPrompt,
+  });
 
   const traceContext: Record<string, unknown> = {
     retrieval_query: retrievalQuery,
@@ -976,7 +994,7 @@ app.post('/api/generate', async (req, res) => {
   const trace = await generationService.createTrace({
     prompt,
     projectId,
-    systemPrompt: generationContext.systemPromptText,
+    systemPrompt: resolvedSystemPrompt,
     context: traceContext,
     useSSE,
     temperature: resolvedTemperature,
@@ -1165,10 +1183,7 @@ app.post('/api/generate/draft', async (req, res) => {
   );
   const draftNarrativeMeta = generationContext.narrativeMeta;
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
-  generationContext.systemPromptText = mergeSystemPromptSections(
-    generationContext.systemPromptText,
-    WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT
-  );
+  generationContext.taskSystemPrompt = WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT;
 
   const prompt = buildWorkbenchDraftUserPrompt(
     {
@@ -1194,7 +1209,10 @@ app.post('/api/generate/draft', async (req, res) => {
   const trace = await generationService.createTrace({
     prompt,
     projectId,
-    systemPrompt: generationContext.systemPromptText,
+    systemPrompt: assembleSystemMessageContent({
+      systemPromptText: generationContext.systemPromptText,
+      taskSystemPrompt: generationContext.taskSystemPrompt,
+    }),
     context: {
       phase: 'write.chapter.draft',
       task,

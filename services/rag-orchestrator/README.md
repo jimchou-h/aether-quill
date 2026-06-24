@@ -30,11 +30,14 @@ POST /api/generate 或 /api/generate/draft
                     ↓
          buildNarrativeContextText（叙事上下文）
                     ↓
-         GenerationService.buildPrompt
-           【系统指令】【叙事上下文】【检索证据】【用户需求】
+         GenerationService.buildLlmMessages
+           system ← 全局默认 + 项目 system + 任务 prompt
+           user   ←【叙事上下文】【检索证据】【用户需求】
                     ↓
               LLM 流式 / 非流式
 ```
+
+`LLM_PROMPT_LEGACY_SINGLE_USER=1` 时回退为单条 user（含【系统指令】段）。
 
 ## 叙事上下文 vs 检索证据
 
@@ -43,7 +46,7 @@ POST /api/generate 或 /api/generate/draft
 | 叙事上下文 | `context/narrative-context` | 前章衔接、人物快照、近期摘要、语义记忆、大纲、关系备忘 |
 | 检索证据 | `retrieval/knowledge-retrieval` | 向量 chunk 或标题匹配后的知识库文档 |
 
-二者在 `GenerationService.buildPrompt` 中分段注入，勿混淆。
+二者在 `GenerationService.buildUserMessage` 中分段注入；system 角色由 `buildSystemMessage` 单独拼装，勿混淆。
 
 ## 开发
 
@@ -57,7 +60,7 @@ pnpm dev   # 默认 http://localhost:3001
 写作工作台「生成大纲」「生成正文」时，`rag-orchestrator` 终端会打印送入 LLM 的完整拼装 prompt（含系统指令、叙事上下文、检索证据、用户需求）。
 
 - 默认开启；设置 `LOG_WRITE_CHAPTER_PROMPT=false` 可关闭
-- 同时写入 trace 的 `context.assembled_prompt`，可通过 `GET /api/traces/:traceId` 查看
+- trace `context` 记录 `system_message`、`user_message` 与 `assembled_prompt`，可通过 `GET /api/traces/:traceId` 查看
 
 ## 主要 API
 
