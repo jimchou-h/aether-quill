@@ -1,8 +1,11 @@
 /**
  * 生成服务 — LLM 调用与 Prompt 拼装
  *
- * Prompt 最终结构（`buildPrompt`）：
- *   【系统指令】→【叙事上下文】→【检索证据】→【用户需求】
+ * 默认消息结构（`buildLlmMessages`）：
+ *   system ← 全局默认 + 项目 systemPromptText + 任务 taskSystemPrompt
+ *   user   ←【叙事上下文】→【检索证据】→【用户需求】
+ *
+ * `LLM_PROMPT_LEGACY_SINGLE_USER=1` 时回退为单条 user（含【系统指令】段）。
  *
  * 叙事上下文由 `context/narrative-context` 在 main 层预先拼装；
  * 检索证据由 `retrieval/knowledge-retrieval` 在 main 层注入 `GenerationContext.retrievedEvidence`。
@@ -11,11 +14,6 @@
  */
 
 import axios from 'axios';
-import {
-  hasMultiPersonaCardEvidence,
-  MULTI_PERSONA_WRITING_GUARD,
-  PERSONA_APPEARANCE_CONTINUITY_GUARD,
-} from '../retrieval/persona-card-evidence';
 import { TraceRecord, GenerateRequest } from './types';
 import { consumeProviderSseStreamChunk, flushProviderSseStreamBuffer } from './provider-sse-stream';
 import { TraceStore, TraceQuery, TraceStats } from './trace-store';
@@ -25,18 +23,16 @@ import {
 } from './identity-relation-extract';
 import { buildSummaryLineFromSnapshot } from '../context/persona-snapshot';
 import { logAssembledWriteChapterPrompt } from './generation-prompt-log';
+import {
+  buildLlmMessages,
+  buildLegacySingleUserPrompt,
+  buildSystemMessage,
+  buildUserMessage,
+  type GenerationContext,
+  type LlmChatMessage,
+} from './generation-prompt-assembler';
 
-export interface GenerationContext {
-  /** 项目级 systemPromptText（Settings） */
-  systemPromptText: string;
-  /**
-   * 叙事上下文：人物 + 大纲 + 近期章节摘要 + 已选关系备忘（不含向量检索证据）。
-   * 与 `retrievedEvidence` 分段拼装，对应模板占位 `{{narrativeContext}}` 语义。
-   */
-  narrativeContext: string;
-  /** 向量检索 + 重排后的证据块，对应 `{{retrievedEvidence}}` */
-  retrievedEvidence?: string;
-}
+export type { GenerationContext, LlmChatMessage } from './generation-prompt-assembler';
 
 interface ProviderRuntimeConfig {
   providerUrl: string;
@@ -49,31 +45,21 @@ interface ProviderRuntimeConfig {
 export class GenerationService {
   private readonly traceStore = new TraceStore();
 
-  /** 将系统指令、叙事上下文、检索证据、用户 prompt 拼成单条 user message */
+  buildSystemMessage(context: GenerationContext): string {
+    return buildSystemMessage(context);
+  }
+
+  buildUserMessage(context: GenerationContext, userPrompt: string): string {
+    return buildUserMessage(context, userPrompt);
+  }
+
+  /** @deprecated 新链路请使用 `buildLlmMessages` */
   buildPrompt(context: GenerationContext, userPrompt: string): string {
-    const sections: string[] = [];
+    return buildLegacySingleUserPrompt(context, userPrompt);
+  }
 
-    if (context.systemPromptText?.trim()) {
-      sections.push(`【系统指令】\n${context.systemPromptText.trim()}`);
-    }
-    if (context.narrativeContext?.trim()) {
-      let narrative = context.narrativeContext.trim();
-      if (narrative.includes('【人物当前快照】')) {
-        narrative = `${PERSONA_APPEARANCE_CONTINUITY_GUARD}\n\n${narrative}`;
-      }
-      sections.push(`【叙事上下文】\n${narrative}`);
-    }
-    if (context.retrievedEvidence?.trim()) {
-      let evidence = context.retrievedEvidence.trim();
-      if (hasMultiPersonaCardEvidence(evidence)) {
-        evidence = `${MULTI_PERSONA_WRITING_GUARD}\n\n${evidence}`;
-      }
-      sections.push(`【检索证据】\n${evidence}`);
-    }
-
-    sections.push(`【用户需求】\n${userPrompt}`);
-
-    return sections.join('\n\n');
+  buildLlmMessages(context: GenerationContext, userPrompt: string): LlmChatMessage[] {
+    return buildLlmMessages(context, userPrompt);
   }
 
   async createTrace(request: GenerateRequest): Promise<TraceRecord> {
@@ -115,16 +101,30 @@ export class GenerationService {
     return this.traceStore.getStats().total;
   }
 
-  private recordAssembledPrompt(trace: TraceRecord, prompt: string): void {
-    logAssembledWriteChapterPrompt(trace, prompt);
+  private recordAssembledPrompt(
+    trace: TraceRecord,
+    systemMessage: string,
+    userMessage: string
+  ): void {
+    logAssembledWriteChapterPrompt(trace, userMessage);
+    const assembledPrompt =
+      systemMessage.trim().length > 0
+        ? `【system】\n${systemMessage.trim()}\n\n【user】\n${userMessage}`
+        : userMessage;
     this.updateTrace(trace.id, {
-      context: { assembled_prompt: prompt },
+      context: {
+        system_message: systemMessage.trim() || undefined,
+        user_message: userMessage,
+        assembled_prompt: assembledPrompt,
+      },
     });
   }
 
   async generateNonStream(trace: TraceRecord, context: GenerationContext): Promise<string> {
-    const prompt = this.buildPrompt(context, trace.prompt);
-    this.recordAssembledPrompt(trace, prompt);
+    const messages = this.buildLlmMessages(context, trace.prompt);
+    const systemMessage = messages.find((m) => m.role === 'system')?.content ?? '';
+    const userMessage = messages.find((m) => m.role === 'user')?.content ?? trace.prompt;
+    this.recordAssembledPrompt(trace, systemMessage, userMessage);
     this.updateTrace(trace.id, { status: 'generating' });
 
     const provider = this.resolveProviderConfig();
@@ -134,7 +134,7 @@ export class GenerationService {
         : provider.temperature;
 
     try {
-      const response = await this.callProviderApi(prompt, {
+      const response = await this.callProviderApi(messages, {
         maxTokens: provider.maxTokens,
         temperature,
       });
@@ -160,13 +160,15 @@ export class GenerationService {
     trace: TraceRecord,
     context: GenerationContext
   ): AsyncGenerator<string, void, unknown> {
-    const prompt = this.buildPrompt(context, trace.prompt);
-    this.recordAssembledPrompt(trace, prompt);
+    const messages = this.buildLlmMessages(context, trace.prompt);
+    const systemMessage = messages.find((m) => m.role === 'system')?.content ?? '';
+    const userMessage = messages.find((m) => m.role === 'user')?.content ?? trace.prompt;
+    this.recordAssembledPrompt(trace, systemMessage, userMessage);
     this.updateTrace(trace.id, { status: 'generating' });
     let fullContent = '';
 
     try {
-      for await (const chunk of this.callProviderStream(prompt, trace)) {
+      for await (const chunk of this.callProviderStream(messages, trace)) {
         fullContent += chunk;
         yield chunk;
       }
@@ -687,19 +689,23 @@ export class GenerationService {
   }
 
   private async callProviderApi(
-    prompt: string,
+    promptOrMessages: string | LlmChatMessage[],
     options?: { maxTokens?: number; temperature?: number }
   ): Promise<{
     content: string;
     usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
   }> {
     const provider = this.resolveProviderConfig();
+    const messages =
+      typeof promptOrMessages === 'string'
+        ? [{ role: 'user' as const, content: promptOrMessages }]
+        : promptOrMessages;
 
     const response = await axios.post(
       provider.providerUrl,
       {
         model: provider.model,
-        messages: [{ role: 'user', content: prompt }],
+        messages,
         max_tokens: options?.maxTokens ?? provider.maxTokens,
         temperature: options?.temperature ?? provider.temperature,
         stream: false,
@@ -739,7 +745,7 @@ export class GenerationService {
   }
 
   private async *callProviderStream(
-    prompt: string,
+    messages: LlmChatMessage[],
     trace: TraceRecord
   ): AsyncGenerator<string, void, unknown> {
     const provider = this.resolveProviderConfig();
@@ -749,7 +755,7 @@ export class GenerationService {
       provider.providerUrl,
       {
         model: provider.model,
-        messages: [{ role: 'user', content: prompt }],
+        messages,
         max_tokens: maxTokens,
         temperature,
         stream: true,

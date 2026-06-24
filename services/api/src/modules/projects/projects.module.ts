@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { PromptTemplatesModule } from '../prompt-templates/prompt-templates.module';
+import { TaskPromptsModule } from '../task-prompts/task-prompts.module';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 
@@ -12,6 +13,7 @@ import { ProjectsService } from './projects.service';
     AuthModule,
     forwardRef(() => DocumentsModule),
     forwardRef(() => PromptTemplatesModule),
+    forwardRef(() => TaskPromptsModule),
   ],
   controllers: [ProjectsController],
   providers: [ProjectsService],

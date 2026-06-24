@@ -91,16 +91,13 @@ import {
 import type { ChapterStructuredInfoPersisted } from './persisted-workspace.types';
 import { DocumentsService } from '../documents/documents.service';
 import { PromptTemplatesService } from '../prompt-templates/prompt-templates.service';
+import { TaskPromptsService } from '../task-prompts/task-prompts.service';
 import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
 import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
-  CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
-  CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
-  CHAPTER_OPTIMIZE_TYPO_CHECK_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY,
-  CHAPTER_OPTIMIZE_TYPO_FIX_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY,
   ChapterVersionConflictError,
   assertDraftText,
@@ -410,7 +407,9 @@ export class ProjectsService implements OnModuleInit {
     @Inject(forwardRef(() => DocumentsService))
     private readonly documentsService: DocumentsService,
     @Inject(forwardRef(() => PromptTemplatesService))
-    private readonly promptTemplatesService: PromptTemplatesService
+    private readonly promptTemplatesService: PromptTemplatesService,
+    @Inject(forwardRef(() => TaskPromptsService))
+    private readonly taskPromptsService: TaskPromptsService
   ) {
     this.persistenceReady = new Promise<void>((resolve) => {
       this.persistenceResolve = resolve;
@@ -2509,7 +2508,6 @@ export class ProjectsService implements OnModuleInit {
           projectId,
           prompt: userPrompt,
           useSSE: true,
-          systemPromptOverride: CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
           templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
           context: {
             task: 'chapter.optimize.plan',
@@ -2751,7 +2749,6 @@ export class ProjectsService implements OnModuleInit {
               projectId,
               prompt: segmentPrompt,
               useSSE: true,
-              systemPromptOverride: CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
               templateKey: CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
               maxTokens,
               context: {
@@ -2941,6 +2938,10 @@ export class ProjectsService implements OnModuleInit {
     const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
     assertDraftText(draftText);
 
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+
     const userPrompt = buildTypoCheckUserPrompt(draftText);
     const traceId = makeOptimizationId('typo-check');
 
@@ -2951,7 +2952,6 @@ export class ProjectsService implements OnModuleInit {
           projectId,
           prompt: userPrompt,
           useSSE: false,
-          systemPromptOverride: CHAPTER_OPTIMIZE_TYPO_CHECK_SYSTEM_PROMPT,
           templateKey: CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY,
           context: {
             task: 'chapter.optimize.typo-check',
@@ -3023,6 +3023,10 @@ export class ProjectsService implements OnModuleInit {
     const traceId = makeOptimizationId('typo-fix');
     const userPrompt = buildTypoFixUserPrompt(draftText, issues);
 
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+
     let response;
     try {
       response = await axios.post(
@@ -3031,7 +3035,6 @@ export class ProjectsService implements OnModuleInit {
           projectId,
           prompt: userPrompt,
           useSSE: true,
-          systemPromptOverride: CHAPTER_OPTIMIZE_TYPO_FIX_SYSTEM_PROMPT,
           templateKey: CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY,
           context: {
             task: 'chapter.optimize.typo-fix',
@@ -4274,6 +4277,7 @@ export class ProjectsService implements OnModuleInit {
 
     await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
       systemPromptText: this.promptTemplatesService.resolveProjectSystemPromptText(projectId),
+      taskPrompts: this.taskPromptsService.getEffectivePublishedTaskPromptsMap(projectId),
       personaProfile: activePersona
         ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
         : '未配置人物设定',

@@ -4,8 +4,9 @@
  * 提供 plan / draft user prompt 拼装、章节版本乐观锁校验、instruction 校验等纯函数。
  *
  * 模板治理同步入口：`packages/prompt-templates/src/templates.ts`
- *  - chapterOptimizePlanTemplate
- *  - chapterOptimizeDraftTemplate
+ *  - chapterOptimizePlanTemplate / chapterOptimizeDraftTemplate（基础登记）
+ *  - 本文件 `CHAPTER_OPTIMIZE_*_SYSTEM_PROMPT` 为**运行时仓库默认种子**（含衔接等扩展句）
+ *  - `task-prompt-defaults.ts` 与 `rag-orchestrator/.../task-prompt-defaults.ts` 须与本文件保持一致
  * 任何一边变更，都必须同步另一边，避免运行时与治理副本漂移。
  */
 

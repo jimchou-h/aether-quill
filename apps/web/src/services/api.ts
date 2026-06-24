@@ -738,6 +738,54 @@ export const apiClient = {
     },
   },
 
+  taskPrompts: {
+    async list(projectId: string): Promise<TaskPromptListItem[]> {
+      const response = await http.get(`/api/projects/${projectId}/task-prompts`);
+      return apiClient.unwrapPayload<TaskPromptListItem[]>(response.data);
+    },
+
+    async get(projectId: string, templateKey: string): Promise<TaskPromptListItem> {
+      const encodedKey = encodeURIComponent(templateKey);
+      const response = await http.get(
+        `/api/projects/${projectId}/task-prompts/${encodedKey}`
+      );
+      return apiClient.unwrapPayload<TaskPromptListItem>(response.data);
+    },
+
+    async saveDraft(
+      projectId: string,
+      templateKey: string,
+      draftText: string
+    ): Promise<TaskPromptListItem> {
+      const encodedKey = encodeURIComponent(templateKey);
+      const response = await http.put(`/api/projects/${projectId}/task-prompts/${encodedKey}`, {
+        draftText,
+      });
+      return apiClient.unwrapPayload<TaskPromptListItem>(response.data);
+    },
+
+    async publish(projectId: string, templateKey: string): Promise<TaskPromptPublishResult> {
+      const encodedKey = encodeURIComponent(templateKey);
+      const response = await http.post(
+        `/api/projects/${projectId}/task-prompts/${encodedKey}/publish`
+      );
+      return apiClient.unwrapPayload<TaskPromptPublishResult>(response.data);
+    },
+
+    async rollback(
+      projectId: string,
+      templateKey: string,
+      payload?: { targetVersion?: number }
+    ): Promise<TaskPromptRollbackResult> {
+      const encodedKey = encodeURIComponent(templateKey);
+      const response = await http.post(
+        `/api/projects/${projectId}/task-prompts/${encodedKey}/rollback`,
+        payload ?? {}
+      );
+      return apiClient.unwrapPayload<TaskPromptRollbackResult>(response.data);
+    },
+  },
+
   // Prompt Templates API (for version history)
   async listPromptTemplates(projectId: string) {
     const response = await http.get(`/api/projects/${projectId}/prompt-templates`);
@@ -1892,6 +1940,30 @@ export interface PromptConfigVersionItem {
   content: string;
   createdAt: string;
   isPublished: boolean;
+}
+
+export interface TaskPromptListItem {
+  templateKey: string;
+  name: string;
+  defaultText: string;
+  draftText: string;
+  publishedText: string;
+  version: number;
+  hasCustomDraft: boolean;
+  hasCustomPublished: boolean;
+  updatedAt?: string;
+}
+
+export interface TaskPromptPublishResult {
+  templateKey: string;
+  version: number;
+  publishedAt: string;
+}
+
+export interface TaskPromptRollbackResult {
+  templateKey: string;
+  version: number;
+  rolledBackAt: string;
 }
 
 export type PersonaIdentityRelationItem = components['schemas']['PersonaIdentityRelation'];

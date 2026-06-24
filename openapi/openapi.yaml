@@ -65,6 +65,14 @@ paths:
     $ref: './paths/projects/prompt-config-publish.yaml'
   /api/projects/{id}/prompt-config/rollback:
     $ref: './paths/projects/prompt-config-rollback.yaml'
+  /api/projects/{id}/task-prompts:
+    $ref: './paths/projects/task-prompts.yaml'
+  /api/projects/{id}/task-prompts/{templateKey}:
+    $ref: './paths/projects/task-prompt-by-key.yaml'
+  /api/projects/{id}/task-prompts/{templateKey}/publish:
+    $ref: './paths/projects/task-prompt-publish.yaml'
+  /api/projects/{id}/task-prompts/{templateKey}/rollback:
+    $ref: './paths/projects/task-prompt-rollback.yaml'
   /api/projects/{id}/personas:
     $ref: './paths/projects/personas.yaml'
   /api/projects/{id}/personas/{personaId}:
@@ -772,6 +780,68 @@ components:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+    TaskPromptListItem:
+      type: object
+      required:
+        - templateKey
+        - name
+        - defaultText
+        - draftText
+        - publishedText
+        - version
+        - hasCustomDraft
+        - hasCustomPublished
+      properties:
+        templateKey:
+          type: string
+        name:
+          type: string
+        defaultText:
+          type: string
+        draftText:
+          type: string
+        publishedText:
+          type: string
+        version:
+          type: integer
+        hasCustomDraft:
+          type: boolean
+        hasCustomPublished:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+    TaskPromptDetail:
+      allOf:
+        - $ref: '#/components/schemas/TaskPromptListItem'
+    TaskPromptPublishResult:
+      type: object
+      required:
+        - templateKey
+        - version
+        - publishedAt
+      properties:
+        templateKey:
+          type: string
+        version:
+          type: integer
+        publishedAt:
+          type: string
+          format: date-time
+    TaskPromptRollbackResult:
+      type: object
+      required:
+        - templateKey
+        - version
+        - rolledBackAt
+      properties:
+        templateKey:
+          type: string
+        version:
+          type: integer
+        rolledBackAt:
           type: string
           format: date-time
     RelationEvent:
