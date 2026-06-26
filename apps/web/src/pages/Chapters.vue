@@ -11,6 +11,7 @@ import ChapterImportForm from '../components/chapters/ChapterImportForm.vue';
 import ChapterImportDialog from '../components/chapters/ChapterImportDialog.vue';
 import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
+import ChapterBatchOptimizeDialog from '../components/chapters/ChapterBatchOptimizeDialog.vue';
 import {
   presentError,
   presentErrorFromCaught,
@@ -37,7 +38,9 @@ const parsingStructuredChapterNo = ref<number | null>(null);
 const showImportModal = ref(false);
 const showImportNovelModal = ref(false);
 const showOptimizeModal = ref(false);
+const showBatchOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
+const batchOptimizeChapters = ref<ChapterItem[]>([]);
 const exportingChapters = ref(false);
 const renumbering = ref(false);
 const showHint = ref(true);
@@ -323,6 +326,17 @@ function handleOpenOptimizeDialog(chapter: ChapterItem) {
   showOptimizeModal.value = true;
 }
 
+function handleOpenBatchOptimizeDialog(chapters: ChapterItem[]) {
+  batchOptimizeChapters.value = chapters;
+  showBatchOptimizeModal.value = true;
+}
+
+function handleCloseBatchOptimizeDialog() {
+  showBatchOptimizeModal.value = false;
+  batchOptimizeChapters.value = [];
+  chapterListRef.value?.clearBatchSelection();
+}
+
 function handleCloseOptimizeDialog() {
   showOptimizeModal.value = false;
   optimizingChapter.value = null;
@@ -333,6 +347,12 @@ async function handleOptimizeApplied(updated: ChapterItem) {
   message.value = presentSuccess(`第${updated.chapterNo}章已更新为优化后的正文`);
   await loadWorkspace();
   selectedChapterNo.value = updated.chapterNo;
+}
+
+async function handleBatchOptimizeApplied() {
+  message.value = presentSuccess('批量优化正文已应用');
+  await loadWorkspace();
+  handleCloseBatchOptimizeDialog();
 }
 
 async function handleDeleteChapter(chapterNo: number) {
@@ -523,6 +543,7 @@ onUnmounted(() => {
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
       @optimize="handleOpenOptimizeDialog"
+      @batch-optimize="handleOpenBatchOptimizeDialog"
       @save="handleSaveChapter"
       @parse-structured="handleParseStructuredChapter"
       @delete="handleDeleteChapter"
@@ -541,6 +562,14 @@ onUnmounted(() => {
       :chapter="optimizingChapter"
       @close="handleCloseOptimizeDialog"
       @applied="handleOptimizeApplied"
+    />
+
+    <ChapterBatchOptimizeDialog
+      :visible="showBatchOptimizeModal"
+      :project-id="projectId"
+      :chapters="batchOptimizeChapters"
+      @close="handleCloseBatchOptimizeDialog"
+      @applied="handleBatchOptimizeApplied"
     />
 
     <div

@@ -392,6 +392,7 @@ export class ProjectsController {
       draftText?: string;
       expectedChapterUpdatedAt?: string;
       planId?: string;
+      preserveSummary?: boolean;
     },
     @Request() req: AuthenticatedRequest
   ) {

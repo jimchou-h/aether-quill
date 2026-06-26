@@ -14,6 +14,7 @@ import axios from 'axios';
 import {
   buildFallbackChapterSummary,
   resolveChapterSummaryOnContentWrite,
+  resolveChapterSummaryOnOptimizeApply,
   type ChapterSummarySource,
 } from './chapter-summary.util';
 import {
@@ -2834,7 +2835,12 @@ export class ProjectsService implements OnModuleInit {
   async applyChapterOptimization(
     projectId: string,
     chapterNo: number,
-    payload: { draftText?: string; expectedChapterUpdatedAt?: string; planId?: string },
+    payload: {
+      draftText?: string;
+      expectedChapterUpdatedAt?: string;
+      planId?: string;
+      preserveSummary?: boolean;
+    },
     userId?: string
   ) {
     if (userId) {
@@ -2870,7 +2876,8 @@ export class ProjectsService implements OnModuleInit {
     }
 
     const now = new Date();
-    const summaryFields = resolveChapterSummaryOnContentWrite({
+    const summaryFields = resolveChapterSummaryOnOptimizeApply({
+      preserveSummary: payload.preserveSummary,
       content: draftText,
       existing: chapter,
       now,
@@ -2896,12 +2903,14 @@ export class ProjectsService implements OnModuleInit {
     this.relinkRelationEventsForProject(projectId);
     this.persistState();
 
-    void this.indexChapterSummaryVector(projectId, chapter).catch((error) => {
-      console.error(
-        `[indexChapterSummaryVector] project=${projectId} chapter=${normalizedChapterNo} failed:`,
-        error
-      );
-    });
+    if (summaryFields.reindexSummaryVector) {
+      void this.indexChapterSummaryVector(projectId, chapter).catch((error) => {
+        console.error(
+          `[indexChapterSummaryVector] project=${projectId} chapter=${normalizedChapterNo} failed:`,
+          error
+        );
+      });
+    }
 
     return {
       chapter: {

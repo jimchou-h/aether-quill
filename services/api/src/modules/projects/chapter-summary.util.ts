@@ -33,3 +33,42 @@ export function resolveChapterSummaryOnContentWrite(input: {
     summaryUpdatedAt: now,
   };
 }
+
+/**
+ * 章节优化 apply 时的摘要策略（AQ-254）。
+ * 默认保留既有摘要；preserveSummary=false 时与手工保存一致。
+ */
+export function resolveChapterSummaryOnOptimizeApply(input: {
+  preserveSummary?: boolean;
+  content: string;
+  existing?: {
+    summary?: string;
+    summarySource?: ChapterSummarySource;
+    summaryUpdatedAt?: Date;
+  } | null;
+  now?: Date;
+}): {
+  summary: string;
+  summarySource: ChapterSummarySource;
+  summaryUpdatedAt: Date;
+  reindexSummaryVector: boolean;
+} {
+  const now = input.now ?? new Date();
+  const preserveSummary = input.preserveSummary !== false;
+
+  if (preserveSummary) {
+    return {
+      summary: input.existing?.summary ?? '',
+      summarySource: input.existing?.summarySource ?? 'fallback',
+      summaryUpdatedAt: input.existing?.summaryUpdatedAt ?? now,
+      reindexSummaryVector: false,
+    };
+  }
+
+  const fields = resolveChapterSummaryOnContentWrite({
+    content: input.content,
+    existing: input.existing,
+    now,
+  });
+  return { ...fields, reindexSummaryVector: true };
+}

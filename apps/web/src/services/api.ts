@@ -1388,7 +1388,12 @@ export const apiClient = {
   async applyChapterOptimization(
     projectId: string,
     chapterNo: number,
-    payload: { draftText: string; expectedChapterUpdatedAt: string; planId?: string }
+    payload: {
+      draftText: string;
+      expectedChapterUpdatedAt: string;
+      planId?: string;
+      preserveSummary?: boolean;
+    }
   ) {
     const response = await http.post(
       `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/apply`,
