@@ -56,17 +56,146 @@ export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
   '8) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
 ].join('\n');
 
-/** 关闭后始终整章单段优化（分段 UI 与多段 prompt 暂不启用） */
-export const OPTIMIZE_SEGMENTATION_ENABLED = false;
-
-/** 低于此字数优先单段生成，减少硬切分 */
+/** 低于此字数优先单段生成，减少硬切分（可通过环境变量覆盖） */
 export const OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD = 2800;
-export const OPTIMIZE_TWO_SEGMENT_CHAR_THRESHOLD = 5500;
+/** 长章按固定字数切分，每段约 3000 字（项目 settings 可覆盖；0 表示不分段） */
+export const OPTIMIZE_SEGMENT_CHAR_SIZE = 3000;
+export const DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE = OPTIMIZE_SEGMENT_CHAR_SIZE;
+export const MAX_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE = 20000;
+
+export type ChapterOptimizeMode = 'single' | 'segmented';
+
+export type ChapterOptimizeStage =
+  | 'segment_diagnosis'
+  | 'plan_synthesis'
+  | 'draft_segment'
+  | 'merge_validation';
+
+export interface ChapterOptimizeLengthStrategy {
+  mode: ChapterOptimizeMode;
+  segmentCount: number;
+  inputChapterChars: number;
+  strategyLabel: string;
+}
+
+export interface ChapterOptimizeConfig {
+  segmentationEnabled: boolean;
+  singleSegmentThreshold: number;
+  segmentCharSize: number;
+}
+
+function parsePositiveIntEnv(key: string, fallback: number): number {
+  const raw = (process.env[key] ?? '').trim();
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseSegmentationEnabledEnv(): boolean {
+  const raw = (process.env.CHAPTER_OPTIMIZE_SEGMENTATION_ENABLED ?? '1').trim().toLowerCase();
+  return raw !== '0' && raw !== 'false';
+}
+
+export function resolveChapterOptimizeConfig(): ChapterOptimizeConfig {
+  return {
+    segmentationEnabled: parseSegmentationEnabledEnv(),
+    singleSegmentThreshold: parsePositiveIntEnv(
+      'CHAPTER_OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD',
+      OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD
+    ),
+    segmentCharSize: parsePositiveIntEnv(
+      'CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE',
+      OPTIMIZE_SEGMENT_CHAR_SIZE
+    ),
+  };
+}
+
+/** 项目 settings 覆盖环境变量中的分段字数；0 表示不按字数分段 */
+export function clampChapterOptimizeSegmentCharSize(value: unknown): number {
+  if (value === 0 || value === '0') {
+    return 0;
+  }
+  const parsed =
+    typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
+  }
+  if (parsed === 0) {
+    return 0;
+  }
+  return Math.min(MAX_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE, Math.trunc(parsed));
+}
+
+export function resolveChapterOptimizeConfigWithProjectOverride(
+  projectSegmentCharSize?: number
+): ChapterOptimizeConfig {
+  const base = resolveChapterOptimizeConfig();
+  if (projectSegmentCharSize === undefined) {
+    return base;
+  }
+  return {
+    ...base,
+    segmentCharSize: clampChapterOptimizeSegmentCharSize(projectSegmentCharSize),
+  };
+}
+
+export function resolveChapterOptimizeSegmentCount(
+  contentLength: number,
+  config: ChapterOptimizeConfig = resolveChapterOptimizeConfig()
+): number {
+  const inputChapterChars = Math.max(0, Math.trunc(contentLength));
+  if (
+    !config.segmentationEnabled ||
+    config.segmentCharSize === 0 ||
+    inputChapterChars <= config.singleSegmentThreshold
+  ) {
+    return 1;
+  }
+  return Math.max(1, Math.ceil(inputChapterChars / config.segmentCharSize));
+}
+
+export function resolveChapterOptimizeLengthStrategy(
+  contentLength: number,
+  config: ChapterOptimizeConfig = resolveChapterOptimizeConfig()
+): ChapterOptimizeLengthStrategy {
+  const inputChapterChars = Math.max(0, Math.trunc(contentLength));
+  const segmentCount = resolveChapterOptimizeSegmentCount(inputChapterChars, config);
+
+  if (segmentCount <= 1) {
+    const disabledByZeroSize =
+      config.segmentCharSize === 0 &&
+      inputChapterChars > config.singleSegmentThreshold;
+    return {
+      mode: 'single',
+      segmentCount: 1,
+      inputChapterChars,
+      strategyLabel: disabledByZeroSize ? '整章优化（未按字数分段）' : '整章优化',
+    };
+  }
+
+  return {
+    mode: 'segmented',
+    segmentCount,
+    inputChapterChars,
+    strategyLabel: `${segmentCount} 段优化（约 ${config.segmentCharSize} 字/段）`,
+  };
+}
 export const SEGMENT_TAIL_CONTEXT_CHARS = 400;
 export const SEGMENT_LEAD_CONTEXT_CHARS = 200;
 /** 中段 maxTokens 相对原文字符上限倍率（抑制越界扩写） */
 export const MIDDLE_SEGMENT_MAX_TOKEN_CHAR_RATIO = 1.15;
 export const SEGMENT_LENGTH_RETRY_RATIO = 1.35;
+/** 分段诊断 / 生成失败时，每段最多额外重试次数 */
+export const CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES = 1;
+
+export interface ChapterOptimizeSegmentRecovery {
+  failedSegmentIndex?: number;
+  segmentTotal?: number;
+  segmentDiagnoses?: string[];
+  retryable?: boolean;
+}
 
 export function normalizeInstruction(value: unknown): string {
   if (typeof value !== 'string') {
@@ -130,6 +259,211 @@ export function buildPlanUserPrompt(input: {
   sections.push('请基于以上信息输出「优化方案」，结构化呈现要点，禁止直接输出新的正文。');
 
   return sections.join('\n\n');
+}
+
+export const CHAPTER_OPTIMIZE_SEGMENT_DIAGNOSIS_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在对长章节中的「局部片段」做优化前诊断。',
+  '本步骤只输出该片段的诊断报告，不要输出新的正文，也不要输出整章方案。',
+  '诊断须结构化，覆盖：',
+  '1) 本段现状问题（节奏、描写、逻辑、语气等）；',
+  '2) 必须保留的情节、对白、动作、人物状态；',
+  '3) 可优化的要点；',
+  '4) 与前后段的边界约束（段首承接、段末落点，不得越界）。',
+].join('\n');
+
+export const CHAPTER_OPTIMIZE_PLAN_SYNTHESIS_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在把多段局部诊断汇总为一份完整的整章优化方案。',
+  '本步骤只输出「优化方案」，不要直接输出新的正文。',
+  '方案必须包含：',
+  '1) 全章总体目标；',
+  '2) 分段优化要点（逐段列出，覆盖每一段）；',
+  '3) 关键情节保留清单（须覆盖全章，不只章首）；',
+  '4) 人物状态与关系连续性要求；',
+  '5) 章首/章末衔接要求。',
+  '若【叙事上下文】含【前章衔接】/【下章衔接】，方案须兼顾章首承接与前章、章末过渡至下章开头。',
+].join('\n');
+
+export function buildSegmentDiagnosisUserPrompt(input: {
+  chapter: ChapterOptimizeChapterRef;
+  instruction: string;
+  segment: Segment;
+  totalSegments: number;
+  appearingCharacters?: string[];
+  selectedRelationEvents?: ChapterOptimizeUsedRelationEvent[];
+  boundaryAnchors?: SegmentBoundaryAnchors;
+}): string {
+  const {
+    chapter,
+    instruction,
+    segment,
+    totalSegments,
+    appearingCharacters,
+    selectedRelationEvents,
+    boundaryAnchors,
+  } = input;
+  const sections: string[] = [];
+
+  sections.push(
+    `【诊断目标】第${chapter.chapterNo}章「${chapter.title}」第 ${segment.index + 1}/${totalSegments} 段局部诊断`
+  );
+  sections.push(`【用户优化要求】\n${instruction}`);
+
+  if (appearingCharacters && appearingCharacters.length > 0) {
+    sections.push(`【本章出场角色】${appearingCharacters.join('、')}`);
+  }
+
+  if (selectedRelationEvents && selectedRelationEvents.length > 0) {
+    const lines = selectedRelationEvents.map((event, index) => {
+      const chapterTag =
+        typeof event.chapterNo === 'number' && event.chapterNo > 0
+          ? `（第${event.chapterNo}章）`
+          : '';
+      return `${index + 1}. ${event.protagonist} ↔ ${event.counterparty}${chapterTag}：${event.summary}`;
+    });
+    sections.push(`【关联关系事件】\n${lines.join('\n')}`);
+  }
+
+  if (boundaryAnchors) {
+    sections.push(formatBoundaryAnchorsBlock(boundaryAnchors, segment.index));
+  }
+
+  sections.push(
+    `<segment-original segment="${segment.index + 1}/${totalSegments}">\n${segment.originalText}\n</segment-original>`
+  );
+  sections.push('请输出本段结构化诊断报告，禁止输出正文或整章方案。');
+
+  return sections.join('\n\n');
+}
+
+export function buildPlanSynthesisUserPrompt(input: {
+  chapter: ChapterOptimizeChapterRef;
+  instruction: string;
+  segmentDiagnoses: Array<{ segmentIndex: number; diagnosisText: string }>;
+  appearingCharacters?: string[];
+  selectedRelationEvents?: ChapterOptimizeUsedRelationEvent[];
+}): string {
+  const { chapter, instruction, segmentDiagnoses, appearingCharacters, selectedRelationEvents } =
+    input;
+  const sections: string[] = [];
+
+  sections.push(
+    `【汇总目标】请把以下分段诊断汇总为第${chapter.chapterNo}章「${chapter.title}」的完整优化方案。`
+  );
+  sections.push(`【用户优化要求】\n${instruction}`);
+
+  if (appearingCharacters && appearingCharacters.length > 0) {
+    sections.push(`【本章出场角色】${appearingCharacters.join('、')}`);
+  }
+
+  if (selectedRelationEvents && selectedRelationEvents.length > 0) {
+    const lines = selectedRelationEvents.map((event, index) => {
+      const chapterTag =
+        typeof event.chapterNo === 'number' && event.chapterNo > 0
+          ? `（第${event.chapterNo}章）`
+          : '';
+      return `${index + 1}. ${event.protagonist} ↔ ${event.counterparty}${chapterTag}：${event.summary}`;
+    });
+    sections.push(`【关联关系事件】\n${lines.join('\n')}`);
+  }
+
+  const diagnosisBlock = segmentDiagnoses
+    .map(
+      (item) =>
+        `### 第 ${item.segmentIndex} 段诊断\n${item.diagnosisText.trim()}`
+    )
+    .join('\n\n');
+  sections.push(`<segment-diagnoses>\n${diagnosisBlock}\n</segment-diagnoses>`);
+  sections.push(
+    `<chapter-original chapter-no="${chapter.chapterNo}">\n${chapter.content}\n</chapter-original>`
+  );
+  sections.push(
+    '请基于分段诊断与原文输出完整整章优化方案，结构化呈现要点，禁止直接输出新的正文。'
+  );
+
+  return sections.join('\n\n');
+}
+
+const PLACEHOLDER_PATTERNS: RegExp[] = [
+  /（此处省略）/,
+  /\[原段落保留\]/,
+  /原文保留/,
+  /此处略/,
+  /原段落保留/,
+  /同上/,
+  /同前/,
+];
+
+export function detectPlaceholderText(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+  for (const pattern of PLACEHOLDER_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return pattern.source;
+    }
+  }
+  return null;
+}
+
+export function planAllowsContentReduction(planText: string): boolean {
+  return /删减|缩短|删除|压缩篇幅|精简|大幅削减/.test(planText);
+}
+
+export interface ChapterOptimizeQualityCheckResult {
+  passed: boolean;
+  failures: string[];
+}
+
+export function validateMergedChapterDraft(input: {
+  originalContent: string;
+  mergedDraft: string;
+  planText: string;
+}): ChapterOptimizeQualityCheckResult {
+  const failures: string[] = [];
+  const original = input.originalContent.trim();
+  const merged = input.mergedDraft.trim();
+  const allowReduction = planAllowsContentReduction(input.planText);
+
+  if (!merged) {
+    failures.push('合并正文为空');
+    return { passed: false, failures };
+  }
+
+  const placeholder = detectPlaceholderText(merged);
+  if (placeholder) {
+    failures.push(`合并正文含占位语（${placeholder}）`);
+  }
+
+  if (original.length > 0 && !allowReduction) {
+    const minLength = Math.floor(original.length * 0.95);
+    if (merged.length < minLength) {
+      failures.push(
+        `合并正文字数 ${merged.length} 低于原文 95%（${minLength} 字）`
+      );
+    }
+  }
+
+  const originalParagraphs = countNonEmptyParagraphs(original);
+  const mergedParagraphs = countNonEmptyParagraphs(merged);
+  if (originalParagraphs > 1 && mergedParagraphs < Math.ceil(originalParagraphs * 0.8)) {
+    failures.push(
+      `合并正文段落数 ${mergedParagraphs} 明显少于原文 ${originalParagraphs} 段`
+    );
+  }
+
+  return { passed: failures.length === 0, failures };
+}
+
+export function countNonEmptyParagraphs(text: string): number {
+  return splitChapterParagraphs(text).length;
+}
+
+export function mergeSegmentDraftTexts(segmentTexts: string[]): string {
+  return segmentTexts
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function buildDraftUserPrompt(input: {
@@ -368,18 +702,16 @@ export function buildSegmentBoundaryAnchors(
   };
 }
 
-export function resolveOptimizeSegmentCount(contentLength: number, maxSegments = 3): number {
-  if (!OPTIMIZE_SEGMENTATION_ENABLED) {
-    return 1;
+export function resolveOptimizeSegmentCount(
+  contentLength: number,
+  maxSegments?: number,
+  config: ChapterOptimizeConfig = resolveChapterOptimizeConfig()
+): number {
+  const segmentCount = resolveChapterOptimizeSegmentCount(contentLength, config);
+  if (maxSegments !== undefined) {
+    return Math.min(segmentCount, Math.max(1, Math.trunc(maxSegments)));
   }
-  const max = Math.max(1, Math.min(3, Math.trunc(maxSegments)));
-  if (contentLength <= OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD) {
-    return 1;
-  }
-  if (contentLength <= OPTIMIZE_TWO_SEGMENT_CHAR_THRESHOLD) {
-    return Math.min(2, max);
-  }
-  return max;
+  return segmentCount;
 }
 
 export function extractSegmentTailText(
@@ -611,6 +943,11 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
   }
 
   sections.push(`<optimization-plan>\n${planText.trim()}\n</optimization-plan>`);
+
+  const localPlan = segment.planExcerpt?.trim();
+  if (localPlan && localPlan !== planText.trim()) {
+    sections.push(`<segment-local-plan>\n${localPlan}\n</segment-local-plan>`);
+  }
 
   if (boundaryAnchors) {
     sections.push(formatBoundaryAnchorsBlock(boundaryAnchors, segment.index));

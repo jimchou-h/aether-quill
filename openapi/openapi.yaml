@@ -554,6 +554,7 @@ components:
         - generationTemperature
         - updatePersonaOnSave
         - generateRelationEventsOnSave
+        - chapterOptimizeSegmentCharSize
         - updatedAt
       properties:
         systemPromptText:
@@ -602,6 +603,12 @@ components:
           type: boolean
           default: true
           description: 保存章节时自动生成关系事件
+        chapterOptimizeSegmentCharSize:
+          type: integer
+          minimum: 0
+          maximum: 20000
+          default: 3000
+          description: 章节优化方案阶段按字数切分诊断时每段目标字数；0 表示不按字数分段（始终整章方案）
         updatedAt:
           type: string
           format: date-time
@@ -640,6 +647,11 @@ components:
         generateRelationEventsOnSave:
           type: boolean
           description: 保存章节时自动生成关系事件
+        chapterOptimizeSegmentCharSize:
+          type: integer
+          minimum: 0
+          maximum: 20000
+          description: 章节优化方案分段字数；0 表示不按字数分段
     WriteContextReadiness:
       type: object
       required:
@@ -1429,6 +1441,19 @@ components:
           type: array
           items:
             type: string
+        existingSegmentDiagnoses:
+          type: array
+          items:
+            type: string
+          description: |
+            Partial per-segment diagnoses from a prior failed run. Used with
+            resumeFromSegmentIndex to retry only the failed segment onward.
+        resumeFromSegmentIndex:
+          type: integer
+          minimum: 1
+          description: |
+            1-based segment index to resume from after a partial failure (must match
+            existingSegmentDiagnoses length + 1).
     ChapterOptimizationPlanResult:
       type: object
       required:
@@ -1447,6 +1472,61 @@ components:
           type: string
         basis:
           $ref: '#/components/schemas/ChapterOptimizationBasis'
+        optimizationMode:
+          type: string
+          enum: [single, segmented]
+          description: Whether the plan was generated as a whole chapter or via segmented diagnosis.
+        segmentTotal:
+          type: integer
+          minimum: 1
+          description: Number of segments used for long-chapter optimization.
+        strategyLabel:
+          type: string
+          description: Human-readable strategy label (e.g. 整章优化 / 2 段优化).
+        segmentDiagnoses:
+          type: array
+          items:
+            type: string
+          description: |
+            Per-segment diagnosis texts for long chapters. Omitted for single-segment optimization.
+            Pass back to the draft step for segment-local prompts.
+    ChapterOptimizationStrategy:
+      type: object
+      required:
+        - optimizationMode
+        - segmentTotal
+        - strategyLabel
+        - inputChapterChars
+      properties:
+        optimizationMode:
+          type: string
+          enum: [single, segmented]
+        segmentTotal:
+          type: integer
+          minimum: 0
+        strategyLabel:
+          type: string
+        inputChapterChars:
+          type: integer
+          minimum: 0
+    ChapterOptimizationStageEvent:
+      type: object
+      required:
+        - stage
+      properties:
+        stage:
+          type: string
+          enum: [segment_diagnosis, plan_synthesis, draft_segment, merge_validation]
+        segmentIndex:
+          type: integer
+          minimum: 1
+        segmentTotal:
+          type: integer
+          minimum: 1
+        retryCount:
+          type: integer
+          minimum: 0
+          description: Present when auto-retrying a failed segment.
     ChapterOptimizationDraftRequest:
       type: object
       required:
@@ -1472,6 +1552,13 @@ components:
           type: array
           items:
             type: string
+        segmentDiagnoses:
+          type: array
+          items:
+            type: string
+          description: |
+            Optional per-segment diagnosis from the plan step. When provided for long chapters,
+            each segment draft prompt includes the matching local diagnosis.
     ChapterOptimizationApplyRequest:
       type: object
       required:

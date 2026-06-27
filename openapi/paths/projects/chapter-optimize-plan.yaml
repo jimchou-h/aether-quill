@@ -7,9 +7,10 @@ post:
     connection active (avoids proxy idle timeouts). Original chapter text is always injected into the prompt.
 
     SSE event sequence:
-      - `data: {"event":"start","traceId":"...","chapterNo":N,"planId":"...","basis":{...}}`
+      - `data: {"event":"start","traceId":"...","chapterNo":N,"planId":"...","basis":{...},"optimizationMode":"single|segmented","segmentTotal":N,"strategyLabel":"...","inputChapterChars":N}`
+      - `data: {"event":"stage","stage":"segment_diagnosis|plan_synthesis","segmentIndex":N,"segmentTotal":N}` (long chapters only)
       - `data: {"event":"content","data":"..."}` (multiple; newlines escaped as `\\n`)
-      - `data: {"event":"end","traceId":"...","planText":"...","planId":"...","basis":{...}}`
+      - `data: {"event":"end","traceId":"...","planText":"...","planId":"...","basis":{...},"segmentDiagnoses":[...]}` 
       - `data: {"event":"error","data":"..."}`
   security:
     - BearerAuth: []

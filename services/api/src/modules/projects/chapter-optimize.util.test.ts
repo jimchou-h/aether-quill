@@ -26,6 +26,19 @@ import {
   buildSegmentPrompt,
   parseSegmentOutput,
   calculateSegmentMaxTokens,
+  resolveChapterOptimizeLengthStrategy,
+  resolveChapterOptimizeConfig,
+  resolveChapterOptimizeConfigWithProjectOverride,
+  clampChapterOptimizeSegmentCharSize,
+  DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
+  MAX_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
+  validateMergedChapterDraft,
+  detectPlaceholderText,
+  mergeSegmentDraftTexts,
+  planAllowsContentReduction,
+  buildSegmentDiagnosisUserPrompt,
+  CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES,
+  buildPlanSynthesisUserPrompt,
   type Segment,
   type ChapterOptimizeChapterRef,
 } from './chapter-optimize.util';
@@ -253,10 +266,126 @@ test('buildSegmentPrompt omits previous summary for first segment', () => {
   assert.ok(!prompt.includes('【前段末文'));
 });
 
-test('resolveOptimizeSegmentCount returns 1 while segmentation is disabled', () => {
-  assert.equal(resolveOptimizeSegmentCount(1000), 1);
-  assert.equal(resolveOptimizeSegmentCount(4000), 1);
-  assert.equal(resolveOptimizeSegmentCount(8000), 1);
+test('resolveOptimizeSegmentCount returns segment count by 3000-char chunks', () => {
+  const config = resolveChapterOptimizeConfig();
+  assert.equal(resolveOptimizeSegmentCount(1000, undefined, config), 1);
+  assert.equal(resolveOptimizeSegmentCount(4000, undefined, config), 2);
+  assert.equal(resolveOptimizeSegmentCount(8000, undefined, config), 3);
+  assert.equal(resolveOptimizeSegmentCount(15000, undefined, config), 5);
+});
+
+test('resolveOptimizeSegmentCount returns 1 when segmentation disabled', () => {
+  const disabled = {
+    ...resolveChapterOptimizeConfig(),
+    segmentationEnabled: false,
+  };
+  assert.equal(resolveOptimizeSegmentCount(15000, undefined, disabled), 1);
+});
+
+test('resolveChapterOptimizeLengthStrategy segments oversized chapters instead of rejecting', () => {
+  const strategy = resolveChapterOptimizeLengthStrategy(15000);
+  assert.equal(strategy.mode, 'segmented');
+  assert.equal(strategy.segmentCount, 5);
+  assert.match(strategy.strategyLabel, /5 段优化/);
+});
+
+test('resolveChapterOptimizeLengthStrategy maps medium chapters to ceil(chars/3000) segments', () => {
+  const strategy = resolveChapterOptimizeLengthStrategy(4000);
+  assert.equal(strategy.mode, 'segmented');
+  assert.equal(strategy.segmentCount, 2);
+  assert.match(strategy.strategyLabel, /2 段优化/);
+});
+
+test('resolveChapterOptimizeLengthStrategy respects segmentCharSize=0 as no split', () => {
+  const config = resolveChapterOptimizeConfigWithProjectOverride(0);
+  const strategy = resolveChapterOptimizeLengthStrategy(15000, config);
+  assert.equal(strategy.mode, 'single');
+  assert.equal(strategy.segmentCount, 1);
+  assert.equal(strategy.strategyLabel, '整章优化（未按字数分段）');
+});
+
+test('resolveChapterOptimizeLengthStrategy uses custom project segment size', () => {
+  const config = resolveChapterOptimizeConfigWithProjectOverride(2000);
+  const strategy = resolveChapterOptimizeLengthStrategy(4000, config);
+  assert.equal(strategy.mode, 'segmented');
+  assert.equal(strategy.segmentCount, 2);
+  assert.match(strategy.strategyLabel, /约 2000 字\/段/);
+});
+
+test('clampChapterOptimizeSegmentCharSize allows 0 and clamps upper bound', () => {
+  assert.equal(clampChapterOptimizeSegmentCharSize(0), 0);
+  assert.equal(clampChapterOptimizeSegmentCharSize('0'), 0);
+  assert.equal(clampChapterOptimizeSegmentCharSize(25000), MAX_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
+  assert.equal(clampChapterOptimizeSegmentCharSize(undefined), DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
+});
+
+test('detectPlaceholderText flags common placeholder phrases', () => {
+  assert.equal(detectPlaceholderText('正文（此处省略）后续'), '（此处省略）');
+  assert.equal(detectPlaceholderText('正常正文内容'), null);
+});
+
+test('validateMergedChapterDraft enforces 95% length when plan does not allow reduction', () => {
+  const original = '字'.repeat(100);
+  const merged = '字'.repeat(90);
+  const result = validateMergedChapterDraft({
+    originalContent: original,
+    mergedDraft: merged,
+    planText: '润色对白',
+  });
+  assert.equal(result.passed, false);
+  assert.ok(result.failures.some((item) => item.includes('95%')));
+});
+
+test('validateMergedChapterDraft allows shorter output when plan requests reduction', () => {
+  const original = '字'.repeat(100);
+  const merged = '字'.repeat(50);
+  const result = validateMergedChapterDraft({
+    originalContent: original,
+    mergedDraft: merged,
+    planText: '删减冗余描写，压缩篇幅',
+  });
+  assert.equal(planAllowsContentReduction('删减冗余描写，压缩篇幅'), true);
+  assert.equal(result.passed, true);
+});
+
+test('mergeSegmentDraftTexts joins segments with blank lines', () => {
+  assert.equal(mergeSegmentDraftTexts(['第一段', '第二段']), '第一段\n\n第二段');
+});
+
+test('buildSegmentDiagnosisUserPrompt wraps segment original text', () => {
+  const segment: Segment = {
+    index: 0,
+    originalText: '第一段原文',
+    planExcerpt: '',
+    startParagraph: 0,
+    endParagraph: 0,
+  };
+  const prompt = buildSegmentDiagnosisUserPrompt({
+    chapter: sampleChapter,
+    instruction: '润色',
+    segment,
+    totalSegments: 2,
+  });
+  assert.match(prompt, /<segment-original/);
+  assert.match(prompt, /第一段原文/);
+});
+
+test('buildPlanSynthesisUserPrompt includes all segment diagnoses', () => {
+  const prompt = buildPlanSynthesisUserPrompt({
+    chapter: sampleChapter,
+    instruction: '润色',
+    segmentDiagnoses: [
+      { segmentIndex: 1, diagnosisText: '第一段诊断' },
+      { segmentIndex: 2, diagnosisText: '第二段诊断' },
+    ],
+  });
+  assert.match(prompt, /第一段诊断/);
+  assert.match(prompt, /第二段诊断/);
+  assert.match(prompt, /<chapter-original/);
+});
+
+test('CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES is 1', () => {
+  assert.equal(CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES, 1);
 });
 
 test('buildSegmentPrompt includes boundary anchors and middle-segment constraints', () => {

@@ -43,16 +43,19 @@ aether-quill/
 
 代码现实与方案 v1 之间存在**结构性差距**，请勿误以为 RAG 已完整接入：
 
-| 维度 | 方案 v1 设计 | 当前代码 |
-| :--- | :--- | :--- |
-| 持久化 | PostgreSQL + Prisma（`DATABASE_URL` 可选） | 未配置时：`services/api/data/*.json` + in-memory；配置后：**PG 主存 + JSON 镜像双写**，`scripts/migrate-json-to-pg.ts`（`--dry-run` / `--confirm` / `--rollback`） |
-| 向量库 | Qdrant / pgvector | 未接入；`vector-store.ts` 在内存里 cache chunks |
-| Embedding | 真模型（BGE / OpenAI） | `Math.sin(charCodeSum * i)` 模拟向量（见 `services/rag-orchestrator/src/retrieval/vector-store.ts:94` / `services/worker/src/jobs/ingestion.processor.ts:76`） |
-| 切分 | 语义段 + token + overlap | 500 字符硬切 + 0 overlap |
-| 上下文注入 | query → retrieve → rerank → 注入相关证据 | 硬塞 `chapters.slice(-3)` + 全量大纲 / 人物 |
-| Trace | 落库可查询 | in-memory，重启即丢 |
+
+| 维度        | 方案 v1 设计                               | 当前代码                                                                                                                                                    |
+| --------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 持久化       | PostgreSQL + Prisma（`DATABASE_URL` 可选） | 未配置时：`services/api/data/*.json` + in-memory；配置后：**PG 主存 + JSON 镜像双写**，`scripts/migrate-json-to-pg.ts`（`--dry-run` / `--confirm` / `--rollback`）         |
+| 向量库       | Qdrant / pgvector                      | 未接入；`vector-store.ts` 在内存里 cache chunks                                                                                                                 |
+| Embedding | 真模型（BGE / OpenAI）                      | `Math.sin(charCodeSum * i)` 模拟向量（见 `services/rag-orchestrator/src/retrieval/vector-store.ts:94` / `services/worker/src/jobs/ingestion.processor.ts:76`） |
+| 切分        | 语义段 + token + overlap                  | 500 字符硬切 + 0 overlap                                                                                                                                    |
+| 上下文注入     | query → retrieve → rerank → 注入相关证据     | 硬塞 `chapters.slice(-3)` + 全量大纲 / 人物                                                                                                                     |
+| Trace     | 落库可查询                                  | in-memory，重启即丢                                                                                                                                          |
+
 
 结论：
+
 - 当前"RAG"实际是 long-context prompt 风格。**改链路前请勿引用「检索效果」作为论据**。
 - 已立项 `AQ-117 ~ AQ-122`（P0 真 RAG 落地）专项解决检索与持久化差距，方案见 `/.docs/新增需求/2026-05-13-真RAG落地.md` 第 0 节「执行决策」。**P18 内 AQ-117~AQ-122 已闭环**（含 AQ-121：可选 PG + 迁移脚本）。
 - P1 / P2 / P3 backlog 沉淀在 `/.docs/待做需求清单-v1.md`；**P0 完成前不引入 P1+ 条目**。
@@ -103,6 +106,7 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 你是本仓库的执行型开发代理，职责是严格按照项目规范完成开发任务，而不是重新设计架构。
 
 核心目标：
+
 - 基于既有文档实现功能，保证质量、完成度和可追溯性。
 - 在多 AI 并行场景下，保持接口一致、配置一致、质量口径一致。
 
@@ -135,11 +139,11 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 
 ## 开发执行流程（固定 7 步）
 
-1. **对齐任务**：确认 `AQ-XXX`、输入输出、完成判定  
-2. **接口对齐**：先检查 API 合同与错误码语义  
-3. **实现功能**：最小可运行增量，避免大批量混合改动  
-4. **补齐测试**：至少一类自动化测试（单测/集成/E2E）  
-5. **执行自检**：通过 lint/typecheck/test/build  
+1. **对齐任务**：确认 `AQ-XXX`、输入输出、完成判定
+2. **接口对齐**：先检查 API 合同与错误码语义
+3. **实现功能**：最小可运行增量，避免大批量混合改动
+4. **补齐测试**：至少一类自动化测试（单测/集成/E2E）
+5. **执行自检**：通过 lint/typecheck/test/build
 6. **登记交付**：输出证据、风险、下一步
 7. **同步看板**：更新 `/.docs/02-开发执行/任务开发进度清单-v1.md`
 
@@ -163,6 +167,7 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 ## 强制开发规则
 
 ## 1) Contract First
+
 - 涉及接口字段、SSE 事件、错误码变更时：
   - 先更新 OpenAPI/文档
   - 再修改代码
@@ -170,12 +175,14 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 - Prompt 配置首期必须支持 `systemPromptText` 文本字段，并可通过前端 Settings 页面修改与发布
 
 ## 2) 配置一致性
+
 - 新增环境变量必须同步更新：
   - `/.docs/环境变量与配置规范-v1.md`
   - `.env.example`
   - 启动配置校验代码
 
 ## 3) RAG 质量约束
+
 - 涉及检索/重排/模板/模型/一致性规则变更时：
   - 必须执行 `/.docs/RAG评测与验收基线-v1.md` 对应回归
   - 未达阈值不得标记完成
@@ -185,10 +192,12 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
   - 必须同步更新 `/.docs/02-开发执行/任务开发进度清单-v1.md`
 
 ## 4) Prompt 治理
+
 - 模板变更必须遵循：`/.docs/Prompt模板治理-v1.md`
 - 必须可追溯模板版本，可灰度，可回滚
 
 ## 5) 协作规范
+
 - 分支、提交、PR、冲突处理遵循：`/.docs/多AI协作协议-v1.md`
 
 ---
@@ -203,6 +212,7 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 - [ ] 日志可追踪（`request_id` 或 `trace_id`）
 
 建议命令：
+
 - `pnpm -r lint`
 - `pnpm -r typecheck`
 - `pnpm -r test`
@@ -234,6 +244,7 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 ## 完成定义（DoD）
 
 当且仅当满足以下条件可标记 `DONE`：
+
 - 任务完成判定满足
 - 全部自检门禁通过
 - 相关文档同步完成

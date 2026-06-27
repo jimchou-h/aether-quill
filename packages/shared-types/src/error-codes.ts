@@ -62,6 +62,8 @@ export const GenerationErrorCodes = {
   ChapterImportParsingFailed: 1319,
   WriteChapterOutlineFailed: 1320,
   WriteChapterOutlineNotConfirmed: 1321,
+  ChapterOptimizationInputTooLarge: 1322,
+  ChapterOptimizationSegmentFailed: 1323,
 } as const;
 
 /**
@@ -117,6 +119,8 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     )
       return 502;
     if (errorCode === 1321) return 400;
+    if (errorCode === 1322) return 413;
+    if (errorCode === 1323) return 502;
     if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
     if (errorCode === 1311) return 504;
     if (errorCode === 1313) return 500;
@@ -179,6 +183,8 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1319: 'Chapter import parsing failed',
     1320: 'Write chapter outline failed',
     1321: 'Write chapter outline not confirmed',
+    1322: 'Chapter optimization input too large',
+    1323: 'Chapter optimization segment failed',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',
