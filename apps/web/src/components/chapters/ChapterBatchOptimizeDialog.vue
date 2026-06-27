@@ -2,9 +2,12 @@
 import { computed, ref, watch } from 'vue';
 import {
   apiClient,
+  formatChapterOptimizeStageLabel,
+  resolveChapterOptimizeStrategyLabel,
   type ChapterItem,
   type ChapterOptimizationBasis,
   type ChapterOptimizationPlanResult,
+  type ChapterOptimizeSegmentRecovery,
 } from '../../services/api';
 import {
   presentError,
@@ -38,6 +41,10 @@ interface BatchOptimizeItem {
   generatingPlan: boolean;
   generatingDraft: boolean;
   applying: boolean;
+  strategyLabel: string;
+  progressLabel: string;
+  segmentDiagnoses: string[];
+  planSegmentRecovery: ChapterOptimizeSegmentRecovery | null;
 }
 
 const props = defineProps<{
@@ -164,6 +171,10 @@ function initItems() {
       generatingPlan: false,
       generatingDraft: false,
       applying: false,
+      strategyLabel: resolveChapterOptimizeStrategyLabel(chapter.content.length),
+      progressLabel: '',
+      segmentDiagnoses: [],
+      planSegmentRecovery: null,
     }));
   activeChapterNo.value = items.value[0]?.chapterNo ?? null;
 }
@@ -226,8 +237,17 @@ function syncScroll(source: 'original' | 'draft') {
   }, 50);
 }
 
-async function runPlanForChapter(item: BatchOptimizeItem): Promise<ChapterOptimizationPlanResult> {
+async function runPlanForChapter(
+  item: BatchOptimizeItem,
+  resume?: { existingSegmentDiagnoses: string[]; resumeFromSegmentIndex: number }
+): Promise<ChapterOptimizationPlanResult> {
   item.generatingPlan = true;
+  item.progressLabel = resume
+    ? `从第 ${resume.resumeFromSegmentIndex} 段重试…`
+    : '准备生成方案…';
+  if (!resume) {
+    item.planSegmentRecovery = null;
+  }
   return new Promise((resolve, reject) => {
     let planResult: ChapterOptimizationPlanResult | null = null;
 
@@ -235,17 +255,43 @@ async function runPlanForChapter(item: BatchOptimizeItem): Promise<ChapterOptimi
       .optimizeChapterPlanSSE(
         props.projectId,
         item.chapterNo,
-        { instruction: instruction.value.trim() },
+        {
+          instruction: instruction.value.trim(),
+          existingSegmentDiagnoses: resume?.existingSegmentDiagnoses,
+          resumeFromSegmentIndex: resume?.resumeFromSegmentIndex,
+        },
         {
           onStart: (payload) => {
-            item.planText = '';
+            if (!resume) {
+              item.planText = '';
+            }
+            item.strategyLabel = payload.strategyLabel || item.strategyLabel;
+            item.progressLabel = '生成优化方案…';
             planResult = {
-              planText: '',
+              planText: resume ? item.planText : '',
               planId: payload.planId,
               traceId: payload.traceId,
               basis: payload.basis,
+              optimizationMode: payload.optimizationMode,
+              segmentTotal: payload.segmentTotal,
+              strategyLabel: payload.strategyLabel,
+              segmentDiagnoses: resume?.existingSegmentDiagnoses ?? item.segmentDiagnoses,
             };
             item.planBasis = payload.basis;
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal, retryCount }) => {
+            if (retryCount && retryCount > 0) {
+              item.planText = '';
+              if (planResult) {
+                planResult = { ...planResult, planText: '' };
+              }
+            }
+            item.progressLabel = formatChapterOptimizeStageLabel(
+              stage,
+              segmentIndex,
+              segmentTotal,
+              retryCount
+            );
           },
           onContent: (text) => {
             item.planText += text;
@@ -257,9 +303,22 @@ async function runPlanForChapter(item: BatchOptimizeItem): Promise<ChapterOptimi
             item.planText = result.planText;
             item.planId = result.planId;
             item.planBasis = result.basis;
+            item.segmentDiagnoses = result.segmentDiagnoses ?? [];
+            item.planSegmentRecovery = null;
+            item.progressLabel = '';
             resolve(result);
           },
-          onError: (message) => {
+          onError: (message, recovery) => {
+            item.progressLabel = '';
+            if (recovery?.retryable) {
+              item.planSegmentRecovery = recovery;
+              item.segmentDiagnoses = recovery.segmentDiagnoses ?? item.segmentDiagnoses;
+              item.status = 'error';
+              item.errorMessage = message || '生成优化方案失败，可重试失败段';
+              reject(new Error(item.errorMessage));
+              return;
+            }
+            item.planSegmentRecovery = null;
             reject(new Error(message || '生成优化方案失败'));
           },
         }
@@ -271,12 +330,29 @@ async function runPlanForChapter(item: BatchOptimizeItem): Promise<ChapterOptimi
   });
 }
 
+async function retryPlanForChapter(item: BatchOptimizeItem) {
+  const recovery = item.planSegmentRecovery;
+  if (recovery?.segmentDiagnoses?.length) {
+    const resumeFrom =
+      recovery.failedSegmentIndex ??
+      (recovery.segmentTotal && recovery.segmentDiagnoses.length >= recovery.segmentTotal
+        ? recovery.segmentTotal + 1
+        : undefined);
+    return runPlanForChapter(item, {
+      existingSegmentDiagnoses: recovery.segmentDiagnoses,
+      resumeFromSegmentIndex: resumeFrom,
+    });
+  }
+  return runPlanForChapter(item);
+}
+
 async function runDraftForChapter(
   item: BatchOptimizeItem,
   plan: ChapterOptimizationPlanResult
 ): Promise<string> {
   item.generatingDraft = true;
   item.draftText = '';
+  item.progressLabel = '准备生成正文…';
   return new Promise((resolve, reject) => {
     let draft = '';
 
@@ -288,21 +364,28 @@ async function runDraftForChapter(
           instruction: instruction.value.trim(),
           planText: plan.planText,
           planId: plan.planId,
+          segmentDiagnoses: plan.segmentDiagnoses ?? item.segmentDiagnoses,
         },
         {
-          onStart: (traceId) => {
+          onStart: (_traceId, _chapterNo, meta) => {
             draft = '';
             item.draftText = '';
-            item.draftTraceId = traceId;
+            item.strategyLabel = meta?.strategyLabel || item.strategyLabel;
+            item.progressLabel = '生成优化正文…';
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal }) => {
+            item.progressLabel = formatChapterOptimizeStageLabel(stage, segmentIndex, segmentTotal);
           },
           onContent: (text) => {
             draft += text;
             item.draftText += text;
           },
           onEnd: () => {
+            item.progressLabel = '';
             resolve(draft);
           },
           onError: (message) => {
+            item.progressLabel = '';
             reject(new Error(message || '生成优化正文失败'));
           },
         }
@@ -499,6 +582,9 @@ watch(
       <ul class="chapter-preview-list">
         <li v-for="chapter in chapters" :key="chapter.chapterNo">
           第{{ chapter.chapterNo }}章 · {{ chapter.title }}
+          <span class="strategy-tag">
+            （{{ resolveChapterOptimizeStrategyLabel(chapter.content.length) }}）
+          </span>
         </li>
       </ul>
 
@@ -565,6 +651,27 @@ watch(
 
         <p v-if="activeItem.errorMessage" class="message message-error">
           {{ activeItem.errorMessage }}
+        </p>
+        <p v-if="activeItem.strategyLabel" class="meta-line">
+          处理策略：{{ activeItem.strategyLabel }}
+        </p>
+        <p v-if="activeItem.progressLabel" class="meta-line progress-line">
+          {{ activeItem.progressLabel }}
+        </p>
+        <p v-if="activeItem.planSegmentRecovery?.retryable" class="message message-info">
+          第 {{ activeItem.planSegmentRecovery.failedSegmentIndex }}/{{
+            activeItem.planSegmentRecovery.segmentTotal
+          }}
+          段失败，已完成 {{ activeItem.planSegmentRecovery.segmentDiagnoses?.length ?? 0 }}
+          段诊断。
+          <button
+            class="link-button"
+            type="button"
+            :disabled="activeItem.generatingPlan || queueRunning"
+            @click="retryPlanForChapter(activeItem)"
+          >
+            {{ activeItem.generatingPlan ? '重试中...' : '重试失败段' }}
+          </button>
         </p>
 
         <section v-if="activeItem.status === 'pending'" class="step-section">

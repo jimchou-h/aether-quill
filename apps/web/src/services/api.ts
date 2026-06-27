@@ -1171,6 +1171,8 @@ export const apiClient = {
       instruction: string;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
+      existingSegmentDiagnoses?: string[];
+      resumeFromSegmentIndex?: number;
     },
     callbacks: ChapterOptimizePlanCallbacks
   ): Promise<void> {
@@ -1226,13 +1228,23 @@ export const apiClient = {
 
         try {
           const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'end' | 'error';
+            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
             data?: string;
             traceId?: string;
             chapterNo?: number;
             planId?: string;
             planText?: string;
             basis?: ChapterOptimizationBasis;
+            optimizationMode?: 'single' | 'segmented';
+            segmentTotal?: number;
+            strategyLabel?: string;
+            inputChapterChars?: number;
+            segmentDiagnoses?: string[];
+            stage?: ChapterOptimizeStage;
+            segmentIndex?: number;
+            retryCount?: number;
+            failedSegmentIndex?: number;
+            retryable?: boolean;
           };
           switch (event.event) {
             case 'start':
@@ -1246,7 +1258,21 @@ export const apiClient = {
                   chapterSummaryCount: 0,
                   usedRelationEvents: [],
                 },
+                optimizationMode: event.optimizationMode,
+                segmentTotal: event.segmentTotal,
+                strategyLabel: event.strategyLabel,
+                inputChapterChars: event.inputChapterChars,
               });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                  retryCount: event.retryCount,
+                });
+              }
               break;
             case 'content':
               callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
@@ -1264,13 +1290,22 @@ export const apiClient = {
                     chapterSummaryCount: 0,
                     usedRelationEvents: [],
                   } as ChapterOptimizationBasis),
+                optimizationMode: event.optimizationMode,
+                segmentTotal: event.segmentTotal,
+                strategyLabel: event.strategyLabel,
+                segmentDiagnoses: event.segmentDiagnoses,
               };
               callbacks.onEnd?.(result);
               reading = false;
               break;
             }
             case 'error':
-              callbacks.onError?.(event.data || '生成优化方案失败');
+              callbacks.onError?.(event.data || '生成优化方案失败', {
+                failedSegmentIndex: event.failedSegmentIndex,
+                segmentTotal: event.segmentTotal,
+                segmentDiagnoses: event.segmentDiagnoses,
+                retryable: event.retryable,
+              });
               reading = false;
               break;
           }
@@ -1290,6 +1325,7 @@ export const apiClient = {
       planId?: string;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
+      segmentDiagnoses?: string[];
     },
     callbacks: ChapterOptimizeDraftCallbacks
   ): Promise<void> {
@@ -1345,14 +1381,32 @@ export const apiClient = {
 
         try {
           const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'end' | 'error' | 'segment_start';
+            event?: 'start' | 'content' | 'end' | 'error' | 'segment_start' | 'stage';
             data?: string;
             traceId?: string;
             chapterNo?: number;
+            optimizationMode?: 'single' | 'segmented';
+            segmentTotal?: number;
+            strategyLabel?: string;
+            stage?: ChapterOptimizeStage;
+            segmentIndex?: number;
           };
           switch (event.event) {
             case 'start':
-              callbacks.onStart?.(event.traceId || '', event.chapterNo || chapterNo);
+              callbacks.onStart?.(event.traceId || '', event.chapterNo ?? chapterNo, {
+                optimizationMode: event.optimizationMode,
+                segmentTotal: event.segmentTotal,
+                strategyLabel: event.strategyLabel,
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
               break;
             case 'content':
               callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
@@ -1765,6 +1819,56 @@ export interface ChapterOptimizationPlanResult {
   planId: string;
   traceId: string;
   basis: ChapterOptimizationBasis;
+  optimizationMode?: 'single' | 'segmented';
+  segmentTotal?: number;
+  strategyLabel?: string;
+  segmentDiagnoses?: string[];
+}
+
+export type ChapterOptimizeStage =
+  | 'segment_diagnosis'
+  | 'plan_synthesis'
+  | 'draft_segment'
+  | 'merge_validation';
+
+export function resolveChapterOptimizeStrategyLabel(
+  contentLength: number,
+  segmentCharSize = 3000
+): string {
+  if (segmentCharSize === 0) {
+    return contentLength > 2800 ? '整章优化（未按字数分段）' : '整章优化';
+  }
+  if (contentLength <= 2800) {
+    return '整章优化';
+  }
+  const count = Math.ceil(contentLength / segmentCharSize);
+  return `${count} 段优化（约 ${segmentCharSize} 字/段）`;
+}
+
+export function formatChapterOptimizeStageLabel(
+  stage: ChapterOptimizeStage,
+  segmentIndex?: number,
+  segmentTotal?: number,
+  retryCount?: number
+): string {
+  const retrySuffix =
+    typeof retryCount === 'number' && retryCount > 0 ? `（重试 ${retryCount}）` : '';
+  switch (stage) {
+    case 'segment_diagnosis':
+      return segmentIndex && segmentTotal
+        ? `分段诊断 ${segmentIndex}/${segmentTotal}${retrySuffix}`
+        : `分段诊断${retrySuffix}`;
+    case 'plan_synthesis':
+      return retrySuffix ? `方案汇总${retrySuffix}` : '方案汇总';
+    case 'draft_segment':
+      return segmentIndex && segmentTotal
+        ? `正文第 ${segmentIndex}/${segmentTotal} 段`
+        : '正文分段生成';
+    case 'merge_validation':
+      return '合并校验';
+    default:
+      return '处理中';
+  }
 }
 
 export interface WriteChapterOutlineBasis {
@@ -1788,20 +1892,50 @@ export interface WriteChapterOutlineStartEvent {
   basis: WriteChapterOutlineBasis;
 }
 
+export interface ChapterOptimizeSegmentRecovery {
+  failedSegmentIndex?: number;
+  segmentTotal?: number;
+  segmentDiagnoses?: string[];
+  retryable?: boolean;
+}
+
 export interface ChapterOptimizePlanCallbacks {
   onStart?: (payload: {
     traceId: string;
     chapterNo: number;
     planId: string;
     basis: ChapterOptimizationBasis;
+    optimizationMode?: 'single' | 'segmented';
+    segmentTotal?: number;
+    strategyLabel?: string;
+    inputChapterChars?: number;
+  }) => void;
+  onStage?: (payload: {
+    stage: ChapterOptimizeStage;
+    segmentIndex?: number;
+    segmentTotal?: number;
+    retryCount?: number;
   }) => void;
   onContent?: (text: string) => void;
   onEnd?: (result: ChapterOptimizationPlanResult) => void;
-  onError?: (message: string) => void;
+  onError?: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
 }
 
 export interface ChapterOptimizeDraftCallbacks {
-  onStart?: (traceId: string, chapterNo: number) => void;
+  onStart?: (
+    traceId: string,
+    chapterNo: number,
+    meta?: {
+      optimizationMode?: 'single' | 'segmented';
+      segmentTotal?: number;
+      strategyLabel?: string;
+    }
+  ) => void;
+  onStage?: (payload: {
+    stage: ChapterOptimizeStage;
+    segmentIndex?: number;
+    segmentTotal?: number;
+  }) => void;
   onContent?: (text: string) => void;
   onEnd?: (traceId: string) => void;
   onError?: (message: string) => void;

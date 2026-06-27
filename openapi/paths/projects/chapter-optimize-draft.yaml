@@ -7,7 +7,9 @@ post:
     confirmed plan text from the previous step are always injected into the prompt.
 
     SSE event sequence is identical to `/api/generate/draft`:
-      - `data: {"event":"start","traceId":"...","chapterNo":N}`
+      - `data: {"event":"start","traceId":"...","chapterNo":N,"optimizationMode":"single|segmented","segmentTotal":N,"strategyLabel":"..."}`
+      - `data: {"event":"stage","stage":"draft_segment|merge_validation","segmentIndex":N,"segmentTotal":N}` (long chapters)
+      - `data: {"event":"segment_start","data":"{\"segmentIndex\":N,\"totalSegments\":N}"}`
       - `data: {"event":"content","data":"...","traceId":"..."}` (multiple)
       - `data: {"event":"end","traceId":"...","citations":[...],"consistencyNotes":[...]}`
       - `data: {"event":"error","data":"...","traceId":"..."}`

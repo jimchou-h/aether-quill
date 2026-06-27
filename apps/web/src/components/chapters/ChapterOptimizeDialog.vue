@@ -3,8 +3,11 @@ import { computed, ref, watch } from 'vue';
 import {
   apiClient,
   buildPersonasContextPayload,
+  formatChapterOptimizeStageLabel,
+  resolveChapterOptimizeStrategyLabel,
   type ChapterItem,
   type ChapterOptimizationPlanResult,
+  type ChapterOptimizeSegmentRecovery,
   type ChapterTypoIssue,
   type PreviewRetrievalResult,
 } from '../../services/api';
@@ -55,6 +58,9 @@ const typoIssues = ref<ChapterTypoIssue[]>([]);
 const typoCheckTraceId = ref('');
 const typoAutoCorrected = ref(false);
 const errorMessage = ref('');
+const strategyLabel = ref('');
+const progressLabel = ref('');
+const planSegmentRecovery = ref<ChapterOptimizeSegmentRecovery | null>(null);
 
 const chapterUpdatedAtSnapshot = ref<string>('');
 
@@ -62,6 +68,11 @@ const originalScrollRef = ref<HTMLDivElement | null>(null);
 const draftTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const isScrolling = ref(false);
 const syncScrollEnabled = ref(true);
+
+const chapterStrategyLabel = computed(() => {
+  const length = props.chapter?.content?.length ?? 0;
+  return resolveChapterOptimizeStrategyLabel(length);
+});
 
 const stepIndex = computed(() => {
   switch (step.value) {
@@ -124,6 +135,9 @@ function resetState() {
   typoCheckTraceId.value = '';
   typoAutoCorrected.value = false;
   errorMessage.value = '';
+  strategyLabel.value = '';
+  progressLabel.value = '';
+  planSegmentRecovery.value = null;
   originalTextSnapshot.value = props.chapter?.content || '';
   chapterUpdatedAtSnapshot.value = props.chapter?.updatedAt || '';
 }
@@ -165,25 +179,56 @@ function syncScroll(source: 'original' | 'draft') {
   }, 50);
 }
 
-async function runOptimizePlanGeneration() {
+async function runOptimizePlanGeneration(options?: {
+  existingSegmentDiagnoses?: string[];
+  resumeFromSegmentIndex?: number;
+}) {
   if (!props.chapter) return;
 
   generatingPlan.value = true;
   errorMessage.value = '';
+  if (!options?.resumeFromSegmentIndex) {
+    planSegmentRecovery.value = null;
+  }
+  progressLabel.value = options?.resumeFromSegmentIndex
+    ? `从第 ${options.resumeFromSegmentIndex} 段重试…`
+    : '准备生成方案…';
+  strategyLabel.value = chapterStrategyLabel.value;
   try {
     await apiClient.optimizeChapterPlanSSE(
       props.projectId,
       props.chapter.chapterNo,
-      { instruction: instruction.value.trim() },
+      {
+        instruction: instruction.value.trim(),
+        existingSegmentDiagnoses: options?.existingSegmentDiagnoses,
+        resumeFromSegmentIndex: options?.resumeFromSegmentIndex,
+      },
       {
         onStart: (p) => {
+          strategyLabel.value = p.strategyLabel || chapterStrategyLabel.value;
+          progressLabel.value = '生成优化方案…';
           plan.value = {
-            planText: '',
+            planText: options?.resumeFromSegmentIndex ? plan.value?.planText || '' : '',
             planId: p.planId,
             traceId: p.traceId,
             basis: p.basis,
+            optimizationMode: p.optimizationMode,
+            segmentTotal: p.segmentTotal,
+            strategyLabel: p.strategyLabel,
+            segmentDiagnoses: options?.existingSegmentDiagnoses,
           };
           step.value = 'plan';
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal, retryCount }) => {
+          if (retryCount && retryCount > 0 && plan.value) {
+            plan.value = { ...plan.value, planText: '' };
+          }
+          progressLabel.value = formatChapterOptimizeStageLabel(
+            stage,
+            segmentIndex,
+            segmentTotal,
+            retryCount
+          );
         },
         onContent: (text) => {
           if (plan.value) {
@@ -192,22 +237,72 @@ async function runOptimizePlanGeneration() {
         },
         onEnd: (result) => {
           plan.value = result;
+          planSegmentRecovery.value = null;
+          progressLabel.value = '';
           presentSuccess('优化方案已生成，可直接修改方案文本后再生成正文');
         },
-        onError: (message) => {
+        onError: (message, recovery) => {
           errorMessage.value = presentError(message || '生成优化方案失败');
+          progressLabel.value = '';
+          if (recovery?.retryable) {
+            planSegmentRecovery.value = recovery;
+            if (plan.value) {
+              plan.value = {
+                ...plan.value,
+                segmentDiagnoses: recovery.segmentDiagnoses,
+                segmentTotal: recovery.segmentTotal,
+              };
+            } else {
+              plan.value = {
+                planText: '',
+                planId: '',
+                traceId: '',
+                basis: {
+                  usedPersonaId: null,
+                  outlineUsed: false,
+                  chapterSummaryCount: 0,
+                  usedRelationEvents: [],
+                },
+                segmentDiagnoses: recovery.segmentDiagnoses,
+                segmentTotal: recovery.segmentTotal,
+              };
+            }
+            step.value = 'plan';
+            return;
+          }
           plan.value = null;
+          planSegmentRecovery.value = null;
           step.value = 'instruction';
         },
       }
     );
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '生成优化方案失败');
-    plan.value = null;
-    step.value = 'instruction';
+    if (!planSegmentRecovery.value) {
+      plan.value = null;
+      step.value = 'instruction';
+    }
+    progressLabel.value = '';
   } finally {
     generatingPlan.value = false;
   }
+}
+
+async function handleRetryFailedPlanSegment() {
+  const recovery = planSegmentRecovery.value;
+  if (recovery?.segmentDiagnoses?.length) {
+    const resumeFrom =
+      recovery.failedSegmentIndex ??
+      (recovery.segmentTotal && recovery.segmentDiagnoses.length >= recovery.segmentTotal
+        ? recovery.segmentTotal + 1
+        : undefined);
+    await runOptimizePlanGeneration({
+      existingSegmentDiagnoses: recovery.segmentDiagnoses,
+      resumeFromSegmentIndex: resumeFrom,
+    });
+    return;
+  }
+  await runOptimizePlanGeneration();
 }
 
 async function handleGeneratePlan() {
@@ -334,6 +429,8 @@ async function handleGenerateDraft() {
   step.value = 'draft';
   generatingDraft.value = true;
   errorMessage.value = '';
+  progressLabel.value = '准备生成正文…';
+  strategyLabel.value = plan.value.strategyLabel || chapterStrategyLabel.value;
 
   try {
     await apiClient.optimizeChapterDraftSSE(
@@ -343,26 +440,35 @@ async function handleGenerateDraft() {
         instruction: instruction.value.trim(),
         planText: planBody,
         planId: plan.value.planId,
+        segmentDiagnoses: plan.value.segmentDiagnoses,
       },
       {
-        onStart: (traceId) => {
+        onStart: (traceId, _chapterNo, meta) => {
           draftTraceId.value = traceId;
+          strategyLabel.value = meta?.strategyLabel || strategyLabel.value;
+          progressLabel.value = '生成优化正文…';
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal }) => {
+          progressLabel.value = formatChapterOptimizeStageLabel(stage, segmentIndex, segmentTotal);
         },
         onContent: (text) => {
           draftText.value += text;
         },
         onEnd: () => {
           generatingDraft.value = false;
+          progressLabel.value = '';
           presentSuccess('优化正文已生成，请确认是否覆盖原章节');
         },
         onError: (message) => {
           generatingDraft.value = false;
+          progressLabel.value = '';
           errorMessage.value = presentError(message || '优化正文生成失败');
         },
       }
     );
   } catch (error) {
     generatingDraft.value = false;
+    progressLabel.value = '';
     errorMessage.value = presentErrorFromCaught(error, '优化正文生成失败');
   }
 }
@@ -522,6 +628,10 @@ async function handleApply() {
       <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
 
       <section v-if="step === 'instruction'" class="step-section">
+        <p v-if="props.chapter" class="meta-line strategy-line">
+          本章策略：{{ chapterStrategyLabel }}
+        </p>
+        <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
         <label class="field-label" for="optimize-instruction">优化要求</label>
         <textarea
           id="optimize-instruction"
@@ -547,6 +657,8 @@ async function handleApply() {
 
       <section v-else-if="step === 'plan'" class="step-section">
         <h4 class="section-title">优化方案</h4>
+        <p v-if="strategyLabel" class="meta-line strategy-line">处理策略：{{ strategyLabel }}</p>
+        <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
         <label class="field-label" for="optimize-plan-text">方案内容</label>
         <textarea
           v-if="plan"
@@ -562,9 +674,27 @@ async function handleApply() {
           {{ plan?.basis.chapterSummaryCount }} 条 · 关系事件
           {{ plan?.basis.usedRelationEvents.length || 0 }} 条
         </p>
+        <p v-if="planSegmentRecovery?.retryable" class="message message-info">
+          <template v-if="planSegmentRecovery.failedSegmentIndex">
+            第 {{ planSegmentRecovery.failedSegmentIndex }}/{{ planSegmentRecovery.segmentTotal }}
+            段失败，已完成 {{ planSegmentRecovery.segmentDiagnoses?.length ?? 0 }} 段诊断，可重试失败段。
+          </template>
+          <template v-else>
+            方案汇总失败，已完成全部分段诊断，可重试汇总。
+          </template>
+        </p>
         <div class="step-actions">
           <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
             取消优化
+          </button>
+          <button
+            v-if="planSegmentRecovery?.retryable"
+            class="primary-button"
+            type="button"
+            :disabled="isBusy"
+            @click="handleRetryFailedPlanSegment"
+          >
+            {{ generatingPlan ? '重试中...' : '重试失败段' }}
           </button>
           <button
             class="secondary-button"
@@ -595,6 +725,8 @@ async function handleApply() {
 
       <section v-else-if="step === 'draft'" class="step-section draft-section">
         <h4 class="section-title">优化正文</h4>
+        <p v-if="strategyLabel" class="meta-line strategy-line">处理策略：{{ strategyLabel }}</p>
+        <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
         <p v-if="typoAutoCorrected" class="message message-info">
           正文已自动修正错字，请确认后再覆盖原章节。
         </p>

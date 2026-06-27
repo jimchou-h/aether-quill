@@ -109,6 +109,7 @@ export class ProjectsController {
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      chapterOptimizeSegmentCharSize?: number;
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -280,6 +281,8 @@ export class ProjectsController {
       instruction?: string;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
+      existingSegmentDiagnoses?: string[];
+      resumeFromSegmentIndex?: number;
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
@@ -301,17 +304,56 @@ export class ProjectsController {
 
     try {
       await this.projectsService.optimizeChapterPlanStream(id, Number(chapterNo), data, userId, {
-        onStart: ({ traceId, chapterNo: cno, planId, basis }) => {
-          writeEvent({ event: 'start', traceId, chapterNo: cno, planId, basis });
+        onStart: ({ traceId, chapterNo: cno, planId, basis, optimizationMode, segmentTotal, strategyLabel, inputChapterChars }) => {
+          writeEvent({
+            event: 'start',
+            traceId,
+            chapterNo: cno,
+            planId,
+            basis,
+            optimizationMode,
+            segmentTotal,
+            strategyLabel,
+            inputChapterChars,
+          });
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal, retryCount }) => {
+          writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal, retryCount });
         },
         onContent: (text) => {
           writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
         },
-        onEnd: ({ traceId, planText, planId, basis }) => {
-          writeEvent({ event: 'end', traceId, planText, planId, basis });
+        onEnd: ({
+          traceId,
+          planText,
+          planId,
+          basis,
+          optimizationMode,
+          segmentTotal,
+          strategyLabel,
+          segmentDiagnoses,
+        }) => {
+          writeEvent({
+            event: 'end',
+            traceId,
+            planText,
+            planId,
+            basis,
+            optimizationMode,
+            segmentTotal,
+            strategyLabel,
+            segmentDiagnoses,
+          });
         },
-        onError: (message) => {
-          writeEvent({ event: 'error', data: message });
+        onError: (message, recovery) => {
+          writeEvent({
+            event: 'error',
+            data: message,
+            failedSegmentIndex: recovery?.failedSegmentIndex,
+            segmentTotal: recovery?.segmentTotal,
+            segmentDiagnoses: recovery?.segmentDiagnoses,
+            retryable: recovery?.retryable,
+          });
         },
       });
     } catch (error) {
@@ -334,6 +376,7 @@ export class ProjectsController {
       planId?: string;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
+      segmentDiagnoses?: string[];
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
@@ -355,8 +398,18 @@ export class ProjectsController {
 
     try {
       await this.projectsService.optimizeChapterDraftStream(id, Number(chapterNo), data, userId, {
-        onStart: ({ traceId, chapterNo: cno }) => {
-          writeEvent({ event: 'start', traceId, chapterNo: cno });
+        onStart: ({ traceId, chapterNo: cno, optimizationMode, segmentTotal, strategyLabel }) => {
+          writeEvent({
+            event: 'start',
+            traceId,
+            chapterNo: cno,
+            optimizationMode,
+            segmentTotal,
+            strategyLabel,
+          });
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal }) => {
+          writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
         },
         onContent: (text) => {
           writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });

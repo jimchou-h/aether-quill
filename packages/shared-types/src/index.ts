@@ -2002,6 +2002,8 @@ export interface components {
       updatePersonaOnSave: boolean;
       /** @description 保存章节时自动生成关系事件 */
       generateRelationEventsOnSave: boolean;
+      /** @description 章节优化方案分段字数；0 表示不按字数分段 */
+      chapterOptimizeSegmentCharSize: number;
       /** Format: date-time */
       updatedAt: string;
     };
@@ -2015,6 +2017,7 @@ export interface components {
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      chapterOptimizeSegmentCharSize?: number;
     };
     WriteContextReadiness: {
       chapterNo: number;
