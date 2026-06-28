@@ -8,6 +8,14 @@ import {
   type UsedRelationEventItem,
   type WriteChapterOutlineResult,
 } from '../services/api';
+import {
+  applyAiTaskProgressEvent,
+  completeAiTaskProgress,
+  createAiTaskProgressState,
+  failAiTaskProgress,
+  resetAiTaskProgress,
+  startAiTaskProgress,
+} from '../composables/useAiTaskProgress';
 import { presentError, presentErrorFromCaught } from '../utils/pageFeedback';
 
 export type GenerationStatus = 'idle' | 'streaming' | 'done' | 'error';
@@ -25,6 +33,7 @@ export const useGenerationStore = defineStore('generation', () => {
   const accepting = ref(false);
   const generationPhase = ref<GenerationPhase | null>(null);
   const phasePanelCollapsed = ref(false);
+  const aiTaskProgress = createAiTaskProgressState();
 
   const outlineStatus = ref<OutlineStatus>('idle');
   const outlineText = ref('');
@@ -55,6 +64,7 @@ export const useGenerationStore = defineStore('generation', () => {
     accepting.value = false;
     generationPhase.value = null;
     phasePanelCollapsed.value = false;
+    resetAiTaskProgress(aiTaskProgress);
   }
 
   function resetOutline() {
@@ -151,6 +161,11 @@ export const useGenerationStore = defineStore('generation', () => {
     resetDraft();
     status.value = 'streaming';
     draftText.value = '';
+    resetAiTaskProgress(aiTaskProgress);
+    startAiTaskProgress(aiTaskProgress, {
+      taskKey: 'write.chapter.draft',
+      message: '正在生成章节正文…',
+    });
 
     try {
       await apiClient.generateDraftSSE(
@@ -166,25 +181,50 @@ export const useGenerationStore = defineStore('generation', () => {
           onPhase: (phase) => {
             generationPhase.value = phase;
             phasePanelCollapsed.value = false;
+            if (phase === 'content_safety_scan') {
+              applyAiTaskProgressEvent(aiTaskProgress, {
+                traceId: traceId.value || undefined,
+                taskKey: 'write.chapter.draft',
+                stage: phase,
+                message: '正在执行内容安全扫描…',
+              });
+            }
+          },
+          onProgress: (event) => {
+            applyAiTaskProgressEvent(aiTaskProgress, event);
           },
           onStart: (id, chNo) => {
             traceId.value = id;
             chapterNo.value = chNo;
+            applyAiTaskProgressEvent(aiTaskProgress, {
+              traceId: id,
+              taskKey: 'write.chapter.draft',
+              stage: 'start',
+              message: '正在整理叙事上下文…',
+            });
           },
           onContent: (text) => {
             draftText.value += text;
           },
-          onEnd: (id, cites, notes, usedEvents) => {
+          onContentReplace: (text) => {
+            draftText.value = text;
+          },
+          onEnd: (id, cites, notes, usedEvents, meta) => {
             traceId.value = id;
+            if (meta?.finalText) {
+              draftText.value = meta.finalText;
+            }
             citations.value = cites;
             consistencyNotes.value = notes;
             usedRelationEvents.value = usedEvents;
             status.value = 'done';
             phasePanelCollapsed.value = true;
+            completeAiTaskProgress(aiTaskProgress, '章节正文生成完成');
           },
           onError: (msg) => {
             errorMessage.value = presentError(msg);
             status.value = 'error';
+            failAiTaskProgress(aiTaskProgress, msg, traceId.value || undefined);
           },
         }
       );
@@ -226,6 +266,7 @@ export const useGenerationStore = defineStore('generation', () => {
     accepting,
     generationPhase,
     phasePanelCollapsed,
+    aiTaskProgress,
     outlineStatus,
     outlineText,
     outlineId,

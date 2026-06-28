@@ -67,6 +67,9 @@ export interface SseEndEvent {
   citations: CitationItem[];
   consistencyNotes: ConsistencyNote[];
   usedRelationEvents?: UsedRelationEventItem[];
+  finalText?: string;
+  finalDraftText?: string;
+  contentSafety?: ContentSafetyScanResult;
 }
 
 export interface SseErrorEvent {
@@ -80,11 +83,22 @@ export type GenerationPhase =
   | 'building_prompt'
   | 'waiting_llm'
   | 'generating'
-  | 'checking';
+  | 'checking'
+  | 'content_safety_scan'
+  | 'content_safety_rewrite';
+
+export type AiTaskProgressEvent = components['schemas']['AiTaskProgressEvent'];
+export type ContentSafetyScanResult = components['schemas']['ContentSafetyScanResult'];
 
 export interface SsePhaseEvent {
-  event: GenerationPhase;
+  event: GenerationPhase | 'progress' | 'content_replace';
   traceId?: string;
+  taskKey?: string;
+  stage?: string;
+  message?: string;
+  currentStep?: number;
+  totalSteps?: number;
+  data?: string;
 }
 
 export type SseEvent =
@@ -97,12 +111,15 @@ export type SseEvent =
 export interface SseCallbacks {
   onStart?: (traceId: string, chapterNo: number) => void;
   onPhase?: (phase: GenerationPhase) => void;
+  onProgress?: (event: AiTaskProgressEvent) => void;
   onContent?: (text: string) => void;
+  onContentReplace?: (text: string) => void;
   onEnd?: (
     traceId: string,
     citations: CitationItem[],
     consistencyNotes: ConsistencyNote[],
-    usedRelationEvents: UsedRelationEventItem[]
+    usedRelationEvents: UsedRelationEventItem[],
+    meta?: { finalText?: string; contentSafety?: ContentSafetyScanResult }
   ) => void;
   onError?: (error: string) => void;
 }
@@ -267,7 +284,11 @@ export const apiClient = {
 
   async getSettings(projectId: string) {
     const response = await http.get(`/api/projects/${projectId}/settings`);
-    return this.unwrapPayload<ProjectSettings>(response.data);
+    const payload = this.unwrapPayload<ProjectSettings>(response.data);
+    if (!Array.isArray(payload.contentSafetyCustomRules)) {
+      payload.contentSafetyCustomRules = [];
+    }
+    return payload;
   },
 
   async getProjectStats(projectId: string) {
@@ -277,7 +298,11 @@ export const apiClient = {
 
   async updateSettings(projectId: string, payload: components['schemas']['ProjectSettingsUpdate']) {
     const response = await http.put(`/api/projects/${projectId}/settings`, payload);
-    return this.unwrapPayload<ProjectSettings>(response.data);
+    const data = this.unwrapPayload<ProjectSettings>(response.data);
+    if (!Array.isArray(data.contentSafetyCustomRules)) {
+      data.contentSafetyCustomRules = [];
+    }
+    return data;
   },
 
   async getPersonas(projectId: string) {
@@ -890,6 +915,10 @@ export const apiClient = {
           (workspace.settings as { chapterSummaryMemoryCount?: number })
             .chapterSummaryMemoryCount ?? 3,
         generationTemperature: workspace.settings.generationTemperature,
+        contentSafetyScanEnabled: workspace.settings.contentSafetyScanEnabled !== false,
+        contentSafetyCustomRules: Array.isArray(workspace.settings.contentSafetyCustomRules)
+          ? workspace.settings.contentSafetyCustomRules
+          : [],
         selectedRelationMemory: buildRelationMemoryBlock(selectedEvents),
         usedRelationEvents: selectedEvents,
         personas: buildPersonasContextPayload(workspace.personas),
@@ -1127,7 +1156,14 @@ export const apiClient = {
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
-            const data: SseEvent = JSON.parse(line.slice(6));
+            const data: SseEvent & {
+              event: string;
+              taskKey?: string;
+              stage?: string;
+              message?: string;
+              currentStep?: number;
+              totalSteps?: number;
+            } = JSON.parse(line.slice(6));
             switch (data.event) {
               case 'start':
                 callbacks.onStart?.(data.traceId, data.chapterNo);
@@ -1137,7 +1173,24 @@ export const apiClient = {
               case 'waiting_llm':
               case 'generating':
               case 'checking':
-                callbacks.onPhase?.(data.event);
+              case 'content_safety_scan':
+              case 'content_safety_rewrite':
+                callbacks.onPhase?.(data.event as GenerationPhase);
+                break;
+              case 'progress':
+                if (data.traceId && data.taskKey && data.stage && data.message) {
+                  callbacks.onProgress?.({
+                    traceId: data.traceId,
+                    taskKey: data.taskKey,
+                    stage: data.stage,
+                    message: data.message,
+                    currentStep: data.currentStep,
+                    totalSteps: data.totalSteps,
+                  });
+                }
+                break;
+              case 'content_replace':
+                callbacks.onContentReplace?.((data.data || '').replace(/\\n/g, '\n'));
                 break;
               case 'content':
                 callbacks.onContent?.(data.data.replace(/\\n/g, '\n'));
@@ -1147,7 +1200,11 @@ export const apiClient = {
                   data.traceId,
                   data.citations,
                   data.consistencyNotes,
-                  data.usedRelationEvents || []
+                  data.usedRelationEvents || [],
+                  {
+                    finalText: data.finalText,
+                    contentSafety: data.contentSafety,
+                  }
                 );
                 reading = false;
                 break;
@@ -1381,7 +1438,15 @@ export const apiClient = {
 
         try {
           const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'end' | 'error' | 'segment_start' | 'stage';
+            event?:
+              | 'start'
+              | 'content'
+              | 'content_replace'
+              | 'end'
+              | 'error'
+              | 'segment_start'
+              | 'stage'
+              | 'progress';
             data?: string;
             traceId?: string;
             chapterNo?: number;
@@ -1390,6 +1455,12 @@ export const apiClient = {
             strategyLabel?: string;
             stage?: ChapterOptimizeStage;
             segmentIndex?: number;
+            taskKey?: string;
+            message?: string;
+            currentStep?: number;
+            totalSteps?: number;
+            finalDraftText?: string;
+            contentSafety?: ContentSafetyScanResult;
           };
           switch (event.event) {
             case 'start':
@@ -1411,8 +1482,27 @@ export const apiClient = {
             case 'content':
               callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
               break;
+            case 'content_replace':
+              callbacks.onContentReplace?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'progress':
+              if (event.traceId && event.taskKey && event.stage && event.message) {
+                callbacks.onProgress?.({
+                  traceId: event.traceId,
+                  taskKey: event.taskKey,
+                  stage: event.stage,
+                  message: event.message,
+                  currentStep: event.currentStep,
+                  totalSteps: event.totalSteps,
+                });
+              }
+              break;
             case 'end':
-              callbacks.onEnd?.(event.traceId || '');
+              callbacks.onEnd?.({
+                traceId: event.traceId || '',
+                finalDraftText: event.finalDraftText,
+                contentSafety: event.contentSafety,
+              });
               reading = false;
               break;
             case 'error':
@@ -1526,11 +1616,18 @@ export const apiClient = {
 
         try {
           const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'end' | 'error';
+            event?: 'start' | 'content' | 'content_replace' | 'end' | 'error' | 'progress';
             data?: string;
             traceId?: string;
             appliedIssueCount?: number;
             autoCorrected?: boolean;
+            taskKey?: string;
+            stage?: string;
+            message?: string;
+            currentStep?: number;
+            totalSteps?: number;
+            finalDraftText?: string;
+            contentSafety?: ContentSafetyScanResult;
           };
           switch (event.event) {
             case 'start':
@@ -1539,11 +1636,28 @@ export const apiClient = {
             case 'content':
               callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
               break;
+            case 'content_replace':
+              callbacks.onContentReplace?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'progress':
+              if (event.traceId && event.taskKey && event.stage && event.message) {
+                callbacks.onProgress?.({
+                  traceId: event.traceId,
+                  taskKey: event.taskKey,
+                  stage: event.stage,
+                  message: event.message,
+                  currentStep: event.currentStep,
+                  totalSteps: event.totalSteps,
+                });
+              }
+              break;
             case 'end':
               callbacks.onEnd?.({
                 traceId: event.traceId || '',
                 appliedIssueCount: event.appliedIssueCount ?? 0,
                 autoCorrected: event.autoCorrected ?? true,
+                finalDraftText: event.finalDraftText,
+                contentSafety: event.contentSafety,
               });
               reading = false;
               break;
@@ -1738,6 +1852,7 @@ export interface DocumentVersionItem {
 }
 
 export type ProjectSettings = components['schemas']['ProjectSettings'];
+export type ProjectContentSafetyRule = components['schemas']['ProjectContentSafetyRule'];
 
 export interface PersonaChapterStateRecord {
   chapterNo: number;
@@ -1829,11 +1944,15 @@ export type ChapterOptimizeStage =
   | 'segment_diagnosis'
   | 'plan_synthesis'
   | 'draft_segment'
-  | 'merge_validation';
+  | 'merge_validation'
+  | 'content_safety_scan'
+  | 'content_safety_rewrite';
+
+export const DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE = 3000;
 
 export function resolveChapterOptimizeStrategyLabel(
   contentLength: number,
-  segmentCharSize = 3000
+  segmentCharSize = DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
 ): string {
   if (segmentCharSize === 0) {
     return contentLength > 2800 ? '整章优化（未按字数分段）' : '整章优化';
@@ -1866,6 +1985,10 @@ export function formatChapterOptimizeStageLabel(
         : '正文分段生成';
     case 'merge_validation':
       return '合并校验';
+    case 'content_safety_scan':
+      return '正在执行内容安全扫描…';
+    case 'content_safety_rewrite':
+      return retrySuffix ? `正在批量重写命中句子${retrySuffix}` : '正在批量重写命中句子…';
     default:
       return '处理中';
   }
@@ -1937,7 +2060,13 @@ export interface ChapterOptimizeDraftCallbacks {
     segmentTotal?: number;
   }) => void;
   onContent?: (text: string) => void;
-  onEnd?: (traceId: string) => void;
+  onContentReplace?: (text: string) => void;
+  onProgress?: (event: AiTaskProgressEvent) => void;
+  onEnd?: (payload: {
+    traceId: string;
+    finalDraftText?: string;
+    contentSafety?: ContentSafetyScanResult;
+  }) => void;
   onError?: (message: string) => void;
   onSegmentStart?: (segmentIndex: number, totalSegments: number) => void;
 }
@@ -1959,7 +2088,15 @@ export interface ChapterOptimizationTypoCheckResult {
 export interface ChapterOptimizeTypoFixCallbacks {
   onStart?: (traceId: string) => void;
   onContent?: (text: string) => void;
-  onEnd?: (payload: { traceId: string; appliedIssueCount: number; autoCorrected: boolean }) => void;
+  onContentReplace?: (text: string) => void;
+  onProgress?: (event: AiTaskProgressEvent) => void;
+  onEnd?: (payload: {
+    traceId: string;
+    appliedIssueCount: number;
+    autoCorrected: boolean;
+    finalDraftText?: string;
+    contentSafety?: ContentSafetyScanResult;
+  }) => void;
   onError?: (message: string) => void;
 }
 

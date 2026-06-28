@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import {
   apiClient,
   buildPersonasContextPayload,
+  DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   formatChapterOptimizeStageLabel,
   resolveChapterOptimizeStrategyLabel,
   type ChapterItem,
@@ -19,6 +20,15 @@ import {
   presentSuccess,
 } from '../../utils/pageFeedback';
 import { resolveEffectiveStructuredMatchingText } from '../../utils/structured-matching';
+import {
+  applyAiTaskProgressEvent,
+  completeAiTaskProgress,
+  createAiTaskProgressState,
+  failAiTaskProgress,
+  resetAiTaskProgress,
+  startAiTaskProgress,
+} from '../../composables/useAiTaskProgress';
+import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import {
   buildChapterDiffLines,
   type DiffLineResult,
@@ -60,7 +70,9 @@ const typoAutoCorrected = ref(false);
 const errorMessage = ref('');
 const strategyLabel = ref('');
 const progressLabel = ref('');
+const aiTaskProgress = createAiTaskProgressState();
 const planSegmentRecovery = ref<ChapterOptimizeSegmentRecovery | null>(null);
+const chapterOptimizeSegmentCharSize = ref(DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
 
 const chapterUpdatedAtSnapshot = ref<string>('');
 
@@ -71,7 +83,7 @@ const syncScrollEnabled = ref(true);
 
 const chapterStrategyLabel = computed(() => {
   const length = props.chapter?.content?.length ?? 0;
-  return resolveChapterOptimizeStrategyLabel(length);
+  return resolveChapterOptimizeStrategyLabel(length, chapterOptimizeSegmentCharSize.value);
 });
 
 const stepIndex = computed(() => {
@@ -119,13 +131,23 @@ watch(
   () => props.visible,
   (next) => {
     if (next) {
-      resetState();
+      void resetState();
     }
   },
   { immediate: true }
 );
 
-function resetState() {
+async function loadOptimizeSegmentSettings() {
+  try {
+    const settings = await apiClient.getSettings(props.projectId);
+    chapterOptimizeSegmentCharSize.value =
+      settings.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
+  } catch {
+    chapterOptimizeSegmentCharSize.value = DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
+  }
+}
+
+async function resetState() {
   step.value = 'instruction';
   instruction.value = '';
   plan.value = null;
@@ -140,6 +162,7 @@ function resetState() {
   planSegmentRecovery.value = null;
   originalTextSnapshot.value = props.chapter?.content || '';
   chapterUpdatedAtSnapshot.value = props.chapter?.updatedAt || '';
+  await loadOptimizeSegmentSettings();
 }
 
 function close() {
@@ -430,6 +453,11 @@ async function handleGenerateDraft() {
   generatingDraft.value = true;
   errorMessage.value = '';
   progressLabel.value = '准备生成正文…';
+  resetAiTaskProgress(aiTaskProgress);
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.optimize.draft',
+    message: '准备生成优化正文…',
+  });
   strategyLabel.value = plan.value.strategyLabel || chapterStrategyLabel.value;
 
   try {
@@ -447,21 +475,48 @@ async function handleGenerateDraft() {
           draftTraceId.value = traceId;
           strategyLabel.value = meta?.strategyLabel || strategyLabel.value;
           progressLabel.value = '生成优化正文…';
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            traceId,
+            taskKey: 'chapter.optimize.draft',
+            stage: 'generating',
+            message: '正在生成优化正文…',
+          });
         },
         onStage: ({ stage, segmentIndex, segmentTotal }) => {
-          progressLabel.value = formatChapterOptimizeStageLabel(stage, segmentIndex, segmentTotal);
+          const label = formatChapterOptimizeStageLabel(stage, segmentIndex, segmentTotal);
+          progressLabel.value = label;
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            traceId: draftTraceId.value || undefined,
+            taskKey: 'chapter.optimize.draft',
+            stage,
+            message: label,
+            currentStep: segmentIndex,
+            totalSteps: segmentTotal,
+          });
+        },
+        onProgress: (event) => {
+          progressLabel.value = event.message;
+          applyAiTaskProgressEvent(aiTaskProgress, event);
         },
         onContent: (text) => {
           draftText.value += text;
         },
-        onEnd: () => {
+        onContentReplace: (text) => {
+          draftText.value = text;
+        },
+        onEnd: ({ finalDraftText }) => {
+          if (finalDraftText) {
+            draftText.value = finalDraftText;
+          }
           generatingDraft.value = false;
           progressLabel.value = '';
+          completeAiTaskProgress(aiTaskProgress, '优化正文已生成，请确认是否覆盖原章节');
           presentSuccess('优化正文已生成，请确认是否覆盖原章节');
         },
         onError: (message) => {
           generatingDraft.value = false;
           progressLabel.value = '';
+          failAiTaskProgress(aiTaskProgress, message || '优化正文生成失败', draftTraceId.value || undefined);
           errorMessage.value = presentError(message || '优化正文生成失败');
         },
       }
@@ -528,6 +583,11 @@ async function handleAutoFixTypos() {
   errorMessage.value = '';
   const previousText = draftText.value;
   draftText.value = '';
+  resetAiTaskProgress(aiTaskProgress);
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.optimize.typo-fix',
+    message: '正在自动修正错字…',
+  });
 
   try {
     await apiClient.fixChapterOptimizationTyposSSE(
@@ -540,12 +600,28 @@ async function handleAutoFixTypos() {
       {
         onStart: (traceId) => {
           draftTraceId.value = traceId;
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            traceId,
+            taskKey: 'chapter.optimize.typo-fix',
+            stage: 'generating',
+            message: '正在自动修正错字…',
+          });
+        },
+        onProgress: (event) => {
+          applyAiTaskProgressEvent(aiTaskProgress, event);
         },
         onContent: (text) => {
           draftText.value += text;
         },
-        onEnd: ({ appliedIssueCount, autoCorrected }) => {
+        onContentReplace: (text) => {
+          draftText.value = text;
+        },
+        onEnd: ({ appliedIssueCount, autoCorrected, finalDraftText }) => {
+          if (finalDraftText) {
+            draftText.value = finalDraftText;
+          }
           typoAutoCorrected.value = autoCorrected;
+          completeAiTaskProgress(aiTaskProgress, '错字修正已完成');
           presentSuccess(
             appliedIssueCount > 0
               ? `已自动修正 ${appliedIssueCount} 处问题并回填正文`
@@ -554,6 +630,7 @@ async function handleAutoFixTypos() {
         },
         onError: (message) => {
           draftText.value = previousText;
+          failAiTaskProgress(aiTaskProgress, message || '自动修正重生成失败', draftTraceId.value || undefined);
           errorMessage.value = presentError(message || '自动修正重生成失败');
         },
       }
@@ -631,6 +708,7 @@ async function handleApply() {
         <p v-if="props.chapter" class="meta-line strategy-line">
           本章策略：{{ chapterStrategyLabel }}
         </p>
+        <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
         <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
         <label class="field-label" for="optimize-instruction">优化要求</label>
         <textarea
@@ -658,6 +736,7 @@ async function handleApply() {
       <section v-else-if="step === 'plan'" class="step-section">
         <h4 class="section-title">优化方案</h4>
         <p v-if="strategyLabel" class="meta-line strategy-line">处理策略：{{ strategyLabel }}</p>
+        <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
         <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
         <label class="field-label" for="optimize-plan-text">方案内容</label>
         <textarea
@@ -726,6 +805,7 @@ async function handleApply() {
       <section v-else-if="step === 'draft'" class="step-section draft-section">
         <h4 class="section-title">优化正文</h4>
         <p v-if="strategyLabel" class="meta-line strategy-line">处理策略：{{ strategyLabel }}</p>
+        <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
         <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
         <p v-if="typoAutoCorrected" class="message message-info">
           正文已自动修正错字，请确认后再覆盖原章节。

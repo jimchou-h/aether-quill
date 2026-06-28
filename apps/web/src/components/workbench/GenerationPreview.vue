@@ -6,6 +6,8 @@ import type {
   GenerationPhase,
   UsedRelationEventItem,
 } from '../../services/api';
+import type { AiTaskProgressState } from '../../composables/useAiTaskProgress';
+import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 
 const PHASE_LABELS: Record<GenerationPhase, string> = {
   retrieving: '正在检索知识库...',
@@ -13,6 +15,8 @@ const PHASE_LABELS: Record<GenerationPhase, string> = {
   waiting_llm: '等待模型响应...',
   generating: '正在生成正文...',
   checking: '正在进行一致性检查...',
+  content_safety_scan: '正在执行内容安全扫描...',
+  content_safety_rewrite: '正在批量重写命中句子...',
 };
 
 const PHASE_ORDER: GenerationPhase[] = [
@@ -21,6 +25,7 @@ const PHASE_ORDER: GenerationPhase[] = [
   'waiting_llm',
   'generating',
   'checking',
+  'content_safety_scan',
 ];
 
 /**
@@ -46,9 +51,19 @@ const props = withDefaults(
     generationPhase: GenerationPhase | null;
     /** 阶段面板是否收起 */
     phasePanelCollapsed: boolean;
+    aiTaskProgress: AiTaskProgressState;
     embedded?: boolean;
   }>(),
-  { embedded: false }
+  { embedded: false, aiTaskProgress: () => ({
+    traceId: null,
+    taskKey: null,
+    stage: null,
+    message: null,
+    currentStep: null,
+    totalSteps: null,
+    active: false,
+    error: null,
+  }) }
 );
 
 const showPhasePanel = computed(
@@ -84,6 +99,8 @@ const emit = defineEmits<{
       <h3 class="panel-title">正文草稿</h3>
       <p class="panel-description">流式生成结果；引用与告警请切换到「引用与告警」标签。</p>
     </header>
+
+    <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
 
     <div v-if="showPhasePanel" class="phase-panel" role="status" aria-live="polite">
       <p class="phase-panel-title">生成进度</p>

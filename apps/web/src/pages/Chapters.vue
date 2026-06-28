@@ -12,6 +12,15 @@ import ChapterImportDialog from '../components/chapters/ChapterImportDialog.vue'
 import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
 import ChapterBatchOptimizeDialog from '../components/chapters/ChapterBatchOptimizeDialog.vue';
+import AiTaskProgressPanel from '../components/common/AiTaskProgressPanel.vue';
+import {
+  applyAiTaskProgressEvent,
+  completeAiTaskProgress,
+  createAiTaskProgressState,
+  failAiTaskProgress,
+  resetAiTaskProgress,
+  startAiTaskProgress,
+} from '../composables/useAiTaskProgress';
 import {
   presentError,
   presentErrorFromCaught,
@@ -46,6 +55,7 @@ const renumbering = ref(false);
 const showHint = ref(true);
 const showMoreMenu = ref(false);
 const moreMenuRef = ref<HTMLElement | null>(null);
+const aiTaskProgress = createAiTaskProgressState();
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
 const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
@@ -194,12 +204,19 @@ async function handleParseStructuredChapter(chapterNo: number) {
   parsingStructuredChapterNo.value = chapterNo;
   errorMessage.value = '';
   message.value = '';
+  resetAiTaskProgress(aiTaskProgress);
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.structured-parse',
+    message: `正在解析第 ${chapterNo} 章结构化信息…`,
+  });
   try {
     await apiClient.parseChapterStructuredInfo(projectId.value, chapterNo, { mode: 'chapter' });
     message.value = presentSuccess(`第${chapterNo}章结构化信息已解析`);
+    completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章结构化解析完成`);
     await loadWorkspace();
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '解析结构化信息失败');
+    failAiTaskProgress(aiTaskProgress, '解析结构化信息失败');
   } finally {
     parsingStructuredChapterNo.value = null;
   }
@@ -215,6 +232,14 @@ async function pollSummaryJob(jobId: string) {
   for (let i = 0; i < 20; i += 1) {
     const job = await apiClient.getSummaryJob(projectId.value, jobId);
     latestSummaryJob.value = job;
+    applyAiTaskProgressEvent(aiTaskProgress, {
+      traceId: job.id,
+      taskKey: 'chapter.summarize',
+      stage: job.status,
+      message: `正在生成章节摘要（${job.processedChapters}/${job.totalChapters}）…`,
+      currentStep: job.processedChapters,
+      totalSteps: job.totalChapters,
+    });
     if (job.status === 'completed' || job.status === 'failed') {
       return job;
     }
@@ -252,6 +277,11 @@ async function handleSummarizeChapter(chapterNo: number) {
   summarizingChapterNo.value = chapterNo;
   errorMessage.value = '';
   message.value = '';
+  resetAiTaskProgress(aiTaskProgress);
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.summarize',
+    message: `正在生成第 ${chapterNo} 章摘要…`,
+  });
   try {
     const created = await apiClient.createChapterSummaryJob(projectId.value, chapterNo);
     latestSummaryJob.value = created;
@@ -266,6 +296,7 @@ async function handleSummarizeChapter(chapterNo: number) {
 
     if (!finalJob) {
       message.value = presentInfo(`第${chapterNo}章摘要任务已提交，请稍后刷新查看结果`);
+      completeAiTaskProgress(aiTaskProgress, '摘要任务已提交');
       return;
     }
 
@@ -274,11 +305,14 @@ async function handleSummarizeChapter(chapterNo: number) {
       message.value = presentSuccess(
         `第${chapterNo}章摘要已更新（${summarySourceText(latest?.summarySource)}）`
       );
+      completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章摘要已完成`);
     } else if (finalJob.status === 'failed') {
       errorMessage.value = presentError(finalJob.errorMessage || `第${chapterNo}章摘要生成失败`);
+      failAiTaskProgress(aiTaskProgress, finalJob.errorMessage || `第${chapterNo}章摘要生成失败`);
     }
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '触发章节摘要失败');
+    failAiTaskProgress(aiTaskProgress, '触发章节摘要失败');
   } finally {
     summarizingChapterNo.value = null;
   }
@@ -288,8 +322,12 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
   generatingRelationChapterNo.value = chapterNo;
   errorMessage.value = '';
   message.value = '';
+  resetAiTaskProgress(aiTaskProgress);
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.relation-events',
+    message: `正在抽取第 ${chapterNo} 章关系事件…`,
+  });
   try {
-    message.value = presentInfo(`第${chapterNo}章关系事件生成中...`);
     const result = await apiClient.generateChapterRelationEvents(projectId.value, chapterNo);
 
     const removedHint =
@@ -300,6 +338,7 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
         `第${chapterNo}章已写入 ${result.createdCount} 条关系事件${removedHint}` +
           (result.skippedCount > 0 ? `，跳过 ${result.skippedCount} 条重复` : '')
       );
+      completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章关系事件抽取完成`);
       return;
     }
 
@@ -307,14 +346,17 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
       message.value = presentInfo(
         `第${chapterNo}章未写入新关系事件${removedHint}，跳过 ${result.skippedCount} 条重复`
       );
+      completeAiTaskProgress(aiTaskProgress, '关系事件抽取完成（无新增）');
       return;
     }
 
     message.value = presentInfo(
       `第${chapterNo}章未识别到可写入的关系事件${removedHint}`
     );
+    completeAiTaskProgress(aiTaskProgress, '关系事件抽取完成（无新增）');
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '生成关系事件失败');
+    failAiTaskProgress(aiTaskProgress, '生成关系事件失败');
   } finally {
     generatingRelationChapterNo.value = null;
   }
@@ -528,6 +570,7 @@ onUnmounted(() => {
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
     <p v-if="message" class="message message-ok">{{ message }}</p>
+    <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
 
     <ChapterList
       ref="chapterListRef"
