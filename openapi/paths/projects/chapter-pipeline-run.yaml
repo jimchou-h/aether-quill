@@ -1,0 +1,67 @@
+post:
+  tags:
+    - Projects
+  summary: Run a pipeline module (SSE)
+  description: |
+    Execute one pipeline module or run-all. SSE events align with chapter optimize draft:
+    start → stage → content → end / error.
+    Gate pause (sensory outline) returns end event with gateRequired=true.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: module
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - character
+          - sensory-outline
+          - sensory-rewrite
+          - rules-scan
+          - rules-fix
+          - homogenization
+          - homogenization-scan
+          - homogenization-rewrite
+          - run-all
+  requestBody:
+    required: false
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineRunRequest'
+  responses:
+    '200':
+      description: SSE stream
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Gate not confirmed (1328) or invalid module order (1327)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Session not found (1326)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

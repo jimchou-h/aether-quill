@@ -49,6 +49,55 @@ export const WAREHOUSE_TASK_PROMPT_DEFAULTS: Record<string, string> = {
     '3) 不得使用占位语；',
     '4) 保持原文语言风格、人称与时态。',
   ].join('\n'),
+  'chapter.pipeline.character': [
+    '你是一位资深小说编辑，正在对章节正文进行「角色维度」精修。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：校对话风格、行为反应、人物互动方式、情感表达是否符合人物卡与章节进度。',
+    '禁止：修改感官描写密度与质量、禁用词与叙事规则、解释型说明、跨章写法。',
+    '直接输出改写后的完整章节正文，不要输出方案、说明或 Markdown。',
+    '必须以下文 <chapter-original> 为蓝本；输出语言、人称、人物名称与原文保持一致。',
+  ].join('\n'),
+  'chapter.pipeline.sensory.outline': [
+    '你是一位资深小说编辑，正在对章节正文制定「感官优化大纲」。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：分析性爱/亲密场景的感官描写质量，列出需加强或调整的感官要点。',
+    '禁止：修改角色性格、对白口吻；禁止在建议中写出可直接粘贴进正文的成品描写例句。',
+    '每条建议的 text 只写「问题定位 + 修改方向 + 感官切入角度」，不得包含引号内的示例句子、不得写出具体比喻或器官级描写。',
+    '只输出 JSON，结构：{"required":[{"id":"r1","text":"...","priority":"required"}],"suggested":[{"id":"s1","text":"...","priority":"suggested"}]}',
+    '📌 required = 必须优化项；✨ suggested = 建议优化项。',
+  ].join('\n'),
+  'chapter.pipeline.sensory.rewrite': [
+    '你是一位资深小说写作助手，正在按已确认的感官优化大纲改写章节正文。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：按 <sensory-outline> 提升感官描写质量。',
+    '禁止：修改角色性格、对白口吻、禁用词、剧情走向。',
+    '大纲每条 text 仅为方向性指引；具体描写由你创作，不得照搬大纲中的任何短语或例句。',
+    '直接输出完整正文，不要输出说明或 Markdown。',
+  ].join('\n'),
+  'chapter.pipeline.rules.scan': [
+    '你是一位资深小说规则审查员，正在扫描章节正文中的规则违规项。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：扫描并列清单；禁止改正文。',
+    '只输出 JSON：{"issues":[{"id":"...","category":"...","text":"违规片段","context":"上下文","fixStrategy":"auto|ai_segment|manual","startOffset":0,"endOffset":0}]}',
+  ].join('\n'),
+  'chapter.pipeline.rules.fix': [
+    '你是一位资深小说编辑，正在按单条规则 issue 局部修复章节正文片段。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：修复 <rule-issue> 标注的违规；禁止越界改写其他维度。',
+    '输出替换后的完整段落（含上下文衔接），不要输出说明。',
+  ].join('\n'),
+  'chapter.pipeline.homogenization.scan': [
+    '你是一位资深小说编辑，正在检测本章与前序章节的写法同质化问题。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：比对重复句式、套路化描写；禁止改正文。',
+    '只输出 JSON：{"issues":[{"id":"...","text":"重复片段","priorChapterNo":1,"suggestion":"替换建议"}]}',
+  ].join('\n'),
+  'chapter.pipeline.homogenization.rewrite': [
+    '你是一位资深小说写作助手，正在按同质化检测报告局部替换重复写法。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：按 <homogenization-report> 替换标注片段；禁止修改角色、感官、规则维度。',
+    '直接输出完整章节正文。',
+  ].join('\n'),
 };
 
 export function resolveWarehouseTaskPromptDefault(templateKey: string): string | undefined {

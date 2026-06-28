@@ -5,6 +5,7 @@ import {
   Get,
   Inject,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -16,6 +17,12 @@ import {
 import { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { DocumentsService } from '../documents/documents.service';
 import { ProjectsService } from './projects.service';
+import { ChapterPipelineService } from './chapter-pipeline.service';
+import {
+  ChapterPipelineGateNotConfirmedError,
+  ChapterPipelineModuleFailedError,
+} from './chapter-pipeline.service';
+import type { ChapterPipelineSession } from './chapter-pipeline.util';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { ProjectContentSafetyRule } from '@aether-quill/config';
 
@@ -27,6 +34,7 @@ interface AuthenticatedRequest extends ExpressRequest {
 export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
+    private readonly chapterPipelineService: ChapterPipelineService,
     @Inject(forwardRef(() => DocumentsService))
     private readonly documentsService: DocumentsService
   ) {}
@@ -573,6 +581,137 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/start')
+  startChapterPipeline(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      preset?: string;
+      configOverrides?: Record<string, unknown>;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    const result = this.chapterPipelineService.startSession(
+      id,
+      Number(chapterNo),
+      data,
+      userId
+    );
+    return {
+      sessionId: result.sessionId,
+      chapterNo: result.chapterNo,
+      config: result.config,
+    };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId')
+  getChapterPipelineSession(
+    @Param('sessionId') sessionId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const session = this.chapterPipelineService.getSession(sessionId, req.user?.userId);
+    return serializePipelineSessionView(session);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/sensory-outline')
+  patchChapterPipelineSensoryOutline(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      required: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      suggested: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      confirmed: boolean;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const session = this.chapterPipelineService.patchSensoryOutline(sessionId, data, req.user?.userId);
+    return serializePipelineSessionView(session);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/apply')
+  applyChapterPipeline(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      expectedChapterUpdatedAt: string;
+      preserveSummary?: boolean;
+      useVersion?: 'afterRules' | 'final';
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.chapterPipelineService.applyPipeline(sessionId, data, req.user?.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/run/:module')
+  async runChapterPipelineModule(
+    @Param('sessionId') sessionId: string,
+    @Param('module') module: string,
+    @Body() data: { issueId?: string },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(': keep-alive\n\n');
+
+    const writeEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    try {
+      await this.chapterPipelineService.runModuleStream(
+        sessionId,
+        module as Parameters<ChapterPipelineService['runModuleStream']>[1],
+        data,
+        userId,
+        {
+          onStart: ({ traceId, chapterNo, stage }) => {
+            writeEvent({ event: 'start', traceId, chapterNo, stage });
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal }) => {
+            writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (payload) => {
+            writeEvent({ event: 'end', ...payload });
+          },
+          onGate: (gate) => {
+            writeEvent({ event: 'end', gateRequired: true, gate });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      if (error instanceof ChapterPipelineGateNotConfirmedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else if (error instanceof ChapterPipelineModuleFailedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code, module: error.module });
+      } else {
+        const message = error instanceof Error ? error.message : '分步精修执行失败';
+        writeEvent({ event: 'error', data: message });
+      }
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':id/knowledge/chapters/export')
   exportChaptersTxt(
     @Param('id') id: string,
@@ -920,4 +1059,18 @@ export class ProjectsController {
     }
     return this.projectsService.removeMember(id, memberId, currentUserId);
   }
+}
+
+function serializePipelineSessionView(session: ChapterPipelineSession) {
+  return {
+    sessionId: session.sessionId,
+    chapterNo: session.chapterNo,
+    config: session.config,
+    currentModule: session.currentModule,
+    versions: session.versions,
+    sensoryOutline: session.sensoryOutline,
+    ruleIssues: session.ruleIssues,
+    homogenizationReport: session.homogenizationReport,
+    sourceUpdatedAt: session.sourceUpdatedAt,
+  };
 }

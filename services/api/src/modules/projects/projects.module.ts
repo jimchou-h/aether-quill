@@ -5,6 +5,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { PromptTemplatesModule } from '../prompt-templates/prompt-templates.module';
 import { TaskPromptsModule } from '../task-prompts/task-prompts.module';
 import { ProjectsController } from './projects.controller';
+import { ChapterPipelineService } from './chapter-pipeline.service';
 import { ProjectsService } from './projects.service';
 
 @Module({
@@ -16,7 +17,7 @@ import { ProjectsService } from './projects.service';
     forwardRef(() => TaskPromptsModule),
   ],
   controllers: [ProjectsController],
-  providers: [ProjectsService],
-  exports: [ProjectsService],
+  providers: [ProjectsService, ChapterPipelineService],
+  exports: [ProjectsService, ChapterPipelineService],
 })
 export class ProjectsModule {}

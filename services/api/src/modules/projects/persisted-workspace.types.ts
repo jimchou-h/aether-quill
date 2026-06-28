@@ -48,6 +48,18 @@ export interface PersistedProjectState {
         severity: 'low' | 'medium' | 'high';
         enabled: boolean;
       }>;
+      pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
+      pipelineSkipSensoryOutlineReview?: boolean;
+      pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
+      pipelineHomogenizationEnabled?: boolean;
+      pipelineHomogenizationPriorChapterCount?: number;
+      pipelineEnabledModules?: number[];
+      protagonistProgressRules?: Array<{
+        abilityKey: string;
+        unlockAtChapter?: number;
+        unlockAfterCondition?: string;
+        descriptionForPrompt: string;
+      }>;
       updatedAt: string;
     }
   >;

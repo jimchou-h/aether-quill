@@ -111,6 +111,16 @@ paths:
     $ref: './paths/projects/chapter-optimize-typo-check.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-fix:
     $ref: './paths/projects/chapter-optimize-typo-fix.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/start:
+    $ref: './paths/projects/chapter-pipeline-start.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}:
+    $ref: './paths/projects/chapter-pipeline-session.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/sensory-outline:
+    $ref: './paths/projects/chapter-pipeline-sensory-outline.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/run/{module}:
+    $ref: './paths/projects/chapter-pipeline-run.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/apply:
+    $ref: './paths/projects/chapter-pipeline-apply.yaml'
   /api/projects/{id}/knowledge/chapters/import/preview:
     $ref: './paths/projects/chapter-import-preview.yaml'
   /api/projects/{id}/knowledge/chapters/import/confirm:
@@ -620,6 +630,43 @@ components:
           description: 项目自定义禁用词（与系统默认规则合并扫描）
           items:
             $ref: '#/components/schemas/ProjectContentSafetyRule'
+        pipelinePreset:
+          type: string
+          enum: [full, character_rules, sensory_only]
+          default: full
+          description: 分步精修预设方案
+        pipelineSkipSensoryOutlineReview:
+          type: boolean
+          default: false
+          description: 跳过大纲人工 gate
+        pipelineRulesFixMode:
+          type: string
+          enum: [auto, semi, manual]
+          default: semi
+          description: 规则修复模式
+        pipelineHomogenizationEnabled:
+          type: boolean
+          default: false
+          description: 是否默认跑同质化模块
+        pipelineHomogenizationPriorChapterCount:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 3
+          description: 同质化参考前 N 章
+        pipelineEnabledModules:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 4
+          default: [1, 2, 3]
+          description: 分步精修模块开关（顺序固定）
+        protagonistProgressRules:
+          type: array
+          description: 主角能力/外形随章节解锁规则（注入模块一）
+          items:
+            $ref: '#/components/schemas/ProtagonistUnlockRule'
         updatedAt:
           type: string
           format: date-time
@@ -670,6 +717,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProjectContentSafetyRule'
+        pipelinePreset:
+          type: string
+          enum: [full, character_rules, sensory_only]
+        pipelineSkipSensoryOutlineReview:
+          type: boolean
+        pipelineRulesFixMode:
+          type: string
+          enum: [auto, semi, manual]
+        pipelineHomogenizationEnabled:
+          type: boolean
+        pipelineHomogenizationPriorChapterCount:
+          type: integer
+          minimum: 1
+          maximum: 10
+        pipelineEnabledModules:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 4
+        protagonistProgressRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProtagonistUnlockRule'
     ProjectContentSafetyRule:
       type: object
       required:
@@ -1639,7 +1710,18 @@ components:
       properties:
         stage:
           type: string
-          enum: [segment_diagnosis, plan_synthesis, draft_segment, merge_validation]
+          enum:
+            - segment_diagnosis
+            - plan_synthesis
+            - draft_segment
+            - merge_validation
+            - pipeline_character
+            - pipeline_sensory_outline
+            - pipeline_sensory_rewrite
+            - pipeline_rules_scan
+            - pipeline_rules_fix
+            - pipeline_homogenization_scan
+            - pipeline_homogenization_rewrite
         segmentIndex:
           type: integer
           minimum: 1
@@ -1791,6 +1873,233 @@ components:
         autoCorrected:
           type: boolean
           description: Always true in V1 — all suggestions are applied automatically.
+    ProtagonistUnlockRule:
+      type: object
+      required:
+        - abilityKey
+        - descriptionForPrompt
+      properties:
+        abilityKey:
+          type: string
+        unlockAtChapter:
+          type: integer
+          minimum: 1
+        unlockAfterCondition:
+          type: string
+        descriptionForPrompt:
+          type: string
+    ChapterPipelineConfig:
+      type: object
+      required:
+        - pipelinePreset
+        - pipelineSkipSensoryOutlineReview
+        - pipelineRulesFixMode
+        - pipelineHomogenizationEnabled
+        - pipelineHomogenizationPriorChapterCount
+        - pipelineEnabledModules
+      properties:
+        pipelinePreset:
+          type: string
+          enum: [full, character_rules, sensory_only]
+        pipelineSkipSensoryOutlineReview:
+          type: boolean
+        pipelineRulesFixMode:
+          type: string
+          enum: [auto, semi, manual]
+        pipelineHomogenizationEnabled:
+          type: boolean
+        pipelineHomogenizationPriorChapterCount:
+          type: integer
+          minimum: 1
+          maximum: 10
+        pipelineEnabledModules:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 4
+    ChapterPipelineStartRequest:
+      type: object
+      properties:
+        preset:
+          type: string
+          enum: [full, character_rules, sensory_only]
+        configOverrides:
+          $ref: '#/components/schemas/ChapterPipelineConfig'
+    ChapterPipelineStartResult:
+      type: object
+      required:
+        - sessionId
+        - chapterNo
+        - config
+      properties:
+        sessionId:
+          type: string
+        chapterNo:
+          type: integer
+        config:
+          $ref: '#/components/schemas/ChapterPipelineConfig'
+    PipelineOutlineItem:
+      type: object
+      required:
+        - id
+        - text
+        - priority
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        priority:
+          type: string
+          enum: [required, suggested]
+        contentWarnings:
+          type: array
+          items:
+            type: string
+          description: 大纲项确定性内容安全扫描告警（如禁用词）
+    PipelineRuleIssue:
+      type: object
+      required:
+        - id
+        - category
+        - text
+        - context
+        - fixStrategy
+        - startOffset
+        - endOffset
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+        text:
+          type: string
+        context:
+          type: string
+        fixStrategy:
+          type: string
+          enum: [auto, ai_segment, manual]
+        startOffset:
+          type: integer
+        endOffset:
+          type: integer
+        fixed:
+          type: boolean
+    PipelineHomogenizationIssue:
+      type: object
+      required:
+        - id
+        - text
+        - priorChapterNo
+        - suggestion
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        priorChapterNo:
+          type: integer
+        suggestion:
+          type: string
+    ChapterPipelineSensoryOutlinePatch:
+      type: object
+      required:
+        - required
+        - suggested
+        - confirmed
+      properties:
+        required:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        suggested:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        confirmed:
+          type: boolean
+    ChapterPipelineRunRequest:
+      type: object
+      properties:
+        issueId:
+          type: string
+          description: For rules-fix module — fix a single issue
+    ChapterPipelineApplyRequest:
+      type: object
+      required:
+        - expectedChapterUpdatedAt
+      properties:
+        expectedChapterUpdatedAt:
+          type: string
+          format: date-time
+        preserveSummary:
+          type: boolean
+          default: true
+        useVersion:
+          type: string
+          enum: [afterRules, final]
+          default: final
+    ChapterPipelineSessionView:
+      type: object
+      required:
+        - sessionId
+        - chapterNo
+        - config
+        - currentModule
+        - versions
+        - sourceUpdatedAt
+      properties:
+        sessionId:
+          type: string
+        chapterNo:
+          type: integer
+        config:
+          $ref: '#/components/schemas/ChapterPipelineConfig'
+        currentModule:
+          oneOf:
+            - type: integer
+              minimum: 1
+              maximum: 4
+            - type: string
+              enum: [done]
+        versions:
+          type: object
+          properties:
+            original:
+              type: string
+            afterCharacter:
+              type: string
+            afterSensory:
+              type: string
+            afterRules:
+              type: string
+            final:
+              type: string
+        sensoryOutline:
+          type: object
+          properties:
+            required:
+              type: array
+              items:
+                $ref: '#/components/schemas/PipelineOutlineItem'
+            suggested:
+              type: array
+              items:
+                $ref: '#/components/schemas/PipelineOutlineItem'
+            userConfirmed:
+              type: boolean
+        ruleIssues:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineRuleIssue'
+        homogenizationReport:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineHomogenizationIssue'
+        sourceUpdatedAt:
+          type: string
+          format: date-time
     ChapterItem:
       type: object
       required:

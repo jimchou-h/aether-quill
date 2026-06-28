@@ -106,6 +106,8 @@ const TASK_PROGRESS_MESSAGES: Record<string, string> = {
   'chapter.optimize.plan': '正在生成优化方案…',
   'chapter.optimize.draft': '正在生成优化正文…',
   'chapter.optimize.typo-fix': '正在自动修正错字…',
+  'chapter.pipeline.run': '分步精修执行中…',
+  'chapter.pipeline.run-all': '一键精修执行中…',
   'chapter.summarize': '正在生成章节摘要…',
   'chapter.relation-events': '正在抽取关系事件…',
   'chapter.structured-parse': '正在解析结构化信息…',

@@ -1546,6 +1546,171 @@ export const apiClient = {
     return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
   },
 
+  async startChapterPipeline(
+    projectId: string,
+    chapterNo: number,
+    payload?: {
+      preset?: 'full' | 'character_rules' | 'sensory_only';
+      configOverrides?: Partial<ChapterPipelineConfig>;
+    }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/start`,
+      payload ?? {}
+    );
+    return this.unwrapPayload<ChapterPipelineStartResult>(response.data);
+  },
+
+  async getChapterPipelineSession(projectId: string, chapterNo: number, sessionId: string) {
+    const response = await http.get(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}`
+    );
+    return this.unwrapPayload<ChapterPipelineSessionView>(response.data);
+  },
+
+  async patchChapterPipelineSensoryOutline(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineSensoryOutlinePatch
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/sensory-outline`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineSessionView>(response.data);
+  },
+
+  async applyChapterPipeline(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: {
+      expectedChapterUpdatedAt: string;
+      preserveSummary?: boolean;
+      useVersion?: 'afterRules' | 'final';
+    }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/apply`,
+      payload
+    );
+    return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
+  },
+
+  async runChapterPipelineModuleSSE(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    module: ChapterPipelineRunModule,
+    payload: { issueId?: string } | undefined,
+    callbacks: ChapterPipelineRunCallbacks
+  ): Promise<void> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
+    const token = localStorage.getItem('token');
+    const baseURL = getApiBaseURL();
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/run/${module}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload ?? {}),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `分步精修执行失败: ${response.statusText}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let reading = true;
+
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const segments = buffer.split('\n\n');
+      buffer = segments.pop() || '';
+
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        const dataPart = trimmed.replace(/^data:\s*/, '');
+        if (!dataPart) {
+          continue;
+        }
+
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            stage?: ChapterPipelineStage;
+            segmentIndex?: number;
+            segmentTotal?: number;
+            versionText?: string;
+            versionKey?: string;
+            sensoryOutline?: ChapterPipelineSessionView['sensoryOutline'];
+            ruleIssues?: PipelineRuleIssue[];
+            homogenizationReport?: PipelineHomogenizationIssue[];
+            gateRequired?: boolean;
+            gate?: string;
+            currentModule?: number | 'done';
+          };
+
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId || '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                stage: event.stage || 'pipeline_character',
+              });
+              break;
+            case 'stage':
+              callbacks.onStage?.({
+                stage: event.stage || 'pipeline_character',
+                segmentIndex: event.segmentIndex,
+                segmentTotal: event.segmentTotal,
+              });
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.(event);
+              if (isTerminalChapterPipelineRunEnd(module, event)) {
+                reading = false;
+              }
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || '分步精修执行失败');
+              reading = false;
+              break;
+          }
+        } catch {
+          // skip malformed SSE
+        }
+      }
+    }
+  },
+
   async checkChapterOptimizationTypos(
     projectId: string,
     chapterNo: number,
@@ -1920,6 +2085,158 @@ export interface ChapterStructuredInfo {
 export interface StructuredInfoParseResult {
   chapter: ChapterItem;
   structuredInfo?: ChapterStructuredInfo;
+}
+
+export type ChapterPipelineStage =
+  | 'pipeline_character'
+  | 'pipeline_sensory_outline'
+  | 'pipeline_sensory_rewrite'
+  | 'pipeline_rules_scan'
+  | 'pipeline_rules_fix'
+  | 'pipeline_homogenization_scan'
+  | 'pipeline_homogenization_rewrite'
+  | 'draft_segment'
+  | 'merge_validation';
+
+export type ChapterPipelineRunModule =
+  | 'character'
+  | 'sensory-outline'
+  | 'sensory-rewrite'
+  | 'rules-scan'
+  | 'rules-fix'
+  | 'homogenization'
+  | 'homogenization-scan'
+  | 'homogenization-rewrite'
+  | 'run-all';
+
+export interface ChapterPipelineConfig {
+  pipelinePreset: 'full' | 'character_rules' | 'sensory_only';
+  pipelineSkipSensoryOutlineReview: boolean;
+  pipelineRulesFixMode: 'auto' | 'semi' | 'manual';
+  pipelineHomogenizationEnabled: boolean;
+  pipelineHomogenizationPriorChapterCount: number;
+  pipelineEnabledModules: number[];
+}
+
+export interface PipelineOutlineItem {
+  id: string;
+  text: string;
+  priority: 'required' | 'suggested';
+  contentWarnings?: string[];
+}
+
+export interface PipelineRuleIssue {
+  id: string;
+  category: string;
+  text: string;
+  context: string;
+  fixStrategy: 'auto' | 'ai_segment' | 'manual';
+  startOffset: number;
+  endOffset: number;
+  fixed?: boolean;
+}
+
+export interface PipelineHomogenizationIssue {
+  id: string;
+  text: string;
+  priorChapterNo: number;
+  suggestion: string;
+}
+
+export interface ProtagonistUnlockRule {
+  abilityKey: string;
+  unlockAtChapter?: number;
+  unlockAfterCondition?: string;
+  descriptionForPrompt: string;
+}
+
+export interface ChapterPipelineStartResult {
+  sessionId: string;
+  chapterNo: number;
+  config: ChapterPipelineConfig;
+}
+
+export interface ChapterPipelineSensoryOutlinePatch {
+  required: PipelineOutlineItem[];
+  suggested: PipelineOutlineItem[];
+  confirmed: boolean;
+}
+
+export interface ChapterPipelineSessionView {
+  sessionId: string;
+  chapterNo: number;
+  config: ChapterPipelineConfig;
+  currentModule: number | 'done';
+  versions: {
+    original?: string;
+    afterCharacter?: string;
+    afterSensory?: string;
+    afterRules?: string;
+    final?: string;
+  };
+  sensoryOutline?: {
+    required: PipelineOutlineItem[];
+    suggested: PipelineOutlineItem[];
+    userConfirmed: boolean;
+  };
+  ruleIssues?: PipelineRuleIssue[];
+  homogenizationReport?: PipelineHomogenizationIssue[];
+  sourceUpdatedAt: string;
+}
+
+export interface ChapterPipelineRunCallbacks {
+  onStart?: (event: { traceId: string; chapterNo: number; stage: ChapterPipelineStage }) => void;
+  onStage?: (event: {
+    stage: ChapterPipelineStage;
+    segmentIndex?: number;
+    segmentTotal?: number;
+  }) => void;
+  onContent?: (text: string) => void;
+  onEnd?: (event: Record<string, unknown>) => void;
+  onError?: (message: string) => void;
+}
+
+export function isTerminalChapterPipelineRunEnd(
+  module: ChapterPipelineRunModule,
+  event: { gateRequired?: boolean; currentModule?: number | 'done' }
+): boolean {
+  if (module !== 'run-all') {
+    return true;
+  }
+  return event.gateRequired === true || event.currentModule === 'done';
+}
+
+export function formatPipelineStageLabel(
+  stage: ChapterPipelineStage,
+  segmentIndex?: number,
+  segmentTotal?: number
+): string {
+  switch (stage) {
+    case 'pipeline_character':
+      return '角色调整中…';
+    case 'pipeline_sensory_outline':
+      return '生成感官优化大纲…';
+    case 'pipeline_sensory_rewrite':
+      return '感官优化改写中…';
+    case 'pipeline_rules_scan':
+      return '规则扫描中…';
+    case 'pipeline_rules_fix':
+      return segmentIndex && segmentTotal
+        ? `规则修复 ${segmentIndex}/${segmentTotal}…`
+        : '规则修复中…';
+    case 'pipeline_homogenization_scan':
+      return '同质化检测中…';
+    case 'pipeline_homogenization_rewrite':
+      return '同质化改写中…';
+    case 'draft_segment':
+      return segmentIndex && segmentTotal
+        ? `分段生成 ${segmentIndex}/${segmentTotal}`
+        : '分段生成中…';
+    case 'merge_validation':
+      return '合并校验中…';
+    default:
+      return '处理中…';
+  }
 }
 
 export interface ChapterOptimizationBasis {

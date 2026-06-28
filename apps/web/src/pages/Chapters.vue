@@ -12,6 +12,8 @@ import ChapterImportDialog from '../components/chapters/ChapterImportDialog.vue'
 import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
 import ChapterBatchOptimizeDialog from '../components/chapters/ChapterBatchOptimizeDialog.vue';
+import ChapterPipelineOptimizeDialog from '../components/chapters/ChapterPipelineOptimizeDialog.vue';
+import ChapterBatchPipelineOptimizeDialog from '../components/chapters/ChapterBatchPipelineOptimizeDialog.vue';
 import AiTaskProgressPanel from '../components/common/AiTaskProgressPanel.vue';
 import {
   applyAiTaskProgressEvent,
@@ -48,8 +50,12 @@ const showImportModal = ref(false);
 const showImportNovelModal = ref(false);
 const showOptimizeModal = ref(false);
 const showBatchOptimizeModal = ref(false);
+const showPipelineOptimizeModal = ref(false);
+const showBatchPipelineOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
+const pipelineOptimizingChapter = ref<ChapterItem | null>(null);
 const batchOptimizeChapters = ref<ChapterItem[]>([]);
+const batchPipelineChapters = ref<ChapterItem[]>([]);
 const exportingChapters = ref(false);
 const renumbering = ref(false);
 const showHint = ref(true);
@@ -373,6 +379,27 @@ function handleOpenBatchOptimizeDialog(chapters: ChapterItem[]) {
   showBatchOptimizeModal.value = true;
 }
 
+function handleOpenPipelineOptimizeDialog(chapter: ChapterItem) {
+  pipelineOptimizingChapter.value = chapter;
+  showPipelineOptimizeModal.value = true;
+}
+
+function handleClosePipelineOptimizeDialog() {
+  showPipelineOptimizeModal.value = false;
+  pipelineOptimizingChapter.value = null;
+}
+
+function handleOpenBatchPipelineOptimizeDialog(chapters: ChapterItem[]) {
+  batchPipelineChapters.value = chapters;
+  showBatchPipelineOptimizeModal.value = true;
+}
+
+function handleCloseBatchPipelineOptimizeDialog() {
+  showBatchPipelineOptimizeModal.value = false;
+  batchPipelineChapters.value = [];
+  chapterListRef.value?.clearBatchSelection();
+}
+
 function handleCloseBatchOptimizeDialog() {
   showBatchOptimizeModal.value = false;
   batchOptimizeChapters.value = [];
@@ -586,7 +613,9 @@ onUnmounted(() => {
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
       @optimize="handleOpenOptimizeDialog"
+      @pipeline-optimize="handleOpenPipelineOptimizeDialog"
       @batch-optimize="handleOpenBatchOptimizeDialog"
+      @batch-pipeline-optimize="handleOpenBatchPipelineOptimizeDialog"
       @save="handleSaveChapter"
       @parse-structured="handleParseStructuredChapter"
       @delete="handleDeleteChapter"
@@ -612,6 +641,22 @@ onUnmounted(() => {
       :project-id="projectId"
       :chapters="batchOptimizeChapters"
       @close="handleCloseBatchOptimizeDialog"
+      @applied="handleBatchOptimizeApplied"
+    />
+
+    <ChapterPipelineOptimizeDialog
+      :visible="showPipelineOptimizeModal"
+      :project-id="projectId"
+      :chapter="pipelineOptimizingChapter"
+      @close="handleClosePipelineOptimizeDialog"
+      @applied="handleOptimizeApplied"
+    />
+
+    <ChapterBatchPipelineOptimizeDialog
+      :visible="showBatchPipelineOptimizeModal"
+      :project-id="projectId"
+      :chapters="batchPipelineChapters"
+      @close="handleCloseBatchPipelineOptimizeDialog"
       @applied="handleBatchOptimizeApplied"
     />
 

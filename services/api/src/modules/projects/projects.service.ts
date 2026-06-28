@@ -180,6 +180,7 @@ import {
 import {
   applyProjectSettingsJsonExtensions,
   pickProjectSettingsJsonExtensions,
+  PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS,
   serializeProjectSettingsForJsonMirror,
 } from './project-settings.extensions';
 import { buildWriteContextReadiness } from './write-context-readiness.util';
@@ -236,6 +237,19 @@ export interface ProjectSettings {
   contentSafetyScanEnabled: boolean;
   /** 项目自定义禁用词 */
   contentSafetyCustomRules: ProjectContentSafetyRule[];
+  /** 分步精修预设（AQ-273） */
+  pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
+  pipelineSkipSensoryOutlineReview?: boolean;
+  pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
+  pipelineHomogenizationEnabled?: boolean;
+  pipelineHomogenizationPriorChapterCount?: number;
+  pipelineEnabledModules?: number[];
+  protagonistProgressRules?: Array<{
+    abilityKey: string;
+    unlockAtChapter?: number;
+    unlockAfterCondition?: string;
+    descriptionForPrompt: string;
+  }>;
   updatedAt: Date;
 }
 
@@ -690,6 +704,13 @@ export class ProjectsService implements OnModuleInit {
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
       contentSafetyCustomRules?: ProjectContentSafetyRule[];
+      pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
+      pipelineSkipSensoryOutlineReview?: boolean;
+      pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
+      pipelineHomogenizationEnabled?: boolean;
+      pipelineHomogenizationPriorChapterCount?: number;
+      pipelineEnabledModules?: number[];
+      protagonistProgressRules?: ProjectSettings['protagonistProgressRules'];
     },
     userId?: string
   ) {
@@ -768,6 +789,16 @@ export class ProjectsService implements OnModuleInit {
       }
       settings.contentSafetyCustomRules = validated.rules;
     }
+
+    applyProjectSettingsJsonExtensions(settings, {
+      pipelinePreset: payload.pipelinePreset,
+      pipelineSkipSensoryOutlineReview: payload.pipelineSkipSensoryOutlineReview,
+      pipelineRulesFixMode: payload.pipelineRulesFixMode,
+      pipelineHomogenizationEnabled: payload.pipelineHomogenizationEnabled,
+      pipelineHomogenizationPriorChapterCount: payload.pipelineHomogenizationPriorChapterCount,
+      pipelineEnabledModules: payload.pipelineEnabledModules,
+      protagonistProgressRules: payload.protagonistProgressRules,
+    });
 
     settings.updatedAt = new Date();
     this.patchSettingsDefaults(settings);
@@ -4327,6 +4358,32 @@ export class ProjectsService implements OnModuleInit {
     settings.contentSafetyCustomRules = sanitizeProjectContentSafetyRules(
       settings.contentSafetyCustomRules
     );
+    if (settings.pipelinePreset === undefined) {
+      settings.pipelinePreset = PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelinePreset;
+    }
+    if (settings.pipelineSkipSensoryOutlineReview === undefined) {
+      settings.pipelineSkipSensoryOutlineReview =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineSkipSensoryOutlineReview;
+    }
+    if (settings.pipelineRulesFixMode === undefined) {
+      settings.pipelineRulesFixMode = PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineRulesFixMode;
+    }
+    if (settings.pipelineHomogenizationEnabled === undefined) {
+      settings.pipelineHomogenizationEnabled =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineHomogenizationEnabled;
+    }
+    if (settings.pipelineHomogenizationPriorChapterCount === undefined) {
+      settings.pipelineHomogenizationPriorChapterCount =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineHomogenizationPriorChapterCount;
+    }
+    if (!settings.pipelineEnabledModules?.length) {
+      settings.pipelineEnabledModules =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineEnabledModules;
+    }
+    if (!settings.protagonistProgressRules) {
+      settings.protagonistProgressRules =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.protagonistProgressRules;
+    }
   }
 
   private serializeProjectSettings(settings: ProjectSettings): ProjectSettings {
@@ -4344,6 +4401,17 @@ export class ProjectsService implements OnModuleInit {
       chapterOptimizeSegmentCharSize: settings.chapterOptimizeSegmentCharSize,
       contentSafetyScanEnabled: settings.contentSafetyScanEnabled,
       contentSafetyCustomRules: settings.contentSafetyCustomRules.map((rule) => ({ ...rule })),
+      pipelinePreset: settings.pipelinePreset,
+      pipelineSkipSensoryOutlineReview: settings.pipelineSkipSensoryOutlineReview,
+      pipelineRulesFixMode: settings.pipelineRulesFixMode,
+      pipelineHomogenizationEnabled: settings.pipelineHomogenizationEnabled,
+      pipelineHomogenizationPriorChapterCount: settings.pipelineHomogenizationPriorChapterCount,
+      pipelineEnabledModules: settings.pipelineEnabledModules
+        ? [...settings.pipelineEnabledModules]
+        : undefined,
+      protagonistProgressRules: settings.protagonistProgressRules
+        ? settings.protagonistProgressRules.map((rule) => ({ ...rule }))
+        : undefined,
       updatedAt: settings.updatedAt,
     };
   }
@@ -5365,5 +5433,48 @@ export class ProjectsService implements OnModuleInit {
     }
 
     return resolved;
+  }
+
+  /** 分步精修流水线：同步 orchestrator 上下文（AQ-275） */
+  async syncContextForChapterPipeline(projectId: string, userId?: string): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+  }
+
+  getRagOrchestratorUrlForPipeline(): string {
+    return this.getRagOrchestratorUrl();
+  }
+
+  getChapterRecordForPipeline(
+    projectId: string,
+    chapterNo: number
+  ): ChapterRecord | undefined {
+    this.ensureProjectState(projectId);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    return knowledge.chapters.find((item) => item.chapterNo === chapterNo);
+  }
+
+  getPriorChapterExcerpts(
+    projectId: string,
+    chapterNo: number,
+    count: number
+  ): Array<{ chapterNo: number; excerpt: string }> {
+    this.ensureProjectState(projectId);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const prior = knowledge.chapters
+      .filter((c) => c.chapterNo < chapterNo && c.content?.trim())
+      .sort((a, b) => b.chapterNo - a.chapterNo)
+      .slice(0, count);
+    return prior.map((c) => ({
+      chapterNo: c.chapterNo,
+      excerpt: c.content.slice(0, 800),
+    }));
   }
 }
