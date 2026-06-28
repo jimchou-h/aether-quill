@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import {
   apiClient,
+  DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   formatChapterOptimizeStageLabel,
   resolveChapterOptimizeStrategyLabel,
   type ChapterItem,
@@ -66,6 +67,7 @@ const queueRunning = ref(false);
 const cancelRequested = ref(false);
 const batchApplying = ref(false);
 const errorMessage = ref('');
+const chapterOptimizeSegmentCharSize = ref(DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
 
 const originalScrollRef = ref<HTMLDivElement | null>(null);
 const draftTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -171,7 +173,10 @@ function initItems() {
       generatingPlan: false,
       generatingDraft: false,
       applying: false,
-      strategyLabel: resolveChapterOptimizeStrategyLabel(chapter.content.length),
+      strategyLabel: resolveChapterOptimizeStrategyLabel(
+        chapter.content.length,
+        chapterOptimizeSegmentCharSize.value
+      ),
       progressLabel: '',
       segmentDiagnoses: [],
       planSegmentRecovery: null,
@@ -239,7 +244,7 @@ function syncScroll(source: 'original' | 'draft') {
 
 async function runPlanForChapter(
   item: BatchOptimizeItem,
-  resume?: { existingSegmentDiagnoses: string[]; resumeFromSegmentIndex: number }
+  resume?: { existingSegmentDiagnoses: string[]; resumeFromSegmentIndex?: number }
 ): Promise<ChapterOptimizationPlanResult> {
   item.generatingPlan = true;
   item.progressLabel = resume
@@ -340,7 +345,7 @@ async function retryPlanForChapter(item: BatchOptimizeItem) {
         : undefined);
     return runPlanForChapter(item, {
       existingSegmentDiagnoses: recovery.segmentDiagnoses,
-      resumeFromSegmentIndex: resumeFrom,
+      ...(resumeFrom !== undefined ? { resumeFromSegmentIndex: resumeFrom } : {}),
     });
   }
   return runPlanForChapter(item);
@@ -547,11 +552,22 @@ async function handleApplyAll() {
   }
 }
 
+async function loadOptimizeSegmentSettings() {
+  try {
+    const settings = await apiClient.getSettings(props.projectId);
+    chapterOptimizeSegmentCharSize.value =
+      settings.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
+  } catch {
+    chapterOptimizeSegmentCharSize.value = DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
+  }
+}
+
 watch(
   () => props.visible,
   (open) => {
     if (open) {
       resetState();
+      void loadOptimizeSegmentSettings();
     }
   }
 );
@@ -583,7 +599,12 @@ watch(
         <li v-for="chapter in chapters" :key="chapter.chapterNo">
           第{{ chapter.chapterNo }}章 · {{ chapter.title }}
           <span class="strategy-tag">
-            （{{ resolveChapterOptimizeStrategyLabel(chapter.content.length) }}）
+            （{{
+              resolveChapterOptimizeStrategyLabel(
+                chapter.content.length,
+                chapterOptimizeSegmentCharSize
+              )
+            }}）
           </span>
         </li>
       </ul>

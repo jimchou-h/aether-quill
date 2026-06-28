@@ -569,6 +569,7 @@ onMounted(() => {
             :is-accepting="generationStore.isAccepting"
             :generation-phase="generationStore.generationPhase"
             :phase-panel-collapsed="generationStore.phasePanelCollapsed"
+            :ai-task-progress="generationStore.aiTaskProgress"
             :evidence-count="evidenceCount"
             @update:outline-text="handleOutlineTextUpdate"
             @confirm="handleConfirmOutline"

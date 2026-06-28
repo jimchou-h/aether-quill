@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { apiClient, type ProjectSettings } from '../../services/api';
+import { apiClient, type ProjectContentSafetyRule, type ProjectSettings } from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
+
+const CONTENT_SAFETY_CUSTOM_RULES_MAX = 200;
+const CONTENT_SAFETY_PATTERN_MAX_LENGTH = 64;
+
+const severityOptions = [
+  { value: 'low' as const, label: '低风险（标记）' },
+  { value: 'medium' as const, label: '中风险（重写句子）' },
+  { value: 'high' as const, label: '高风险（阻断保存）' },
+];
 
 const props = defineProps<{
   projectId: string;
@@ -14,6 +23,9 @@ const excerptMaxChars = ref(400);
 const temperature = ref(0.7);
 const updatePersonaOnSave = ref(true);
 const generateRelationEventsOnSave = ref(true);
+const contentSafetyScanEnabled = ref(true);
+const contentSafetyCustomRules = ref<ProjectContentSafetyRule[]>([]);
+const chapterOptimizeSegmentCharSize = ref(3000);
 const saved = ref<{
   summaryCount: number;
   memoryCount: number;
@@ -22,6 +34,9 @@ const saved = ref<{
   temperature: number;
   updatePersonaOnSave: boolean;
   generateRelationEventsOnSave: boolean;
+  contentSafetyScanEnabled: boolean;
+  contentSafetyCustomRules: ProjectContentSafetyRule[];
+  chapterOptimizeSegmentCharSize: number;
 } | null>(null);
 
 const loading = ref(false);
@@ -29,6 +44,178 @@ const saving = ref(false);
 const rebuildingMemory = ref(false);
 const errorMessage = ref('');
 const message = ref('');
+const batchImportText = ref('');
+const batchImportSeverity = ref<ProjectContentSafetyRule['severity']>('low');
+const batchImportMessage = ref('');
+
+function createRuleId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `rule-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizePatternKey(pattern: string) {
+  return pattern.trim().toLowerCase();
+}
+
+function parseBatchPatterns(text: string): string[] {
+  return text
+    .split(/[,，]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function appendBatchPatterns(
+  candidates: string[],
+  severity: ProjectContentSafetyRule['severity']
+): { added: number; skipped: number } {
+  const existingKeys = new Set(
+    contentSafetyCustomRules.value.map((rule) => normalizePatternKey(rule.pattern))
+  );
+  const pendingKeys = new Set<string>();
+  const toAdd: ProjectContentSafetyRule[] = [];
+  let skipped = 0;
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const pattern = candidates[i]!;
+    if (pattern.length > CONTENT_SAFETY_PATTERN_MAX_LENGTH) {
+      skipped += 1;
+      continue;
+    }
+    const key = normalizePatternKey(pattern);
+    if (existingKeys.has(key) || pendingKeys.has(key)) {
+      skipped += 1;
+      continue;
+    }
+    if (contentSafetyCustomRules.value.length + toAdd.length >= CONTENT_SAFETY_CUSTOM_RULES_MAX) {
+      skipped += candidates.length - i;
+      break;
+    }
+    pendingKeys.add(key);
+    existingKeys.add(key);
+    toAdd.push({
+      id: createRuleId(),
+      pattern,
+      severity,
+      enabled: true,
+    });
+  }
+
+  if (toAdd.length > 0) {
+    contentSafetyCustomRules.value = [...contentSafetyCustomRules.value, ...toAdd];
+  }
+
+  return { added: toAdd.length, skipped };
+}
+
+function flushPendingBatchImport(): { added: number; skipped: number } {
+  const candidates = parseBatchPatterns(batchImportText.value);
+  if (candidates.length === 0) {
+    return { added: 0, skipped: 0 };
+  }
+  const result = appendBatchPatterns(candidates, batchImportSeverity.value);
+  if (result.added > 0) {
+    batchImportText.value = '';
+  }
+  return result;
+}
+
+function importBatchRules() {
+  batchImportMessage.value = '';
+  const candidates = parseBatchPatterns(batchImportText.value);
+  if (candidates.length === 0) {
+    batchImportMessage.value = '请输入至少一个禁用词，多个词用逗号分隔。';
+    return;
+  }
+
+  const { added, skipped } = appendBatchPatterns(candidates, batchImportSeverity.value);
+  if (added === 0) {
+    batchImportMessage.value =
+      skipped > 0
+        ? `未添加新词：${skipped} 个重复、超长或超出上限（最多 ${CONTENT_SAFETY_CUSTOM_RULES_MAX} 条）。`
+        : '未添加新词，请检查输入。';
+    return;
+  }
+
+  batchImportText.value = '';
+  batchImportMessage.value =
+    skipped > 0
+      ? `已添加 ${added} 条，跳过 ${skipped} 个重复、超长或超出上限的词条。`
+      : `已添加 ${added} 条禁用词。`;
+}
+
+function addCustomRule() {
+  contentSafetyCustomRules.value = [
+    ...contentSafetyCustomRules.value,
+    {
+      id: createRuleId(),
+      pattern: '',
+      severity: 'low',
+      enabled: true,
+    },
+  ];
+}
+
+function removeCustomRule(index: number) {
+  contentSafetyCustomRules.value = contentSafetyCustomRules.value.filter((_, i) => i !== index);
+}
+
+function updateCustomRule<K extends keyof ProjectContentSafetyRule>(
+  index: number,
+  key: K,
+  value: ProjectContentSafetyRule[K]
+) {
+  contentSafetyCustomRules.value = contentSafetyCustomRules.value.map((rule, i) =>
+    i === index ? { ...rule, [key]: value } : rule
+  );
+}
+
+function normalizeCustomRules(raw: unknown): ProjectContentSafetyRule[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === 'string' ? row.id.trim() : '';
+    const pattern = typeof row.pattern === 'string' ? row.pattern : '';
+    const severity = row.severity;
+    if (!id || !['low', 'medium', 'high'].includes(String(severity))) {
+      return [];
+    }
+    return [
+      {
+        id,
+        pattern,
+        severity: severity as ProjectContentSafetyRule['severity'],
+        enabled: row.enabled !== false,
+      },
+    ];
+  });
+}
+
+function buildRulesPayload(): ProjectContentSafetyRule[] {
+  return contentSafetyCustomRules.value
+    .map((rule) => ({
+      ...rule,
+      pattern: rule.pattern.trim(),
+    }))
+    .filter((rule) => rule.pattern.length > 0);
+}
+
+function serializeCustomRules(rules: ProjectContentSafetyRule[]) {
+  return JSON.stringify(
+    rules.map((rule) => ({
+      id: rule.id,
+      pattern: rule.pattern.trim(),
+      severity: rule.severity,
+      enabled: rule.enabled,
+    }))
+  );
+}
 
 const isDirty = computed(() => {
   if (!saved.value) {
@@ -41,11 +228,23 @@ const isDirty = computed(() => {
     excerptMaxChars.value !== saved.value.excerptMaxChars ||
     temperature.value !== saved.value.temperature ||
     updatePersonaOnSave.value !== saved.value.updatePersonaOnSave ||
-    generateRelationEventsOnSave.value !== saved.value.generateRelationEventsOnSave
+    generateRelationEventsOnSave.value !== saved.value.generateRelationEventsOnSave ||
+    contentSafetyScanEnabled.value !== saved.value.contentSafetyScanEnabled ||
+    chapterOptimizeSegmentCharSize.value !== saved.value.chapterOptimizeSegmentCharSize ||
+    serializeCustomRules(contentSafetyCustomRules.value) !==
+      serializeCustomRules(saved.value.contentSafetyCustomRules)
   );
 });
 
-function applyFromSettings(s: ProjectSettings) {
+function resolveCustomRules(
+  raw: unknown,
+  fallback: ProjectContentSafetyRule[] = []
+): ProjectContentSafetyRule[] {
+  const fromApi = normalizeCustomRules(raw);
+  return fromApi.length > 0 ? fromApi : fallback.map((rule) => ({ ...rule }));
+}
+
+function applyFromSettings(s: ProjectSettings, rulesFallback: ProjectContentSafetyRule[] = []) {
   summaryCount.value = s.chapterSummaryPromptCount;
   memoryCount.value =
     (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3;
@@ -54,6 +253,10 @@ function applyFromSettings(s: ProjectSettings) {
   temperature.value = s.generationTemperature;
   updatePersonaOnSave.value = s.updatePersonaOnSave ?? true;
   generateRelationEventsOnSave.value = s.generateRelationEventsOnSave ?? true;
+  contentSafetyScanEnabled.value = s.contentSafetyScanEnabled ?? true;
+  const rules = resolveCustomRules(s.contentSafetyCustomRules, rulesFallback);
+  contentSafetyCustomRules.value = rules;
+  chapterOptimizeSegmentCharSize.value = s.chapterOptimizeSegmentCharSize ?? 3000;
   saved.value = {
     summaryCount: s.chapterSummaryPromptCount,
     memoryCount:
@@ -63,6 +266,9 @@ function applyFromSettings(s: ProjectSettings) {
     temperature: s.generationTemperature,
     updatePersonaOnSave: s.updatePersonaOnSave ?? true,
     generateRelationEventsOnSave: s.generateRelationEventsOnSave ?? true,
+    contentSafetyScanEnabled: s.contentSafetyScanEnabled ?? true,
+    contentSafetyCustomRules: rules.map((rule) => ({ ...rule })),
+    chapterOptimizeSegmentCharSize: s.chapterOptimizeSegmentCharSize ?? 3000,
   };
 }
 
@@ -132,6 +338,8 @@ async function handleSave() {
   saving.value = true;
   errorMessage.value = '';
   message.value = '';
+  const autoImport = flushPendingBatchImport();
+  const rulesToSave = buildRulesPayload();
   try {
     const s = await apiClient.updateSettings(props.projectId, {
       chapterSummaryPromptCount: summaryCount.value,
@@ -141,9 +349,18 @@ async function handleSave() {
       generationTemperature: temperature.value,
       updatePersonaOnSave: updatePersonaOnSave.value,
       generateRelationEventsOnSave: generateRelationEventsOnSave.value,
+      contentSafetyScanEnabled: contentSafetyScanEnabled.value,
+      chapterOptimizeSegmentCharSize: chapterOptimizeSegmentCharSize.value,
+      contentSafetyCustomRules: rulesToSave,
     });
-    applyFromSettings(s);
-    message.value = presentSuccess('生成偏好已保存');
+    applyFromSettings(s, rulesToSave);
+    const autoImportHint =
+      autoImport.added > 0 ? `（保存前自动收录 ${autoImport.added} 条批量词条）` : '';
+    message.value = presentSuccess(
+      rulesToSave.length > 0
+        ? `生成偏好已保存（含 ${rulesToSave.length} 条禁用词）${autoImportHint}`
+        : `生成偏好已保存${autoImportHint}`
+    );
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '保存生成偏好失败');
   } finally {
@@ -273,6 +490,22 @@ onMounted(() => {
       </div>
       <p class="field-hint inline-hint">范围 0~2；默认 0.7。数值越高，模型输出越发散。</p>
 
+      <div class="row">
+        <label class="field-label" for="aq-optimize-segment">章节优化分段字数</label>
+        <input
+          id="aq-optimize-segment"
+          v-model.number="chapterOptimizeSegmentCharSize"
+          class="field-input"
+          type="number"
+          min="0"
+          max="20000"
+          step="100"
+        />
+      </div>
+      <p class="field-hint inline-hint">
+        方案阶段长章按字数切分诊断；范围 0~20000，默认 3000。设为 0 表示不按字数分段（始终整章方案）。
+      </p>
+
       <div class="toggle-row">
         <label class="toggle-label">
           <input v-model="updatePersonaOnSave" type="checkbox" class="toggle-checkbox" />
@@ -285,6 +518,117 @@ onMounted(() => {
           <input v-model="generateRelationEventsOnSave" type="checkbox" class="toggle-checkbox" />
           <span class="toggle-text">保存章节时自动生成关系事件</span>
         </label>
+      </div>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input v-model="contentSafetyScanEnabled" type="checkbox" class="toggle-checkbox" />
+          <span class="toggle-text">AI 正文生成后执行内容安全扫描</span>
+        </label>
+      </div>
+      <p class="field-hint inline-hint">
+        开启后，章节续写、优化正文等 AI 输出会经过硬规则扫描；关闭后跳过扫描与自动改写，但仍显示任务进度。
+      </p>
+
+      <div class="content-safety-rules-block">
+        <h4 class="subsection-title">自定义禁用词</h4>
+        <p class="field-hint inline-hint">
+          与系统默认规则合并扫描。高风险将阻断保存，中风险尝试改写句子，低风险仅标记。可先点「批量引入」预览列表，也可直接保存（未引入的批量词条会自动收录）。
+        </p>
+
+        <div class="rules-editor">
+          <div class="batch-import-block">
+            <label class="batch-label" for="aq-batch-import">批量添加（逗号分隔）</label>
+            <textarea
+              id="aq-batch-import"
+              v-model="batchImportText"
+              class="batch-textarea"
+              :disabled="saving"
+              rows="2"
+              placeholder="例如：违禁词甲, 违禁词乙, 违禁词丙"
+            />
+            <div class="batch-actions">
+              <select v-model="batchImportSeverity" class="severity-select" :disabled="saving">
+                <option v-for="opt in severityOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+              <button
+                class="batch-import-button"
+                type="button"
+                :disabled="saving"
+                @click="importBatchRules"
+              >
+                批量引入
+              </button>
+            </div>
+            <p v-if="batchImportMessage" class="batch-message">{{ batchImportMessage }}</p>
+          </div>
+
+          <p v-if="contentSafetyCustomRules.length === 0" class="empty-hint">
+            尚未添加自定义禁用词。
+          </p>
+          <p v-else class="rules-count-hint">
+            当前 {{ contentSafetyCustomRules.length }} 条自定义禁用词
+          </p>
+
+          <div
+            v-for="(rule, index) in contentSafetyCustomRules"
+            :key="rule.id"
+            class="rule-row"
+          >
+            <input
+              class="pattern-input"
+              type="text"
+              :value="rule.pattern"
+              :disabled="saving"
+              maxlength="64"
+              placeholder="禁用词或短语"
+              @input="
+                updateCustomRule(index, 'pattern', ($event.target as HTMLInputElement).value)
+              "
+            />
+            <select
+              class="severity-select"
+              :value="rule.severity"
+              :disabled="saving"
+              @change="
+                updateCustomRule(
+                  index,
+                  'severity',
+                  ($event.target as HTMLSelectElement).value as ProjectContentSafetyRule['severity']
+                )
+              "
+            >
+              <option v-for="opt in severityOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+            <label class="enabled-label">
+              <input
+                type="checkbox"
+                :checked="rule.enabled"
+                :disabled="saving"
+                @change="
+                  updateCustomRule(index, 'enabled', ($event.target as HTMLInputElement).checked)
+                "
+              />
+              启用
+            </label>
+            <button
+              class="remove-button"
+              type="button"
+              :disabled="saving"
+              @click="removeCustomRule(index)"
+            >
+              删除
+            </button>
+          </div>
+
+          <button class="add-button" type="button" :disabled="saving" @click="addCustomRule">
+            添加禁用词
+          </button>
+        </div>
       </div>
 
       <div class="meta-bar">
@@ -455,5 +799,148 @@ onMounted(() => {
 .secondary-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.content-safety-rules-block {
+  margin: 0.75rem 0 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #f3f4f6;
+}
+
+.subsection-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  color: #111827;
+}
+
+.rules-editor {
+  margin-top: 0.5rem;
+}
+
+.batch-import-block {
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px dashed #e5e7eb;
+}
+
+.batch-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.batch-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  resize: vertical;
+  min-height: 3rem;
+}
+
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+}
+
+.batch-import-button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.batch-import-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.batch-message {
+  margin: 0.45rem 0 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.empty-hint {
+  color: #9ca3af;
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+}
+
+.rules-count-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.rule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.pattern-input {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.severity-select {
+  flex: 0 0 11rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: #fff;
+}
+
+.enabled-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #374151;
+  user-select: none;
+}
+
+.remove-button {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fff;
+  color: #b42318;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.remove-button:disabled,
+.add-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.add-button {
+  margin-top: 0.25rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  font-size: 0.85rem;
 }
 </style>

@@ -6,6 +6,7 @@ import type {
   GenerationPhase,
   UsedRelationEventItem,
 } from '../../services/api';
+import type { AiTaskProgressState } from '../../composables/useAiTaskProgress';
 import WriteOutlinePanel from './WriteOutlinePanel.vue';
 import GenerationPreview from './GenerationPreview.vue';
 import ConsistencyAlert from './ConsistencyAlert.vue';
@@ -28,6 +29,7 @@ const props = defineProps<{
   isAccepting: boolean;
   generationPhase: GenerationPhase | null;
   phasePanelCollapsed: boolean;
+  aiTaskProgress: AiTaskProgressState;
   evidenceCount: number;
 }>();
 
@@ -115,6 +117,7 @@ function selectTab(id: 'outline' | 'draft' | 'evidence') {
           :is-accepting="isAccepting"
           :generation-phase="generationPhase"
           :phase-panel-collapsed="phasePanelCollapsed"
+          :ai-task-progress="aiTaskProgress"
           embedded
           @accept="emit('acceptDraft')"
           @regenerate="emit('regenerateDraft')"
