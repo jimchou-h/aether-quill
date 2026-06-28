@@ -22,7 +22,7 @@ import {
   parseIdentityRelationsFromModelContent,
 } from './identity-relation-extract';
 import { buildSummaryLineFromSnapshot } from '../context/persona-snapshot';
-import { logAssembledWriteChapterPrompt } from './generation-prompt-log';
+import { logAssembledGenerationPrompt } from './generation-prompt-log';
 import {
   buildLlmMessages,
   buildLegacySingleUserPrompt,
@@ -106,7 +106,7 @@ export class GenerationService {
     systemMessage: string,
     userMessage: string
   ): void {
-    logAssembledWriteChapterPrompt(trace, userMessage);
+    logAssembledGenerationPrompt(trace, userMessage, systemMessage);
     const assembledPrompt =
       systemMessage.trim().length > 0
         ? `【system】\n${systemMessage.trim()}\n\n【user】\n${userMessage}`

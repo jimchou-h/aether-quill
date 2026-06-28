@@ -6,7 +6,11 @@ post:
     写作工作台两阶段生成之第二步：基于**已确认**的章节大纲流式生成正文。
     必须提供 `confirmedOutlineText`（或经服务端校验的 `outlineId` 与之一致）。
 
-    SSE phase events: `retrieving` → `building_prompt` → `start` → `waiting_llm` → `generating` → `checking` → `end`
+    SSE phase events: `retrieving` → `building_prompt` → `start` → `waiting_llm` → `generating` → `checking` → `content_safety_scan` → `end`
+
+    Progress events (optional): `{"event":"progress","traceId":"...","taskKey":"write.chapter.draft","stage":"...","message":"..."}`
+
+    End event may include `contentSafety` (`ContentSafetyScanResult`) and `finalText` when post-scan rewrite occurs.
 
     Trace 上下文会记录 `outlineId`、`outlineTraceId` 以便回溯正文来源大纲。
   security:

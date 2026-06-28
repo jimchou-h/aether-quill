@@ -12,6 +12,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import axios from 'axios';
 import {
+  mergeContentSafetyRules,
+  sanitizeProjectContentSafetyRules,
+  validateProjectContentSafetyRulesInput,
+  type ProjectContentSafetyRule,
+} from '@aether-quill/config';
+import {
+  runContentSafetyPipeline,
+  formatContentSafetyBlockMessage,
+  toContentSafetyScanPayload,
+  type ContentSafetyProgressStage,
+} from './content-safety.pipeline';
+import {
   buildFallbackChapterSummary,
   resolveChapterSummaryOnContentWrite,
   resolveChapterSummaryOnOptimizeApply,
@@ -165,6 +177,11 @@ import {
   DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
   sliceContentTail,
 } from './project-settings.util';
+import {
+  applyProjectSettingsJsonExtensions,
+  pickProjectSettingsJsonExtensions,
+  serializeProjectSettingsForJsonMirror,
+} from './project-settings.extensions';
 import { buildWriteContextReadiness } from './write-context-readiness.util';
 
 function buildTargetWordsInstruction(targetWords?: number): string {
@@ -215,6 +232,10 @@ export interface ProjectSettings {
   generateRelationEventsOnSave: boolean;
   /** 章节优化方案分段字数；0 表示不按字数分段 */
   chapterOptimizeSegmentCharSize: number;
+  /** 是否对 AI 正文执行内容安全硬规则扫描 */
+  contentSafetyScanEnabled: boolean;
+  /** 项目自定义禁用词 */
+  contentSafetyCustomRules: ProjectContentSafetyRule[];
   updatedAt: Date;
 }
 
@@ -440,6 +461,8 @@ export class ProjectsService implements OnModuleInit {
 
     if (!restored) {
       this.persistState();
+    } else if (this.jsonMirrorNeedsExtensionBackfill()) {
+      this.persistState();
     }
     this.persistenceResolve();
   }
@@ -452,6 +475,7 @@ export class ProjectsService implements OnModuleInit {
       const fromPg = await loadWorkspaceFromPostgres(this.prisma);
       if (fromPg?.projects.length) {
         this.applyRestoredWorkspace(this.mapPersistedToRuntime(fromPg));
+        this.mergeJsonMirrorSettingsExtensions();
       } else {
         const fromJson = this.restoreStateFromDisk();
         if (fromJson) {
@@ -467,6 +491,9 @@ export class ProjectsService implements OnModuleInit {
       for (const project of this.projects) {
         this.ensureProjectState(project.id);
       }
+      if (this.jsonMirrorNeedsExtensionBackfill()) {
+        this.persistState();
+      }
     } catch (err) {
       console.error('[persistence] workspace PG 初始化失败，回退到 JSON 镜像', err);
       const fromJson = this.restoreStateFromDisk();
@@ -475,6 +502,9 @@ export class ProjectsService implements OnModuleInit {
       }
       for (const project of this.projects) {
         this.ensureProjectState(project.id);
+      }
+      if (this.jsonMirrorNeedsExtensionBackfill()) {
+        this.persistState();
       }
     } finally {
       this.persistenceResolve();
@@ -633,11 +663,16 @@ export class ProjectsService implements OnModuleInit {
     if (userId) {
       this.checkAccess(projectId, userId);
     }
+    return this.getSettingsInternal(projectId);
+  }
+
+  private getSettingsInternal(projectId: string): ProjectSettings {
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
+    this.mergeJsonMirrorSettingsExtensionsForProject(projectId);
     const settings = this.settingsStore.get(projectId)!;
     this.patchSettingsDefaults(settings);
-    return settings;
+    return this.serializeProjectSettings(settings);
   }
 
   updateSettings(
@@ -653,6 +688,8 @@ export class ProjectsService implements OnModuleInit {
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
+      contentSafetyScanEnabled?: boolean;
+      contentSafetyCustomRules?: ProjectContentSafetyRule[];
     },
     userId?: string
   ) {
@@ -720,10 +757,22 @@ export class ProjectsService implements OnModuleInit {
       );
     }
 
+    if (payload.contentSafetyScanEnabled !== undefined) {
+      settings.contentSafetyScanEnabled = payload.contentSafetyScanEnabled;
+    }
+
+    if (payload.contentSafetyCustomRules !== undefined) {
+      const validated = validateProjectContentSafetyRulesInput(payload.contentSafetyCustomRules);
+      if (!validated.ok) {
+        throw new BadRequestException(validated.message);
+      }
+      settings.contentSafetyCustomRules = validated.rules;
+    }
+
     settings.updatedAt = new Date();
     this.patchSettingsDefaults(settings);
     this.persistState();
-    return settings;
+    return this.serializeProjectSettings(settings);
   }
 
   getPersonas(projectId: string, userId?: string) {
@@ -2440,6 +2489,7 @@ export class ProjectsService implements OnModuleInit {
         segmentIndex?: number;
         segmentTotal?: number;
         retryCount?: number;
+        message?: string;
       }) => void;
       onContent: (text: string) => void;
       onEnd: (event: {
@@ -2781,11 +2831,17 @@ export class ProjectsService implements OnModuleInit {
         segmentIndex?: number;
         segmentTotal?: number;
         retryCount?: number;
+        message?: string;
       }) => void;
       onContent: (text: string) => void;
-      onEnd: (event: { traceId: string }) => void;
+      onEnd: (event: {
+        traceId: string;
+        finalDraftText?: string;
+        contentSafety?: ReturnType<typeof toContentSafetyScanPayload>;
+      }) => void;
       onError: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
       onSegmentStart?: (event: { segmentIndex: number; totalSegments: number }) => void;
+      onContentReplace?: (text: string) => void;
     }
   ): Promise<void> {
     if (userId) {
@@ -2905,7 +2961,35 @@ export class ProjectsService implements OnModuleInit {
       return;
     }
 
-    callbacks.onEnd({ traceId });
+    let finalDraftText = draftResult.segmentText;
+    const safety = await this.runContentSafetyForText(
+      projectId,
+      finalDraftText,
+      traceId,
+      'chapter.optimize.draft',
+      (progress) => {
+        callbacks.onStage?.({
+          stage: progress.stage,
+          message: progress.message,
+        });
+      }
+    );
+
+    if (safety.blocked) {
+      callbacks.onError(formatContentSafetyBlockMessage(safety.blockReason, safety.hits));
+      return;
+    }
+
+    finalDraftText = safety.text;
+    if (finalDraftText !== draftResult.segmentText) {
+      callbacks.onContentReplace?.(finalDraftText);
+    }
+
+    callbacks.onEnd({
+      traceId,
+      finalDraftText: finalDraftText !== draftResult.segmentText ? finalDraftText : undefined,
+      contentSafety: toContentSafetyScanPayload(safety),
+    });
   }
 
   async applyChapterOptimization(
@@ -2935,6 +3019,25 @@ export class ProjectsService implements OnModuleInit {
     const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
     assertDraftText(draftText);
 
+    const safety = await this.runContentSafetyForText(
+      projectId,
+      draftText,
+      payload.planId || makeOptimizationId('draft'),
+      'chapter.optimize.apply'
+    );
+    if (safety.blocked) {
+      throw new BadRequestException({
+        code: 1325,
+        msg: formatContentSafetyBlockMessage(
+          safety.blockReason || '内容安全扫描未通过，已阻断应用',
+          safety.hits
+        ),
+        hits: safety.hits,
+        traceId: safety.traceId,
+      });
+    }
+    const safeDraftText = safety.text;
+
     const expected = parseExpectedUpdatedAt(payload.expectedChapterUpdatedAt);
     try {
       ensureChapterVersionMatches(normalizedChapterNo, expected, chapter.updatedAt);
@@ -2954,13 +3057,13 @@ export class ProjectsService implements OnModuleInit {
     const now = new Date();
     const summaryFields = resolveChapterSummaryOnOptimizeApply({
       preserveSummary: payload.preserveSummary,
-      content: draftText,
+      content: safeDraftText,
       existing: chapter,
       now,
     });
 
-    chapter.content = draftText;
-    chapter.contentHash = hashChapterContent(draftText);
+    chapter.content = safeDraftText;
+    chapter.contentHash = hashChapterContent(safeDraftText);
     chapter.summary = summaryFields.summary;
     chapter.summarySource = summaryFields.summarySource;
     chapter.summaryUpdatedAt = summaryFields.summaryUpdatedAt;
@@ -2972,7 +3075,7 @@ export class ProjectsService implements OnModuleInit {
       await this.syncPersonaGraphFromChapter(
         projectId,
         normalizedChapterNo,
-        draftText,
+        safeDraftText,
         chapter.title
       );
     }
@@ -3070,12 +3173,16 @@ export class ProjectsService implements OnModuleInit {
     callbacks: {
       onStart: (event: { traceId: string }) => void;
       onContent: (text: string) => void;
+      onStage?: (event: { stage: ContentSafetyProgressStage; message?: string }) => void;
       onEnd: (event: {
         traceId: string;
         appliedIssueCount: number;
         autoCorrected: boolean;
+        finalDraftText?: string;
+        contentSafety?: ReturnType<typeof toContentSafetyScanPayload>;
       }) => void;
       onError: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
+      onContentReplace?: (text: string) => void;
     }
   ): Promise<void> {
     if (userId) {
@@ -3140,8 +3247,18 @@ export class ProjectsService implements OnModuleInit {
 
     let firstStartEmitted = false;
     let buffer = '';
+    let accumulatedDraft = '';
 
     await new Promise<void>((resolveStream, rejectStream) => {
+      let streamResolved = false;
+      const completeStream = () => {
+        if (streamResolved) {
+          return;
+        }
+        streamResolved = true;
+        resolveStream();
+      };
+
       const stream = response.data as NodeJS.ReadableStream;
 
       stream.on('data', (chunk: Buffer) => {
@@ -3176,28 +3293,66 @@ export class ProjectsService implements OnModuleInit {
             }
             case 'content': {
               const raw = typeof event.data === 'string' ? event.data : '';
-              callbacks.onContent(raw.replace(/\\n/g, '\n'));
+              const piece = raw.replace(/\\n/g, '\n');
+              accumulatedDraft += piece;
+              callbacks.onContent(piece);
               break;
             }
             case 'end': {
               const eventTraceId = typeof event.traceId === 'string' ? event.traceId : traceId;
-              callbacks.onEnd({
-                traceId: eventTraceId,
-                appliedIssueCount: issues.length,
-                autoCorrected: true,
-              });
+              void (async () => {
+                try {
+                  const safety = await this.runContentSafetyForText(
+                    projectId,
+                    accumulatedDraft,
+                    eventTraceId,
+                    'chapter.optimize.typo-fix',
+                    (progress) => {
+                      callbacks.onStage?.({
+                        stage: progress.stage,
+                        message: progress.message,
+                      });
+                    }
+                  );
+                  if (safety.blocked) {
+                    callbacks.onError(
+                      formatContentSafetyBlockMessage(safety.blockReason, safety.hits)
+                    );
+                    resolveStream();
+                    return;
+                  }
+                  if (safety.text !== accumulatedDraft) {
+                    callbacks.onContentReplace?.(safety.text);
+                  }
+                  callbacks.onEnd({
+                    traceId: eventTraceId,
+                    appliedIssueCount: issues.length,
+                    autoCorrected: true,
+                    finalDraftText:
+                      safety.text !== accumulatedDraft ? safety.text : undefined,
+                    contentSafety: toContentSafetyScanPayload(safety),
+                  });
+                } catch (error) {
+                  const message =
+                    error instanceof Error ? error.message : '内容安全扫描失败';
+                  callbacks.onError(message);
+                } finally {
+                  completeStream();
+                }
+              })();
               break;
             }
             case 'error': {
               const message = typeof event.data === 'string' ? event.data : '错字自动修正失败';
               callbacks.onError(message);
+              completeStream();
               break;
             }
           }
         }
       });
 
-      stream.on('end', () => resolveStream());
+      stream.on('end', () => completeStream());
       stream.on('error', (error: unknown) => rejectStream(error));
     });
   }
@@ -3338,10 +3493,11 @@ export class ProjectsService implements OnModuleInit {
     };
 
     for (const [projectId, settings] of this.settingsStore.entries()) {
-      payload.settings[projectId] = {
+      this.patchSettingsDefaults(settings);
+      payload.settings[projectId] = serializeProjectSettingsForJsonMirror({
         ...settings,
-        updatedAt: settings.updatedAt.toISOString(),
-      };
+        activePersonaId: settings.activePersonaId ?? null,
+      });
     }
 
     for (const [projectId, personas] of this.personasStore.entries()) {
@@ -3460,6 +3616,13 @@ export class ProjectsService implements OnModuleInit {
             generationTemperature: clampGenerationTemperature(value.generationTemperature),
             updatePersonaOnSave: value.updatePersonaOnSave ?? true,
             generateRelationEventsOnSave: value.generateRelationEventsOnSave ?? true,
+            chapterOptimizeSegmentCharSize: clampChapterOptimizeSegmentCharSize(
+              value.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
+            ),
+            contentSafetyScanEnabled: value.contentSafetyScanEnabled ?? true,
+            contentSafetyCustomRules: sanitizeProjectContentSafetyRules(
+              value.contentSafetyCustomRules
+            ),
             updatedAt: new Date(value.updatedAt),
           },
         ])
@@ -4094,6 +4257,8 @@ export class ProjectsService implements OnModuleInit {
         updatePersonaOnSave: true,
         generateRelationEventsOnSave: true,
         chapterOptimizeSegmentCharSize: DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
+        contentSafetyScanEnabled: true,
+        contentSafetyCustomRules: [],
         updatedAt: new Date(),
       });
     } else {
@@ -4156,6 +4321,103 @@ export class ProjectsService implements OnModuleInit {
     settings.chapterOptimizeSegmentCharSize = clampChapterOptimizeSegmentCharSize(
       settings.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
     );
+    if (settings.contentSafetyScanEnabled === undefined) {
+      settings.contentSafetyScanEnabled = true;
+    }
+    settings.contentSafetyCustomRules = sanitizeProjectContentSafetyRules(
+      settings.contentSafetyCustomRules
+    );
+  }
+
+  private serializeProjectSettings(settings: ProjectSettings): ProjectSettings {
+    this.patchSettingsDefaults(settings);
+    return {
+      systemPromptText: settings.systemPromptText,
+      activePersonaId: settings.activePersonaId,
+      chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
+      chapterSummaryMemoryCount: settings.chapterSummaryMemoryCount,
+      priorChapterTailChars: settings.priorChapterTailChars,
+      contextExcerptMaxChars: settings.contextExcerptMaxChars,
+      generationTemperature: settings.generationTemperature,
+      updatePersonaOnSave: settings.updatePersonaOnSave,
+      generateRelationEventsOnSave: settings.generateRelationEventsOnSave,
+      chapterOptimizeSegmentCharSize: settings.chapterOptimizeSegmentCharSize,
+      contentSafetyScanEnabled: settings.contentSafetyScanEnabled,
+      contentSafetyCustomRules: settings.contentSafetyCustomRules.map((rule) => ({ ...rule })),
+      updatedAt: settings.updatedAt,
+    };
+  }
+
+  private jsonMirrorNeedsExtensionBackfill(): boolean {
+    if (!existsSync(this.storagePath)) {
+      return false;
+    }
+    try {
+      const raw = readFileSync(this.storagePath, 'utf8');
+      const parsed = JSON.parse(raw) as PersistedProjectState;
+      for (const jsonSettings of Object.values(parsed.settings || {})) {
+        if (!Array.isArray(jsonSettings.contentSafetyCustomRules)) {
+          return true;
+        }
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
+  private mergeJsonMirrorSettingsExtensionsForProject(projectId: string) {
+    if (!existsSync(this.storagePath)) {
+      return;
+    }
+    if (!this.settingsStore.has(projectId)) {
+      return;
+    }
+    try {
+      const raw = readFileSync(this.storagePath, 'utf8');
+      const parsed = JSON.parse(raw) as PersistedProjectState;
+      const jsonSettings = parsed.settings?.[projectId];
+      if (!jsonSettings) {
+        return;
+      }
+      const settings = this.settingsStore.get(projectId)!;
+      applyProjectSettingsJsonExtensions(
+        settings,
+        pickProjectSettingsJsonExtensions(jsonSettings)
+      );
+      this.patchSettingsDefaults(settings);
+    } catch {
+      // JSON 镜像损坏时跳过扩展字段合并
+    }
+  }
+
+  private mergeJsonMirrorSettingsExtensions() {
+    if (!existsSync(this.storagePath)) {
+      return;
+    }
+    try {
+      const raw = readFileSync(this.storagePath, 'utf8');
+      const parsed = JSON.parse(raw) as PersistedProjectState;
+      for (const [projectId, settings] of this.settingsStore.entries()) {
+        const jsonSettings = parsed.settings?.[projectId];
+        if (!jsonSettings) {
+          continue;
+        }
+        applyProjectSettingsJsonExtensions(
+          settings,
+          pickProjectSettingsJsonExtensions(jsonSettings)
+        );
+        this.patchSettingsDefaults(settings);
+      }
+    } catch {
+      // JSON 镜像损坏时跳过扩展字段合并
+    }
+  }
+
+  private buildContentSafetyRules(projectId: string) {
+    this.ensureProjectState(projectId);
+    const settings = this.settingsStore.get(projectId)!;
+    return mergeContentSafetyRules(settings.contentSafetyCustomRules);
   }
 
   private resolveChapterOptimizeConfig(projectId: string) {
@@ -4675,6 +4937,76 @@ export class ProjectsService implements OnModuleInit {
     return process.env.RAG_ORCHESTRATOR_URL || 'http://localhost:3001';
   }
 
+  private isContentSafetyEnabled(projectId: string): boolean {
+    this.ensureProjectState(projectId);
+    this.mergeJsonMirrorSettingsExtensionsForProject(projectId);
+    const settings = this.settingsStore.get(projectId)!;
+    return settings.contentSafetyScanEnabled !== false;
+  }
+
+  private async rewriteSentenceForContentSafety(
+    projectId: string,
+    sentence: string,
+    traceId: string
+  ): Promise<string> {
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+
+    const userPrompt = [
+      '请改写以下小说句子，使其符合平台内容规范，保持原意、人物语气与叙事连贯。',
+      '只输出改写后的单句，不要解释。',
+      '',
+      sentence,
+    ].join('\n');
+
+    const response = await axios.post(
+      `${this.getRagOrchestratorUrl()}/api/generate`,
+      {
+        projectId,
+        prompt: userPrompt,
+        useSSE: true,
+        context: {
+          task: 'content-safety.rewrite',
+          traceId,
+        },
+      },
+      { responseType: 'stream' }
+    );
+
+    const sseResult = await this.readOrchestratorGenerateSseStream(
+      response.data as NodeJS.ReadableStream
+    );
+    if (sseResult.errorMessage) {
+      throw new Error(sseResult.errorMessage);
+    }
+    const rewritten = sseResult.accumulated.trim();
+    if (!rewritten) {
+      throw new Error('内容安全句子改写未返回有效文本');
+    }
+    return rewritten;
+  }
+
+  private async runContentSafetyForText(
+    projectId: string,
+    text: string,
+    traceId: string,
+    taskKey: string,
+    onProgress?: (payload: { stage: ContentSafetyProgressStage; message: string }) => void
+  ) {
+    return runContentSafetyPipeline({
+      text,
+      traceId,
+      taskKey,
+      enabled: this.isContentSafetyEnabled(projectId),
+      rules: this.buildContentSafetyRules(projectId),
+      rewriteSentence: (sentence) =>
+        this.rewriteSentenceForContentSafety(projectId, sentence, traceId),
+      onProgress,
+    });
+  }
+
   private async syncProjectContextToOrchestrator(
     projectId: string,
     settings: ProjectSettings,
@@ -4705,6 +5037,8 @@ export class ProjectsService implements OnModuleInit {
       priorChapterTailChars: settings.priorChapterTailChars,
       contextExcerptMaxChars: settings.contextExcerptMaxChars,
       generationTemperature: settings.generationTemperature,
+      contentSafetyScanEnabled: settings.contentSafetyScanEnabled !== false,
+      contentSafetyCustomRules: settings.contentSafetyCustomRules,
       chapters: this.buildOrchestratorChapterContexts(knowledge, settings),
       knowledgeDocuments: docs.map((doc) => ({
         id: doc.id,

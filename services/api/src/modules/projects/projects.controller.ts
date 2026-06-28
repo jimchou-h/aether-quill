@@ -17,6 +17,7 @@ import { Request as ExpressRequest, Response as ExpressResponse } from 'express'
 import { DocumentsService } from '../documents/documents.service';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { ProjectContentSafetyRule } from '@aether-quill/config';
 
 interface AuthenticatedRequest extends ExpressRequest {
   user?: { userId: string; email: string; name: string };
@@ -110,6 +111,8 @@ export class ProjectsController {
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
+      contentSafetyScanEnabled?: boolean;
+      contentSafetyCustomRules?: ProjectContentSafetyRule[];
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -408,14 +411,34 @@ export class ProjectsController {
             strategyLabel,
           });
         },
-        onStage: ({ stage, segmentIndex, segmentTotal }) => {
+        onStage: ({ stage, segmentIndex, segmentTotal, message }) => {
           writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+          if (stage === 'content_safety_scan' || stage === 'content_safety_rewrite') {
+            writeEvent({
+              event: 'progress',
+              taskKey: 'chapter.optimize.draft',
+              stage,
+              message:
+                message ??
+                (stage === 'content_safety_rewrite'
+                  ? '正在批量重写命中句子…'
+                  : '正在执行内容安全扫描…'),
+            });
+          }
         },
         onContent: (text) => {
           writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
         },
-        onEnd: ({ traceId }) => {
-          writeEvent({ event: 'end', traceId });
+        onContentReplace: (text) => {
+          writeEvent({ event: 'content_replace', data: text.replace(/\n/g, '\\n') });
+        },
+        onEnd: ({ traceId, finalDraftText, contentSafety }) => {
+          writeEvent({
+            event: 'end',
+            traceId,
+            ...(finalDraftText ? { finalDraftText } : {}),
+            ...(contentSafety ? { contentSafety } : {}),
+          });
         },
         onError: (message) => {
           writeEvent({ event: 'error', data: message });
@@ -511,8 +534,30 @@ export class ProjectsController {
           onContent: (text) => {
             writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
           },
-          onEnd: ({ traceId, appliedIssueCount, autoCorrected }) => {
-            writeEvent({ event: 'end', traceId, appliedIssueCount, autoCorrected });
+          onStage: ({ stage, message }) => {
+            writeEvent({
+              event: 'progress',
+              taskKey: 'chapter.optimize.typo-fix',
+              stage,
+              message:
+                message ??
+                (stage === 'content_safety_rewrite'
+                  ? '正在批量重写命中句子…'
+                  : '正在执行内容安全扫描…'),
+            });
+          },
+          onContentReplace: (text) => {
+            writeEvent({ event: 'content_replace', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: ({ traceId, appliedIssueCount, autoCorrected, finalDraftText, contentSafety }) => {
+            writeEvent({
+              event: 'end',
+              traceId,
+              appliedIssueCount,
+              autoCorrected,
+              ...(finalDraftText ? { finalDraftText } : {}),
+              ...(contentSafety ? { contentSafety } : {}),
+            });
           },
           onError: (message) => {
             writeEvent({ event: 'error', data: message });

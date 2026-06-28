@@ -69,7 +69,9 @@ export type ChapterOptimizeStage =
   | 'segment_diagnosis'
   | 'plan_synthesis'
   | 'draft_segment'
-  | 'merge_validation';
+  | 'merge_validation'
+  | 'content_safety_scan'
+  | 'content_safety_rewrite';
 
 export interface ChapterOptimizeLengthStrategy {
   mode: ChapterOptimizeMode;

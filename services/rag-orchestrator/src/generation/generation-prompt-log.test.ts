@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  isGenerationPromptLoggingEnabled,
   isWriteChapterPromptLoggingEnabled,
+  resolveGenerationPromptLogKind,
   resolveWriteChapterPromptKind,
 } from './generation-prompt-log';
 import type { TraceRecord } from './types';
@@ -20,38 +22,55 @@ function trace(partial: Partial<TraceRecord>): TraceRecord {
   };
 }
 
-test('resolveWriteChapterPromptKind 识别大纲与正文', () => {
+test('resolveGenerationPromptLogKind 识别写作工作台与章节优化', () => {
   assert.equal(
-    resolveWriteChapterPromptKind(trace({ context: { templateKey: 'write.chapter.outline' } })),
+    resolveGenerationPromptLogKind(trace({ context: { templateKey: 'write.chapter.outline' } })),
     'outline'
   );
   assert.equal(
-    resolveWriteChapterPromptKind(trace({ context: { templateKey: 'write.chapter' } })),
+    resolveGenerationPromptLogKind(trace({ context: { templateKey: 'write.chapter' } })),
     'draft'
   );
   assert.equal(
-    resolveWriteChapterPromptKind(trace({ context: { phase: 'write.chapter.draft' } })),
+    resolveGenerationPromptLogKind(trace({ context: { phase: 'write.chapter.draft' } })),
     'draft'
   );
   assert.equal(
-    resolveWriteChapterPromptKind(trace({ context: { templateKey: 'chapter.optimize.plan' } })),
-    null
+    resolveGenerationPromptLogKind(trace({ context: { templateKey: 'chapter.optimize.plan' } })),
+    'optimize-plan'
   );
+  assert.equal(
+    resolveGenerationPromptLogKind(trace({ context: { templateKey: 'chapter.optimize.draft' } })),
+    'optimize-draft'
+  );
+  assert.equal(resolveWriteChapterPromptKind, resolveGenerationPromptLogKind);
 });
 
-test('isWriteChapterPromptLoggingEnabled 默认开启且可关闭', () => {
-  const prev = process.env.LOG_WRITE_CHAPTER_PROMPT;
+test('isGenerationPromptLoggingEnabled 默认开启且可关闭', () => {
+  const prevGen = process.env.LOG_GENERATION_PROMPT;
+  const prevWrite = process.env.LOG_WRITE_CHAPTER_PROMPT;
   try {
+    delete process.env.LOG_GENERATION_PROMPT;
     delete process.env.LOG_WRITE_CHAPTER_PROMPT;
+    assert.equal(isGenerationPromptLoggingEnabled(), true);
     assert.equal(isWriteChapterPromptLoggingEnabled(), true);
 
     process.env.LOG_WRITE_CHAPTER_PROMPT = 'false';
-    assert.equal(isWriteChapterPromptLoggingEnabled(), false);
+    assert.equal(isGenerationPromptLoggingEnabled(), false);
+
+    delete process.env.LOG_WRITE_CHAPTER_PROMPT;
+    process.env.LOG_GENERATION_PROMPT = 'off';
+    assert.equal(isGenerationPromptLoggingEnabled(), false);
   } finally {
-    if (prev === undefined) {
+    if (prevGen === undefined) {
+      delete process.env.LOG_GENERATION_PROMPT;
+    } else {
+      process.env.LOG_GENERATION_PROMPT = prevGen;
+    }
+    if (prevWrite === undefined) {
       delete process.env.LOG_WRITE_CHAPTER_PROMPT;
     } else {
-      process.env.LOG_WRITE_CHAPTER_PROMPT = prev;
+      process.env.LOG_WRITE_CHAPTER_PROMPT = prevWrite;
     }
   }
 });
