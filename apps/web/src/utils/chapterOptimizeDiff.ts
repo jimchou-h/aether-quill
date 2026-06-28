@@ -141,3 +141,36 @@ export function buildChapterDiffLines(original: string, draft: string): DiffLine
 
   return results;
 }
+
+export interface InlineDiffSegment {
+  text: string;
+  removed?: boolean;
+  added?: boolean;
+}
+
+/** 全文并排高亮：左栏标删除、右栏标新增，不丢段落 */
+export function buildInlineDiffViews(
+  original: string,
+  draft: string
+): { originalSegments: InlineDiffSegment[]; draftSegments: InlineDiffSegment[] } {
+  if (!original && !draft) {
+    return { originalSegments: [], draftSegments: [] };
+  }
+
+  const changes: Change[] = computeDiff(original, draft);
+  const originalSegments: InlineDiffSegment[] = [];
+  const draftSegments: InlineDiffSegment[] = [];
+
+  for (const change of changes) {
+    if (change.removed) {
+      originalSegments.push({ text: change.value, removed: true });
+    } else if (change.added) {
+      draftSegments.push({ text: change.value, added: true });
+    } else {
+      originalSegments.push({ text: change.value });
+      draftSegments.push({ text: change.value });
+    }
+  }
+
+  return { originalSegments, draftSegments };
+}

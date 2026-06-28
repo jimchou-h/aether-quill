@@ -1,0 +1,49 @@
+post:
+  tags:
+    - Projects
+  summary: Apply pipeline result to chapter
+  description: |
+    Overwrite chapter with pipeline final version. Reuses optimistic lock semantics (1307).
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineApplyRequest'
+  responses:
+    '200':
+      description: Chapter updated
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizationApplyResult'
+    '409':
+      description: Chapter version conflict (1307)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

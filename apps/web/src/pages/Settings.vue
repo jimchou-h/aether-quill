@@ -8,6 +8,7 @@ import SystemPromptEditor from '../components/settings/SystemPromptEditor.vue';
 import TaskPromptSection from '../components/settings/TaskPromptSection.vue';
 import OutlineSummaryEditor from '../components/settings/OutlineSummaryEditor.vue';
 import ProjectGenerationPreferences from '../components/settings/ProjectGenerationPreferences.vue';
+import ProjectPipelinePreferences from '../components/settings/ProjectPipelinePreferences.vue';
 import PromptVersionHistory from '../components/settings/PromptVersionHistory.vue';
 import WritingStatsPanel from '../components/settings/WritingStatsPanel.vue';
 import { presentErrorFromCaught } from '../utils/pageFeedback';
@@ -57,6 +58,7 @@ onMounted(() => {
       <WritingStatsPanel :project-id="projectId" />
       <OutlineSummaryEditor :project-id="projectId" />
       <ProjectGenerationPreferences :project-id="projectId" />
+      <ProjectPipelinePreferences :project-id="projectId" />
       <SystemPromptEditor :project-id="projectId" />
       <TaskPromptSection :project-id="projectId" />
       <PromptVersionHistory :project-id="projectId" />

@@ -19,7 +19,9 @@ const emit = defineEmits<{
   summarize: [chapterNo: number];
   generateRelationEvents: [chapterNo: number];
   optimize: [chapter: ChapterItem];
+  pipelineOptimize: [chapter: ChapterItem];
   batchOptimize: [chapters: ChapterItem[]];
+  batchPipelineOptimize: [chapters: ChapterItem[]];
   save: [payload: { chapterNo: number; title: string; content: string }];
   parseStructured: [chapterNo: number];
   delete: [chapterNo: number];
@@ -89,6 +91,16 @@ function emitBatchOptimize() {
     .filter((chapter) => selectedForBatch.value.has(chapter.chapterNo))
     .sort((a, b) => a.chapterNo - b.chapterNo);
   emit('batchOptimize', selected);
+}
+
+function emitBatchPipelineOptimize() {
+  if (selectedBatchCount.value < 2) {
+    return;
+  }
+  const selected = props.chapters
+    .filter((chapter) => selectedForBatch.value.has(chapter.chapterNo))
+    .sort((a, b) => a.chapterNo - b.chapterNo);
+  emit('batchPipelineOptimize', selected);
 }
 
 const selectedChapter = computed(
@@ -313,6 +325,14 @@ defineExpose({ clearEditing, clearBatchSelection });
           >
             批量优化{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
           </button>
+          <button
+            class="secondary-button batch-optimize-button"
+            type="button"
+            :disabled="selectedBatchCount < 2"
+            @click="emitBatchPipelineOptimize"
+          >
+            批量分步精修{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
+          </button>
         </div>
 
         <div ref="chapterTabsRef" class="chapter-tabs" role="tablist" aria-label="章节列表">
@@ -422,6 +442,13 @@ defineExpose({ clearEditing, clearBatchSelection });
                     ? '解析中...'
                     : '解析结构化信息'
                 }}
+              </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                @click="emit('pipelineOptimize', selectedChapter)"
+              >
+                分步精修
               </button>
               <button
                 class="secondary-button"

@@ -66,6 +66,11 @@ export const GenerationErrorCodes = {
   ChapterOptimizationSegmentFailed: 1323,
   ContentSafetyScanFailed: 1324,
   ContentSafetyBlocked: 1325,
+  ChapterPipelineSessionNotFound: 1326,
+  ChapterPipelineInvalidModuleOrder: 1327,
+  ChapterPipelineGateNotConfirmed: 1328,
+  ChapterPipelineModuleFailed: 1329,
+  ChapterPipelineInvalidConfig: 1330,
 } as const;
 
 /**
@@ -124,6 +129,9 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     if (errorCode === 1322) return 413;
     if (errorCode === 1323) return 502;
     if (errorCode === 1324 || errorCode === 1325) return 400;
+    if (errorCode === 1326) return 404;
+    if (errorCode === 1327 || errorCode === 1328 || errorCode === 1330) return 400;
+    if (errorCode === 1329) return 502;
     if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
     if (errorCode === 1311) return 504;
     if (errorCode === 1313) return 500;
@@ -190,6 +198,11 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1323: 'Chapter optimization segment failed',
     1324: 'Content safety scan failed',
     1325: 'Content blocked by safety rules',
+    1326: 'Chapter pipeline session not found',
+    1327: 'Chapter pipeline invalid module order',
+    1328: 'Chapter pipeline gate not confirmed',
+    1329: 'Chapter pipeline module failed',
+    1330: 'Chapter pipeline invalid config',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',
