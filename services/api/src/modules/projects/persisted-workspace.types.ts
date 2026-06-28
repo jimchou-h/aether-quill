@@ -40,6 +40,14 @@ export interface PersistedProjectState {
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      chapterOptimizeSegmentCharSize?: number;
+      contentSafetyScanEnabled?: boolean;
+      contentSafetyCustomRules?: Array<{
+        id: string;
+        pattern: string;
+        severity: 'low' | 'medium' | 'high';
+        enabled: boolean;
+      }>;
       updatedAt: string;
     }
   >;

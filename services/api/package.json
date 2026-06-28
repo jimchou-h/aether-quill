@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "pnpm --filter @aether-quill/config run build && nest start --watch",
     "build": "nest build && prisma generate",
     "start": "nest start",
     "start:prod": "node dist/main",
     "lint": "eslint src --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @aether-quill/config run build && tsc --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",
     "clean": "rm -rf dist node_modules",
     "db:generate": "prisma generate",
@@ -17,6 +17,7 @@
     "migrate:json-to-pg": "prisma generate && tsx scripts/migrate-json-to-pg.ts"
   },
   "dependencies": {
+    "@aether-quill/config": "workspace:*",
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",

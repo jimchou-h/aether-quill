@@ -9,10 +9,12 @@
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {},
-  "devDependencies": {
+    "devDependencies": {
+    "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }
 }

@@ -28,7 +28,15 @@
  */
 
 import { loadEnv } from './config/load-env';
-import { assertRagInfrastructureEnv, getResolvedRagInfrastructureEnv } from '@aether-quill/config';
+import {
+  assertRagInfrastructureEnv,
+  formatContentSafetyBlockMessage,
+  getResolvedRagInfrastructureEnv,
+  mergeContentSafetyRules,
+  processContentSafety,
+  sanitizeProjectContentSafetyRules,
+  type ProjectContentSafetyRule,
+} from '@aether-quill/config';
 import express from 'express';
 import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
@@ -143,6 +151,10 @@ interface ProjectContext {
   contextExcerptMaxChars: number;
   /** 主生成链路采样温度 */
   generationTemperature: number;
+  /** 是否对 AI 正文执行内容安全硬规则扫描 */
+  contentSafetyScanEnabled?: boolean;
+  /** 项目自定义禁用词 */
+  contentSafetyCustomRules?: ProjectContentSafetyRule[];
   /** 项目知识库文档全文列表，用于标题匹配后整文注入 */
   knowledgeDocuments?: KnowledgeDocumentPayload[];
   selectedRelationMemory?: string;
@@ -186,6 +198,8 @@ function getOrCreateContext(projectId: string) {
       priorChapterTailChars: DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
       contextExcerptMaxChars: DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
       generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
+      contentSafetyScanEnabled: true,
+      contentSafetyCustomRules: [],
       updatedAt: new Date().toISOString(),
     });
   }
@@ -544,6 +558,14 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
   if (payload.generationTemperature !== undefined) {
     context.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
+  }
+  if (payload.contentSafetyScanEnabled !== undefined) {
+    context.contentSafetyScanEnabled = Boolean(payload.contentSafetyScanEnabled);
+  }
+  if (payload.contentSafetyCustomRules !== undefined) {
+    context.contentSafetyCustomRules = sanitizeProjectContentSafetyRules(
+      payload.contentSafetyCustomRules
+    );
   }
   if (payload.priorChapterTailChars !== undefined) {
     context.priorChapterTailChars = clampPriorChapterTailChars(payload.priorChapterTailChars);
@@ -1315,8 +1337,73 @@ app.post('/api/generate/draft', async (req, res) => {
 
     if (consistencyNotes.length === 0) {
       consistencyNotes = context.outlineSummary
-        ? [{ level: 'info', message: '已加载项目大纲与章节摘要，未检测到设定冲突。' }]
+        ? [{ level: 'info', message: '已检测到大纲总结，未检测到设定冲突。' }]
         : [{ level: 'warning', message: '未检测到大纲总结，请补充后再生成。' }];
+    }
+
+    writeSse({ event: 'content_safety_scan', traceId: trace.id });
+    writeSse({
+      event: 'progress',
+      traceId: trace.id,
+      taskKey: 'write.chapter.draft',
+      stage: 'content_safety_scan',
+      message: '正在执行内容安全扫描…',
+    });
+
+    const safetyEnabled = context.contentSafetyScanEnabled !== false;
+    const safetyRules = mergeContentSafetyRules(context.contentSafetyCustomRules ?? []);
+    const safety = await processContentSafety(fullDraftText, {
+      enabled: safetyEnabled,
+      rules: safetyRules,
+      rewriteSentence: safetyEnabled
+        ? async (sentence) => {
+            writeSse({
+              event: 'progress',
+              traceId: trace.id,
+              taskKey: 'write.chapter.draft',
+              stage: 'content_safety_rewrite',
+              message: '正在重写命中句子…',
+            });
+            const rewriteTrace = await generationService.createTrace({
+              projectId,
+              prompt: [
+                '请改写以下小说句子，使其符合平台内容规范，保持原意、人物语气与叙事连贯。',
+                '只输出改写后的单句，不要解释。',
+                '',
+                sentence,
+              ].join('\n'),
+              context: { task: 'content-safety.rewrite', traceId: trace.id },
+            });
+            return generationService.generateNonStream(rewriteTrace, generationContext);
+          }
+        : undefined,
+      onRewriteAttempt: (progress) => {
+        writeSse({
+          event: 'progress',
+          traceId: trace.id,
+          taskKey: 'write.chapter.draft',
+          stage: 'content_safety_rewrite',
+          message: `正在批量重写命中句子（第 ${progress.batch} 轮，${progress.indexInBatch}/${progress.batchSize}）…`,
+        });
+      },
+    });
+
+    if (safety.blocked) {
+      const errorMsg = formatContentSafetyBlockMessage(safety.blockReason, safety.hits);
+      endSpan(streamSpanId, errorMsg);
+      endSpan(traceSpanId, errorMsg);
+      writeSse({ event: 'error', data: errorMsg, traceId: trace.id });
+      res.end();
+      return;
+    }
+
+    const finalDraftText = safety.text;
+    if (finalDraftText !== fullDraftText) {
+      writeSse({
+        event: 'content_replace',
+        data: finalDraftText.replace(/\n/g, '\\n'),
+        traceId: trace.id,
+      });
     }
 
     writeSse({
@@ -1325,6 +1412,15 @@ app.post('/api/generate/draft', async (req, res) => {
       citations: resolvedCitations,
       consistencyNotes,
       usedRelationEvents: context.usedRelationEvents || [],
+      ...(finalDraftText !== fullDraftText ? { finalText: finalDraftText } : {}),
+      contentSafety: {
+        hits: safety.hits,
+        blocked: safety.blocked,
+        blockReason: safety.blockReason,
+        scanEnabled: safety.scanEnabled,
+        rewriteAttempts: safety.rewriteAttempts,
+        finalText: finalDraftText,
+      },
     });
     res.end();
     endSpan(traceSpanId);

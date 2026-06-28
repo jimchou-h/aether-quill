@@ -555,6 +555,8 @@ components:
         - updatePersonaOnSave
         - generateRelationEventsOnSave
         - chapterOptimizeSegmentCharSize
+        - contentSafetyScanEnabled
+        - contentSafetyCustomRules
         - updatedAt
       properties:
         systemPromptText:
@@ -609,6 +611,15 @@ components:
           maximum: 20000
           default: 3000
           description: 章节优化方案阶段按字数切分诊断时每段目标字数；0 表示不按字数分段（始终整章方案）
+        contentSafetyScanEnabled:
+          type: boolean
+          default: true
+          description: 是否对 AI 生成/改写后的用户可见正文执行内容安全硬规则扫描
+        contentSafetyCustomRules:
+          type: array
+          description: 项目自定义禁用词（与系统默认规则合并扫描）
+          items:
+            $ref: '#/components/schemas/ProjectContentSafetyRule'
         updatedAt:
           type: string
           format: date-time
@@ -652,6 +663,118 @@ components:
           minimum: 0
           maximum: 20000
           description: 章节优化方案分段字数；0 表示不按字数分段
+        contentSafetyScanEnabled:
+          type: boolean
+          description: 是否启用内容安全硬规则扫描
+        contentSafetyCustomRules:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectContentSafetyRule'
+    ProjectContentSafetyRule:
+      type: object
+      required:
+        - id
+        - pattern
+        - severity
+        - enabled
+      properties:
+        id:
+          type: string
+          description: 规则 UUID，项目内唯一
+        pattern:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 禁用词或短语（关键词匹配）
+        severity:
+          $ref: '#/components/schemas/ContentSafetySeverity'
+        enabled:
+          type: boolean
+          default: true
+          description: 是否参与扫描
+    ContentSafetySeverity:
+      type: string
+      enum: [low, medium, high]
+    ContentSafetyAction:
+      type: string
+      enum: [mark, replace, rewrite_sentence, block]
+    ContentSafetyHit:
+      type: object
+      required:
+        - ruleId
+        - severity
+        - startOffset
+        - endOffset
+        - matchedText
+        - normalizedMatchedText
+        - action
+      properties:
+        ruleId:
+          type: string
+        severity:
+          $ref: '#/components/schemas/ContentSafetySeverity'
+        startOffset:
+          type: integer
+          minimum: 0
+        endOffset:
+          type: integer
+          minimum: 0
+        matchedText:
+          type: string
+        normalizedMatchedText:
+          type: string
+        action:
+          $ref: '#/components/schemas/ContentSafetyAction'
+    ContentSafetyScanResult:
+      type: object
+      required:
+        - hits
+        - blocked
+        - scanEnabled
+        - rewriteAttempts
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentSafetyHit'
+        blocked:
+          type: boolean
+        blockReason:
+          type: string
+        scanEnabled:
+          type: boolean
+        rewriteAttempts:
+          type: integer
+          minimum: 0
+        finalText:
+          type: string
+          description: 扫描/改写后的最终正文（若与流式输出不同则返回）
+    AiTaskProgressEvent:
+      type: object
+      required:
+        - traceId
+        - taskKey
+        - stage
+        - message
+      properties:
+        traceId:
+          type: string
+        taskKey:
+          type: string
+        stage:
+          type: string
+        message:
+          type: string
+        currentStep:
+          type: integer
+          minimum: 0
+        totalSteps:
+          type: integer
+          minimum: 0
+        percent:
+          type: number
+          minimum: 0
+          maximum: 100
     WriteContextReadiness:
       type: object
       required:

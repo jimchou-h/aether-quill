@@ -2004,6 +2004,10 @@ export interface components {
       generateRelationEventsOnSave: boolean;
       /** @description 章节优化方案分段字数；0 表示不按字数分段 */
       chapterOptimizeSegmentCharSize: number;
+      /** @description 是否启用内容安全硬规则扫描 */
+      contentSafetyScanEnabled: boolean;
+      /** @description 项目自定义禁用词 */
+      contentSafetyCustomRules: components['schemas']['ProjectContentSafetyRule'][];
       /** Format: date-time */
       updatedAt: string;
     };
@@ -2018,6 +2022,42 @@ export interface components {
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
+      contentSafetyScanEnabled?: boolean;
+      contentSafetyCustomRules?: components['schemas']['ProjectContentSafetyRule'][];
+    };
+    ProjectContentSafetyRule: {
+      id: string;
+      pattern: string;
+      severity: components['schemas']['ContentSafetySeverity'];
+      enabled: boolean;
+    };
+    ContentSafetySeverity: 'low' | 'medium' | 'high';
+    ContentSafetyAction: 'mark' | 'replace' | 'rewrite_sentence' | 'block';
+    ContentSafetyHit: {
+      ruleId: string;
+      severity: components['schemas']['ContentSafetySeverity'];
+      startOffset: number;
+      endOffset: number;
+      matchedText: string;
+      normalizedMatchedText: string;
+      action: components['schemas']['ContentSafetyAction'];
+    };
+    ContentSafetyScanResult: {
+      hits: components['schemas']['ContentSafetyHit'][];
+      blocked: boolean;
+      blockReason?: string;
+      scanEnabled: boolean;
+      rewriteAttempts: number;
+      finalText?: string;
+    };
+    AiTaskProgressEvent: {
+      traceId: string;
+      taskKey: string;
+      stage: string;
+      message: string;
+      currentStep?: number;
+      totalSteps?: number;
+      percent?: number;
     };
     WriteContextReadiness: {
       chapterNo: number;

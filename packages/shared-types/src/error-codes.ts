@@ -64,6 +64,8 @@ export const GenerationErrorCodes = {
   WriteChapterOutlineNotConfirmed: 1321,
   ChapterOptimizationInputTooLarge: 1322,
   ChapterOptimizationSegmentFailed: 1323,
+  ContentSafetyScanFailed: 1324,
+  ContentSafetyBlocked: 1325,
 } as const;
 
 /**
@@ -121,6 +123,7 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     if (errorCode === 1321) return 400;
     if (errorCode === 1322) return 413;
     if (errorCode === 1323) return 502;
+    if (errorCode === 1324 || errorCode === 1325) return 400;
     if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
     if (errorCode === 1311) return 504;
     if (errorCode === 1313) return 500;
@@ -185,6 +188,8 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1321: 'Write chapter outline not confirmed',
     1322: 'Chapter optimization input too large',
     1323: 'Chapter optimization segment failed',
+    1324: 'Content safety scan failed',
+    1325: 'Content blocked by safety rules',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',
