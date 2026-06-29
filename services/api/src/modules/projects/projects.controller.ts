@@ -588,6 +588,7 @@ export class ProjectsController {
     @Body()
     data: {
       preset?: string;
+      mode?: 'pipeline' | 'final-polish';
       configOverrides?: Record<string, unknown>;
     },
     @Request() req: AuthenticatedRequest
@@ -652,7 +653,7 @@ export class ProjectsController {
   async runChapterPipelineModule(
     @Param('sessionId') sessionId: string,
     @Param('module') module: string,
-    @Body() data: { issueId?: string },
+    @Body() data: { issueId?: string; forceRegenerate?: boolean },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
   ) {
@@ -1072,5 +1073,6 @@ function serializePipelineSessionView(session: ChapterPipelineSession) {
     ruleIssues: session.ruleIssues,
     homogenizationReport: session.homogenizationReport,
     sourceUpdatedAt: session.sourceUpdatedAt,
+    finalPolishResult: session.finalPolishResult,
   };
 }

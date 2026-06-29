@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyRuleSegmentFix,
+  computeFinalPolishFingerprint,
   getPipelineInputText,
   mergePipelineConfig,
   relocateRuleIssuesInText,
+  resolveFinalPolishQualityStatus,
   resolvePipelineApplyText,
   resolveProtagonistContext,
   resolveRuleIssueSpanStrict,
@@ -274,4 +276,55 @@ test('sanitizeSensoryOutlineWithContentScan skips scan when disabled', () => {
   assert.equal(result.required.length, 1);
   assert.equal(result.required[0]?.contentWarnings, undefined);
   assert.equal(result.suggested.length, 0);
+});
+
+test('computeFinalPolishFingerprint is stable for identical inputs', () => {
+  const input = {
+    chapterContent: '正文A',
+    chapterUpdatedAt: '2026-06-29T00:00:00.000Z',
+    personasFingerprint: 'persona-hash',
+    systemPromptFingerprint: 'sys-hash',
+    pipelineEngineFingerprint: 'engine-hash',
+    contentSafetyRulesFingerprint: 'rules-hash',
+    finalPolishConfigFingerprint: 'config-hash',
+    segmentConfigFingerprint: 'segment-hash',
+  };
+  const first = computeFinalPolishFingerprint(input);
+  const second = computeFinalPolishFingerprint(input);
+  assert.equal(first, second);
+  assert.notEqual(first, computeFinalPolishFingerprint({ ...input, chapterContent: '正文B' }));
+});
+
+test('resolveFinalPolishQualityStatus blocks unresolved hard issues', () => {
+  assert.equal(resolveFinalPolishQualityStatus([]), 'passed');
+  assert.equal(
+    resolveFinalPolishQualityStatus([
+      {
+        id: '1',
+        category: 'forbidden_word',
+        text: '违禁',
+        context: '',
+        fixStrategy: 'auto',
+        startOffset: 0,
+        endOffset: 2,
+        fixed: false,
+      },
+    ]),
+    'blocked'
+  );
+  assert.equal(
+    resolveFinalPolishQualityStatus([
+      {
+        id: '2',
+        category: 'explanatory_text',
+        text: '说明',
+        context: '',
+        fixStrategy: 'manual',
+        startOffset: 0,
+        endOffset: 2,
+        fixed: false,
+      },
+    ]),
+    'blocked'
+  );
 });

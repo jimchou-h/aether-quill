@@ -1924,6 +1924,11 @@ components:
         preset:
           type: string
           enum: [full, character_rules, sensory_only]
+        mode:
+          type: string
+          enum: [pipeline, final-polish]
+          default: pipeline
+          description: final-polish 用于一键终稿会话
         configOverrides:
           $ref: '#/components/schemas/ChapterPipelineConfig'
     ChapterPipelineStartResult:
@@ -2025,6 +2030,10 @@ components:
         issueId:
           type: string
           description: For rules-fix module — fix a single issue
+        forceRegenerate:
+          type: boolean
+          default: false
+          description: 一键终稿专用；跳过指纹缓存并重新跑完整流水线
     ChapterPipelineApplyRequest:
       type: object
       required:
@@ -2100,6 +2109,41 @@ components:
         sourceUpdatedAt:
           type: string
           format: date-time
+        finalPolishResult:
+          $ref: '#/components/schemas/FinalPolishResult'
+    FinalPolishQualityStatus:
+      type: string
+      enum: [passed, passed_with_warnings, blocked]
+    FinalPolishResult:
+      type: object
+      required:
+        - fingerprint
+        - versionText
+        - residualIssues
+        - qualityStatus
+        - traceIds
+        - createdAt
+      properties:
+        fingerprint:
+          type: string
+        versionText:
+          type: string
+        residualIssues:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineRuleIssue'
+        qualityStatus:
+          $ref: '#/components/schemas/FinalPolishQualityStatus'
+        traceIds:
+          type: object
+          additionalProperties:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        cached:
+          type: boolean
+          description: 是否来自输入指纹缓存命中
     ChapterItem:
       type: object
       required:

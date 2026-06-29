@@ -10,6 +10,7 @@ const props = defineProps<{
   summarizingChapterNo: number | null;
   generatingRelationChapterNo: number | null;
   optimizingChapterNo: number | null;
+  finalPolishingChapterNo: number | null;
   savingChapterNo: number | null;
   parsingStructuredChapterNo: number | null;
 }>();
@@ -19,6 +20,7 @@ const emit = defineEmits<{
   summarize: [chapterNo: number];
   generateRelationEvents: [chapterNo: number];
   optimize: [chapter: ChapterItem];
+  finalPolish: [chapter: ChapterItem];
   pipelineOptimize: [chapter: ChapterItem];
   batchOptimize: [chapters: ChapterItem[]];
   batchPipelineOptimize: [chapters: ChapterItem[]];
@@ -162,6 +164,7 @@ function isBusy(chapterNo: number) {
     props.summarizingChapterNo === chapterNo ||
     props.generatingRelationChapterNo === chapterNo ||
     props.optimizingChapterNo === chapterNo ||
+    props.finalPolishingChapterNo === chapterNo ||
     props.savingChapterNo === chapterNo ||
     props.parsingStructuredChapterNo === chapterNo ||
     (editingChapterNo.value !== null && editingChapterNo.value !== chapterNo)
@@ -444,11 +447,15 @@ defineExpose({ clearEditing, clearBatchSelection });
                 }}
               </button>
               <button
-                class="secondary-button"
+                class="primary-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('pipelineOptimize', selectedChapter)"
+                @click="emit('finalPolish', selectedChapter)"
               >
-                分步精修
+                {{
+                  props.finalPolishingChapterNo === selectedChapter.chapterNo
+                    ? '终稿化中...'
+                    : '一键终稿'
+                }}
               </button>
               <button
                 class="secondary-button"
@@ -456,7 +463,7 @@ defineExpose({ clearEditing, clearBatchSelection });
                 @click="emit('optimize', selectedChapter)"
               >
                 {{
-                  props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '优化章节'
+                  props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '章节优化'
                 }}
               </button>
               <div class="dropdown-container">
@@ -483,6 +490,13 @@ defineExpose({ clearEditing, clearBatchSelection });
                   </svg>
                 </button>
                 <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('pipelineOptimize', selectedChapter)"
+                  >
+                    高级 · 分步精修
+                  </button>
                   <button
                     class="dropdown-item"
                     :disabled="isBusy(selectedChapter.chapterNo)"

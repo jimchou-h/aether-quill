@@ -22,7 +22,9 @@ import {
 } from './chapter-pipeline-orchestrator.client';
 import {
   deletePipelineSession,
+  getFinalPolishCache,
   getPipelineSession,
+  putFinalPolishCache,
   putPipelineSession,
 } from './chapter-pipeline-session.store';
 
@@ -49,11 +51,16 @@ import {
   type ChapterPipelineRunModule,
   type ChapterPipelineSession,
   type ChapterPipelineStage,
+  type FinalPolishResult,
   type PipelineOutlineItem,
   type PipelineRuleIssue,
+  computeContentSafetyRulesFingerprint,
+  computeFinalPolishFingerprint,
+  computePersonasFingerprint,
   DEFAULT_PIPELINE_CONFIG,
   DEFAULT_PROTAGONIST_PROGRESS_RULES,
   getPipelineInputText,
+  hashFingerprintPart,
   makePipelineSessionId,
   makePipelineTraceId,
   mergePipelineConfig,
@@ -61,6 +68,7 @@ import {
   parseRuleIssuesJson,
   parseSensoryOutlineJson,
   relocateRuleIssuesInText,
+  resolveFinalPolishQualityStatus,
   resolvePipelineApplyText,
   sanitizeRuleIssuesForText,
   sanitizeSensoryOutlineWithContentScan,
@@ -100,6 +108,7 @@ export class ChapterPipelineService {
     chapterNo: number,
     payload: {
       preset?: string;
+      mode?: 'pipeline' | 'final-polish';
       configOverrides?: Partial<ChapterPipelineConfig>;
     },
     userId?: string
@@ -114,7 +123,16 @@ export class ChapterPipelineService {
 
     const settings = this.projectsService.getSettings(projectId, userId);
     const projectPipelineDefaults = this.resolveProjectPipelineDefaults(settings);
+    const finalPolishDefaults =
+      payload.mode === 'final-polish'
+        ? {
+            pipelinePreset: 'full' as ChapterPipelineConfig['pipelinePreset'],
+            pipelineSkipSensoryOutlineReview: true,
+            pipelineRulesFixMode: 'semi' as ChapterPipelineConfig['pipelineRulesFixMode'],
+          }
+        : {};
     const config = mergePipelineConfig(projectPipelineDefaults, {
+      ...finalPolishDefaults,
       ...(payload.configOverrides ?? {}),
       ...(payload.preset
         ? { pipelinePreset: payload.preset as ChapterPipelineConfig['pipelinePreset'] }
@@ -133,6 +151,7 @@ export class ChapterPipelineService {
       currentModule: config.pipelineEnabledModules[0] ?? 1,
       traceIds: {},
       createdAt: new Date(),
+      sessionMode: payload.mode ?? 'pipeline',
     };
 
     putPipelineSession(session);
@@ -197,21 +216,23 @@ export class ChapterPipelineService {
   async runModuleStream(
     sessionId: string,
     module: ChapterPipelineRunModule,
-    payload: { issueId?: string },
+    payload: { issueId?: string; forceRegenerate?: boolean },
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
     const session = this.requireSession(sessionId, userId);
 
-    try {
-      assertModulePrerequisites(session, module);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '模块前置条件不满足';
-      if (message.includes('尚未确认')) {
-        throw new ChapterPipelineGateNotConfirmedError(message);
+    if (module !== 'final-polish') {
+      try {
+        assertModulePrerequisites(session, module);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '模块前置条件不满足';
+        if (message.includes('尚未确认')) {
+          throw new ChapterPipelineGateNotConfirmedError(message);
+        }
+        callbacks.onError?.(message);
+        return;
       }
-      callbacks.onError?.(message);
-      return;
     }
 
     if (module === 'run-all') {
@@ -246,6 +267,11 @@ export class ChapterPipelineService {
         break;
       case 'homogenization-rewrite':
         await this.runHomogenizationRewriteModule(session, userId, callbacks);
+        break;
+      case 'final-polish':
+        await this.runFinalPolishModule(session, userId, callbacks, {
+          forceRegenerate: payload.forceRegenerate,
+        });
         break;
       default:
         callbacks.onError?.(`未知模块: ${module}`);
@@ -778,6 +804,204 @@ export class ChapterPipelineService {
       versionKey: 'final',
       currentModule: 'done',
     });
+  }
+
+  private async runFinalPolishModule(
+    session: ChapterPipelineSession,
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks,
+    options?: { forceRegenerate?: boolean }
+  ): Promise<void> {
+    await this.prepareContext(session.projectId, userId);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    const protagonist = this.resolveProtagonist(personas, settings.activePersonaId);
+    const protagonistRules =
+      (settings as { protagonistProgressRules?: typeof DEFAULT_PROTAGONIST_PROGRESS_RULES })
+        .protagonistProgressRules ?? DEFAULT_PROTAGONIST_PROGRESS_RULES;
+    const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
+    const scanEnabled = settings.contentSafetyScanEnabled !== false;
+    const fingerprint = this.buildFinalPolishFingerprint(
+      session,
+      settings,
+      personas,
+      protagonistRules,
+      rules,
+      scanEnabled
+    );
+
+    if (!options?.forceRegenerate) {
+      const cached = getFinalPolishCache(session.projectId, session.chapterNo, fingerprint);
+      if (cached?.versionText?.trim()) {
+        const traceId = makePipelineTraceId('final-polish-cache');
+        session.traceIds.finalPolish = traceId;
+        callbacks.onStart?.({
+          traceId,
+          chapterNo: session.chapterNo,
+          stage: 'pipeline_final_polish_done',
+        });
+        callbacks.onStage?.({ stage: 'pipeline_final_polish_done' });
+        this.applyFinalPolishResult(session, {
+          ...cached,
+          cached: true,
+          traceIds: { ...cached.traceIds, cache: traceId },
+        });
+        putPipelineSession(session);
+        callbacks.onEnd?.({
+          traceId,
+          versionText: cached.versionText,
+          versionKey: 'final',
+          currentModule: 'done',
+          finalPolishResult: session.finalPolishResult,
+          cachedFromFingerprint: true,
+        });
+        return;
+      }
+    } else {
+      session.versions = { original: session.sourceText };
+      session.sensoryOutline = undefined;
+      session.ruleIssues = undefined;
+      session.homogenizationReport = undefined;
+      session.finalPolishResult = undefined;
+      session.currentModule = session.config.pipelineEnabledModules[0] ?? 1;
+      putPipelineSession(session);
+    }
+
+    const traceId = makePipelineTraceId('final-polish-pipeline');
+    session.traceIds.finalPolish = traceId;
+    callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: 'pipeline_character',
+    });
+
+    let pipelineInterrupted = false;
+    await this.runAllModules(session, userId, {
+      onStart: callbacks.onStart,
+      onStage: callbacks.onStage,
+      onContent: callbacks.onContent,
+      onError: (message) => {
+        pipelineInterrupted = true;
+        callbacks.onError?.(message);
+      },
+      onGate: () => {
+        pipelineInterrupted = true;
+        callbacks.onError?.(
+          '一键终稿不应中断于感官大纲；请在设置中开启「跳过大纲审核」或联系管理员'
+        );
+      },
+    });
+
+    if (pipelineInterrupted || session.currentModule !== 'done') {
+      return;
+    }
+
+    const draftText = resolvePipelineApplyText(session, 'final');
+    if (!draftText.trim()) {
+      callbacks.onError?.('终稿流水线未产出正文');
+      return;
+    }
+
+    if (!session.versions.final?.trim()) {
+      session.versions.final = draftText;
+    }
+
+    const protagonistName = protagonist?.name ?? '主角';
+    const residualIssues = sanitizeRuleIssuesForText(
+      draftText,
+      session.ruleIssues ??
+        relocateRuleIssuesInText(
+          draftText,
+          scanPipelineRules(draftText, rules, scanEnabled, 'semi', protagonistName)
+        )
+    );
+
+    callbacks.onStage?.({ stage: 'pipeline_final_polish_done' });
+
+    const finalPolishResult: FinalPolishResult = {
+      fingerprint,
+      versionText: draftText,
+      residualIssues,
+      qualityStatus: resolveFinalPolishQualityStatus(residualIssues),
+      traceIds: {
+        pipeline: traceId,
+        ...session.traceIds,
+      },
+      createdAt: new Date().toISOString(),
+      cached: false,
+    };
+
+    this.applyFinalPolishResult(session, finalPolishResult);
+    putFinalPolishCache(session.projectId, session.chapterNo, finalPolishResult);
+    putPipelineSession(session);
+
+    callbacks.onEnd?.({
+      traceId,
+      versionText: draftText,
+      versionKey: 'final',
+      currentModule: 'done',
+      finalPolishResult: session.finalPolishResult,
+      cachedFromFingerprint: false,
+    });
+  }
+
+  private buildFinalPolishFingerprint(
+    session: ChapterPipelineSession,
+    settings: ReturnType<ProjectsService['getSettings']>,
+    personas: PersonaRecord[],
+    protagonistRules: typeof DEFAULT_PROTAGONIST_PROGRESS_RULES,
+    rules: ReturnType<typeof mergeContentSafetyRules>,
+    scanEnabled: boolean
+  ): string {
+    return computeFinalPolishFingerprint({
+      chapterContent: session.versions.original,
+      chapterUpdatedAt: session.sourceUpdatedAt,
+      personasFingerprint: computePersonasFingerprint(
+        personas.map((persona) => ({
+          id: persona.id,
+          name: persona.name,
+          profile: persona.profile,
+          state: persona.state,
+          status: persona.status,
+          chapterStates: persona.chapterStates?.map((state) => ({
+            chapterNo: state.chapterNo,
+            appearance: state.snapshot?.appearance,
+            state: state.snapshot?.status ?? state.summaryLine,
+          })),
+        }))
+      ),
+      systemPromptFingerprint: hashFingerprintPart(settings.systemPromptText ?? ''),
+      pipelineEngineFingerprint: hashFingerprintPart(
+        JSON.stringify({
+          engine: 'silent-run-all-v2',
+          modules: session.config.pipelineEnabledModules,
+          skipOutline: session.config.pipelineSkipSensoryOutlineReview,
+          rulesFixMode: session.config.pipelineRulesFixMode,
+          homogenization: session.config.pipelineHomogenizationEnabled,
+        })
+      ),
+      contentSafetyRulesFingerprint: computeContentSafetyRulesFingerprint(rules),
+      finalPolishConfigFingerprint: hashFingerprintPart(
+        JSON.stringify({
+          contentSafetyScanEnabled: scanEnabled,
+          protagonistProgressRules: protagonistRules,
+        })
+      ),
+      segmentConfigFingerprint: hashFingerprintPart(
+        String(settings.chapterOptimizeSegmentCharSize ?? '')
+      ),
+    });
+  }
+
+  private applyFinalPolishResult(
+    session: ChapterPipelineSession,
+    result: FinalPolishResult
+  ): void {
+    session.versions.final = result.versionText;
+    session.finalPolishResult = result;
+    session.ruleIssues = result.residualIssues;
+    session.currentModule = 'done';
+    session.traceIds.finalPolish = result.traceIds.generate;
   }
 
   private requireSession(sessionId: string, userId?: string): ChapterPipelineSession {

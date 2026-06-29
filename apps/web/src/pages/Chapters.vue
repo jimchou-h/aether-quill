@@ -13,6 +13,7 @@ import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
 import ChapterBatchOptimizeDialog from '../components/chapters/ChapterBatchOptimizeDialog.vue';
 import ChapterPipelineOptimizeDialog from '../components/chapters/ChapterPipelineOptimizeDialog.vue';
+import ChapterFinalPolishDialog from '../components/chapters/ChapterFinalPolishDialog.vue';
 import ChapterBatchPipelineOptimizeDialog from '../components/chapters/ChapterBatchPipelineOptimizeDialog.vue';
 import AiTaskProgressPanel from '../components/common/AiTaskProgressPanel.vue';
 import {
@@ -41,6 +42,7 @@ const batchSummarizing = ref(false);
 const summarizingChapterNo = ref<number | null>(null);
 const generatingRelationChapterNo = ref<number | null>(null);
 const optimizingChapterNo = ref<number | null>(null);
+const finalPolishingChapterNo = ref<number | null>(null);
 const latestSummaryJob = ref<SummaryJob | null>(null);
 const message = ref('');
 const errorMessage = ref('');
@@ -51,9 +53,11 @@ const showImportNovelModal = ref(false);
 const showOptimizeModal = ref(false);
 const showBatchOptimizeModal = ref(false);
 const showPipelineOptimizeModal = ref(false);
+const showFinalPolishModal = ref(false);
 const showBatchPipelineOptimizeModal = ref(false);
 const optimizingChapter = ref<ChapterItem | null>(null);
 const pipelineOptimizingChapter = ref<ChapterItem | null>(null);
+const finalPolishingChapter = ref<ChapterItem | null>(null);
 const batchOptimizeChapters = ref<ChapterItem[]>([]);
 const batchPipelineChapters = ref<ChapterItem[]>([]);
 const exportingChapters = ref(false);
@@ -384,6 +388,18 @@ function handleOpenPipelineOptimizeDialog(chapter: ChapterItem) {
   showPipelineOptimizeModal.value = true;
 }
 
+function handleOpenFinalPolishDialog(chapter: ChapterItem) {
+  finalPolishingChapter.value = chapter;
+  finalPolishingChapterNo.value = chapter.chapterNo;
+  showFinalPolishModal.value = true;
+}
+
+function handleCloseFinalPolishDialog() {
+  showFinalPolishModal.value = false;
+  finalPolishingChapter.value = null;
+  finalPolishingChapterNo.value = null;
+}
+
 function handleClosePipelineOptimizeDialog() {
   showPipelineOptimizeModal.value = false;
   pipelineOptimizingChapter.value = null;
@@ -607,12 +623,14 @@ onUnmounted(() => {
       :summarizing-chapter-no="summarizingChapterNo"
       :generating-relation-chapter-no="generatingRelationChapterNo"
       :optimizing-chapter-no="optimizingChapterNo"
+      :final-polishing-chapter-no="finalPolishingChapterNo"
       :saving-chapter-no="savingChapterNo"
       :parsing-structured-chapter-no="parsingStructuredChapterNo"
       @select="selectedChapterNo = $event"
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
       @optimize="handleOpenOptimizeDialog"
+      @final-polish="handleOpenFinalPolishDialog"
       @pipeline-optimize="handleOpenPipelineOptimizeDialog"
       @batch-optimize="handleOpenBatchOptimizeDialog"
       @batch-pipeline-optimize="handleOpenBatchPipelineOptimizeDialog"
@@ -642,6 +660,14 @@ onUnmounted(() => {
       :chapters="batchOptimizeChapters"
       @close="handleCloseBatchOptimizeDialog"
       @applied="handleBatchOptimizeApplied"
+    />
+
+    <ChapterFinalPolishDialog
+      :visible="showFinalPolishModal"
+      :project-id="projectId"
+      :chapter="finalPolishingChapter"
+      @close="handleCloseFinalPolishDialog"
+      @applied="handleOptimizeApplied"
     />
 
     <ChapterPipelineOptimizeDialog
