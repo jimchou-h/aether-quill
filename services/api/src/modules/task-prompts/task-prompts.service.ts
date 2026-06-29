@@ -6,6 +6,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ProjectsService } from '../projects/projects.service';
 import {
@@ -267,7 +268,12 @@ export class TaskPromptsService {
     return getWarehouseDefaultTaskPromptText(templateKey);
   }
 
-  /** 同步至 orchestrator：仅已发布且与仓库默认不同的项 */
+  /** 运行时生效 Prompt 的内容指纹（用于 Final Polish 幂等） */
+  getTaskPromptFingerprint(projectId: string, templateKey: string): string {
+    const text = this.resolveTaskSystemPrompt(projectId, templateKey);
+    return createHash('sha256').update(text).digest('hex').slice(0, 16);
+  }
+
   getPublishedTaskPromptsMap(projectId: string): Record<string, string> {
     this.projectsService.findOne(projectId);
     const map: Record<string, string> = {};

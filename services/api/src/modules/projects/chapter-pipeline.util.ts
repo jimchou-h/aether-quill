@@ -6,7 +6,7 @@
  *  - `rag-orchestrator/.../task-prompt-defaults.ts`
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { scanContentSafety, type ContentSafetyRule } from '@aether-quill/config';
 import {
   clampChapterOptimizeSegmentCharSize,
@@ -113,7 +113,8 @@ export type ChapterPipelineRunModule =
   | 'homogenization'
   | 'homogenization-scan'
   | 'homogenization-rewrite'
-  | 'run-all';
+  | 'run-all'
+  | 'final-polish';
 
 export type ChapterPipelineStage =
   | 'pipeline_character'
@@ -123,8 +124,21 @@ export type ChapterPipelineStage =
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
+  | 'pipeline_final_polish_done'
   | 'draft_segment'
   | 'merge_validation';
+
+export type FinalPolishQualityStatus = 'passed' | 'passed_with_warnings' | 'blocked';
+
+export interface FinalPolishResult {
+  fingerprint: string;
+  versionText: string;
+  residualIssues: PipelineRuleIssue[];
+  qualityStatus: FinalPolishQualityStatus;
+  traceIds: Record<string, string>;
+  createdAt: string;
+  cached?: boolean;
+}
 
 export type PipelineRuleCategory =
   | 'forbidden_word'
@@ -223,6 +237,8 @@ export interface ChapterPipelineSession {
   currentModule: ChapterPipelineModule | 'done';
   traceIds: Record<string, string>;
   createdAt: Date;
+  sessionMode?: 'pipeline' | 'final-polish';
+  finalPolishResult?: FinalPolishResult;
 }
 
 // ── Defaults ───────────────────────────────────────────────────
@@ -480,6 +496,92 @@ export function buildRulesScanUserPrompt(input: {
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+export function hashFingerprintPart(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
+export interface FinalPolishFingerprintInput {
+  chapterContent: string;
+  chapterUpdatedAt: string;
+  personasFingerprint: string;
+  systemPromptFingerprint: string;
+  pipelineEngineFingerprint: string;
+  contentSafetyRulesFingerprint: string;
+  finalPolishConfigFingerprint: string;
+  segmentConfigFingerprint: string;
+}
+
+export function computeFinalPolishFingerprint(input: FinalPolishFingerprintInput): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        chapterContent: input.chapterContent,
+        chapterUpdatedAt: input.chapterUpdatedAt,
+        personasFingerprint: input.personasFingerprint,
+        systemPromptFingerprint: input.systemPromptFingerprint,
+        pipelineEngineFingerprint: input.pipelineEngineFingerprint,
+        contentSafetyRulesFingerprint: input.contentSafetyRulesFingerprint,
+        finalPolishConfigFingerprint: input.finalPolishConfigFingerprint,
+        segmentConfigFingerprint: input.segmentConfigFingerprint,
+      })
+    )
+    .digest('hex');
+}
+
+export function computePersonasFingerprint(
+  personas: Array<{
+    id: string;
+    name: string;
+    profile: string;
+    state: string;
+    status: string;
+    chapterStates?: Array<{ chapterNo: number; appearance?: string; state?: string }>;
+  }>
+): string {
+  const payload = personas
+    .filter((persona) => persona.status === 'published')
+    .map((persona) => ({
+      id: persona.id,
+      name: persona.name,
+      profile: persona.profile,
+      state: persona.state,
+      chapterStates: persona.chapterStates ?? [],
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return hashFingerprintPart(JSON.stringify(payload));
+}
+
+export function computeContentSafetyRulesFingerprint(rules: ContentSafetyRule[]): string {
+  const payload = rules
+    .map((rule) => ({
+      ruleId: rule.ruleId,
+      pattern: rule.pattern,
+      action: rule.action,
+      severity: rule.severity,
+    }))
+    .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+  return hashFingerprintPart(JSON.stringify(payload));
+}
+
+export function resolveFinalPolishQualityStatus(
+  residualIssues: PipelineRuleIssue[]
+): FinalPolishQualityStatus {
+  const unfixed = residualIssues.filter((issue) => !issue.fixed);
+  if (unfixed.length === 0) {
+    return 'passed';
+  }
+  const blocked = unfixed.some(
+    (issue) =>
+      issue.category === 'forbidden_word' ||
+      issue.fixStrategy === 'manual' ||
+      issue.fixStrategy === 'ai_segment'
+  );
+  if (blocked) {
+    return 'blocked';
+  }
+  return 'passed_with_warnings';
 }
 
 export function buildRulesFixUserPrompt(input: {
@@ -875,6 +977,7 @@ export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
     pipeline_rules_fix: '规则修复中…',
     pipeline_homogenization_scan: '同质化检测中…',
     pipeline_homogenization_rewrite: '同质化改写中…',
+    pipeline_final_polish_done: '终稿已生成，等待审核',
     draft_segment: '分段生成中…',
     merge_validation: '合并校验中…',
   };

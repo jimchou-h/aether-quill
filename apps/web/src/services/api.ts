@@ -1551,6 +1551,7 @@ export const apiClient = {
     chapterNo: number,
     payload?: {
       preset?: 'full' | 'character_rules' | 'sensory_only';
+      mode?: 'pipeline' | 'final-polish';
       configOverrides?: Partial<ChapterPipelineConfig>;
     }
   ) {
@@ -1603,7 +1604,7 @@ export const apiClient = {
     chapterNo: number,
     sessionId: string,
     module: ChapterPipelineRunModule,
-    payload: { issueId?: string } | undefined,
+    payload: { issueId?: string; forceRegenerate?: boolean } | undefined,
     callbacks: ChapterPipelineRunCallbacks
   ): Promise<void> {
     const { useAuthStore } = await import('../stores/auth');
@@ -2095,8 +2096,21 @@ export type ChapterPipelineStage =
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
+  | 'pipeline_final_polish_done'
   | 'draft_segment'
   | 'merge_validation';
+
+export type FinalPolishQualityStatus = 'passed' | 'passed_with_warnings' | 'blocked';
+
+export interface FinalPolishResult {
+  fingerprint: string;
+  versionText: string;
+  residualIssues: PipelineRuleIssue[];
+  qualityStatus: FinalPolishQualityStatus;
+  traceIds: Record<string, string>;
+  createdAt: string;
+  cached?: boolean;
+}
 
 export type ChapterPipelineRunModule =
   | 'character'
@@ -2107,7 +2121,8 @@ export type ChapterPipelineRunModule =
   | 'homogenization'
   | 'homogenization-scan'
   | 'homogenization-rewrite'
-  | 'run-all';
+  | 'run-all'
+  | 'final-polish';
 
 export interface ChapterPipelineConfig {
   pipelinePreset: 'full' | 'character_rules' | 'sensory_only';
@@ -2182,6 +2197,7 @@ export interface ChapterPipelineSessionView {
   ruleIssues?: PipelineRuleIssue[];
   homogenizationReport?: PipelineHomogenizationIssue[];
   sourceUpdatedAt: string;
+  finalPolishResult?: FinalPolishResult;
 }
 
 export interface ChapterPipelineRunCallbacks {
@@ -2228,6 +2244,8 @@ export function formatPipelineStageLabel(
       return '同质化检测中…';
     case 'pipeline_homogenization_rewrite':
       return '同质化改写中…';
+    case 'pipeline_final_polish_done':
+      return '终稿已生成，等待审核';
     case 'draft_segment':
       return segmentIndex && segmentTotal
         ? `分段生成 ${segmentIndex}/${segmentTotal}`
