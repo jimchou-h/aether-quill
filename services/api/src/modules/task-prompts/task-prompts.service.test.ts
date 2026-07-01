@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { BadRequestException } from '@nestjs/common';
 import { TaskPromptsService } from './task-prompts.service';
 import { CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY } from '../projects/chapter-optimize.util';
+import { TASK_PROMPT_DEFINITIONS } from './task-prompt-defaults';
 
 function createService() {
   const projects = new Map<string, { id: string }>();
@@ -36,7 +37,7 @@ describe('TaskPromptsService', () => {
   it('lists warehouse defaults for all whitelist keys', () => {
     const projectId = registerProject('project-test-list');
     const list = service.listByProject(projectId);
-    assert.equal(list.length, 4);
+    assert.equal(list.length, TASK_PROMPT_DEFINITIONS.length);
     assert.ok(list.some((item) => item.templateKey === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY));
     assert.match(list[0]?.defaultText ?? '', /小说/);
   });
