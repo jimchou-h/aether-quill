@@ -12,6 +12,7 @@ import {
   Res,
   UseGuards,
   Request,
+  BadRequestException,
   forwardRef,
 } from '@nestjs/common';
 import { Request as ExpressRequest, Response as ExpressResponse } from 'express';
@@ -21,8 +22,13 @@ import { ChapterPipelineService } from './chapter-pipeline.service';
 import {
   ChapterPipelineGateNotConfirmedError,
   ChapterPipelineModuleFailedError,
+  ChapterPipelineOutlineReviseInvalidError,
 } from './chapter-pipeline.service';
-import type { ChapterPipelineSession } from './chapter-pipeline.util';
+import type {
+  ChapterPipelineOutlineReviseMode,
+  ChapterPipelineOutlineType,
+  ChapterPipelineSession,
+} from './chapter-pipeline.util';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { ProjectContentSafetyRule } from '@aether-quill/config';
 
@@ -590,6 +596,7 @@ export class ProjectsController {
       preset?: string;
       mode?: 'pipeline' | 'final-polish';
       configOverrides?: Record<string, unknown>;
+      selectedPersonaNames?: string[];
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -634,6 +641,58 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/outline')
+  patchChapterPipelineOutline(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      outlineType: ChapterPipelineOutlineType;
+      required: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      suggested: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      confirmed: boolean;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const session = this.chapterPipelineService.patchOutline(
+      sessionId,
+      data.outlineType,
+      {
+        required: data.required,
+        suggested: data.suggested,
+        confirmed: data.confirmed,
+      },
+      req.user?.userId
+    );
+    return serializePipelineSessionView(session);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/outline/revise')
+  async reviseChapterPipelineOutline(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      outlineType: ChapterPipelineOutlineType;
+      mode?: ChapterPipelineOutlineReviseMode;
+      currentOutline: {
+        required: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+        suggested: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      };
+      userFeedback?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      return await this.chapterPipelineService.reviseOutline(sessionId, data, req.user?.userId);
+    } catch (error) {
+      if (error instanceof ChapterPipelineOutlineReviseInvalidError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/apply')
   applyChapterPipeline(
     @Param('sessionId') sessionId: string,
@@ -642,6 +701,7 @@ export class ProjectsController {
       expectedChapterUpdatedAt: string;
       preserveSummary?: boolean;
       useVersion?: 'afterRules' | 'final';
+      draftTextOverride?: string;
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -690,8 +750,8 @@ export class ProjectsController {
           onEnd: (payload) => {
             writeEvent({ event: 'end', ...payload });
           },
-          onGate: (gate) => {
-            writeEvent({ event: 'end', gateRequired: true, gate });
+          onGate: (gate, payload) => {
+            writeEvent({ event: 'end', gateRequired: true, gate, ...(payload ?? {}) });
           },
           onError: (message) => {
             writeEvent({ event: 'error', data: message });
@@ -1069,7 +1129,10 @@ function serializePipelineSessionView(session: ChapterPipelineSession) {
     config: session.config,
     currentModule: session.currentModule,
     versions: session.versions,
+    characterOutline: session.characterOutline,
+    characterTraitsOutline: session.characterTraitsOutline,
     sensoryOutline: session.sensoryOutline,
+    selectedPersonaNames: session.selectedPersonaNames,
     ruleIssues: session.ruleIssues,
     homogenizationReport: session.homogenizationReport,
     sourceUpdatedAt: session.sourceUpdatedAt,

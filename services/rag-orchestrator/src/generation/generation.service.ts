@@ -22,7 +22,7 @@ import {
   parseIdentityRelationsFromModelContent,
 } from './identity-relation-extract';
 import { buildSummaryLineFromSnapshot } from '../context/persona-snapshot';
-import { logAssembledGenerationPrompt } from './generation-prompt-log';
+import { logAssembledGenerationPrompt, logGenerationResponse } from './generation-prompt-log';
 import {
   buildLlmMessages,
   buildLegacySingleUserPrompt,
@@ -144,6 +144,7 @@ export class GenerationService {
         completedAt: new Date().toISOString(),
         usage: response.usage,
       });
+      logGenerationResponse(trace, response.content);
       return response.content;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Generation failed';
@@ -178,6 +179,7 @@ export class GenerationService {
         result: fullContent,
         completedAt: new Date().toISOString(),
       });
+      logGenerationResponse(trace, fullContent);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Generation failed';
       this.updateTrace(trace.id, {

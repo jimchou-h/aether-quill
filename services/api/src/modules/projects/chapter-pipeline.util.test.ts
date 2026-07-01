@@ -2,9 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyRuleSegmentFix,
+  buildCharacterOutlineUserPrompt,
+  buildOutlineGateRecheckUserPrompt,
   computeFinalPolishFingerprint,
+  filterPipelinePersonas,
   getPipelineInputText,
+  getPostCharacterText,
   mergePipelineConfig,
+  parsePipelineOutlineJson,
+  resolveOutlineGenerationTemplateKey,
+  resolveOutlineSourceText,
+  synthesizePipelineOutlineItemText,
+  shouldRunCharacterTraitsModule,
   relocateRuleIssuesInText,
   resolveFinalPolishQualityStatus,
   resolvePipelineApplyText,
@@ -12,10 +21,32 @@ import {
   resolveRuleIssueSpanStrict,
   sanitizeRuleIssuesForText,
   sanitizeSensoryOutlineWithContentScan,
+  stripPipelineOutlineJsonFence,
+  CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT,
+  CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   type ChapterPipelineSession,
   type PipelineRuleIssue,
 } from './chapter-pipeline.util';
 import type { ContentSafetyRule } from '@aether-quill/config';
+
+test('character traits outline default prompt specifies required/suggested JSON', () => {
+  assert.match(CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT, /"required":\[/);
+  assert.match(CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT, /"suggested":\[/);
+  assert.doesNotMatch(CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT, /结构同角色调整大纲/);
+  assert.match(CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT, /不要根级数组/);
+});
+
+test('buildCharacterOutlineUserPrompt reinforces JSON-only output in user message', () => {
+  const prompt = buildCharacterOutlineUserPrompt({
+    sourceText: '正文',
+    protagonistContext: '',
+    personaBlock: '',
+  });
+  assert.match(prompt, /只输出一个 JSON 对象/);
+  assert.match(prompt, /不要报告式说明/);
+});
 
 test('getPipelineInputText uses version chain', () => {
   const session: ChapterPipelineSession = {
@@ -34,6 +65,9 @@ test('getPipelineInputText uses version chain', () => {
     config: {
       pipelinePreset: 'full',
       pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterTraitsEnabled: true,
       pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
@@ -50,6 +84,164 @@ test('getPipelineInputText uses version chain', () => {
   assert.equal(getPipelineInputText(session, 4), 'version-c');
 });
 
+test('getPostCharacterText prefers afterCharacterTraits', () => {
+  const session: ChapterPipelineSession = {
+    sessionId: 's2',
+    projectId: 'p1',
+    chapterNo: 2,
+    sourceText: 'original',
+    sourceUpdatedAt: new Date().toISOString(),
+    versions: {
+      original: 'original',
+      afterCharacter: 'version-a',
+      afterCharacterTraits: 'version-a-prime',
+    },
+    config: {
+      pipelinePreset: 'full',
+      pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterTraitsEnabled: true,
+      pipelineRulesFixMode: 'semi',
+      pipelineHomogenizationEnabled: false,
+      pipelineHomogenizationPriorChapterCount: 3,
+      pipelineEnabledModules: [1, 2, 3],
+    },
+    currentModule: 2,
+    traceIds: {},
+    createdAt: new Date(),
+  };
+  assert.equal(getPostCharacterText(session), 'version-a-prime');
+  assert.equal(getPipelineInputText(session, 2), 'version-a-prime');
+});
+
+test('parsePipelineOutlineJson preserves persona fields', () => {
+  const parsed = parsePipelineOutlineJson(
+    JSON.stringify({
+      required: [
+        {
+          id: 'r1',
+          text: '补发色描写',
+          priority: 'required',
+          personaName: '林默',
+          featureRef: '外观：及腰黑发',
+          anchorHint: '初见段',
+        },
+      ],
+      suggested: [],
+    })
+  );
+  assert.equal(parsed.required[0]?.personaName, '林默');
+  assert.equal(parsed.required[0]?.featureRef, '外观：及腰黑发');
+});
+
+test('parsePipelineOutlineJson accepts character_adjustments without text field', () => {
+  const parsed = parsePipelineOutlineJson(
+    JSON.stringify({
+      character_adjustments: [
+        {
+          personaName: '林默',
+          featureRef: '体脂12%，八块腹肌线条凌厉（角色卡·当前状态）',
+          anchorHint: '【本章第1段】林默被唤醒后睁开眼，晨光切出光柱的描写后，可补充其体脂极低、腹肌轮廓在光影下分明的细节。',
+        },
+      ],
+    })
+  );
+  assert.equal(parsed.required.length, 1);
+  assert.equal(parsed.suggested.length, 0);
+  assert.equal(parsed.required[0]?.personaName, '林默');
+  assert.match(parsed.required[0]?.text ?? '', /林默/);
+  assert.match(parsed.required[0]?.text ?? '', /体脂12%/);
+});
+
+test('parsePipelineOutlineJson maps items array by priority', () => {
+  const parsed = parsePipelineOutlineJson(
+    JSON.stringify({
+      items: [
+        { id: 'a1', text: '必须补', priority: 'required' },
+        { id: 'a2', text: '可选补', priority: 'suggested' },
+      ],
+    })
+  );
+  assert.equal(parsed.required.length, 1);
+  assert.equal(parsed.suggested.length, 1);
+});
+
+test('synthesizePipelineOutlineItemText joins persona fields', () => {
+  const text = synthesizePipelineOutlineItemText({
+    personaName: '林默',
+    featureRef: '黑发',
+    anchorHint: '初见段',
+  });
+  assert.match(text, /林默/);
+  assert.match(text, /黑发/);
+  assert.match(text, /初见段/);
+});
+
+test('parsePipelineOutlineJson accepts root-level persona array', () => {
+  const parsed = parsePipelineOutlineJson(
+    `\`\`\`json
+[
+  {
+    "personaName": "林默",
+    "featureRef": "言语掌控",
+    "anchorHint": "在清晨骑乘对话中补充陈述句与疑问句。"
+  },
+  {
+    "personaName": "田曦薇",
+    "featureRef": "事后安静",
+    "anchorHint": "或标记为\\"suggested：若不破坏对话节奏，可先写半秒安静\\""
+  }
+]
+\`\`\``
+  );
+  assert.equal(parsed.required.length, 1);
+  assert.equal(parsed.suggested.length, 1);
+  assert.equal(parsed.required[0]?.personaName, '林默');
+  assert.equal(parsed.suggested[0]?.personaName, '田曦薇');
+});
+
+test('filterPipelinePersonas keeps only selected published personas', () => {
+  const personas = [
+    { name: '甲', status: 'published' },
+    { name: '乙', status: 'published' },
+    { name: '丙', status: 'draft' },
+  ];
+  assert.deepEqual(filterPipelinePersonas(personas, ['甲']), [{ name: '甲', status: 'published' }]);
+  assert.equal(filterPipelinePersonas(personas).length, 2);
+});
+
+test('shouldRunCharacterTraitsModule requires module 1 enabled', () => {
+  assert.equal(
+    shouldRunCharacterTraitsModule({
+      pipelinePreset: 'full',
+      pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterTraitsEnabled: true,
+      pipelineRulesFixMode: 'semi',
+      pipelineHomogenizationEnabled: false,
+      pipelineHomogenizationPriorChapterCount: 3,
+      pipelineEnabledModules: [1, 2, 3],
+    }),
+    true
+  );
+  assert.equal(
+    shouldRunCharacterTraitsModule({
+      pipelinePreset: 'sensory_only',
+      pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterTraitsEnabled: true,
+      pipelineRulesFixMode: 'semi',
+      pipelineHomogenizationEnabled: false,
+      pipelineHomogenizationPriorChapterCount: 3,
+      pipelineEnabledModules: [2],
+    }),
+    false
+  );
+});
+
 test('resolvePipelineApplyText prefers final when requested', () => {
   const session: ChapterPipelineSession = {
     sessionId: 's1',
@@ -61,6 +253,9 @@ test('resolvePipelineApplyText prefers final when requested', () => {
     config: {
       pipelinePreset: 'full',
       pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterTraitsEnabled: true,
       pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
@@ -327,4 +522,123 @@ test('resolveFinalPolishQualityStatus blocks unresolved hard issues', () => {
     ]),
     'blocked'
   );
+});
+
+test('resolveOutlineGenerationTemplateKey maps outline types to module templates', () => {
+  assert.equal(
+    resolveOutlineGenerationTemplateKey('character'),
+    CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY
+  );
+  assert.equal(
+    resolveOutlineGenerationTemplateKey('character-traits'),
+    CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY
+  );
+  assert.equal(
+    resolveOutlineGenerationTemplateKey('sensory'),
+    CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY
+  );
+});
+
+test('resolveOutlineSourceText aligns with outline module input text', () => {
+  const session = {
+    chapterNo: 3,
+    versions: {
+      original: '原文',
+      afterCharacter: '角色调整后',
+      afterCharacterTraits: '特征润色后',
+    },
+  } as ChapterPipelineSession;
+
+  assert.equal(resolveOutlineSourceText(session, 'character'), '原文');
+  assert.equal(resolveOutlineSourceText(session, 'character-traits'), '角色调整后');
+  assert.equal(resolveOutlineSourceText(session, 'sensory'), '特征润色后');
+});
+
+test('buildOutlineGateRecheckUserPrompt recheck mirrors first-run output contract', () => {
+  const baseUserPrompt = buildCharacterOutlineUserPrompt({
+    sourceText: '章节正文',
+    protagonistContext: '主角上下文',
+    personaBlock: '人物A',
+  });
+  const prompt = buildOutlineGateRecheckUserPrompt({
+    baseUserPrompt,
+    currentOutline: {
+      required: [{ id: 'r1', text: '待改项', priority: 'required' }],
+      suggested: [],
+    },
+    mode: 'recheck',
+    revisionRound: 2,
+  });
+
+  assert.match(prompt, /<chapter-original>\n章节正文\n<\/chapter-original>/);
+  assert.match(prompt, /<current-outline>/);
+  assert.match(prompt, /与首次生成完全相同/);
+  assert.doesNotMatch(prompt, /大纲复核说明/);
+  assert.doesNotMatch(prompt, /重新诊断/);
+});
+
+test('buildOutlineGateRecheckUserPrompt revise mode includes user feedback', () => {
+  const prompt = buildOutlineGateRecheckUserPrompt({
+    baseUserPrompt: '<chapter-original>\nx\n</chapter-original>',
+    currentOutline: { required: [], suggested: [] },
+    mode: 'revise',
+    revisionRound: 1,
+    userFeedback: '删掉第二条',
+  });
+
+  assert.match(prompt, /<user-feedback>\n删掉第二条\n<\/user-feedback>/);
+  assert.match(prompt, /与首次生成相同诊断流程/);
+  assert.doesNotMatch(prompt, /按意见修订/);
+});
+
+test('parsePipelineOutlineJson normalizes diagnostic split fields into text', () => {
+  const parsed = parsePipelineOutlineJson(
+    JSON.stringify({
+      required: [
+        {
+          id: 'r3',
+          character: '田曦薇',
+          category: '核心算法偏离',
+          priority: 'required',
+          location: '第52段“右侧脸颊上的梨涡因为哭泣而深深陷着”',
+          problem: '梨涡情绪晴雨表规则：痛苦/被强迫时梨涡应消失或若隐若现，深陷是开心标志',
+          fix: '改为梨涡消失或若隐若现',
+        },
+      ],
+      suggested: [],
+    })
+  );
+
+  assert.equal(parsed.required.length, 1);
+  assert.match(parsed.required[0]?.text ?? '', /田曦薇/);
+  assert.match(parsed.required[0]?.text ?? '', /核心算法偏离/);
+  assert.match(parsed.required[0]?.text ?? '', /梨涡/);
+  assert.match(parsed.required[0]?.text ?? '', /修改方向：改为梨涡消失或若隐若现/);
+  assert.equal(parsed.required[0]?.personaName, '田曦薇');
+});
+
+test('stripPipelineOutlineJsonFence extracts JSON object after prose preamble', () => {
+  const raw = [
+    '好的，作为资深小说编辑，我已根据诊断步骤，对章节正文进行角色维度诊断。以下是修订后的完整调整大纲。',
+    '{"required":[{"id":"r1","text":"调整口吻","priority":"required"}],"suggested":[]}',
+  ].join('\n');
+
+  const cleaned = stripPipelineOutlineJsonFence(raw);
+  const parsed = parsePipelineOutlineJson(raw);
+  assert.equal(cleaned.startsWith('{'), true);
+  assert.equal(parsed.required.length, 1);
+  assert.equal(parsed.required[0]?.text, '调整口吻');
+});
+
+test('stripPipelineOutlineJsonFence extracts fenced JSON from mixed output', () => {
+  const raw = [
+    '说明文字',
+    '```json',
+    '{"required":[],"suggested":[{"id":"s1","text":"建议项","priority":"suggested"}]}',
+    '```',
+  ].join('\n');
+
+  const parsed = parsePipelineOutlineJson(raw);
+  assert.equal(parsed.suggested.length, 1);
+  assert.equal(parsed.suggested[0]?.text, '建议项');
 });

@@ -71,6 +71,7 @@ export const GenerationErrorCodes = {
   ChapterPipelineGateNotConfirmed: 1328,
   ChapterPipelineModuleFailed: 1329,
   ChapterPipelineInvalidConfig: 1330,
+  ChapterPipelineOutlineReviseInvalid: 1331,
 } as const;
 
 /**
@@ -130,7 +131,8 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     if (errorCode === 1323) return 502;
     if (errorCode === 1324 || errorCode === 1325) return 400;
     if (errorCode === 1326) return 404;
-    if (errorCode === 1327 || errorCode === 1328 || errorCode === 1330) return 400;
+    if (errorCode === 1327 || errorCode === 1328 || errorCode === 1330 || errorCode === 1331)
+      return 400;
     if (errorCode === 1329) return 502;
     if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
     if (errorCode === 1311) return 504;
@@ -203,6 +205,7 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1328: 'Chapter pipeline gate not confirmed',
     1329: 'Chapter pipeline module failed',
     1330: 'Chapter pipeline invalid config',
+    1331: 'Chapter pipeline outline revise invalid',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

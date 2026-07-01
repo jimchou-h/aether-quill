@@ -164,9 +164,6 @@ export class TaskPromptsService {
     if (!text) {
       throw new BadRequestException('draftText 不能为空');
     }
-    if (text.length > 8000) {
-      throw new BadRequestException('draftText 长度不能超过 8000 字符');
-    }
 
     const record = this.getOrInitRecord(projectId, templateKey);
     const now = new Date().toISOString();

@@ -13,7 +13,8 @@ export type GenerationPromptLogKind =
   | 'outline'
   | 'draft'
   | 'optimize-plan'
-  | 'optimize-draft';
+  | 'optimize-draft'
+  | 'pipeline';
 
 /** @deprecated 使用 GenerationPromptLogKind */
 export type WriteChapterPromptKind = GenerationPromptLogKind;
@@ -36,6 +37,9 @@ export function resolveGenerationPromptLogKind(
   }
   if (templateKey === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY) {
     return 'optimize-draft';
+  }
+  if (templateKey.startsWith('chapter.pipeline.')) {
+    return 'pipeline';
   }
   return null;
 }
@@ -60,6 +64,7 @@ const KIND_LABEL: Record<GenerationPromptLogKind, string> = {
   draft: '生成正文',
   'optimize-plan': '优化生成方案',
   'optimize-draft': '优化生成正文',
+  pipeline: '分步精修',
 };
 
 /**
@@ -117,6 +122,47 @@ export function logAssembledGenerationPrompt(
     : userMessage;
 
   console.log(`${header}\n${body}\n${'='.repeat(72)}\n`);
+}
+
+/** 打印分步精修等任务的 LLM 原始返回（与 logAssembledGenerationPrompt 配套） */
+export function logGenerationResponse(trace: TraceRecord, content: string): void {
+  const kind = resolveGenerationPromptLogKind(trace);
+  if (!kind || !isGenerationPromptLoggingEnabled()) {
+    return;
+  }
+
+  const label = KIND_LABEL[kind];
+  const templateKey =
+    typeof trace.context?.templateKey === 'string' ? trace.context.templateKey : undefined;
+  const responseText = typeof content === 'string' ? content.trim() : '';
+
+  logger.info('generation_response', {
+    traceId: trace.id,
+    projectId: trace.projectId,
+    kind,
+    templateKey,
+    responseChars: responseText.length,
+    response: responseText || undefined,
+  });
+
+  console.log(
+    [
+      '',
+      '='.repeat(72),
+      `[rag-orchestrator] ${label} · LLM 返回`,
+      `traceId=${trace.id}`,
+      `projectId=${trace.projectId}`,
+      templateKey ? `templateKey=${templateKey}` : null,
+      `responseChars=${responseText.length}`,
+      '='.repeat(72),
+      '【response】',
+      responseText,
+      '='.repeat(72),
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  );
 }
 
 /** @deprecated 使用 logAssembledGenerationPrompt */

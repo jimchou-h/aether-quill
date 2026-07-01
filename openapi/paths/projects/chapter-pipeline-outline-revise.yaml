@@ -1,0 +1,58 @@
+post:
+  tags:
+    - Projects
+  summary: AI-assisted pipeline outline revision
+  description: |
+    Re-checks or revises outline JSON using the same module outline prompt as initial generation.
+    `mode=recheck` re-diagnoses against chapter text; `mode=revise` also applies user feedback.
+    Synchronous JSON response (not SSE).
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineOutlineReviseRequest'
+  responses:
+    '200':
+      description: Revised outline
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  payload:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineOutlineReviseResult'
+    '400':
+      description: Invalid feedback (1331) or gate error
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Session not found (1326)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

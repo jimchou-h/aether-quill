@@ -165,7 +165,7 @@ async function runQueue() {
   }
   queueRunning.value = false;
   if (awaitingOutlineCount.value > 0) {
-    presentInfo(`${awaitingOutlineCount.value} 章待确认感官大纲，请逐章打开分步精修弹窗处理`);
+    presentInfo(`${awaitingOutlineCount.value} 章待确认大纲，请逐章打开分步精修弹窗处理`);
   }
 }
 
