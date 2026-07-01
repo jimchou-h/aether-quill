@@ -31,7 +31,10 @@ post:
       schema:
         type: string
         enum:
+          - character-outline
           - character
+          - character-traits-outline
+          - character-traits
           - sensory-outline
           - sensory-rewrite
           - rules-scan

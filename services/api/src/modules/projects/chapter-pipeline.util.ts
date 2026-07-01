@@ -19,6 +19,11 @@ import {
 // ── Template keys ──────────────────────────────────────────────
 
 export const CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY = 'chapter.pipeline.character';
+export const CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY = 'chapter.pipeline.character.outline';
+export const CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY =
+  'chapter.pipeline.character-traits.outline';
+export const CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY = 'chapter.pipeline.character-traits';
+export const CHAPTER_PIPELINE_OUTLINE_REVISE_TEMPLATE_KEY = 'chapter.pipeline.outline.revise';
 export const CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY = 'chapter.pipeline.sensory.outline';
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY = 'chapter.pipeline.sensory.rewrite';
 export const CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY = 'chapter.pipeline.rules.scan';
@@ -29,7 +34,11 @@ export const CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_TEMPLATE_KEY =
   'chapter.pipeline.homogenization.rewrite';
 
 export const CHAPTER_PIPELINE_TEMPLATE_KEYS = [
+  CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_OUTLINE_REVISE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
@@ -45,16 +54,65 @@ const DIMENSION_BOUNDARY = '【维度边界】本步骤 ONLY 负责本模块职�
 export const CHAPTER_PIPELINE_CHARACTER_SYSTEM_PROMPT = [
   '你是一位资深小说编辑，正在对章节正文进行「角色维度」精修。',
   DIMENSION_BOUNDARY,
-  'ONLY：校对话风格、行为反应、人物互动方式、情感表达是否符合人物卡与章节进度。',
-  '禁止：修改感官描写密度与质量、禁用词与叙事规则、解释型说明、跨章写法。',
+  'ONLY：严格按已确认的 <character-outline> 校对话风格、行为反应、人物互动方式、情感表达。',
+  '禁止：修改感官描写密度与质量、禁用词与叙事规则、解释型说明、跨章写法、角色卡特征硬补（特征归模块一-b）。',
   '直接输出改写后的完整章节正文，不要输出方案、说明或 Markdown。',
   '必须以下文 <chapter-original> 为蓝本；输出语言、人称、人物名称与原文保持一致。',
+].join('\n');
+
+export const CHAPTER_PIPELINE_CHARACTER_OUTLINE_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在对章节正文制定「角色调整大纲」。',
+  DIMENSION_BOUNDARY,
+  'ONLY：分析对白口吻、行为反应、互动方式等待调整项，列出修改方向。',
+  '禁止：输出正文、修改感官描写、禁用词、角色卡特征补缺（特征归模块一-b）。',
+  '只输出 JSON，结构：{"required":[{"id":"r1","text":"...","priority":"required"}],"suggested":[{"id":"s1","text":"...","priority":"suggested"}]}',
+  '📌 required = 必须调整项；✨ suggested = 建议调整项。',
+].join('\n');
+
+/** 角色调整大纲 user 侧 JSON 格式（每次请求附带，避免自定义 system 写成「诊断报告」时模型输出散文） */
+export const CHAPTER_PIPELINE_CHARACTER_OUTLINE_JSON_FORMAT = [
+  '只输出一个 JSON 对象（不要 Markdown 代码块、不要报告式说明、不要「以下是…」类前言）：',
+  '{"required":[{"id":"r1","text":"【角色名-问题类型】定位原文 + 冲突描述 + 修改方向","priority":"required"}],"suggested":[{"id":"s1","text":"...","priority":"suggested"}]}',
+  '每条仅允许 id、text、priority（选填 personaName/featureRef/anchorHint）；禁止 character、category、location、problem、fix 等分散字段。',
+  '如无需要调整项，对应数组为 []。',
+].join('\n');
+
+/** 特征润色大纲唯一合法 JSON 形态（写入 system / user prompt，解析器亦兼容历史变体） */
+export const CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_JSON_FORMAT = [
+  '只输出一个 JSON 对象（不要 Markdown 代码块、不要根级数组、不要用 character_adjustments 等其它字段名）：',
+  '{"required":[{"id":"r1","text":"【角色名】缺失特征：……。建议插入：……","priority":"required","personaName":"角色名","featureRef":"角色卡摘录","anchorHint":"落笔位置"}],"suggested":[{"id":"s1","text":"……","priority":"suggested","personaName":"角色名","featureRef":"……","anchorHint":"……"}]}',
+  '📌 required = 角色卡硬性要求且本章可补；✨ suggested = 可补可不补或场景边缘；无缺失则对应数组为 []。',
+  '每条必须有 text；personaName / featureRef / anchorHint 选填但推荐填写。',
+].join('\n');
+
+export const CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在对章节正文制定「角色特征润色大纲」。',
+  DIMENSION_BOUNDARY,
+  'ONLY：对照人物卡，识别本章正文中缺失的、角色卡明确要求的外观/气质/习惯等特征描写。',
+  '禁止：修改对白、情节走向、体位顺序、感官描写；禁止补充角色卡未写明的特征。',
+  CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_JSON_FORMAT,
+].join('\n');
+
+export const CHAPTER_PIPELINE_CHARACTER_TRAITS_SYSTEM_PROMPT = [
+  '你是一位资深小说写作助手，正在按已确认的特征润色大纲补充角色卡特征描写。',
+  DIMENSION_BOUNDARY,
+  'ONLY：在合理场景插入或微调相邻句以补足特征；不改动既有情节骨架。',
+  '禁止：修改对白内容/口吻、情节走向、人物出场顺序、体位顺序；禁止新增或删除对白句子、人物、体位、场景。',
+  '直接输出完整正文，不要输出说明或 Markdown。',
+].join('\n');
+
+export const CHAPTER_PIPELINE_OUTLINE_REVISE_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在根据用户意见修订分步精修大纲 JSON。',
+  DIMENSION_BOUNDARY,
+  'ONLY：按 userFeedback 修订当前大纲条目（增删改、调整 priority）；禁止输出正文。',
+  '禁止越界修改其他模块职责的条目（角色调整 vs 特征润色 vs 感官优化边界不可混淆）。',
+  '只输出 JSON：{"required":[...],"suggested":[...]}，结构与输入大纲一致。',
 ].join('\n');
 
 export const CHAPTER_PIPELINE_SENSORY_OUTLINE_SYSTEM_PROMPT = [
   '你是一位资深小说编辑，正在对章节正文制定「感官优化大纲」。',
   DIMENSION_BOUNDARY,
-  'ONLY：分析性爱/亲密场景的感官描写质量，列出需加强或调整的感官要点。',
+  'ONLY：分析亲密场景的感官描写质量，列出需加强或调整的感官要点。',
   '禁止：修改角色性格、对白口吻；禁止在建议中写出可直接粘贴进正文的成品描写例句。',
   '每条建议的 text 只写「问题定位 + 修改方向 + 感官切入角度」，不得包含引号内的示例句子、不得写出具体比喻或器官级描写。',
   '只输出 JSON，结构：{"required":[{"id":"r1","text":"...","priority":"required"}],"suggested":[{"id":"s1","text":"...","priority":"suggested"}]}',
@@ -105,7 +163,10 @@ export type ChapterPipelinePreset = 'full' | 'character_rules' | 'sensory_only';
 export type ChapterPipelineRulesFixMode = 'auto' | 'semi' | 'manual';
 export type ChapterPipelineModule = 1 | 2 | 3 | 4;
 export type ChapterPipelineRunModule =
+  | 'character-outline'
   | 'character'
+  | 'character-traits-outline'
+  | 'character-traits'
   | 'sensory-outline'
   | 'sensory-rewrite'
   | 'rules-scan'
@@ -116,8 +177,19 @@ export type ChapterPipelineRunModule =
   | 'run-all'
   | 'final-polish';
 
+export type ChapterPipelineOutlineType = 'character' | 'character-traits' | 'sensory';
+export type ChapterPipelineOutlineReviseMode = 'recheck' | 'revise';
+
+export type ChapterPipelineOutlineGate =
+  | 'character-outline'
+  | 'character-traits-outline'
+  | 'sensory-outline';
+
 export type ChapterPipelineStage =
+  | 'pipeline_character_outline'
   | 'pipeline_character'
+  | 'pipeline_character_traits_outline'
+  | 'pipeline_character_traits'
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
   | 'pipeline_rules_scan'
@@ -176,6 +248,9 @@ export interface ProtagonistUnlockRule {
 export interface ChapterPipelineConfig {
   pipelinePreset: ChapterPipelinePreset;
   pipelineSkipSensoryOutlineReview: boolean;
+  pipelineSkipCharacterOutlineReview: boolean;
+  pipelineSkipCharacterTraitsOutlineReview: boolean;
+  pipelineCharacterTraitsEnabled: boolean;
   pipelineRulesFixMode: ChapterPipelineRulesFixMode;
   pipelineHomogenizationEnabled: boolean;
   pipelineHomogenizationPriorChapterCount: number;
@@ -188,6 +263,22 @@ export interface PipelineOutlineItem {
   priority: 'required' | 'suggested';
   /** 确定性内容安全扫描告警（如禁用词） */
   contentWarnings?: string[];
+  personaId?: string;
+  personaName?: string;
+  featureRef?: string;
+  anchorHint?: string;
+}
+
+export interface PipelineOutlineState {
+  required: PipelineOutlineItem[];
+  suggested: PipelineOutlineItem[];
+  userConfirmed: boolean;
+  revisionRound: number;
+  /** 最近 N 轮 AI 修订快照，用于撤销 */
+  revisionHistory?: Array<{
+    required: PipelineOutlineItem[];
+    suggested: PipelineOutlineItem[];
+  }>;
 }
 
 export interface PipelineRuleIssue {
@@ -201,6 +292,11 @@ export interface PipelineRuleIssue {
   fixed?: boolean;
   /** deterministic = 正则/禁用词引擎；llm = 扫描 Prompt 返回（不可信 offset） */
   source?: 'deterministic' | 'llm';
+  /** 内容安全规则 id（自定义禁用词命中时） */
+  ruleId?: string;
+  /** 低风险 replace 动作的替换文本 */
+  replacement?: string;
+  contentSafetyAction?: 'mark' | 'replace' | 'rewrite_sentence' | 'block';
 }
 
 export interface PipelineHomogenizationIssue {
@@ -213,6 +309,7 @@ export interface PipelineHomogenizationIssue {
 export interface ChapterPipelineVersions {
   original: string;
   afterCharacter?: string;
+  afterCharacterTraits?: string;
   afterSensory?: string;
   afterRules?: string;
   final?: string;
@@ -226,11 +323,11 @@ export interface ChapterPipelineSession {
   sourceText: string;
   sourceUpdatedAt: string;
   versions: ChapterPipelineVersions;
-  sensoryOutline?: {
-    required: PipelineOutlineItem[];
-    suggested: PipelineOutlineItem[];
-    userConfirmed: boolean;
-  };
+  /** 用户检索预览确认后注入的角色名（空则回退全部已发布人物） */
+  selectedPersonaNames?: string[];
+  characterOutline?: PipelineOutlineState;
+  characterTraitsOutline?: PipelineOutlineState;
+  sensoryOutline?: PipelineOutlineState;
   ruleIssues?: PipelineRuleIssue[];
   homogenizationReport?: PipelineHomogenizationIssue[];
   config: ChapterPipelineConfig;
@@ -246,11 +343,17 @@ export interface ChapterPipelineSession {
 export const DEFAULT_PIPELINE_CONFIG: ChapterPipelineConfig = {
   pipelinePreset: 'full',
   pipelineSkipSensoryOutlineReview: false,
+  pipelineSkipCharacterOutlineReview: false,
+  pipelineSkipCharacterTraitsOutlineReview: false,
+  pipelineCharacterTraitsEnabled: true,
   pipelineRulesFixMode: 'semi',
   pipelineHomogenizationEnabled: false,
   pipelineHomogenizationPriorChapterCount: 3,
   pipelineEnabledModules: [1, 2, 3],
 };
+
+export const PIPELINE_OUTLINE_REVISION_HISTORY_LIMIT = 5;
+export const PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS = 2000;
 
 export const DEFAULT_PROTAGONIST_PROGRESS_RULES: ProtagonistUnlockRule[] = [];
 
@@ -298,6 +401,18 @@ export function mergePipelineConfig(
       overrides?.pipelineSkipSensoryOutlineReview ??
       projectDefaults.pipelineSkipSensoryOutlineReview ??
       false,
+    pipelineSkipCharacterOutlineReview:
+      overrides?.pipelineSkipCharacterOutlineReview ??
+      projectDefaults.pipelineSkipCharacterOutlineReview ??
+      false,
+    pipelineSkipCharacterTraitsOutlineReview:
+      overrides?.pipelineSkipCharacterTraitsOutlineReview ??
+      projectDefaults.pipelineSkipCharacterTraitsOutlineReview ??
+      false,
+    pipelineCharacterTraitsEnabled:
+      overrides?.pipelineCharacterTraitsEnabled ??
+      projectDefaults.pipelineCharacterTraitsEnabled ??
+      true,
     pipelineRulesFixMode:
       overrides?.pipelineRulesFixMode ?? projectDefaults.pipelineRulesFixMode ?? 'semi',
     pipelineHomogenizationEnabled: homogenizationEnabled,
@@ -314,6 +429,137 @@ export function mergePipelineConfig(
   };
 }
 
+export function shouldRunCharacterTraitsModule(config: ChapterPipelineConfig): boolean {
+  return config.pipelineCharacterTraitsEnabled && config.pipelineEnabledModules.includes(1);
+}
+
+export function filterPipelinePersonas<T extends { name: string; status: string }>(
+  personas: T[],
+  selectedPersonaNames?: string[]
+): T[] {
+  const published = personas.filter((persona) => persona.status === 'published');
+  if (!selectedPersonaNames?.length) {
+    return published;
+  }
+  const selected = new Set(
+    selectedPersonaNames.map((name) => name.trim()).filter((name) => name.length > 0)
+  );
+  if (selected.size === 0) {
+    return published;
+  }
+  return published.filter((persona) => selected.has(persona.name));
+}
+
+export function getPostCharacterText(session: ChapterPipelineSession): string {
+  return (
+    session.versions.afterCharacterTraits ??
+    session.versions.afterCharacter ??
+    session.versions.original
+  );
+}
+
+export function resolveOutlineSkipReview(
+  config: ChapterPipelineConfig,
+  outlineType: ChapterPipelineOutlineType
+): boolean {
+  switch (outlineType) {
+    case 'character':
+      return config.pipelineSkipCharacterOutlineReview;
+    case 'character-traits':
+      return config.pipelineSkipCharacterTraitsOutlineReview;
+    case 'sensory':
+      return config.pipelineSkipSensoryOutlineReview;
+    default:
+      return false;
+  }
+}
+
+export function getOutlineState(
+  session: ChapterPipelineSession,
+  outlineType: ChapterPipelineOutlineType
+): PipelineOutlineState | undefined {
+  switch (outlineType) {
+    case 'character':
+      return session.characterOutline;
+    case 'character-traits':
+      return session.characterTraitsOutline;
+    case 'sensory':
+      return session.sensoryOutline;
+    default:
+      return undefined;
+  }
+}
+
+export function setOutlineState(
+  session: ChapterPipelineSession,
+  outlineType: ChapterPipelineOutlineType,
+  state: PipelineOutlineState
+): void {
+  switch (outlineType) {
+    case 'character':
+      session.characterOutline = state;
+      break;
+    case 'character-traits':
+      session.characterTraitsOutline = state;
+      break;
+    case 'sensory':
+      session.sensoryOutline = state;
+      break;
+    default:
+      break;
+  }
+}
+
+export function resolveOutlineGenerationTemplateKey(
+  outlineType: ChapterPipelineOutlineType
+): string {
+  switch (outlineType) {
+    case 'character':
+      return CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY;
+    case 'character-traits':
+      return CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY;
+    case 'sensory':
+      return CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY;
+    default:
+      return CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY;
+  }
+}
+
+export function resolveOutlineSourceText(
+  session: ChapterPipelineSession,
+  outlineType: ChapterPipelineOutlineType
+): string {
+  switch (outlineType) {
+    case 'character':
+      return getPipelineInputText(session, 1);
+    case 'character-traits':
+      return session.versions.afterCharacter ?? getPipelineInputText(session, 1);
+    case 'sensory':
+      return getPipelineInputText(session, 2);
+    default:
+      return session.versions.original;
+  }
+}
+
+export function createEmptyOutlineState(userConfirmed = false): PipelineOutlineState {
+  return {
+    required: [],
+    suggested: [],
+    userConfirmed,
+    revisionRound: 0,
+    revisionHistory: [],
+  };
+}
+
+export function pushOutlineRevisionHistory(state: PipelineOutlineState): void {
+  const snapshot = {
+    required: state.required.map((item) => ({ ...item })),
+    suggested: state.suggested.map((item) => ({ ...item })),
+  };
+  const history = [...(state.revisionHistory ?? []), snapshot];
+  state.revisionHistory = history.slice(-PIPELINE_OUTLINE_REVISION_HISTORY_LIMIT);
+}
+
 // ── Version chain ──────────────────────────────────────────────
 
 export function getPipelineInputText(
@@ -324,15 +570,14 @@ export function getPipelineInputText(
     case 1:
       return session.versions.original;
     case 2:
-      return session.versions.afterCharacter ?? session.versions.original;
+      return getPostCharacterText(session);
     case 3:
-      return session.versions.afterSensory ?? session.versions.afterCharacter ?? session.versions.original;
+      return session.versions.afterSensory ?? getPostCharacterText(session);
     case 4:
       return (
         session.versions.afterRules ??
         session.versions.afterSensory ??
-        session.versions.afterCharacter ??
-        session.versions.original
+        getPostCharacterText(session)
       );
     default:
       return session.versions.original;
@@ -350,6 +595,7 @@ export function resolvePipelineApplyText(
     session.versions.final ??
     session.versions.afterRules ??
     session.versions.afterSensory ??
+    session.versions.afterCharacterTraits ??
     session.versions.afterCharacter ??
     session.versions.original
   );
@@ -360,12 +606,45 @@ export function assertModulePrerequisites(
   module: ChapterPipelineRunModule
 ): void {
   const enabled = session.config.pipelineEnabledModules;
+  const traitsEnabled = shouldRunCharacterTraitsModule(session.config);
+
+  if (module === 'character-outline') {
+    if (!enabled.includes(1)) {
+      throw new Error('模块一未启用');
+    }
+  }
+  if (module === 'character') {
+    if (!enabled.includes(1)) {
+      throw new Error('模块一未启用');
+    }
+    const outline = session.characterOutline;
+    if (!outline?.userConfirmed && !session.config.pipelineSkipCharacterOutlineReview) {
+      throw new Error('角色调整大纲尚未确认');
+    }
+  }
+  if (module === 'character-traits-outline' || module === 'character-traits') {
+    if (!traitsEnabled) {
+      throw new Error('角色特征润色未启用');
+    }
+    if (!session.versions.afterCharacter?.trim()) {
+      throw new Error('请先完成模块一（角色调整）');
+    }
+  }
+  if (module === 'character-traits') {
+    const outline = session.characterTraitsOutline;
+    if (!outline?.userConfirmed && !session.config.pipelineSkipCharacterTraitsOutlineReview) {
+      throw new Error('角色特征润色大纲尚未确认');
+    }
+  }
   if (module === 'sensory-outline' || module === 'sensory-rewrite') {
     if (!enabled.includes(2)) {
       throw new Error('模块二未启用');
     }
     if (enabled.includes(1) && !session.versions.afterCharacter) {
       throw new Error('请先完成模块一（角色调整）');
+    }
+    if (traitsEnabled && !session.versions.afterCharacterTraits && !session.versions.afterCharacter) {
+      throw new Error('请先完成角色特征润色');
     }
   }
   if (module === 'sensory-rewrite') {
@@ -438,11 +717,134 @@ export function buildCharacterUserPrompt(input: {
   sourceText: string;
   protagonistContext: string;
   personaBlock: string;
+  outline?: PipelineOutlineItem[];
+}): string {
+  const outlineBlock =
+    input.outline && input.outline.length > 0
+      ? `<character-outline>\n${JSON.stringify({ items: input.outline }, null, 2)}\n</character-outline>`
+      : '';
+  return [
+    input.protagonistContext,
+    input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
+    outlineBlock,
+    `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function buildCharacterOutlineUserPrompt(input: {
+  sourceText: string;
+  protagonistContext: string;
+  personaBlock: string;
 }): string {
   return [
     input.protagonistContext,
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
+    [
+      '【输出要求】',
+      '- 每条 text 仅描述：待调整的对白/行为/互动问题与修改方向',
+      '- 禁止输出可直接粘贴进正文的成品句子',
+      CHAPTER_PIPELINE_CHARACTER_OUTLINE_JSON_FORMAT,
+    ].join('\n'),
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function buildCharacterTraitsOutlineUserPrompt(input: {
+  sourceText: string;
+  personaBlock: string;
+}): string {
+  return [
+    input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
+    ['【输出要求】', CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_JSON_FORMAT].join('\n'),
+    `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function buildCharacterTraitsRewriteUserPrompt(input: {
+  sourceText: string;
+  outline: PipelineOutlineItem[];
+  personaBlock: string;
+}): string {
+  const outlineJson = JSON.stringify({ items: input.outline }, null, 2);
+  return [
+    input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
+    [
+      '【改写原则】',
+      '严格按大纲补缺角色卡特征；不改动情节骨架、对白、体位顺序。',
+    ].join('\n'),
+    `<character-traits-outline>\n${outlineJson}\n</character-traits-outline>`,
+    `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export const PIPELINE_OUTLINE_JSON_OUTPUT_RULE = [
+  '本步骤只输出一个 JSON 对象，不要任何前言、后语、Markdown 代码块、诊断报告或「以下是…」类说明。',
+  '响应必须以 { 开头、以 } 结尾，不得输出报告式散文。',
+  '结构：{"required":[{"id":"r1","text":"...","priority":"required"}],"suggested":[{"id":"s1","text":"...","priority":"suggested"}]}',
+].join('\n');
+
+export function buildOutlineGateRecheckUserPrompt(input: {
+  baseUserPrompt: string;
+  currentOutline: { required: PipelineOutlineItem[]; suggested: PipelineOutlineItem[] };
+  mode: ChapterPipelineOutlineReviseMode;
+  revisionRound: number;
+  userFeedback?: string;
+}): string {
+  void input.revisionRound;
+
+  const blocks = [
+    input.baseUserPrompt,
+    `<current-outline>\n${JSON.stringify(input.currentOutline, null, 2)}\n</current-outline>`,
+  ];
+
+  if (input.userFeedback?.trim()) {
+    blocks.push(`<user-feedback>\n${input.userFeedback.trim()}\n</user-feedback>`);
+  }
+
+  if (input.mode === 'recheck') {
+    blocks.push(
+      [
+        '【补充说明】',
+        '上文 <current-outline> 为上轮大纲，仅供参考对照。',
+        '请按 system 中与首次生成完全相同的诊断步骤与判定标准重新执行。',
+        '输出格式也与首次生成完全相同：仅输出 JSON 对象（required + suggested），不要前言、不要诊断报告、不要 Markdown。',
+        '每条大纲项必须把定位/问题/修改方向写入 text 字段，禁止拆成 character、category、location、problem、fix 等字段。',
+      ].join('\n')
+    );
+  } else {
+    blocks.push(
+      [
+        '【补充说明】',
+        '在保持与首次生成相同诊断流程与 JSON 输出格式的前提下，优先落实 <user-feedback>。',
+        '仅输出 JSON 对象（required + suggested），不要前言、不要诊断报告、不要 Markdown。',
+        '每条大纲项必须把定位/问题/修改方向写入 text 字段，禁止拆成 character、category、location、problem、fix 等字段。',
+      ].join('\n')
+    );
+  }
+
+  return blocks.filter(Boolean).join('\n\n');
+}
+
+/** @deprecated V1.2 主路径改用 buildOutlineGateRecheckUserPrompt + 模块原 outline templateKey */
+export function buildOutlineReviseUserPrompt(input: {
+  outlineType: ChapterPipelineOutlineType;
+  currentOutline: { required: PipelineOutlineItem[]; suggested: PipelineOutlineItem[] };
+  userFeedback: string;
+  chapterSummary?: string;
+}): string {
+  return [
+    `outlineType: ${input.outlineType}`,
+    input.chapterSummary ? `【章节摘要】\n${input.chapterSummary}` : '',
+    `<current-outline>\n${JSON.stringify(input.currentOutline, null, 2)}\n</current-outline>`,
+    `<user-feedback>\n${input.userFeedback}\n</user-feedback>`,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -459,6 +861,7 @@ export function buildSensoryOutlineUserPrompt(input: {
       '- 每条 text 仅描述：问题在哪、需加强什么感官维度、从什么角度切入',
       '- 禁止写出可直接用于正文的成品描写、比喻句、带引号的示例句',
       '- 禁止医学解剖词、零件级身体词、解释型说明句式',
+      PIPELINE_OUTLINE_JSON_OUTPUT_RULE,
     ].join('\n'),
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
   ]
@@ -657,7 +1060,16 @@ export function shouldApplyAutoFix(
     return false;
   }
   if (mode === 'semi') {
-    return issue.category === 'pronoun_mismatch' || issue.category === 'forbidden_word';
+    if (issue.category === 'pronoun_mismatch') {
+      return true;
+    }
+    if (issue.category === 'forbidden_word') {
+      return Boolean(issue.replacement?.trim());
+    }
+    return false;
+  }
+  if (issue.category === 'forbidden_word') {
+    return Boolean(issue.replacement?.trim());
   }
   return true;
 }
@@ -884,24 +1296,325 @@ export function parseSensoryOutlineJson(raw: string): {
   required: PipelineOutlineItem[];
   suggested: PipelineOutlineItem[];
 } {
-  const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
-  const parsed = JSON.parse(cleaned) as {
-    required?: Array<{ id?: string; text?: string; priority?: string }>;
-    suggested?: Array<{ id?: string; text?: string; priority?: string }>;
-  };
-  const mapItem = (
-    item: { id?: string; text?: string; priority?: string },
-    priority: 'required' | 'suggested',
-    index: number
-  ): PipelineOutlineItem => ({
-    id: item.id?.trim() || `${priority}-${index + 1}`,
-    text: item.text?.trim() || '',
-    priority,
-  });
+  return parsePipelineOutlineJson(raw);
+}
+
+const PIPELINE_OUTLINE_ALT_ARRAY_KEYS = [
+  'character_adjustments',
+  'character_traits_adjustments',
+  'trait_adjustments',
+  'missing_features',
+  'adjustments',
+  'items',
+  'issues',
+  'diagnostics',
+  'findings',
+] as const;
+
+function pickOutlineStringField(
+  record: Record<string, unknown>,
+  keys: readonly string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+/** 将模型偶发输出的诊断分字段形态归一为 PipelineOutlineItem 可解析结构 */
+export function normalizePipelineOutlineItemPartial(
+  item: Partial<PipelineOutlineItem> & Record<string, unknown>
+): Partial<PipelineOutlineItem> {
+  if (item.text?.trim()) {
+    return item;
+  }
+
+  const character = pickOutlineStringField(item, ['character', 'persona', 'role', 'name']);
+  const category = pickOutlineStringField(item, [
+    'category',
+    'issueType',
+    'type',
+    'problemType',
+  ]);
+  const location = pickOutlineStringField(item, ['location', 'anchor', 'position', 'loc']);
+  const problem = pickOutlineStringField(item, [
+    'problem',
+    'issue',
+    'description',
+    'conflict',
+  ]);
+  const fix = pickOutlineStringField(item, [
+    'fix',
+    'direction',
+    'suggestion',
+    'revision',
+    'fixDirection',
+  ]);
+
+  const hasDiagnosticShape = Boolean(character || category || location || problem || fix);
+  if (!hasDiagnosticShape) {
+    return item;
+  }
+
+  const displayName = character ?? pickOutlineStringField(item, ['personaName']);
+  const prefix =
+    displayName && category
+      ? `【${displayName}-${category}】`
+      : displayName
+        ? `【${displayName}】`
+        : category
+          ? `【${category}】`
+          : '';
+  const textParts = [prefix, location, problem, fix ? `修改方向：${fix}` : ''].filter(Boolean);
+  const text = textParts.join(' ').replace(/\s+/g, ' ').trim();
+
   return {
-    required: (parsed.required ?? []).map((item, i) => mapItem(item, 'required', i)),
-    suggested: (parsed.suggested ?? []).map((item, i) => mapItem(item, 'suggested', i)),
+    ...item,
+    text,
+    personaName: item.personaName?.trim() || displayName,
+    anchorHint: item.anchorHint?.trim() || location,
+    featureRef: item.featureRef?.trim() || category,
   };
+}
+
+function resolveOutlineItemPriority(item: {
+  priority?: unknown;
+  anchorHint?: string;
+}): 'required' | 'suggested' {
+  const raw = item.priority;
+  if (raw === 'suggested' || raw === 'required') {
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'suggested' || normalized === 'optional' || normalized === '建议') {
+      return 'suggested';
+    }
+  }
+  const hint = item.anchorHint?.trim() ?? '';
+  if (
+    /标记为[「"']?suggested/i.test(hint) ||
+    /^suggested[：:]/i.test(hint) ||
+    /[「"']suggested[：:]/i.test(hint)
+  ) {
+    return 'suggested';
+  }
+  return 'required';
+}
+
+/** 模型未填 text 时，由 personaName / featureRef / anchorHint 拼出展示与改写用文案 */
+export function synthesizePipelineOutlineItemText(item: Partial<PipelineOutlineItem>): string {
+  const direct = item.text?.trim();
+  if (direct) {
+    return direct;
+  }
+  const normalized = normalizePipelineOutlineItemPartial(
+    item as Partial<PipelineOutlineItem> & Record<string, unknown>
+  );
+  if (normalized.text?.trim()) {
+    return normalized.text.trim();
+  }
+  const parts: string[] = [];
+  if (item.personaName?.trim()) {
+    parts.push(`【${item.personaName.trim()}】`);
+  }
+  if (item.featureRef?.trim()) {
+    parts.push(`缺失特征：${item.featureRef.trim()}`);
+  }
+  if (item.anchorHint?.trim()) {
+    parts.push(`建议插入：${item.anchorHint.trim()}`);
+  }
+  return parts.join(' ').trim();
+}
+
+function pushOutlineItemPartial(
+  item: unknown,
+  required: Array<Partial<PipelineOutlineItem>>,
+  suggested: Array<Partial<PipelineOutlineItem>>
+): void {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return;
+  }
+  const partial = normalizePipelineOutlineItemPartial(
+    item as Partial<PipelineOutlineItem> & Record<string, unknown>
+  );
+  if (resolveOutlineItemPriority(partial) === 'suggested') {
+    suggested.push({ ...partial, priority: 'suggested' });
+  } else {
+    required.push(partial);
+  }
+}
+
+function collectOutlineItemPartials(parsed: Record<string, unknown>): {
+  required: Array<Partial<PipelineOutlineItem>>;
+  suggested: Array<Partial<PipelineOutlineItem>>;
+} {
+  const required: Array<Partial<PipelineOutlineItem>> = [];
+  const suggested: Array<Partial<PipelineOutlineItem>> = [];
+
+  for (const entry of (parsed.required as unknown[]) ?? []) {
+    pushOutlineItemPartial(entry, required, suggested);
+  }
+  for (const entry of (parsed.suggested as unknown[]) ?? []) {
+    const partial = entry as Partial<PipelineOutlineItem>;
+    suggested.push({ ...partial, priority: 'suggested' });
+  }
+
+  if (required.length > 0 || suggested.length > 0) {
+    return { required, suggested };
+  }
+
+  for (const key of PIPELINE_OUTLINE_ALT_ARRAY_KEYS) {
+    const entries = parsed[key];
+    if (!Array.isArray(entries) || entries.length === 0) {
+      continue;
+    }
+    for (const entry of entries) {
+      pushOutlineItemPartial(entry, required, suggested);
+    }
+    break;
+  }
+
+  return { required, suggested };
+}
+
+function collectOutlineItemPartialsFromRoot(parsed: unknown): {
+  required: Array<Partial<PipelineOutlineItem>>;
+  suggested: Array<Partial<PipelineOutlineItem>>;
+} {
+  if (Array.isArray(parsed)) {
+    const required: Array<Partial<PipelineOutlineItem>> = [];
+    const suggested: Array<Partial<PipelineOutlineItem>> = [];
+    for (const entry of parsed) {
+      pushOutlineItemPartial(entry, required, suggested);
+    }
+    return { required, suggested };
+  }
+  if (parsed && typeof parsed === 'object') {
+    return collectOutlineItemPartials(parsed as Record<string, unknown>);
+  }
+  return { required: [], suggested: [] };
+}
+
+export function stripPipelineOutlineJsonFence(raw: string): string {
+  const trimmed = raw.replace(/^\uFEFF/, '').trim();
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]?.trim()) {
+    return fenced[1].trim();
+  }
+
+  const withoutEdgeFence = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+
+  if (withoutEdgeFence.startsWith('{')) {
+    const balanced = extractBalancedJsonObject(withoutEdgeFence, 0);
+    if (balanced) {
+      return balanced;
+    }
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  if (firstBrace >= 0) {
+    const balanced = extractBalancedJsonObject(trimmed, firstBrace);
+    if (balanced) {
+      try {
+        JSON.parse(balanced);
+        return balanced;
+      } catch {
+        // fall through to trimmed text
+      }
+    }
+  }
+
+  return withoutEdgeFence;
+}
+
+function extractBalancedJsonObject(text: string, startIndex: number): string | null {
+  if (text[startIndex] !== '{') {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = startIndex; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(startIndex, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function mapPipelineOutlineItem(
+  item: Partial<PipelineOutlineItem>,
+  priority: 'required' | 'suggested',
+  index: number
+): PipelineOutlineItem | null {
+  const text = synthesizePipelineOutlineItemText(item);
+  if (!text) {
+    return null;
+  }
+  return {
+    id: item.id?.trim() || `${priority}-${index + 1}`,
+    text,
+    priority,
+    ...(item.contentWarnings?.length ? { contentWarnings: [...item.contentWarnings] } : {}),
+    ...(item.personaId ? { personaId: item.personaId } : {}),
+    ...(item.personaName?.trim() ? { personaName: item.personaName.trim() } : {}),
+    ...(item.featureRef?.trim() ? { featureRef: item.featureRef.trim() } : {}),
+    ...(item.anchorHint?.trim() ? { anchorHint: item.anchorHint.trim() } : {}),
+  };
+}
+
+export function parsePipelineOutlineJson(raw: string): {
+  required: PipelineOutlineItem[];
+  suggested: PipelineOutlineItem[];
+} {
+  const cleaned = stripPipelineOutlineJsonFence(raw);
+  const parsed: unknown = JSON.parse(cleaned);
+  const collected = collectOutlineItemPartialsFromRoot(parsed);
+
+  const required = collected.required
+    .map((item, index) => mapPipelineOutlineItem(item, 'required', index))
+    .filter((item): item is PipelineOutlineItem => item !== null);
+  const suggested = collected.suggested
+    .map((item, index) => mapPipelineOutlineItem(item, 'suggested', index))
+    .filter((item): item is PipelineOutlineItem => item !== null);
+
+  return { required, suggested };
 }
 
 export function parseRuleIssuesJson(raw: string): PipelineRuleIssue[] {
@@ -970,7 +1683,10 @@ export function makePipelineTraceId(module: string): string {
 
 export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
   const labels: Record<ChapterPipelineStage, string> = {
+    pipeline_character_outline: '生成角色调整大纲…',
     pipeline_character: '角色调整中…',
+    pipeline_character_traits_outline: '生成角色特征润色大纲…',
+    pipeline_character_traits: '角色特征润色中…',
     pipeline_sensory_outline: '生成感官优化大纲…',
     pipeline_sensory_rewrite: '感官优化改写中…',
     pipeline_rules_scan: '规则扫描中…',

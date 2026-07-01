@@ -25,6 +25,9 @@ export type ProjectSettingsJsonExtensions = {
   contentSafetyCustomRules?: ProjectContentSafetyRule[];
   pipelinePreset?: ChapterPipelineConfig['pipelinePreset'];
   pipelineSkipSensoryOutlineReview?: boolean;
+  pipelineSkipCharacterOutlineReview?: boolean;
+  pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterTraitsEnabled?: boolean;
   pipelineRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
@@ -50,6 +53,9 @@ export function pickProjectSettingsJsonExtensions(
       : {}),
     pipelinePreset: raw.pipelinePreset,
     pipelineSkipSensoryOutlineReview: raw.pipelineSkipSensoryOutlineReview,
+    pipelineSkipCharacterOutlineReview: raw.pipelineSkipCharacterOutlineReview,
+    pipelineSkipCharacterTraitsOutlineReview: raw.pipelineSkipCharacterTraitsOutlineReview,
+    pipelineCharacterTraitsEnabled: raw.pipelineCharacterTraitsEnabled,
     pipelineRulesFixMode: raw.pipelineRulesFixMode,
     pipelineHomogenizationEnabled: raw.pipelineHomogenizationEnabled,
     pipelineHomogenizationPriorChapterCount: raw.pipelineHomogenizationPriorChapterCount,
@@ -92,6 +98,16 @@ export function applyProjectSettingsJsonExtensions<T extends ProjectSettingsJson
   }
   if (extensions.pipelineSkipSensoryOutlineReview !== undefined) {
     target.pipelineSkipSensoryOutlineReview = extensions.pipelineSkipSensoryOutlineReview;
+  }
+  if (extensions.pipelineSkipCharacterOutlineReview !== undefined) {
+    target.pipelineSkipCharacterOutlineReview = extensions.pipelineSkipCharacterOutlineReview;
+  }
+  if (extensions.pipelineSkipCharacterTraitsOutlineReview !== undefined) {
+    target.pipelineSkipCharacterTraitsOutlineReview =
+      extensions.pipelineSkipCharacterTraitsOutlineReview;
+  }
+  if (extensions.pipelineCharacterTraitsEnabled !== undefined) {
+    target.pipelineCharacterTraitsEnabled = extensions.pipelineCharacterTraitsEnabled;
   }
   if (extensions.pipelineRulesFixMode !== undefined) {
     target.pipelineRulesFixMode = extensions.pipelineRulesFixMode;
@@ -152,6 +168,9 @@ export function serializeProjectSettingsForJsonMirror(settings: {
   contentSafetyCustomRules?: ProjectContentSafetyRule[];
   pipelinePreset?: ChapterPipelineConfig['pipelinePreset'];
   pipelineSkipSensoryOutlineReview?: boolean;
+  pipelineSkipCharacterOutlineReview?: boolean;
+  pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterTraitsEnabled?: boolean;
   pipelineRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
@@ -184,6 +203,14 @@ export function serializeProjectSettingsForJsonMirror(settings: {
     pipelineSkipSensoryOutlineReview:
       settings.pipelineSkipSensoryOutlineReview ??
       DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
+    pipelineSkipCharacterOutlineReview:
+      settings.pipelineSkipCharacterOutlineReview ??
+      DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
+    pipelineSkipCharacterTraitsOutlineReview:
+      settings.pipelineSkipCharacterTraitsOutlineReview ??
+      DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
+    pipelineCharacterTraitsEnabled:
+      settings.pipelineCharacterTraitsEnabled ?? DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
     pipelineRulesFixMode:
       settings.pipelineRulesFixMode ?? DEFAULT_PIPELINE_CONFIG.pipelineRulesFixMode,
     pipelineHomogenizationEnabled:
@@ -210,6 +237,10 @@ export const PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS = {
   contentSafetyCustomRules: [] as ProjectContentSafetyRule[],
   pipelinePreset: DEFAULT_PIPELINE_CONFIG.pipelinePreset,
   pipelineSkipSensoryOutlineReview: DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
+  pipelineSkipCharacterOutlineReview: DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
+  pipelineSkipCharacterTraitsOutlineReview:
+    DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
+  pipelineCharacterTraitsEnabled: DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
   pipelineRulesFixMode: DEFAULT_PIPELINE_CONFIG.pipelineRulesFixMode,
   pipelineHomogenizationEnabled: DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationEnabled,
   pipelineHomogenizationPriorChapterCount:

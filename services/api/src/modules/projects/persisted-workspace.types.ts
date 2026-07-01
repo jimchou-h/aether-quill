@@ -50,6 +50,9 @@ export interface PersistedProjectState {
       }>;
       pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
       pipelineSkipSensoryOutlineReview?: boolean;
+      pipelineSkipCharacterOutlineReview?: boolean;
+      pipelineSkipCharacterTraitsOutlineReview?: boolean;
+      pipelineCharacterTraitsEnabled?: boolean;
       pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
       pipelineHomogenizationEnabled?: boolean;
       pipelineHomogenizationPriorChapterCount?: number;

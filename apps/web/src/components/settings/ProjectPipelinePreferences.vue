@@ -9,6 +9,9 @@ const props = defineProps<{
 
 const pipelinePreset = ref<'full' | 'character_rules' | 'sensory_only'>('full');
 const skipOutlineReview = ref(false);
+const skipCharacterOutlineReview = ref(false);
+const skipCharacterTraitsOutlineReview = ref(false);
+const characterTraitsEnabled = ref(true);
 const rulesFixMode = ref<'auto' | 'semi' | 'manual'>('semi');
 const homogenizationEnabled = ref(false);
 const homogenizationPriorCount = ref(3);
@@ -42,6 +45,9 @@ async function loadSettings() {
 function applySettings(settings: ProjectSettings & {
   pipelinePreset?: typeof pipelinePreset.value;
   pipelineSkipSensoryOutlineReview?: boolean;
+  pipelineSkipCharacterOutlineReview?: boolean;
+  pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterTraitsEnabled?: boolean;
   pipelineRulesFixMode?: typeof rulesFixMode.value;
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
@@ -49,6 +55,10 @@ function applySettings(settings: ProjectSettings & {
 }) {
   pipelinePreset.value = settings.pipelinePreset ?? 'full';
   skipOutlineReview.value = settings.pipelineSkipSensoryOutlineReview ?? false;
+  skipCharacterOutlineReview.value = settings.pipelineSkipCharacterOutlineReview ?? false;
+  skipCharacterTraitsOutlineReview.value =
+    settings.pipelineSkipCharacterTraitsOutlineReview ?? false;
+  characterTraitsEnabled.value = settings.pipelineCharacterTraitsEnabled ?? true;
   rulesFixMode.value = settings.pipelineRulesFixMode ?? 'semi';
   homogenizationEnabled.value = settings.pipelineHomogenizationEnabled ?? false;
   homogenizationPriorCount.value = settings.pipelineHomogenizationPriorChapterCount ?? 3;
@@ -61,6 +71,9 @@ async function saveSettings() {
     await apiClient.updateSettings(props.projectId, {
       pipelinePreset: pipelinePreset.value,
       pipelineSkipSensoryOutlineReview: skipOutlineReview.value,
+      pipelineSkipCharacterOutlineReview: skipCharacterOutlineReview.value,
+      pipelineSkipCharacterTraitsOutlineReview: skipCharacterTraitsOutlineReview.value,
+      pipelineCharacterTraitsEnabled: characterTraitsEnabled.value,
       pipelineRulesFixMode: rulesFixMode.value,
       pipelineHomogenizationEnabled: homogenizationEnabled.value,
       pipelineHomogenizationPriorChapterCount: homogenizationPriorCount.value,
@@ -84,7 +97,7 @@ onMounted(() => {
 <template>
   <section class="panel">
     <h3 class="panel-title">分步精修流水线</h3>
-    <p class="field-hint">固定顺序：角色 → 感官 → 规则 → 同质化（可选）。可配置默认预设与 gate 行为。</p>
+    <p class="field-hint">固定顺序：角色（含大纲）→ 特征润色（可选）→ 感官 → 规则 → 同质化（可选）。</p>
 
     <p v-if="loading" class="loading-text">加载中…</p>
     <template v-else>
@@ -99,8 +112,33 @@ onMounted(() => {
 
       <div class="toggle-row">
         <label class="toggle-label">
+          <input v-model="skipCharacterOutlineReview" class="toggle-checkbox" type="checkbox" />
+          <span class="toggle-text">默认跳过角色调整大纲审核</span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input v-model="characterTraitsEnabled" class="toggle-checkbox" type="checkbox" />
+          <span class="toggle-text">启用角色特征润色（模块一-b）</span>
+        </label>
+      </div>
+
+      <div v-if="characterTraitsEnabled" class="toggle-row">
+        <label class="toggle-label">
+          <input
+            v-model="skipCharacterTraitsOutlineReview"
+            class="toggle-checkbox"
+            type="checkbox"
+          />
+          <span class="toggle-text">默认跳过特征润色大纲审核</span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
           <input v-model="skipOutlineReview" class="toggle-checkbox" type="checkbox" />
-          <span class="toggle-text">默认跳过大纲人工审核</span>
+          <span class="toggle-text">默认跳过感官大纲人工审核</span>
         </label>
       </div>
 

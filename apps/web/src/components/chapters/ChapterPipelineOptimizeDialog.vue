@@ -2,15 +2,25 @@
 import { computed, ref, watch } from 'vue';
 import {
   apiClient,
+  buildPersonasContextPayload,
   formatPipelineStageLabel,
   isTerminalChapterPipelineRunEnd,
   type ChapterItem,
   type ChapterPipelineConfig,
+  type ChapterPipelineOutlineType,
   type ChapterPipelineRunModule,
   type ChapterPipelineSessionView,
   type PipelineOutlineItem,
+  type PipelineOutlineState,
   type PipelineRuleIssue,
+  type PreviewRetrievalResult,
 } from '../../services/api';
+import RetrievalPreviewDialog from '../workbench/RetrievalPreviewDialog.vue';
+import { resolveEffectiveStructuredMatchingText } from '../../utils/structured-matching';
+import {
+  hasSelectedPersonaCard,
+  resolvePersonaNamesFromPreviewSelection,
+} from '../../utils/pipelinePersonaPreview';
 import {
   presentErrorFromCaught,
   presentSuccess,
@@ -24,11 +34,15 @@ import {
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
+import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 
 type PipelineStep =
   | 'ready'
+  | 'character-outline'
   | 'character'
+  | 'character-traits-outline'
+  | 'character-traits'
   | 'sensory-outline'
   | 'sensory-rewrite'
   | 'rules'
@@ -36,7 +50,7 @@ type PipelineStep =
   | 'done';
 
 interface PipelineStepItem {
-  key: PipelineStep | 'sensory';
+  key: PipelineStep | 'sensory' | 'character-traits-outline';
   label: string;
 }
 
@@ -62,9 +76,17 @@ const streamingText = ref('');
 const progressLabel = ref('');
 const aiTaskProgress = createAiTaskProgressState();
 const chapterUpdatedAtSnapshot = ref('');
+const outlineRevisionRound = ref(0);
+const activeOutlineType = ref<ChapterPipelineOutlineType>('sensory');
 const outlineRequired = ref<PipelineOutlineItem[]>([]);
 const outlineSuggested = ref<PipelineOutlineItem[]>([]);
 const ruleIssues = ref<PipelineRuleIssue[]>([]);
+const previewVisible = ref(false);
+const previewLoading = ref(false);
+const previewResult = ref<PreviewRetrievalResult | null>(null);
+const previewError = ref('');
+const pendingRunAll = ref(false);
+const selectedPersonaNames = ref<string[]>([]);
 
 const isBusy = computed(() => running.value || applying.value);
 
@@ -79,6 +101,7 @@ const currentVersionText = computed(() => {
     versions.final ??
     versions.afterRules ??
     versions.afterSensory ??
+    versions.afterCharacterTraits ??
     versions.afterCharacter ??
     versions.original ??
     ''
@@ -136,6 +159,9 @@ const pipelineSteps = computed<PipelineStepItem[]>(() => {
   const steps: PipelineStepItem[] = [{ key: 'ready', label: '准备' }];
   if (modules.includes(1)) {
     steps.push({ key: 'character', label: '角色调整' });
+    if (config.value?.pipelineCharacterTraitsEnabled !== false) {
+      steps.push({ key: 'character-traits-outline', label: '特征润色' });
+    }
   }
   if (modules.includes(2)) {
     steps.push({ key: 'sensory', label: '感官优化' });
@@ -151,28 +177,30 @@ const pipelineSteps = computed<PipelineStepItem[]>(() => {
 });
 
 const activeStepIndex = computed(() => {
-  const map: Record<PipelineStep, number> = {
-    ready: 0,
-    character: 1,
-    'sensory-outline': 2,
-    'sensory-rewrite': 2,
-    rules: 3,
-    homogenization: 4,
-    done: pipelineSteps.value.length - 1,
-  };
-  const idx = map[step.value];
-  if (step.value === 'character') {
-    return pipelineSteps.value.findIndex((s) => s.key === 'character') || 0;
-  }
-  if (step.value === 'sensory-outline' || step.value === 'sensory-rewrite') {
-    return Math.max(0, pipelineSteps.value.findIndex((s) => s.key === 'sensory'));
-  }
-  if (step.value === 'rules') {
-    return Math.max(0, pipelineSteps.value.findIndex((s) => s.key === 'rules'));
-  }
-  if (step.value === 'homogenization') {
-    return Math.max(0, pipelineSteps.value.findIndex((s) => s.key === 'homogenization'));
-  }
+  const idx = pipelineSteps.value.findIndex((item) => {
+    if (step.value === 'character-outline' || step.value === 'character') {
+      return item.key === 'character';
+    }
+    if (
+      step.value === 'character-traits-outline' ||
+      step.value === 'character-traits'
+    ) {
+      return item.key === 'character-traits-outline';
+    }
+    if (step.value === 'sensory-outline' || step.value === 'sensory-rewrite') {
+      return item.key === 'sensory';
+    }
+    if (step.value === 'rules') {
+      return item.key === 'rules';
+    }
+    if (step.value === 'homogenization') {
+      return item.key === 'homogenization';
+    }
+    if (step.value === 'done') {
+      return item.key === 'done';
+    }
+    return item.key === step.value;
+  });
   return idx >= 0 ? idx : 0;
 });
 
@@ -196,6 +224,14 @@ function resetState() {
   progressLabel.value = '';
   outlineRequired.value = [];
   outlineSuggested.value = [];
+  outlineRevisionRound.value = 0;
+  activeOutlineType.value = 'sensory';
+  previewVisible.value = false;
+  previewLoading.value = false;
+  previewResult.value = null;
+  previewError.value = '';
+  pendingRunAll.value = false;
+  selectedPersonaNames.value = [];
   ruleIssues.value = [];
   previewMode.value = 'diff';
   resetAiTaskProgress(aiTaskProgress);
@@ -230,6 +266,33 @@ function close() {
   emit('close');
 }
 
+function applyOutlineToEditor(
+  outlineType: ChapterPipelineOutlineType,
+  source?: PipelineOutlineState | null
+) {
+  activeOutlineType.value = outlineType;
+  const resolved =
+    source ??
+    (outlineType === 'character'
+      ? session.value?.characterOutline
+      : outlineType === 'character-traits'
+        ? session.value?.characterTraitsOutline
+        : session.value?.sensoryOutline);
+  if (!resolved) {
+    outlineRequired.value = [];
+    outlineSuggested.value = [];
+    outlineRevisionRound.value = 0;
+    return;
+  }
+  outlineRequired.value = [...(resolved.required ?? [])];
+  outlineSuggested.value = [...(resolved.suggested ?? [])];
+  outlineRevisionRound.value = resolved.revisionRound ?? 0;
+}
+
+function loadOutlineFromSession(outlineType: ChapterPipelineOutlineType) {
+  applyOutlineToEditor(outlineType);
+}
+
 async function refreshSession() {
   if (!sessionId.value || !props.chapter) {
     return;
@@ -239,9 +302,14 @@ async function refreshSession() {
     props.chapter.chapterNo,
     sessionId.value
   );
-  if (session.value.sensoryOutline) {
-    outlineRequired.value = [...session.value.sensoryOutline.required];
-    outlineSuggested.value = [...session.value.sensoryOutline.suggested];
+  if (step.value === 'character-outline') {
+    loadOutlineFromSession('character');
+  } else if (step.value === 'character-traits-outline') {
+    loadOutlineFromSession('character-traits');
+  } else if (step.value === 'sensory-outline') {
+    loadOutlineFromSession('sensory');
+  } else if (session.value.sensoryOutline) {
+    loadOutlineFromSession('sensory');
   }
   if (session.value.ruleIssues) {
     ruleIssues.value = [...session.value.ruleIssues];
@@ -253,21 +321,124 @@ async function handleStart(runAll = false) {
     errorMessage.value = '章节正文为空';
     return;
   }
+  pendingRunAll.value = runAll;
+  await openPersonaPreview();
+}
+
+async function openPersonaPreview() {
+  if (!props.chapter) {
+    return;
+  }
+  previewVisible.value = true;
+  previewLoading.value = true;
+  previewResult.value = null;
+  previewError.value = '';
+  errorMessage.value = '';
+
+  try {
+    const workspace = await apiClient.getWorkspace(props.projectId);
+    const docRes = await apiClient.documents.list(props.projectId);
+    const docList = apiClient.unwrapPayload(docRes) as Array<{
+      id: string;
+      title: string;
+      content: string;
+      docType?: string;
+    }>;
+
+    const activePersona =
+      workspace.personas.find((item) => item.id === workspace.settings.activePersonaId) ||
+      workspace.personas.find((item) => item.status === 'published') ||
+      null;
+
+    previewResult.value = await apiClient.previewRetrieval(props.projectId, {
+      prompt: props.chapter.content.slice(0, 2000),
+      chapterNo: props.chapter.chapterNo,
+      useStructuredKb: true,
+      projectCtx: {
+        outlineSummary: workspace.knowledge.outlineSummary,
+        personaProfile: activePersona
+          ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
+          : '未配置人物设定',
+        chapters: workspace.knowledge.chapters.map((ch) => ({
+          chapterNo: ch.chapterNo,
+          title: ch.title,
+          summary: ch.summary || ch.content.slice(0, 160),
+          structuredMatchingText: resolveEffectiveStructuredMatchingText(ch.structuredInfo),
+        })),
+        knowledgeDocuments: docList.map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          content: doc.content,
+          docType: doc.docType ?? 'other',
+        })),
+        chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
+        chapterSummaryMemoryCount:
+          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
+          3,
+        personas: buildPersonasContextPayload(workspace.personas),
+      },
+      extraContext: {
+        retrievalInstruction: '分步精修',
+        retrievalChapterTitle: props.chapter.title,
+        retrievalChapterSummary: props.chapter.summary || props.chapter.content.slice(0, 500),
+      },
+    });
+  } catch (error) {
+    previewError.value = error instanceof Error ? error.message : '检索预览失败';
+  } finally {
+    previewLoading.value = false;
+  }
+}
+
+async function confirmPersonaPreviewAndStart(selectedIds: string[]) {
+  if (!previewResult.value) {
+    return;
+  }
+  if (!hasSelectedPersonaCard(previewResult.value, selectedIds)) {
+    presentErrorFromCaught(new Error('请至少勾选一条角色卡'), '未选择角色卡');
+    return;
+  }
+  const names = resolvePersonaNamesFromPreviewSelection(previewResult.value, selectedIds);
+  if (!names.length) {
+    presentErrorFromCaught(new Error('未能解析角色卡名称'), '未选择角色卡');
+    return;
+  }
+  selectedPersonaNames.value = names;
+  previewVisible.value = false;
+  await startPipelineSession(pendingRunAll.value);
+}
+
+async function startPipelineSession(runAll = false) {
+  if (!props.chapter?.content?.trim()) {
+    errorMessage.value = '章节正文为空';
+    return;
+  }
   running.value = true;
   errorMessage.value = '';
   try {
     const result = await apiClient.startChapterPipeline(
       props.projectId,
-      props.chapter.chapterNo
+      props.chapter.chapterNo,
+      {
+        selectedPersonaNames: selectedPersonaNames.value,
+      }
     );
     sessionId.value = result.sessionId;
     config.value = result.config;
     await refreshSession();
-    step.value = 'character';
+    const modules = config.value?.pipelineEnabledModules ?? [1, 2, 3];
     if (runAll) {
+      step.value = modules.includes(1) ? 'character-outline' : 'sensory-outline';
       await runModule('run-all');
+    } else if (modules.includes(1)) {
+      step.value = 'character-outline';
+      await runModule('character-outline');
+    } else if (modules.includes(2)) {
+      step.value = 'sensory-outline';
+      await runModule('sensory-outline');
     } else {
-      await runModule('character');
+      step.value = 'rules';
+      await runModule('rules-scan');
     }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '启动失败';
@@ -317,14 +488,66 @@ async function runModule(module: ChapterPipelineRunModule) {
         },
         onEnd: async (event) => {
           const endEvent = event as PipelineEndEvent;
-          if (endEvent.gateRequired && endEvent.gate === 'sensory-outline') {
-            step.value = 'sensory-outline';
-            await refreshSession();
-            completeAiTaskProgress(aiTaskProgress, '等待确认感官大纲');
+          if (endEvent.gateRequired && endEvent.gate) {
+            if (endEvent.gate === 'character-outline') {
+              step.value = 'character-outline';
+              if (endEvent.characterOutline) {
+                applyOutlineToEditor('character', endEvent.characterOutline);
+              } else {
+                await refreshSession();
+                loadOutlineFromSession('character');
+              }
+            } else if (endEvent.gate === 'character-traits-outline') {
+              step.value = 'character-traits-outline';
+              if (endEvent.characterTraitsOutline) {
+                applyOutlineToEditor('character-traits', endEvent.characterTraitsOutline);
+              } else {
+                await refreshSession();
+                loadOutlineFromSession('character-traits');
+              }
+            } else if (endEvent.gate === 'sensory-outline') {
+              step.value = 'sensory-outline';
+              if (endEvent.sensoryOutline) {
+                applyOutlineToEditor('sensory', endEvent.sensoryOutline);
+              } else {
+                await refreshSession();
+                loadOutlineFromSession('sensory');
+              }
+            } else {
+              await refreshSession();
+            }
+            completeAiTaskProgress(aiTaskProgress, '等待确认大纲');
             return;
           }
           await refreshSession();
           applyPipelineStepFromEnd(endEvent);
+          if (
+            !isRunAll &&
+            module === 'character-outline' &&
+            endEvent.characterOutline?.userConfirmed
+          ) {
+            step.value = 'character';
+            await runModule('character');
+            return;
+          }
+          if (
+            !isRunAll &&
+            module === 'character-traits-outline' &&
+            endEvent.characterTraitsOutline?.userConfirmed
+          ) {
+            step.value = 'character-traits';
+            await runModule('character-traits');
+            return;
+          }
+          if (
+            !isRunAll &&
+            module === 'sensory-outline' &&
+            endEvent.sensoryOutline?.userConfirmed
+          ) {
+            step.value = 'sensory-rewrite';
+            await runModule('sensory-rewrite');
+            return;
+          }
           if (isTerminalChapterPipelineRunEnd(module, endEvent)) {
             completeAiTaskProgress(
               aiTaskProgress,
@@ -352,23 +575,30 @@ async function runModule(module: ChapterPipelineRunModule) {
   }
 }
 
-async function confirmSensoryOutline() {
+async function confirmOutline() {
   if (!props.chapter || !sessionId.value) {
     return;
   }
   running.value = true;
   try {
-    session.value = await apiClient.patchChapterPipelineSensoryOutline(
+    session.value = await apiClient.patchChapterPipelineOutline(
       props.projectId,
       props.chapter.chapterNo,
       sessionId.value,
       {
+        outlineType: activeOutlineType.value,
         required: outlineRequired.value,
         suggested: outlineSuggested.value,
         confirmed: true,
       }
     );
-    step.value = 'sensory-rewrite';
+    if (activeOutlineType.value === 'character') {
+      step.value = 'character';
+    } else if (activeOutlineType.value === 'character-traits') {
+      step.value = 'character-traits';
+    } else {
+      step.value = 'sensory-rewrite';
+    }
     await runModule('run-all');
   } catch (error) {
     presentErrorFromCaught(error, '确认大纲失败');
@@ -377,9 +607,94 @@ async function confirmSensoryOutline() {
   }
 }
 
-function removeSuggestedItem(id: string) {
-  outlineSuggested.value = outlineSuggested.value.filter((item) => item.id !== id);
+async function recheckOutline() {
+  if (!props.chapter || !sessionId.value) {
+    return;
+  }
+  running.value = true;
+  try {
+    const result = await apiClient.reviseChapterPipelineOutline(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      {
+        outlineType: activeOutlineType.value,
+        mode: 'recheck',
+        currentOutline: {
+          required: outlineRequired.value,
+          suggested: outlineSuggested.value,
+        },
+      }
+    );
+    outlineRequired.value = [...result.required];
+    outlineSuggested.value = [...result.suggested];
+    outlineRevisionRound.value = result.revisionRound;
+    await refreshSession();
+    presentSuccess('大纲已重新检查，请继续审阅');
+  } catch (error) {
+    presentErrorFromCaught(error, 'AI 重新检查大纲失败');
+  } finally {
+    running.value = false;
+  }
 }
+
+async function reviseOutlineWithFeedback(feedback: string) {
+  if (!props.chapter || !sessionId.value) {
+    return;
+  }
+  running.value = true;
+  try {
+    const result = await apiClient.reviseChapterPipelineOutline(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      {
+        outlineType: activeOutlineType.value,
+        mode: 'revise',
+        currentOutline: {
+          required: outlineRequired.value,
+          suggested: outlineSuggested.value,
+        },
+        userFeedback: feedback,
+      }
+    );
+    outlineRequired.value = [...result.required];
+    outlineSuggested.value = [...result.suggested];
+    outlineRevisionRound.value = result.revisionRound;
+    await refreshSession();
+    presentSuccess('大纲已按意见修订，请继续审阅');
+  } catch (error) {
+    presentErrorFromCaught(error, 'AI 修订大纲失败');
+  } finally {
+    running.value = false;
+  }
+}
+
+const outlineEditorTitle = computed(() => {
+  switch (activeOutlineType.value) {
+    case 'character':
+      return '角色调整大纲';
+    case 'character-traits':
+      return '角色特征润色大纲';
+    default:
+      return '感官优化大纲';
+  }
+});
+
+const outlineEditorHint = computed(() => {
+  switch (activeOutlineType.value) {
+    case 'character':
+      return '审阅拟调整的对白/行为/互动项；可先「重新检查」对照正文，有具体修改点再「按意见修订」。';
+    case 'character-traits':
+      return '仅补充角色卡明确要求但原文缺失的特征；可先重新检查，再按意见修订或手改后确认改写。';
+    default:
+      return '请确认必需项；可先重新检查对照正文，有具体修改点再按意见修订。';
+  }
+});
+
+const isOutlineStep = computed(() =>
+  ['character-outline', 'character-traits-outline', 'sensory-outline'].includes(step.value)
+);
 
 async function handleApply() {
   if (!props.chapter || !sessionId.value) {
@@ -422,6 +737,8 @@ type PipelineEndEvent = {
   gateRequired?: boolean;
   gate?: string;
   currentModule?: number | 'done';
+  characterOutline?: ChapterPipelineSessionView['characterOutline'];
+  characterTraitsOutline?: ChapterPipelineSessionView['characterTraitsOutline'];
   sensoryOutline?: ChapterPipelineSessionView['sensoryOutline'];
   ruleIssues?: PipelineRuleIssue[];
   versionKey?: string;
@@ -429,9 +746,18 @@ type PipelineEndEvent = {
 };
 
 function applyPipelineStepFromEnd(event: PipelineEndEvent) {
+  if (event.characterOutline && !event.characterOutline.userConfirmed) {
+    applyOutlineToEditor('character', event.characterOutline);
+    step.value = 'character-outline';
+    return;
+  }
+  if (event.characterTraitsOutline && !event.characterTraitsOutline.userConfirmed) {
+    applyOutlineToEditor('character-traits', event.characterTraitsOutline);
+    step.value = 'character-traits-outline';
+    return;
+  }
   if (event.sensoryOutline && !event.sensoryOutline.userConfirmed) {
-    outlineRequired.value = [...event.sensoryOutline.required];
-    outlineSuggested.value = [...event.sensoryOutline.suggested];
+    applyOutlineToEditor('sensory', event.sensoryOutline);
     step.value = 'sensory-outline';
     return;
   }
@@ -468,6 +794,10 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
   }
   if (event.versionKey === 'afterSensory') {
     step.value = 'sensory-rewrite';
+    return;
+  }
+  if (event.versionKey === 'afterCharacterTraits') {
+    step.value = 'character-traits';
     return;
   }
   if (event.versionKey === 'afterCharacter') {
@@ -510,7 +840,10 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
 
     <section v-if="step === 'ready'" class="step-section">
       <p class="intro-text">
-        将按项目预设依次执行各模块。若开启大纲审核，感官优化会在生成大纲后暂停等待确认。
+        将按项目预设依次执行各模块。启动前会弹出检索预览，请确认要注入的角色卡（与章节优化一致）；角色/特征/感官大纲均支持 gate 与 AI 修订。
+      </p>
+      <p v-if="selectedPersonaNames.length" class="meta-line">
+        已选角色：{{ selectedPersonaNames.join('、') }}
       </p>
       <div class="step-actions">
         <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
@@ -525,50 +858,18 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       </div>
     </section>
 
-    <section v-else-if="step === 'sensory-outline'" class="step-section">
-      <h4 class="section-title">感官优化大纲</h4>
-      <p class="meta-line">
-        请确认必需项，可删除不需要的建议项后再进入改写。含禁用词的必需项已自动降为建议项并标注告警。
-      </p>
-
-      <div class="outline-panel">
-        <div class="outline-group">
-          <p class="outline-label required">必需项</p>
-          <ul v-if="outlineRequired.length" class="outline-list">
-            <li v-for="item in outlineRequired" :key="item.id" class="outline-item-row">
-              <span>{{ item.text }}</span>
-              <ul v-if="item.contentWarnings?.length" class="outline-warnings">
-                <li v-for="warning in item.contentWarnings" :key="warning">{{ warning }}</li>
-              </ul>
-            </li>
-          </ul>
-          <p v-else class="empty-hint">暂无必需项</p>
-        </div>
-        <div class="outline-group">
-          <p class="outline-label suggested">建议项</p>
-          <ul v-if="outlineSuggested.length" class="outline-list">
-            <li v-for="item in outlineSuggested" :key="item.id" class="outline-suggested-row">
-              <div class="outline-item-body">
-                <span>{{ item.text }}</span>
-                <ul v-if="item.contentWarnings?.length" class="outline-warnings">
-                  <li v-for="warning in item.contentWarnings" :key="warning">{{ warning }}</li>
-                </ul>
-              </div>
-              <button type="button" class="text-button" @click="removeSuggestedItem(item.id)">
-                删除
-              </button>
-            </li>
-          </ul>
-          <p v-else class="empty-hint">暂无建议项</p>
-        </div>
-      </div>
-
-      <div class="step-actions">
-        <button class="primary-button" type="button" :disabled="isBusy" @click="confirmSensoryOutline">
-          {{ running ? '改写中…' : '确认大纲并改写' }}
-        </button>
-      </div>
-    </section>
+    <PipelineOutlineEditor
+      v-else-if="isOutlineStep"
+      :title="outlineEditorTitle"
+      :hint="outlineEditorHint"
+      v-model:required="outlineRequired"
+      v-model:suggested="outlineSuggested"
+      :busy="isBusy"
+      :revision-round="outlineRevisionRound"
+      @confirm="confirmOutline"
+      @recheck="recheckOutline"
+      @revise="reviseOutlineWithFeedback"
+    />
 
     <section v-else-if="step === 'rules' && ruleIssues.length" class="step-section">
       <h4 class="section-title">规则扫描清单</h4>
@@ -649,7 +950,7 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     </section>
 
     <div
-      v-if="pipelineIncomplete && !running && step !== 'ready' && step !== 'sensory-outline'"
+      v-if="pipelineIncomplete && !running && step !== 'ready' && !isOutlineStep"
       class="step-actions"
     >
       <button class="primary-button" type="button" :disabled="isBusy" @click="runModule('run-all')">
@@ -664,6 +965,16 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       </button>
     </div>
   </a-modal>
+
+  <RetrievalPreviewDialog
+    :visible="previewVisible"
+    :loading="previewLoading"
+    :result="previewResult"
+    :error-message="previewError"
+    :z-index="1300"
+    @close="previewVisible = false"
+    @confirm="confirmPersonaPreviewAndStart"
+  />
 </template>
 
 <style scoped>

@@ -9,6 +9,7 @@ const PIPELINE_ERROR = {
   sessionNotFound: 1326,
   gateNotConfirmed: 1328,
   moduleFailed: 1329,
+  outlineReviseInvalid: 1331,
 } as const;
 import {
   applyAutoFixes,
@@ -20,6 +21,7 @@ import {
   generatePipelinePlainText,
   streamPipelineGeneration,
 } from './chapter-pipeline-orchestrator.client';
+import { logPipelinePlainTextDebug, isPipelinePromptLoggingEnabled } from './chapter-pipeline-debug';
 import {
   deletePipelineSession,
   getFinalPolishCache,
@@ -34,6 +36,10 @@ import {
   assertModulePrerequisites,
   applyRuleSegmentFix,
   buildCharacterUserPrompt,
+  buildCharacterOutlineUserPrompt,
+  buildCharacterTraitsOutlineUserPrompt,
+  buildCharacterTraitsRewriteUserPrompt,
+  buildOutlineGateRecheckUserPrompt,
   buildHomogenizationRewriteUserPrompt,
   buildHomogenizationScanUserPrompt,
   buildRulesFixUserPrompt,
@@ -41,6 +47,9 @@ import {
   buildSensoryOutlineUserPrompt,
   buildSensoryRewriteUserPrompt,
   CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY,
   CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
@@ -48,31 +57,45 @@ import {
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
   type ChapterPipelineConfig,
+  type ChapterPipelineOutlineGate,
+  type ChapterPipelineOutlineReviseMode,
+  type ChapterPipelineOutlineType,
   type ChapterPipelineRunModule,
   type ChapterPipelineSession,
   type ChapterPipelineStage,
   type FinalPolishResult,
   type PipelineOutlineItem,
+  type PipelineOutlineState,
   type PipelineRuleIssue,
   computeContentSafetyRulesFingerprint,
   computeFinalPolishFingerprint,
   computePersonasFingerprint,
+  createEmptyOutlineState,
   DEFAULT_PIPELINE_CONFIG,
   DEFAULT_PROTAGONIST_PROGRESS_RULES,
+  filterPipelinePersonas,
+  getOutlineState,
   getPipelineInputText,
   hashFingerprintPart,
   makePipelineSessionId,
   makePipelineTraceId,
   mergePipelineConfig,
   parseHomogenizationReportJson,
+  parsePipelineOutlineJson,
   parseRuleIssuesJson,
   parseSensoryOutlineJson,
+  PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS,
+  pushOutlineRevisionHistory,
   relocateRuleIssuesInText,
   resolveFinalPolishQualityStatus,
+  resolveOutlineGenerationTemplateKey,
+  resolveOutlineSourceText,
   resolvePipelineApplyText,
   sanitizeRuleIssuesForText,
   sanitizeSensoryOutlineWithContentScan,
+  setOutlineState,
   shouldApplyAiSegmentFix,
+  shouldRunCharacterTraitsModule,
   resolvePipelineSegmentStrategy,
   resolveProtagonistContext,
   splitPipelineText,
@@ -99,6 +122,10 @@ export class ChapterPipelineModuleFailedError extends Error {
   }
 }
 
+export class ChapterPipelineOutlineReviseInvalidError extends Error {
+  readonly code = PIPELINE_ERROR.outlineReviseInvalid;
+}
+
 @Injectable()
 export class ChapterPipelineService {
   constructor(private readonly projectsService: ProjectsService) {}
@@ -110,6 +137,7 @@ export class ChapterPipelineService {
       preset?: string;
       mode?: 'pipeline' | 'final-polish';
       configOverrides?: Partial<ChapterPipelineConfig>;
+      selectedPersonaNames?: string[];
     },
     userId?: string
   ): ChapterPipelineStartResult {
@@ -127,6 +155,8 @@ export class ChapterPipelineService {
       payload.mode === 'final-polish'
         ? {
             pipelinePreset: 'full' as ChapterPipelineConfig['pipelinePreset'],
+            pipelineSkipCharacterOutlineReview: true,
+            pipelineSkipCharacterTraitsOutlineReview: true,
             pipelineSkipSensoryOutlineReview: true,
             pipelineRulesFixMode: 'semi' as ChapterPipelineConfig['pipelineRulesFixMode'],
           }
@@ -139,6 +169,10 @@ export class ChapterPipelineService {
         : {}),
     });
 
+    const selectedPersonaNames = payload.selectedPersonaNames
+      ?.map((name) => name.trim())
+      .filter((name) => name.length > 0);
+
     const session: ChapterPipelineSession = {
       sessionId: makePipelineSessionId(),
       projectId,
@@ -147,6 +181,7 @@ export class ChapterPipelineService {
       sourceText: chapter.content,
       sourceUpdatedAt: chapter.updatedAt.toISOString(),
       versions: { original: chapter.content },
+      selectedPersonaNames: selectedPersonaNames?.length ? selectedPersonaNames : undefined,
       config,
       currentModule: config.pipelineEnabledModules[0] ?? 1,
       traceIds: {},
@@ -172,6 +207,19 @@ export class ChapterPipelineService {
     },
     userId?: string
   ): ChapterPipelineSession {
+    return this.patchOutline(sessionId, 'sensory', payload, userId);
+  }
+
+  patchOutline(
+    sessionId: string,
+    outlineType: ChapterPipelineOutlineType,
+    payload: {
+      required: PipelineOutlineItem[];
+      suggested: PipelineOutlineItem[];
+      confirmed: boolean;
+    },
+    userId?: string
+  ): ChapterPipelineSession {
     const session = this.requireSession(sessionId, userId);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
@@ -180,13 +228,102 @@ export class ChapterPipelineService {
       rules,
       settings.contentSafetyScanEnabled !== false
     );
-    session.sensoryOutline = {
+    const previous = getOutlineState(session, outlineType);
+    setOutlineState(session, outlineType, {
       required: sanitized.required,
       suggested: sanitized.suggested,
       userConfirmed: payload.confirmed,
-    };
+      revisionRound: previous?.revisionRound ?? 0,
+      revisionHistory: previous?.revisionHistory ?? [],
+    });
     putPipelineSession(session);
     return session;
+  }
+
+  async reviseOutline(
+    sessionId: string,
+    payload: {
+      outlineType: ChapterPipelineOutlineType;
+      mode?: ChapterPipelineOutlineReviseMode;
+      currentOutline: { required: PipelineOutlineItem[]; suggested: PipelineOutlineItem[] };
+      userFeedback?: string;
+    },
+    userId?: string
+  ): Promise<{
+    required: PipelineOutlineItem[];
+    suggested: PipelineOutlineItem[];
+    revisionRound: number;
+  }> {
+    const session = this.requireSession(sessionId, userId);
+    const mode: ChapterPipelineOutlineReviseMode = payload.mode ?? 'revise';
+    const feedback = payload.userFeedback?.trim() ?? '';
+
+    if (mode === 'revise' && !feedback) {
+      throw new ChapterPipelineOutlineReviseInvalidError(
+        `按意见修订须填写 1~${PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS} 字修改意见`
+      );
+    }
+    if (feedback.length > PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS) {
+      throw new ChapterPipelineOutlineReviseInvalidError(
+        `修改意见须不超过 ${PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS} 字`
+      );
+    }
+
+    await this.prepareContext(session);
+    const previous = getOutlineState(session, payload.outlineType) ?? createEmptyOutlineState();
+    const revisionRound = (previous.revisionRound ?? 0) + 1;
+    const baseUserPrompt = this.buildOutlineBaseUserPrompt(session, payload.outlineType, userId);
+    const prompt = buildOutlineGateRecheckUserPrompt({
+      baseUserPrompt,
+      currentOutline: payload.currentOutline,
+      mode,
+      revisionRound,
+      userFeedback: feedback || undefined,
+    });
+    const templateKey = resolveOutlineGenerationTemplateKey(payload.outlineType);
+    const traceId = makePipelineTraceId(`outline-${mode}`);
+    const taskSuffix = mode === 'recheck' ? 'outline.recheck' : 'outline.revise';
+    const raw = await generatePipelinePlainText({
+      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+      projectId: session.projectId,
+      prompt,
+      templateKey,
+      context: {
+        task: `chapter.pipeline.${payload.outlineType}.${taskSuffix}`,
+        chapterNo: session.chapterNo,
+        traceId,
+        outlineType: payload.outlineType,
+        mode,
+      },
+    });
+
+    try {
+      const parsed = parsePipelineOutlineJson(raw);
+      const settings = this.projectsService.getSettings(session.projectId, userId);
+      const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
+      const sanitized = sanitizeSensoryOutlineWithContentScan(
+        parsed,
+        rules,
+        settings.contentSafetyScanEnabled !== false
+      );
+      pushOutlineRevisionHistory(previous);
+      const nextState: PipelineOutlineState = {
+        required: sanitized.required,
+        suggested: sanitized.suggested,
+        userConfirmed: false,
+        revisionRound,
+        revisionHistory: previous.revisionHistory,
+      };
+      setOutlineState(session, payload.outlineType, nextState);
+      putPipelineSession(session);
+      return {
+        required: nextState.required,
+        suggested: nextState.suggested,
+        revisionRound: nextState.revisionRound,
+      };
+    } catch {
+      throw new ChapterPipelineModuleFailedError('大纲修订 JSON 解析失败', 'outline-revise');
+    }
   }
 
   async applyPipeline(
@@ -195,11 +332,14 @@ export class ChapterPipelineService {
       expectedChapterUpdatedAt: string;
       preserveSummary?: boolean;
       useVersion?: 'afterRules' | 'final';
+      draftTextOverride?: string;
     },
     userId?: string
   ) {
     const session = this.requireSession(sessionId, userId);
-    const draftText = resolvePipelineApplyText(session, payload.useVersion ?? 'final');
+    const draftText =
+      payload.draftTextOverride?.trim() ||
+      resolvePipelineApplyText(session, payload.useVersion ?? 'final');
     return this.projectsService.applyChapterOptimization(
       session.projectId,
       session.chapterNo,
@@ -246,8 +386,17 @@ export class ChapterPipelineService {
     }
 
     switch (module) {
+      case 'character-outline':
+        await this.runCharacterOutlineModule(session, userId, callbacks);
+        break;
       case 'character':
         await this.runCharacterModule(session, userId, callbacks);
+        break;
+      case 'character-traits-outline':
+        await this.runCharacterTraitsOutlineModule(session, userId, callbacks);
+        break;
+      case 'character-traits':
+        await this.runCharacterTraitsModule(session, userId, callbacks);
         break;
       case 'sensory-outline':
         await this.runSensoryOutlineModule(session, userId, callbacks);
@@ -284,11 +433,44 @@ export class ChapterPipelineService {
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
     const enabled = session.config.pipelineEnabledModules;
+    const traitsEnabled = shouldRunCharacterTraitsModule(session.config);
 
-    if (enabled.includes(1) && !session.versions.afterCharacter?.trim()) {
-      await this.runCharacterModule(session, userId, callbacks);
-      if (!session.versions.afterCharacter) {
+    if (enabled.includes(1)) {
+      if (!session.characterOutline) {
+        await this.runCharacterOutlineModule(session, userId, callbacks);
+      }
+      if (
+        !session.config.pipelineSkipCharacterOutlineReview &&
+        !session.characterOutline?.userConfirmed
+      ) {
+        callbacks.onGate?.('character-outline', {
+          characterOutline: session.characterOutline,
+        });
         return;
+      }
+      if (!session.versions.afterCharacter?.trim()) {
+        await this.runCharacterModule(session, userId, callbacks);
+        if (!session.versions.afterCharacter) {
+          return;
+        }
+      }
+
+      if (traitsEnabled) {
+        if (!session.characterTraitsOutline) {
+          await this.runCharacterTraitsOutlineModule(session, userId, callbacks);
+        }
+        if (
+          !session.config.pipelineSkipCharacterTraitsOutlineReview &&
+          !session.characterTraitsOutline?.userConfirmed
+        ) {
+          callbacks.onGate?.('character-traits-outline', {
+            characterTraitsOutline: session.characterTraitsOutline,
+          });
+          return;
+        }
+        if (!session.versions.afterCharacterTraits?.trim()) {
+          await this.runCharacterTraitsModule(session, userId, callbacks);
+        }
       }
     }
 
@@ -300,7 +482,9 @@ export class ChapterPipelineService {
         !session.config.pipelineSkipSensoryOutlineReview &&
         !session.sensoryOutline?.userConfirmed
       ) {
-        callbacks.onGate?.('sensory-outline');
+        callbacks.onGate?.('sensory-outline', {
+          sensoryOutline: session.sensoryOutline,
+        });
         return;
       }
       if (!session.versions.afterSensory?.trim()) {
@@ -331,12 +515,12 @@ export class ChapterPipelineService {
     callbacks.onEnd?.({ sessionId: session.sessionId, currentModule: 'done' });
   }
 
-  private async runCharacterModule(
+  private async runCharacterOutlineModule(
     session: ChapterPipelineSession,
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const protagonist = this.resolveProtagonist(personas, settings.activePersonaId);
@@ -350,8 +534,84 @@ export class ChapterPipelineService {
       protagonistRules,
       protagonist
     );
-    const personaBlock = this.buildPersonaBlock(personas);
-    const prompt = buildCharacterUserPrompt({ sourceText, protagonistContext, personaBlock });
+    const prompt = buildCharacterOutlineUserPrompt({
+      sourceText,
+      protagonistContext,
+      personaBlock: this.buildPersonaBlock(personas, session),
+    });
+    const traceId = makePipelineTraceId('character-outline');
+    session.traceIds.characterOutline = traceId;
+
+    callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: 'pipeline_character_outline',
+    });
+    callbacks.onStage?.({ stage: 'pipeline_character_outline' });
+
+    const raw = await generatePipelinePlainText({
+      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+      projectId: session.projectId,
+      prompt,
+      templateKey: CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
+      context: { task: 'chapter.pipeline.character.outline', chapterNo: session.chapterNo, traceId },
+    });
+
+    try {
+      const parsed = parsePipelineOutlineJson(raw);
+      const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
+      const sanitized = sanitizeSensoryOutlineWithContentScan(
+        parsed,
+        rules,
+        settings.contentSafetyScanEnabled !== false
+      );
+      session.characterOutline = {
+        ...sanitized,
+        userConfirmed: session.config.pipelineSkipCharacterOutlineReview,
+        revisionRound: 0,
+        revisionHistory: [],
+      };
+      putPipelineSession(session);
+      callbacks.onEnd?.({
+        traceId,
+        characterOutline: session.characterOutline,
+        currentModule: 1,
+      });
+    } catch {
+      callbacks.onError?.('角色调整大纲 JSON 解析失败');
+      throw new ChapterPipelineModuleFailedError('角色调整大纲 JSON 解析失败', 'character-outline');
+    }
+  }
+
+  private async runCharacterModule(
+    session: ChapterPipelineSession,
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks
+  ): Promise<void> {
+    await this.prepareContext(session);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    const protagonist = this.resolveProtagonist(personas, settings.activePersonaId);
+    const protagonistRules =
+      (settings as { protagonistProgressRules?: typeof DEFAULT_PROTAGONIST_PROGRESS_RULES })
+        .protagonistProgressRules ?? DEFAULT_PROTAGONIST_PROGRESS_RULES;
+
+    const sourceText = getPipelineInputText(session, 1);
+    const protagonistContext = resolveProtagonistContext(
+      session.chapterNo,
+      protagonistRules,
+      protagonist
+    );
+    const characterOutline = session.characterOutline;
+    const outlineItems = characterOutline
+      ? [...characterOutline.required, ...characterOutline.suggested]
+      : undefined;
+    const prompt = buildCharacterUserPrompt({
+      sourceText,
+      protagonistContext,
+      personaBlock: this.buildPersonaBlock(personas, session),
+      outline: outlineItems,
+    });
     const traceId = makePipelineTraceId('character');
     session.traceIds.character = traceId;
 
@@ -406,12 +666,197 @@ export class ChapterPipelineService {
     const merged =
       segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
     session.versions.afterCharacter = merged;
-    session.currentModule = 2;
+    const traitsEnabled = shouldRunCharacterTraitsModule(session.config);
+    session.currentModule = traitsEnabled ? 1 : 2;
     putPipelineSession(session);
     callbacks.onEnd?.({
       traceId,
       versionText: merged,
       versionKey: 'afterCharacter',
+      currentModule: traitsEnabled ? 1 : 2,
+    });
+  }
+
+  private async runCharacterTraitsOutlineModule(
+    session: ChapterPipelineSession,
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks
+  ): Promise<void> {
+    await this.prepareContext(session);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    const resolvedPersonas = this.resolveSessionPersonas(session, personas);
+    const personaBlock = this.buildPersonaBlock(personas, session);
+    const sourceText = session.versions.afterCharacter ?? getPipelineInputText(session, 1);
+    const prompt = buildCharacterTraitsOutlineUserPrompt({
+      sourceText,
+      personaBlock,
+    });
+    const traceId = makePipelineTraceId('character-traits-outline');
+    session.traceIds.characterTraitsOutline = traceId;
+
+    callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: 'pipeline_character_traits_outline',
+    });
+    callbacks.onStage?.({ stage: 'pipeline_character_traits_outline' });
+
+    logPipelinePlainTextDebug({
+      module: 'character-traits-outline（请求前）',
+      traceId,
+      projectId: session.projectId,
+      chapterNo: session.chapterNo,
+      templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
+      selectedPersonaNames: session.selectedPersonaNames,
+      resolvedPersonaNames: resolvedPersonas.map((persona) => persona.name),
+      personaBlock,
+      userPrompt: prompt,
+    });
+
+    const raw = await generatePipelinePlainText({
+      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+      projectId: session.projectId,
+      prompt,
+      templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
+      context: {
+        task: 'chapter.pipeline.character-traits.outline',
+        chapterNo: session.chapterNo,
+        traceId,
+      },
+    });
+
+    logPipelinePlainTextDebug({
+      module: 'character-traits-outline（返回后）',
+      traceId,
+      projectId: session.projectId,
+      chapterNo: session.chapterNo,
+      templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
+      selectedPersonaNames: session.selectedPersonaNames,
+      resolvedPersonaNames: resolvedPersonas.map((persona) => persona.name),
+      personaBlock,
+      userPrompt: prompt,
+      rawResponse: raw,
+    });
+
+    try {
+      const parsed = parsePipelineOutlineJson(raw);
+      const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
+      const sanitized = sanitizeSensoryOutlineWithContentScan(
+        parsed,
+        rules,
+        settings.contentSafetyScanEnabled !== false
+      );
+      session.characterTraitsOutline = {
+        ...sanitized,
+        userConfirmed: session.config.pipelineSkipCharacterTraitsOutlineReview,
+        revisionRound: 0,
+        revisionHistory: [],
+      };
+      putPipelineSession(session);
+      if (isPipelinePromptLoggingEnabled()) {
+        console.log(
+          `[api/chapter-pipeline] character-traits-outline parsed required=${session.characterTraitsOutline.required.length} suggested=${session.characterTraitsOutline.suggested.length}`
+        );
+      }
+      callbacks.onEnd?.({
+        traceId,
+        characterTraitsOutline: session.characterTraitsOutline,
+        currentModule: 1,
+      });
+    } catch {
+      callbacks.onError?.('角色特征润色大纲 JSON 解析失败');
+      throw new ChapterPipelineModuleFailedError(
+        '角色特征润色大纲 JSON 解析失败',
+        'character-traits-outline'
+      );
+    }
+  }
+
+  private async runCharacterTraitsModule(
+    session: ChapterPipelineSession,
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks
+  ): Promise<void> {
+    const outline = session.characterTraitsOutline;
+    if (!outline) {
+      throw new ChapterPipelineGateNotConfirmedError('角色特征润色大纲尚未生成');
+    }
+    if (!outline.userConfirmed && !session.config.pipelineSkipCharacterTraitsOutlineReview) {
+      throw new ChapterPipelineGateNotConfirmedError('角色特征润色大纲尚未确认');
+    }
+
+    await this.prepareContext(session);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    const sourceText = session.versions.afterCharacter ?? getPipelineInputText(session, 1);
+    const allItems = [...outline.required, ...outline.suggested];
+    const prompt = buildCharacterTraitsRewriteUserPrompt({
+      sourceText,
+      outline: allItems,
+      personaBlock: this.buildPersonaBlock(personas, session),
+    });
+    const traceId = makePipelineTraceId('character-traits');
+    session.traceIds.characterTraits = traceId;
+
+    callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: 'pipeline_character_traits',
+    });
+    callbacks.onStage?.({ stage: 'pipeline_character_traits' });
+
+    const segmentCharSize = settings.chapterOptimizeSegmentCharSize;
+    const strategy = resolvePipelineSegmentStrategy(sourceText.length, segmentCharSize);
+    const segments = splitPipelineText(sourceText, segmentCharSize);
+    const chapter = this.projectsService.getChapterRecordForPipeline(
+      session.projectId,
+      session.chapterNo
+    );
+    const segmentTexts: string[] = [];
+
+    for (let i = 0; i < segments.length; i += 1) {
+      if (strategy.mode === 'segmented') {
+        callbacks.onStage?.({
+          stage: 'draft_segment',
+          segmentIndex: i + 1,
+          segmentTotal: segments.length,
+        });
+      }
+      const result = await streamPipelineGeneration({
+        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+        projectId: session.projectId,
+        prompt: prompt.replace(sourceText, segments[i]),
+        templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY,
+        context: {
+          task: 'chapter.pipeline.character-traits',
+          chapterNo: session.chapterNo,
+          traceId,
+          segmentIndex: i,
+          segmentTotal: segments.length,
+          retrievalChapterTitle: chapter?.title ?? '',
+        },
+        callbacks: { onContent: callbacks.onContent },
+      });
+      if (!result.ok) {
+        callbacks.onError?.(result.errorMessage || '角色特征润色失败');
+        throw new ChapterPipelineModuleFailedError(
+          result.errorMessage || '角色特征润色失败',
+          'character-traits'
+        );
+      }
+      segmentTexts.push(result.text);
+    }
+
+    const merged =
+      segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
+    session.versions.afterCharacterTraits = merged;
+    session.currentModule = 2;
+    putPipelineSession(session);
+    callbacks.onEnd?.({
+      traceId,
+      versionText: merged,
+      versionKey: 'afterCharacterTraits',
       currentModule: 2,
     });
   }
@@ -421,13 +866,13 @@ export class ChapterPipelineService {
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const sourceText = getPipelineInputText(session, 2);
     const prompt = buildSensoryOutlineUserPrompt({
       sourceText,
-      personaBlock: this.buildPersonaBlock(personas),
+      personaBlock: this.buildPersonaBlock(personas, session),
     });
     const traceId = makePipelineTraceId('sensory-outline');
     session.traceIds.sensoryOutline = traceId;
@@ -454,6 +899,8 @@ export class ChapterPipelineService {
       session.sensoryOutline = {
         ...sanitized,
         userConfirmed: session.config.pipelineSkipSensoryOutlineReview,
+        revisionRound: session.sensoryOutline?.revisionRound ?? 0,
+        revisionHistory: session.sensoryOutline?.revisionHistory ?? [],
       };
       putPipelineSession(session);
       callbacks.onEnd?.({
@@ -480,7 +927,7 @@ export class ChapterPipelineService {
       throw new ChapterPipelineGateNotConfirmedError('感官大纲尚未确认');
     }
 
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const sourceText = getPipelineInputText(session, 2);
@@ -488,7 +935,7 @@ export class ChapterPipelineService {
     const prompt = buildSensoryRewriteUserPrompt({
       sourceText,
       outline: allItems,
-      personaBlock: this.buildPersonaBlock(personas),
+      personaBlock: this.buildPersonaBlock(personas, session),
     });
     const traceId = makePipelineTraceId('sensory-rewrite');
     session.traceIds.sensoryRewrite = traceId;
@@ -526,20 +973,19 @@ export class ChapterPipelineService {
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const protagonist = this.resolveProtagonist(personas, settings.activePersonaId);
     const protagonistName = protagonist?.name ?? '主角';
-    const personaBlock = this.buildPersonaBlock(personas);
+    const personaBlock = this.buildPersonaBlock(personas, session);
     const sourceText = getPipelineInputText(session, 3);
     const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
     const deterministic = scanPipelineRules(
       sourceText,
       rules,
       settings.contentSafetyScanEnabled !== false,
-      session.config.pipelineRulesFixMode,
-      protagonistName
+      session.config.pipelineRulesFixMode
     );
 
     callbacks.onStart?.({
@@ -667,7 +1113,7 @@ export class ChapterPipelineService {
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const sourceText = session.versions.afterRules ?? getPipelineInputText(session, 3);
     const issue = session.ruleIssues?.find((i) => i.id === issueId);
     if (!issue) {
@@ -716,7 +1162,7 @@ export class ChapterPipelineService {
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const sourceText = getPipelineInputText(session, 4);
     const priorExcerpts = this.projectsService.getPriorChapterExcerpts(
       session.projectId,
@@ -761,7 +1207,7 @@ export class ChapterPipelineService {
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const sourceText = getPipelineInputText(session, 4);
     const report = session.homogenizationReport ?? [];
     const prompt = buildHomogenizationRewriteUserPrompt({ sourceText, report });
@@ -812,7 +1258,7 @@ export class ChapterPipelineService {
     callbacks: PipelineStreamCallbacks,
     options?: { forceRegenerate?: boolean }
   ): Promise<void> {
-    await this.prepareContext(session.projectId, userId);
+    await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const protagonist = this.resolveProtagonist(personas, settings.activePersonaId);
@@ -859,6 +1305,8 @@ export class ChapterPipelineService {
       }
     } else {
       session.versions = { original: session.sourceText };
+      session.characterOutline = undefined;
+      session.characterTraitsOutline = undefined;
       session.sensoryOutline = undefined;
       session.ruleIssues = undefined;
       session.homogenizationReport = undefined;
@@ -887,7 +1335,7 @@ export class ChapterPipelineService {
       onGate: () => {
         pipelineInterrupted = true;
         callbacks.onError?.(
-          '一键终稿不应中断于感官大纲；请在设置中开启「跳过大纲审核」或联系管理员'
+          '一键终稿不应中断于大纲 gate；请在设置中开启「跳过大纲审核」或联系管理员'
         );
       },
     });
@@ -912,7 +1360,7 @@ export class ChapterPipelineService {
       session.ruleIssues ??
         relocateRuleIssuesInText(
           draftText,
-          scanPipelineRules(draftText, rules, scanEnabled, 'semi', protagonistName)
+          scanPipelineRules(draftText, rules, scanEnabled, 'semi')
         )
     );
 
@@ -973,9 +1421,12 @@ export class ChapterPipelineService {
       systemPromptFingerprint: hashFingerprintPart(settings.systemPromptText ?? ''),
       pipelineEngineFingerprint: hashFingerprintPart(
         JSON.stringify({
-          engine: 'silent-run-all-v2',
+          engine: 'silent-run-all-v3',
           modules: session.config.pipelineEnabledModules,
-          skipOutline: session.config.pipelineSkipSensoryOutlineReview,
+          skipCharacterOutline: session.config.pipelineSkipCharacterOutlineReview,
+          skipCharacterTraitsOutline: session.config.pipelineSkipCharacterTraitsOutlineReview,
+          characterTraitsEnabled: session.config.pipelineCharacterTraitsEnabled,
+          skipSensoryOutline: session.config.pipelineSkipSensoryOutlineReview,
           rulesFixMode: session.config.pipelineRulesFixMode,
           homogenization: session.config.pipelineHomogenizationEnabled,
         })
@@ -1023,8 +1474,17 @@ export class ChapterPipelineService {
     return session;
   }
 
-  private async prepareContext(projectId: string, userId?: string): Promise<void> {
-    await this.projectsService.syncContextForChapterPipeline(projectId, userId);
+  private async prepareContext(session: ChapterPipelineSession): Promise<void> {
+    await this.projectsService.syncContextForChapterPipeline(session.projectId, session.userId, {
+      appearingCharacters: session.selectedPersonaNames,
+    });
+  }
+
+  private resolveSessionPersonas(
+    session: ChapterPipelineSession,
+    personas: PersonaRecord[]
+  ): PersonaRecord[] {
+    return filterPipelinePersonas(personas, session.selectedPersonaNames);
   }
 
   private resolveProtagonist(personas: PersonaRecord[], activePersonaId?: string | null) {
@@ -1045,11 +1505,50 @@ export class ChapterPipelineService {
     };
   }
 
-  private buildPersonaBlock(personas: PersonaRecord[]): string {
-    return personas
-      .filter((p) => p.status === 'published')
+  private buildPersonaBlock(personas: PersonaRecord[], session: ChapterPipelineSession): string {
+    return this.resolveSessionPersonas(session, personas)
       .map((p) => `${p.name}：${p.profile}\n状态：${p.state}`)
       .join('\n\n');
+  }
+
+  private buildOutlineBaseUserPrompt(
+    session: ChapterPipelineSession,
+    outlineType: ChapterPipelineOutlineType,
+    userId?: string
+  ): string {
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    const personaBlock = this.buildPersonaBlock(personas, session);
+    const sourceText = resolveOutlineSourceText(session, outlineType);
+
+    if (outlineType === 'character') {
+      const protagonist = this.resolveProtagonist(personas, settings.activePersonaId);
+      const protagonistRules =
+        (settings as { protagonistProgressRules?: typeof DEFAULT_PROTAGONIST_PROGRESS_RULES })
+          .protagonistProgressRules ?? DEFAULT_PROTAGONIST_PROGRESS_RULES;
+      const protagonistContext = resolveProtagonistContext(
+        session.chapterNo,
+        protagonistRules,
+        protagonist
+      );
+      return buildCharacterOutlineUserPrompt({
+        sourceText,
+        protagonistContext,
+        personaBlock,
+      });
+    }
+
+    if (outlineType === 'character-traits') {
+      return buildCharacterTraitsOutlineUserPrompt({
+        sourceText,
+        personaBlock,
+      });
+    }
+
+    return buildSensoryOutlineUserPrompt({
+      sourceText,
+      personaBlock,
+    });
   }
 
   private resolveProjectPipelineDefaults(
@@ -1065,6 +1564,14 @@ export class ChapterPipelineService {
       pipelineSkipSensoryOutlineReview:
         ext.pipelineSkipSensoryOutlineReview ??
         DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
+      pipelineSkipCharacterOutlineReview:
+        ext.pipelineSkipCharacterOutlineReview ??
+        DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
+      pipelineSkipCharacterTraitsOutlineReview:
+        ext.pipelineSkipCharacterTraitsOutlineReview ??
+        DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
+      pipelineCharacterTraitsEnabled:
+        ext.pipelineCharacterTraitsEnabled ?? DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
       pipelineRulesFixMode:
         ext.pipelineRulesFixMode ?? DEFAULT_PIPELINE_CONFIG.pipelineRulesFixMode,
       pipelineHomogenizationEnabled:
@@ -1101,5 +1608,12 @@ export interface PipelineStreamCallbacks {
   onContent?: (text: string) => void;
   onEnd?: (event: Record<string, unknown>) => void;
   onError?: (message: string) => void;
-  onGate?: (gate: 'sensory-outline') => void;
+  onGate?: (
+    gate: ChapterPipelineOutlineGate,
+    payload?: {
+      characterOutline?: ChapterPipelineSession['characterOutline'];
+      characterTraitsOutline?: ChapterPipelineSession['characterTraitsOutline'];
+      sensoryOutline?: ChapterPipelineSession['sensoryOutline'];
+    }
+  ) => void;
 }

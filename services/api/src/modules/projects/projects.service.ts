@@ -240,6 +240,9 @@ export interface ProjectSettings {
   /** 分步精修预设（AQ-273） */
   pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
   pipelineSkipSensoryOutlineReview?: boolean;
+  pipelineSkipCharacterOutlineReview?: boolean;
+  pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterTraitsEnabled?: boolean;
   pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
@@ -706,6 +709,9 @@ export class ProjectsService implements OnModuleInit {
       contentSafetyCustomRules?: ProjectContentSafetyRule[];
       pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
       pipelineSkipSensoryOutlineReview?: boolean;
+      pipelineSkipCharacterOutlineReview?: boolean;
+      pipelineSkipCharacterTraitsOutlineReview?: boolean;
+      pipelineCharacterTraitsEnabled?: boolean;
       pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
       pipelineHomogenizationEnabled?: boolean;
       pipelineHomogenizationPriorChapterCount?: number;
@@ -793,6 +799,9 @@ export class ProjectsService implements OnModuleInit {
     applyProjectSettingsJsonExtensions(settings, {
       pipelinePreset: payload.pipelinePreset,
       pipelineSkipSensoryOutlineReview: payload.pipelineSkipSensoryOutlineReview,
+      pipelineSkipCharacterOutlineReview: payload.pipelineSkipCharacterOutlineReview,
+      pipelineSkipCharacterTraitsOutlineReview: payload.pipelineSkipCharacterTraitsOutlineReview,
+      pipelineCharacterTraitsEnabled: payload.pipelineCharacterTraitsEnabled,
       pipelineRulesFixMode: payload.pipelineRulesFixMode,
       pipelineHomogenizationEnabled: payload.pipelineHomogenizationEnabled,
       pipelineHomogenizationPriorChapterCount: payload.pipelineHomogenizationPriorChapterCount,
@@ -4365,6 +4374,18 @@ export class ProjectsService implements OnModuleInit {
       settings.pipelineSkipSensoryOutlineReview =
         PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineSkipSensoryOutlineReview;
     }
+    if (settings.pipelineSkipCharacterOutlineReview === undefined) {
+      settings.pipelineSkipCharacterOutlineReview =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineSkipCharacterOutlineReview;
+    }
+    if (settings.pipelineSkipCharacterTraitsOutlineReview === undefined) {
+      settings.pipelineSkipCharacterTraitsOutlineReview =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineSkipCharacterTraitsOutlineReview;
+    }
+    if (settings.pipelineCharacterTraitsEnabled === undefined) {
+      settings.pipelineCharacterTraitsEnabled =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineCharacterTraitsEnabled;
+    }
     if (settings.pipelineRulesFixMode === undefined) {
       settings.pipelineRulesFixMode = PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineRulesFixMode;
     }
@@ -4403,6 +4424,9 @@ export class ProjectsService implements OnModuleInit {
       contentSafetyCustomRules: settings.contentSafetyCustomRules.map((rule) => ({ ...rule })),
       pipelinePreset: settings.pipelinePreset,
       pipelineSkipSensoryOutlineReview: settings.pipelineSkipSensoryOutlineReview,
+      pipelineSkipCharacterOutlineReview: settings.pipelineSkipCharacterOutlineReview,
+      pipelineSkipCharacterTraitsOutlineReview: settings.pipelineSkipCharacterTraitsOutlineReview,
+      pipelineCharacterTraitsEnabled: settings.pipelineCharacterTraitsEnabled,
       pipelineRulesFixMode: settings.pipelineRulesFixMode,
       pipelineHomogenizationEnabled: settings.pipelineHomogenizationEnabled,
       pipelineHomogenizationPriorChapterCount: settings.pipelineHomogenizationPriorChapterCount,
@@ -5436,14 +5460,26 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /** 分步精修流水线：同步 orchestrator 上下文（AQ-275） */
-  async syncContextForChapterPipeline(projectId: string, userId?: string): Promise<void> {
+  async syncContextForChapterPipeline(
+    projectId: string,
+    userId?: string,
+    options?: { appearingCharacters?: string[] }
+  ): Promise<void> {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
     const settings = this.settingsStore.get(projectId)!;
-    const personas = this.personasStore.get(projectId)!;
+    const allPersonas = this.personasStore.get(projectId)!;
+    const personas =
+      options?.appearingCharacters?.length
+        ? allPersonas.filter(
+            (persona) =>
+              persona.status === 'published' &&
+              options.appearingCharacters!.includes(persona.name)
+          )
+        : allPersonas;
     const knowledge = this.knowledgeStore.get(projectId)!;
     await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
   }

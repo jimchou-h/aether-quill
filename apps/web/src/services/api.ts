@@ -1553,6 +1553,7 @@ export const apiClient = {
       preset?: 'full' | 'character_rules' | 'sensory_only';
       mode?: 'pipeline' | 'final-polish';
       configOverrides?: Partial<ChapterPipelineConfig>;
+      selectedPersonaNames?: string[];
     }
   ) {
     const response = await http.post(
@@ -1582,6 +1583,32 @@ export const apiClient = {
     return this.unwrapPayload<ChapterPipelineSessionView>(response.data);
   },
 
+  async patchChapterPipelineOutline(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineOutlinePatch
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/outline`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineSessionView>(response.data);
+  },
+
+  async reviseChapterPipelineOutline(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineOutlineReviseRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/outline/revise`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineOutlineReviseResult>(response.data);
+  },
+
   async applyChapterPipeline(
     projectId: string,
     chapterNo: number,
@@ -1590,6 +1617,7 @@ export const apiClient = {
       expectedChapterUpdatedAt: string;
       preserveSummary?: boolean;
       useVersion?: 'afterRules' | 'final';
+      draftTextOverride?: string;
     }
   ) {
     const response = await http.post(
@@ -1668,6 +1696,8 @@ export const apiClient = {
             segmentTotal?: number;
             versionText?: string;
             versionKey?: string;
+            characterOutline?: ChapterPipelineSessionView['characterOutline'];
+            characterTraitsOutline?: ChapterPipelineSessionView['characterTraitsOutline'];
             sensoryOutline?: ChapterPipelineSessionView['sensoryOutline'];
             ruleIssues?: PipelineRuleIssue[];
             homogenizationReport?: PipelineHomogenizationIssue[];
@@ -2089,7 +2119,10 @@ export interface StructuredInfoParseResult {
 }
 
 export type ChapterPipelineStage =
+  | 'pipeline_character_outline'
   | 'pipeline_character'
+  | 'pipeline_character_traits_outline'
+  | 'pipeline_character_traits'
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
   | 'pipeline_rules_scan'
@@ -2113,7 +2146,10 @@ export interface FinalPolishResult {
 }
 
 export type ChapterPipelineRunModule =
+  | 'character-outline'
   | 'character'
+  | 'character-traits-outline'
+  | 'character-traits'
   | 'sensory-outline'
   | 'sensory-rewrite'
   | 'rules-scan'
@@ -2127,17 +2163,33 @@ export type ChapterPipelineRunModule =
 export interface ChapterPipelineConfig {
   pipelinePreset: 'full' | 'character_rules' | 'sensory_only';
   pipelineSkipSensoryOutlineReview: boolean;
+  pipelineSkipCharacterOutlineReview: boolean;
+  pipelineSkipCharacterTraitsOutlineReview: boolean;
+  pipelineCharacterTraitsEnabled: boolean;
   pipelineRulesFixMode: 'auto' | 'semi' | 'manual';
   pipelineHomogenizationEnabled: boolean;
   pipelineHomogenizationPriorChapterCount: number;
   pipelineEnabledModules: number[];
 }
 
+export type ChapterPipelineOutlineType = 'character' | 'character-traits' | 'sensory';
+
 export interface PipelineOutlineItem {
   id: string;
   text: string;
   priority: 'required' | 'suggested';
   contentWarnings?: string[];
+  personaId?: string;
+  personaName?: string;
+  featureRef?: string;
+  anchorHint?: string;
+}
+
+export interface PipelineOutlineState {
+  required: PipelineOutlineItem[];
+  suggested: PipelineOutlineItem[];
+  userConfirmed: boolean;
+  revisionRound: number;
 }
 
 export interface PipelineRuleIssue {
@@ -2177,6 +2229,25 @@ export interface ChapterPipelineSensoryOutlinePatch {
   confirmed: boolean;
 }
 
+export interface ChapterPipelineOutlinePatch extends ChapterPipelineSensoryOutlinePatch {
+  outlineType: ChapterPipelineOutlineType;
+}
+
+export type ChapterPipelineOutlineReviseMode = 'recheck' | 'revise';
+
+export interface ChapterPipelineOutlineReviseRequest {
+  outlineType: ChapterPipelineOutlineType;
+  mode?: ChapterPipelineOutlineReviseMode;
+  currentOutline: { required: PipelineOutlineItem[]; suggested: PipelineOutlineItem[] };
+  userFeedback?: string;
+}
+
+export interface ChapterPipelineOutlineReviseResult {
+  required: PipelineOutlineItem[];
+  suggested: PipelineOutlineItem[];
+  revisionRound: number;
+}
+
 export interface ChapterPipelineSessionView {
   sessionId: string;
   chapterNo: number;
@@ -2185,15 +2256,15 @@ export interface ChapterPipelineSessionView {
   versions: {
     original?: string;
     afterCharacter?: string;
+    afterCharacterTraits?: string;
     afterSensory?: string;
     afterRules?: string;
     final?: string;
   };
-  sensoryOutline?: {
-    required: PipelineOutlineItem[];
-    suggested: PipelineOutlineItem[];
-    userConfirmed: boolean;
-  };
+  characterOutline?: PipelineOutlineState;
+  characterTraitsOutline?: PipelineOutlineState;
+  sensoryOutline?: PipelineOutlineState;
+  selectedPersonaNames?: string[];
   ruleIssues?: PipelineRuleIssue[];
   homogenizationReport?: PipelineHomogenizationIssue[];
   sourceUpdatedAt: string;
@@ -2228,8 +2299,14 @@ export function formatPipelineStageLabel(
   segmentTotal?: number
 ): string {
   switch (stage) {
+    case 'pipeline_character_outline':
+      return '生成角色调整大纲…';
     case 'pipeline_character':
       return '角色调整中…';
+    case 'pipeline_character_traits_outline':
+      return '生成角色特征润色大纲…';
+    case 'pipeline_character_traits':
+      return '角色特征润色中…';
     case 'pipeline_sensory_outline':
       return '生成感官优化大纲…';
     case 'pipeline_sensory_rewrite':

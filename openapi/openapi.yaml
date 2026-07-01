@@ -117,6 +117,10 @@ paths:
     $ref: './paths/projects/chapter-pipeline-session.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/sensory-outline:
     $ref: './paths/projects/chapter-pipeline-sensory-outline.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline:
+    $ref: './paths/projects/chapter-pipeline-outline.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/revise:
+    $ref: './paths/projects/chapter-pipeline-outline-revise.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/run/{module}:
     $ref: './paths/projects/chapter-pipeline-run.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/apply:
@@ -1715,7 +1719,10 @@ components:
             - plan_synthesis
             - draft_segment
             - merge_validation
+            - pipeline_character_outline
             - pipeline_character
+            - pipeline_character_traits_outline
+            - pipeline_character_traits
             - pipeline_sensory_outline
             - pipeline_sensory_rewrite
             - pipeline_rules_scan
@@ -1893,6 +1900,9 @@ components:
       required:
         - pipelinePreset
         - pipelineSkipSensoryOutlineReview
+        - pipelineSkipCharacterOutlineReview
+        - pipelineSkipCharacterTraitsOutlineReview
+        - pipelineCharacterTraitsEnabled
         - pipelineRulesFixMode
         - pipelineHomogenizationEnabled
         - pipelineHomogenizationPriorChapterCount
@@ -1902,6 +1912,12 @@ components:
           type: string
           enum: [full, character_rules, sensory_only]
         pipelineSkipSensoryOutlineReview:
+          type: boolean
+        pipelineSkipCharacterOutlineReview:
+          type: boolean
+        pipelineSkipCharacterTraitsOutlineReview:
+          type: boolean
+        pipelineCharacterTraitsEnabled:
           type: boolean
         pipelineRulesFixMode:
           type: string
@@ -1931,6 +1947,11 @@ components:
           description: final-polish 用于一键终稿会话
         configOverrides:
           $ref: '#/components/schemas/ChapterPipelineConfig'
+        selectedPersonaNames:
+          type: array
+          items:
+            type: string
+          description: 检索预览确认后注入的角色名；省略则使用全部已发布人物
     ChapterPipelineStartResult:
       type: object
       required:
@@ -1963,6 +1984,108 @@ components:
           items:
             type: string
           description: 大纲项确定性内容安全扫描告警（如禁用词）
+        personaId:
+          type: string
+        personaName:
+          type: string
+        featureRef:
+          type: string
+        anchorHint:
+          type: string
+    PipelineOutlineState:
+      type: object
+      required:
+        - required
+        - suggested
+        - userConfirmed
+        - revisionRound
+      properties:
+        required:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        suggested:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        userConfirmed:
+          type: boolean
+        revisionRound:
+          type: integer
+          minimum: 0
+    ChapterPipelineOutlinePatch:
+      type: object
+      required:
+        - outlineType
+        - required
+        - suggested
+        - confirmed
+      properties:
+        outlineType:
+          type: string
+          enum: [character, character-traits, sensory]
+        required:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        suggested:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        confirmed:
+          type: boolean
+    ChapterPipelineOutlineReviseRequest:
+      type: object
+      required:
+        - outlineType
+        - currentOutline
+      properties:
+        outlineType:
+          type: string
+          enum: [character, character-traits, sensory]
+        mode:
+          type: string
+          enum: [recheck, revise]
+          default: revise
+          description: |
+            recheck — 复用模块原 outline prompt 对照正文重新诊断，userFeedback 可选；
+            revise — 同上且须落实 userFeedback（必填）。
+        currentOutline:
+          type: object
+          required:
+            - required
+            - suggested
+          properties:
+            required:
+              type: array
+              items:
+                $ref: '#/components/schemas/PipelineOutlineItem'
+            suggested:
+              type: array
+              items:
+                $ref: '#/components/schemas/PipelineOutlineItem'
+        userFeedback:
+          type: string
+          maxLength: 2000
+          description: mode=revise 时必填 1~2000 字；mode=recheck 时可选
+    ChapterPipelineOutlineReviseResult:
+      type: object
+      required:
+        - required
+        - suggested
+        - revisionRound
+      properties:
+        required:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        suggested:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineOutlineItem'
+        revisionRound:
+          type: integer
+          minimum: 0
     PipelineRuleIssue:
       type: object
       required:
@@ -2049,7 +2172,9 @@ components:
           type: string
           enum: [afterRules, final]
           default: final
-    ChapterPipelineSessionView:
+        draftTextOverride:
+          type: string
+          description: 手动修订后的终稿正文；提供时优先于 session 内版本（用于质量门禁 blocked 时人工兜底）
       type: object
       required:
         - sessionId
@@ -2079,25 +2204,24 @@ components:
               type: string
             afterCharacter:
               type: string
+            afterCharacterTraits:
+              type: string
             afterSensory:
               type: string
             afterRules:
               type: string
             final:
               type: string
+        characterOutline:
+          $ref: '#/components/schemas/PipelineOutlineState'
+        characterTraitsOutline:
+          $ref: '#/components/schemas/PipelineOutlineState'
         sensoryOutline:
-          type: object
-          properties:
-            required:
-              type: array
-              items:
-                $ref: '#/components/schemas/PipelineOutlineItem'
-            suggested:
-              type: array
-              items:
-                $ref: '#/components/schemas/PipelineOutlineItem'
-            userConfirmed:
-              type: boolean
+          $ref: '#/components/schemas/PipelineOutlineState'
+        selectedPersonaNames:
+          type: array
+          items:
+            type: string
         ruleIssues:
           type: array
           items:

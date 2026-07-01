@@ -9,6 +9,7 @@ import {
   type PipelineRuleIssue,
 } from '../../services/api';
 import { presentErrorFromCaught, presentInfo, presentSuccess } from '../../utils/pageFeedback';
+import { confirmAction } from '../../composables/useAppConfirm';
 import {
   applyAiTaskProgressEvent,
   completeAiTaskProgress,
@@ -45,6 +46,7 @@ const cachedHint = ref('');
 const aiTaskProgress = createAiTaskProgressState();
 const chapterUpdatedAtSnapshot = ref('');
 const previewMode = ref<'final' | 'diff'>('diff');
+const editableFinalText = ref('');
 
 const isBusy = computed(() => running.value || applying.value);
 
@@ -92,7 +94,7 @@ const qualityStatusLabel = computed(() => {
     case 'passed_with_warnings':
       return '已通过，仍有少量硬风险需留意';
     case 'blocked':
-      return '存在阻断性硬风险，暂不可应用';
+      return '存在阻断性硬风险，需手动修订或确认后应用';
     default:
       return '';
   }
@@ -109,8 +111,18 @@ function resetState() {
   progressLabel.value = '';
   cachedHint.value = '';
   previewMode.value = 'diff';
+  editableFinalText.value = '';
   resetAiTaskProgress(aiTaskProgress);
 }
+
+watch(
+  () => [step.value, finalText.value] as const,
+  ([currentStep, text]) => {
+    if (currentStep === 'review' && text) {
+      editableFinalText.value = text;
+    }
+  }
+);
 
 watch(
   () => props.visible,
@@ -239,6 +251,35 @@ async function handleApply() {
   if (!props.chapter || !sessionId.value || applyBlocked.value) {
     return;
   }
+  await doApply(finalText.value.trim(), false);
+}
+
+async function handleApplyWithOverride() {
+  if (!props.chapter || !sessionId.value || !applyBlocked.value) {
+    return;
+  }
+  const text = editableFinalText.value.trim();
+  if (!text) {
+    return;
+  }
+  const unchanged = text === finalText.value.trim();
+  if (unchanged) {
+    const ok = await confirmAction({
+      title: '强制应用终稿',
+      content:
+        '仍存在未解决的硬风险。若未在下方手动修订，将按 AI 原稿强制覆盖章节正文。确认继续？',
+    });
+    if (!ok) {
+      return;
+    }
+  }
+  await doApply(text, true);
+}
+
+async function doApply(text: string, useOverride: boolean) {
+  if (!props.chapter || !sessionId.value || !text) {
+    return;
+  }
   applying.value = true;
   try {
     const result = await apiClient.applyChapterPipeline(
@@ -249,6 +290,7 @@ async function handleApply() {
         expectedChapterUpdatedAt: chapterUpdatedAtSnapshot.value,
         preserveSummary: true,
         useVersion: 'final',
+        draftTextOverride: useOverride ? text : undefined,
       }
     );
     presentSuccess('终稿已应用到章节');
@@ -299,55 +341,7 @@ async function handleApply() {
         </span>
       </div>
 
-      <div v-if="hasResultDiff" class="diff-summary">
-        <span class="diff-badge diff-added">+{{ diffAddedCount }} 新增</span>
-        <span class="diff-badge diff-removed">-{{ diffRemovedCount }} 删除</span>
-        <span class="diff-badge diff-modified">~{{ diffModifiedCount }} 修改</span>
-      </div>
-
-      <div v-if="hasResultDiff" class="preview-toggle">
-        <button
-          type="button"
-          class="preview-toggle-btn"
-          :class="{ active: previewMode === 'final' }"
-          @click="previewMode = 'final'"
-        >
-          终稿正文
-        </button>
-        <button
-          type="button"
-          class="preview-toggle-btn"
-          :class="{ active: previewMode === 'diff' }"
-          @click="previewMode = 'diff'"
-        >
-          对比视图
-        </button>
-      </div>
-
-      <pre
-        v-if="previewMode === 'final' || !hasResultDiff"
-        class="final-preview final-preview-done"
-      >{{ finalText }}</pre>
-      <div v-else class="draft-compare-grid">
-        <div class="compare-pane">
-          <p class="field-label">原文（快照）</p>
-          <div class="scroll-pane full-text-pane">
-            <template v-for="(seg, idx) in inlineDiff.originalSegments" :key="'o-' + idx">
-              <span :class="{ 'diff-removed-text': seg.removed }">{{ seg.text }}</span>
-            </template>
-          </div>
-        </div>
-        <div class="compare-pane">
-          <p class="field-label">终稿正文</p>
-          <div class="scroll-pane full-text-pane">
-            <template v-for="(seg, idx) in inlineDiff.draftSegments" :key="'d-' + idx">
-              <span :class="{ 'diff-added-text': seg.added }">{{ seg.text }}</span>
-            </template>
-          </div>
-        </div>
-      </div>
-
-      <section v-if="residualIssues.length" class="issue-section">
+      <section v-if="residualIssues.length && applyBlocked" class="issue-section">
         <h5 class="section-title">残留硬风险</h5>
         <ul class="issue-list">
           <li v-for="issue in residualIssues" :key="issue.id" class="issue-item">
@@ -359,9 +353,83 @@ async function handleApply() {
             <p v-if="issue.context" class="issue-context">{{ issue.context }}</p>
           </li>
         </ul>
-        <p v-if="applyBlocked" class="blocked-hint">
-          请改用「分步精修」诊断，或手动处理上述风险后再应用。
+      </section>
+
+      <div v-if="applyBlocked" class="manual-edit-section">
+        <p class="field-label">手动修订终稿</p>
+        <p class="blocked-hint editable-hint">
+          对照上方风险项修订正文后应用；若保持原稿不变，点击「应用终稿」时将提示确认强制应用。
         </p>
+        <textarea
+          v-model="editableFinalText"
+          class="final-editor"
+          rows="18"
+          :disabled="isBusy"
+        />
+      </div>
+
+      <template v-else>
+        <div v-if="hasResultDiff" class="diff-summary">
+          <span class="diff-badge diff-added">+{{ diffAddedCount }} 新增</span>
+          <span class="diff-badge diff-removed">-{{ diffRemovedCount }} 删除</span>
+          <span class="diff-badge diff-modified">~{{ diffModifiedCount }} 修改</span>
+        </div>
+
+        <div v-if="hasResultDiff" class="preview-toggle">
+          <button
+            type="button"
+            class="preview-toggle-btn"
+            :class="{ active: previewMode === 'final' }"
+            @click="previewMode = 'final'"
+          >
+            终稿正文
+          </button>
+          <button
+            type="button"
+            class="preview-toggle-btn"
+            :class="{ active: previewMode === 'diff' }"
+            @click="previewMode = 'diff'"
+          >
+            对比视图
+          </button>
+        </div>
+
+        <pre
+          v-if="previewMode === 'final' || !hasResultDiff"
+          class="final-preview final-preview-done"
+        >{{ finalText }}</pre>
+        <div v-else class="draft-compare-grid">
+          <div class="compare-pane">
+            <p class="field-label">原文（快照）</p>
+            <div class="scroll-pane full-text-pane">
+              <template v-for="(seg, idx) in inlineDiff.originalSegments" :key="'o-' + idx">
+                <span :class="{ 'diff-removed-text': seg.removed }">{{ seg.text }}</span>
+              </template>
+            </div>
+          </div>
+          <div class="compare-pane">
+            <p class="field-label">终稿正文</p>
+            <div class="scroll-pane full-text-pane">
+              <template v-for="(seg, idx) in inlineDiff.draftSegments" :key="'d-' + idx">
+                <span :class="{ 'diff-added-text': seg.added }">{{ seg.text }}</span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <section v-if="residualIssues.length && !applyBlocked" class="issue-section">
+        <h5 class="section-title">残留硬风险</h5>
+        <ul class="issue-list">
+          <li v-for="issue in residualIssues" :key="issue.id" class="issue-item">
+            <div class="issue-head">
+              <span class="issue-category">{{ issue.category }}</span>
+              <span class="issue-strategy">{{ issue.fixStrategy }}</span>
+            </div>
+            <p class="issue-text">{{ issue.text }}</p>
+            <p v-if="issue.context" class="issue-context">{{ issue.context }}</p>
+          </li>
+        </ul>
       </section>
     </section>
 
@@ -376,9 +444,19 @@ async function handleApply() {
         {{ running ? '生成中…' : '换一版' }}
       </button>
       <button
+        v-if="applyBlocked"
         class="primary-button"
         type="button"
-        :disabled="isBusy || !finalText || applyBlocked"
+        :disabled="isBusy || !editableFinalText.trim()"
+        @click="handleApplyWithOverride"
+      >
+        {{ applying ? '应用中…' : '应用终稿' }}
+      </button>
+      <button
+        v-else
+        class="primary-button"
+        type="button"
+        :disabled="isBusy || !finalText"
         @click="handleApply"
       >
         {{ applying ? '应用中…' : '应用到章节' }}
@@ -618,6 +696,34 @@ async function handleApply() {
   margin: 0;
   font-size: 0.82rem;
   color: #b91c1c;
+}
+
+.editable-hint {
+  margin-bottom: 0.5rem;
+}
+
+.manual-edit-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.final-editor {
+  width: 100%;
+  min-height: 320px;
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.88rem;
+  line-height: 1.65;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.final-editor:disabled {
+  background: #f3f4f6;
+  cursor: not-allowed;
 }
 
 .step-actions {
