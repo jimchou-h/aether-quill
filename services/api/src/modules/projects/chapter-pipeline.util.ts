@@ -23,7 +23,6 @@ export const CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY = 'chapter.pipeline
 export const CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY =
   'chapter.pipeline.character-traits.outline';
 export const CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY = 'chapter.pipeline.character-traits';
-export const CHAPTER_PIPELINE_OUTLINE_REVISE_TEMPLATE_KEY = 'chapter.pipeline.outline.revise';
 export const CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY = 'chapter.pipeline.sensory.outline';
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY = 'chapter.pipeline.sensory.rewrite';
 export const CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY = 'chapter.pipeline.rules.scan';
@@ -38,7 +37,6 @@ export const CHAPTER_PIPELINE_TEMPLATE_KEYS = [
   CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_OUTLINE_REVISE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
@@ -99,14 +97,6 @@ export const CHAPTER_PIPELINE_CHARACTER_TRAITS_SYSTEM_PROMPT = [
   'ONLY：在合理场景插入或微调相邻句以补足特征；不改动既有情节骨架。',
   '禁止：修改对白内容/口吻、情节走向、人物出场顺序、体位顺序；禁止新增或删除对白句子、人物、体位、场景。',
   '直接输出完整正文，不要输出说明或 Markdown。',
-].join('\n');
-
-export const CHAPTER_PIPELINE_OUTLINE_REVISE_SYSTEM_PROMPT = [
-  '你是一位资深小说编辑，正在根据用户意见修订分步精修大纲 JSON。',
-  DIMENSION_BOUNDARY,
-  'ONLY：按 userFeedback 修订当前大纲条目（增删改、调整 priority）；禁止输出正文。',
-  '禁止越界修改其他模块职责的条目（角色调整 vs 特征润色 vs 感官优化边界不可混淆）。',
-  '只输出 JSON：{"required":[...],"suggested":[...]}，结构与输入大纲一致。',
 ].join('\n');
 
 export const CHAPTER_PIPELINE_SENSORY_OUTLINE_SYSTEM_PROMPT = [
@@ -831,23 +821,6 @@ export function buildOutlineGateRecheckUserPrompt(input: {
   }
 
   return blocks.filter(Boolean).join('\n\n');
-}
-
-/** @deprecated V1.2 主路径改用 buildOutlineGateRecheckUserPrompt + 模块原 outline templateKey */
-export function buildOutlineReviseUserPrompt(input: {
-  outlineType: ChapterPipelineOutlineType;
-  currentOutline: { required: PipelineOutlineItem[]; suggested: PipelineOutlineItem[] };
-  userFeedback: string;
-  chapterSummary?: string;
-}): string {
-  return [
-    `outlineType: ${input.outlineType}`,
-    input.chapterSummary ? `【章节摘要】\n${input.chapterSummary}` : '',
-    `<current-outline>\n${JSON.stringify(input.currentOutline, null, 2)}\n</current-outline>`,
-    `<user-feedback>\n${input.userFeedback}\n</user-feedback>`,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
 }
 
 export function buildSensoryOutlineUserPrompt(input: {

@@ -82,13 +82,6 @@ export const WAREHOUSE_TASK_PROMPT_DEFAULTS: Record<string, string> = {
     '禁止：修改对白内容/口吻、情节走向、人物出场顺序、体位顺序；禁止新增或删除对白句子、人物、体位、场景。',
     '直接输出完整正文，不要输出说明或 Markdown。',
   ].join('\n'),
-  'chapter.pipeline.outline.revise': [
-    '你是一位资深小说编辑，正在根据用户意见修订分步精修大纲 JSON。',
-    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
-    'ONLY：按 userFeedback 修订当前大纲条目（增删改、调整 priority）；禁止输出正文。',
-    '禁止越界修改其他模块职责的条目（角色调整 vs 特征润色 vs 感官优化边界不可混淆）。',
-    '只输出 JSON：{"required":[...],"suggested":[...]}，结构与输入大纲一致。',
-  ].join('\n'),
   'chapter.pipeline.sensory.outline': [
     '你是一位资深小说编辑，正在对章节正文制定「感官优化大纲」。',
     '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
