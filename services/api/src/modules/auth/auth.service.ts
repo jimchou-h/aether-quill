@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -9,6 +11,7 @@ import { User, Session, LoginResponse, RefreshResponse } from './auth.entity';
 export class AuthService implements OnModuleInit {
   private users: Map<string, User> = new Map();
   private sessions: Map<string, Session> = new Map();
+  private readonly storagePath = join(resolve(process.cwd()), 'data', 'auth-sessions.json');
 
   constructor(
     private readonly jwtService: JwtService,
@@ -20,6 +23,7 @@ export class AuthService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    this.restoreSessionsFromDisk();
     if (!usePostgresPersistence()) {
       return;
     }
@@ -78,8 +82,31 @@ export class AuthService implements OnModuleInit {
         });
       }
       console.log(`[persistence] 已从数据库加载 ${dbSessions.length} 个有效 sessions`);
+      this.persistSessions();
     } catch (err) {
       console.error('[persistence] sessions PG 加载失败', err);
+    }
+  }
+
+  private restoreSessionsFromDisk() {
+    if (!existsSync(this.storagePath)) {
+      return;
+    }
+    try {
+      const raw = readFileSync(this.storagePath, 'utf8');
+      const parsed = JSON.parse(raw) as { sessions?: Session[] };
+      const now = Date.now();
+      for (const session of parsed.sessions ?? []) {
+        if (!session?.token || !session.expiresAt) {
+          continue;
+        }
+        if (new Date(session.expiresAt).getTime() <= now) {
+          continue;
+        }
+        this.sessions.set(session.token, session);
+      }
+    } catch (err) {
+      console.error('[persistence] auth sessions JSON 加载失败', err);
     }
   }
 
@@ -201,6 +228,7 @@ export class AuthService implements OnModuleInit {
     };
 
     this.sessions.set(refreshToken, session);
+    this.persistSessions();
 
     if (usePostgresPersistence()) {
       try {
@@ -221,6 +249,7 @@ export class AuthService implements OnModuleInit {
 
   private async deleteSession(refreshToken: string) {
     this.sessions.delete(refreshToken);
+    this.persistSessions();
 
     if (usePostgresPersistence()) {
       try {
@@ -245,10 +274,28 @@ export class AuthService implements OnModuleInit {
 
   clearExpiredSessions(): void {
     const now = new Date();
+    let changed = false;
     this.sessions.forEach((session, token) => {
       if (new Date(session.expiresAt) < now) {
         this.sessions.delete(token);
+        changed = true;
       }
     });
+    if (changed) {
+      this.persistSessions();
+    }
+  }
+
+  private persistSessions() {
+    const targetDir = dirname(this.storagePath);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    const payload = {
+      sessions: Array.from(this.sessions.values()).sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt)
+      ),
+    };
+    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
   }
 }
