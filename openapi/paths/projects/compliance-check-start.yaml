@@ -1,0 +1,23 @@
+post:
+  tags:
+    - Projects
+  summary: Start compliance check session
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    '200':
+      description: Session created
+    '400':
+      description: Empty chapter

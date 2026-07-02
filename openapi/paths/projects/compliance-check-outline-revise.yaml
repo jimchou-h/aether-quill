@@ -1,0 +1,30 @@
+post:
+  tags:
+    - Projects
+  summary: AI revise compliance outline
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required: [currentOutline]
+          properties:
+            mode:
+              type: string
+              enum: [recheck, revise]
+            userFeedback:
+              type: string
+            currentOutline:
+              type: object
+  responses:
+    '200':
+      description: Revised outline items

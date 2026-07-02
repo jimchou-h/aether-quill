@@ -1,0 +1,34 @@
+post:
+  tags:
+    - Projects
+  summary: Apply compliance rewrite to chapter
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required: [expectedChapterUpdatedAt]
+          properties:
+            expectedChapterUpdatedAt:
+              type: string
+            preserveSummary:
+              type: boolean
+              default: true
+            draftTextOverride:
+              type: string
+            forceApply:
+              type: boolean
+  responses:
+    '200':
+      description: Chapter updated
+    '400':
+      description: Quality blocked (1334)

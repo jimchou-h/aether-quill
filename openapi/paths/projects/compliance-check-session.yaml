@@ -1,0 +1,17 @@
+get:
+  tags:
+    - Projects
+  summary: Get compliance check session by id
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Session view
+    '404':
+      description: Session not found (1332)

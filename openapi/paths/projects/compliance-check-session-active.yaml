@@ -1,0 +1,23 @@
+get:
+  tags:
+    - Projects
+  summary: Get active compliance check session for chapter
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    '200':
+      description: Active session
+    '404':
+      description: No active session (1332)
