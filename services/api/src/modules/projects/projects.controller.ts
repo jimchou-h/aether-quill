@@ -39,6 +39,7 @@ import type {
 } from './chapter-pipeline.util';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { ProjectContentSafetyRule } from '@aether-quill/config';
+import { createSseStreamContext } from '../../common/sse-stream.util';
 
 interface AuthenticatedRequest extends ExpressRequest {
   user?: { userId: string; email: string; name: string };
@@ -315,17 +316,12 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    // 避免在同步上下文 / 上游首包较慢时长时间无响应体，被中间层或客户端当作空闲连接断开
-    res.write(': keep-alive\n\n');
-
+    const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
     };
 
     try {
@@ -409,17 +405,12 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    // 避免在同步上下文 / 上游首包较慢时长时间无响应体，被中间层或客户端当作空闲连接断开
-    res.write(': keep-alive\n\n');
-
+    const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
     };
 
     try {
@@ -532,16 +523,12 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.write(': keep-alive\n\n');
-
+    const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
     };
 
     try {
@@ -747,16 +734,12 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.write(': keep-alive\n\n');
-
+    const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
     };
 
     try {
@@ -919,16 +902,12 @@ export class ProjectsController {
       throw new BadRequestException('phase 须为 outline 或 rewrite');
     }
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.write(': keep-alive\n\n');
-
+    const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
     };
 
     try {
@@ -1096,9 +1075,7 @@ export class ProjectsController {
     @Res() res: ExpressResponse
   ) {
     const userId = req.user?.userId;
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+    const sse = createSseStreamContext(req, res);
 
     try {
       await this.projectsService.executeChapterAfterSave(
@@ -1107,15 +1084,21 @@ export class ProjectsController {
         body,
         userId,
         (event) => {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
+          if (!sse.isAborted()) {
+            sse.writeEvent(event as Record<string, unknown>);
+          }
         }
       );
-      res.write(`data: ${JSON.stringify({ event: 'done' })}\n\n`);
-      res.end();
+      if (!sse.isAborted()) {
+        sse.writeEvent({ event: 'done' });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'after-save failed';
-      res.write(`data: ${JSON.stringify({ event: 'error', message })}\n\n`);
-      res.end();
+      if (!sse.isAborted()) {
+        sse.writeEvent({ event: 'error', message });
+      }
+    } finally {
+      sse.end();
     }
   }
 
@@ -1220,16 +1203,12 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.write(': keep-alive\n\n');
-
+    const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
     };
 
     try {

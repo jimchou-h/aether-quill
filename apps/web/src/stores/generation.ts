@@ -10,12 +10,14 @@ import {
 } from '../services/api';
 import {
   applyAiTaskProgressEvent,
+  cancelAiTaskProgress,
   completeAiTaskProgress,
   createAiTaskProgressState,
   failAiTaskProgress,
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../composables/useAiTaskProgress';
+import { isSseAbortError } from '../utils/sseStream';
 import { presentError, presentErrorFromCaught } from '../utils/pageFeedback';
 
 export type GenerationStatus = 'idle' | 'streaming' | 'done' | 'error';
@@ -34,6 +36,8 @@ export const useGenerationStore = defineStore('generation', () => {
   const generationPhase = ref<GenerationPhase | null>(null);
   const phasePanelCollapsed = ref(false);
   const aiTaskProgress = createAiTaskProgressState();
+  let outlineAbortController: AbortController | null = null;
+  let draftAbortController: AbortController | null = null;
 
   const outlineStatus = ref<OutlineStatus>('idle');
   const outlineText = ref('');
@@ -114,15 +118,35 @@ export const useGenerationStore = defineStore('generation', () => {
     selectedEventIds?: string[];
   };
 
+  function interruptStreaming() {
+    outlineAbortController?.abort();
+    draftAbortController?.abort();
+    outlineAbortController = null;
+    draftAbortController = null;
+    if (outlineStatus.value === 'streaming') {
+      outlineStatus.value = 'idle';
+      cancelAiTaskProgress(aiTaskProgress, '大纲生成已中断');
+    }
+    if (status.value === 'streaming') {
+      status.value = 'idle';
+      cancelAiTaskProgress(aiTaskProgress, '正文生成已中断');
+    }
+  }
+
   async function generateOutline(projectId: string, task: WriteTask) {
     resetOutline();
     resetDraft();
     outlineStatus.value = 'streaming';
     outlineText.value = '';
     chapterNo.value = task.chapterNo;
+    outlineAbortController?.abort();
+    outlineAbortController = new AbortController();
 
     try {
-      await apiClient.generateWriteOutlineSSE(projectId, task, {
+      await apiClient.generateWriteOutlineSSE(
+        projectId,
+        task,
+        {
         onStart: (event) => {
           outlineId.value = event.outlineId;
           outlineTraceId.value = event.traceId;
@@ -142,10 +166,19 @@ export const useGenerationStore = defineStore('generation', () => {
           outlineErrorMessage.value = presentError(msg);
           outlineStatus.value = 'error';
         },
-      });
+      },
+      { signal: outlineAbortController.signal }
+      );
     } catch (error) {
+      if (isSseAbortError(error)) {
+        cancelAiTaskProgress(aiTaskProgress, '大纲生成已中断');
+        outlineStatus.value = 'idle';
+        return;
+      }
       outlineErrorMessage.value = presentErrorFromCaught(error, '生成章节大纲失败');
       outlineStatus.value = 'error';
+    } finally {
+      outlineAbortController = null;
     }
   }
 
@@ -166,6 +199,8 @@ export const useGenerationStore = defineStore('generation', () => {
       taskKey: 'write.chapter.draft',
       message: '正在生成章节正文…',
     });
+    draftAbortController?.abort();
+    draftAbortController = new AbortController();
 
     try {
       await apiClient.generateDraftSSE(
@@ -226,11 +261,19 @@ export const useGenerationStore = defineStore('generation', () => {
             status.value = 'error';
             failAiTaskProgress(aiTaskProgress, msg, traceId.value || undefined);
           },
-        }
+        },
+        { signal: draftAbortController.signal }
       );
     } catch (error) {
+      if (isSseAbortError(error)) {
+        cancelAiTaskProgress(aiTaskProgress, '正文生成已中断');
+        status.value = 'idle';
+        return;
+      }
       errorMessage.value = presentErrorFromCaught(error, '生成请求失败');
       status.value = 'error';
+    } finally {
+      draftAbortController = null;
     }
   }
 
@@ -288,6 +331,7 @@ export const useGenerationStore = defineStore('generation', () => {
     confirmOutline,
     generateOutline,
     generate,
+    interruptStreaming,
     acceptDraft,
   };
 });

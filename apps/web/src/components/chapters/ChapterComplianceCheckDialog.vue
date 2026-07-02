@@ -19,7 +19,10 @@ import {
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
+import { useChapterSseTask } from '../../composables/useChapterSseTask';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
+import MarkdownContent from '../common/MarkdownContent.vue';
+import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 
@@ -44,6 +47,8 @@ const applying = ref(false);
 const errorMessage = ref('');
 const streamingText = ref('');
 const aiTaskProgress = createAiTaskProgressState();
+const { interruptStream, beginStream, handleStreamError, endStream } =
+  useChapterSseTask(aiTaskProgress);
 const chapterUpdatedAtSnapshot = ref('');
 const outlineRequired = ref<PipelineOutlineItem[]>([]);
 const outlineSuggested = ref<PipelineOutlineItem[]>([]);
@@ -133,6 +138,7 @@ async function startComplianceFlow() {
     taskKey: 'compliance-check',
     message: '生成合规大纲…',
   });
+  const signal = beginStream();
 
   try {
     const started = await apiClient.startComplianceCheck(props.projectId, props.chapter.chapterNo);
@@ -167,14 +173,19 @@ async function startComplianceFlow() {
           errorMessage.value = message;
           failAiTaskProgress(aiTaskProgress, message);
         },
-      }
+      },
+      { signal }
     );
   } catch (error) {
+    if (handleStreamError(error)) {
+      return;
+    }
     errorMessage.value = error instanceof Error ? error.message : '合规检验失败';
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
     presentErrorFromCaught(error, '合规检验失败');
   } finally {
     running.value = false;
+    endStream();
   }
 }
 
@@ -213,8 +224,10 @@ async function runRewrite() {
     taskKey: 'compliance-rewrite',
     message: '合规改写中…',
   });
+  const signal = beginStream();
 
-  await apiClient.runComplianceCheckPhaseSSE(
+  try {
+    await apiClient.runComplianceCheckPhaseSSE(
     props.projectId,
     props.chapter.chapterNo,
     sessionId.value,
@@ -246,8 +259,18 @@ async function runRewrite() {
         errorMessage.value = message;
         failAiTaskProgress(aiTaskProgress, message);
       },
+    },
+    { signal }
+    );
+  } catch (error) {
+    if (handleStreamError(error)) {
+      step.value = 'outline';
+      return;
     }
-  );
+    throw error;
+  } finally {
+    endStream();
+  }
 }
 
 async function handleRecheckOutline() {
@@ -346,6 +369,17 @@ async function applyResult() {
     applying.value = false;
   }
 }
+
+function handleClose() {
+  if (running.value) {
+    interruptStream();
+    running.value = false;
+  }
+  if (applying.value) {
+    return;
+  }
+  emit('close');
+}
 </script>
 
 <template>
@@ -354,15 +388,18 @@ async function applyResult() {
     :width="920"
     :title="`终稿合规检验${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
-    :mask-closable="!isBusy"
-    :closable="!isBusy"
+    :mask-closable="true"
+    :closable="true"
     destroy-on-close
-    @cancel="emit('close')"
+    @cancel="handleClose"
   >
     <p class="modal-subtitle">
       发布前专检：先生成合规大纲并确认，再改正文；任务 Prompt 可配，不注入项目 systemPromptText；改写后硬规则复扫兜底。
     </p>
 
+    <div v-if="running" class="stream-actions">
+      <SseInterruptButton @interrupt="() => { interruptStream(); running = false; }" />
+    </div>
     <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
 
@@ -395,7 +432,9 @@ async function applyResult() {
 
     <section v-else-if="step === 'rewriting'" class="step-section">
       <h4 class="section-title">合规改写预览</h4>
-      <pre class="stream-preview">{{ streamingText || '等待输出…' }}</pre>
+      <div class="stream-preview markdown-pane">
+        <MarkdownContent :source="streamingText || '等待输出…'" :throttle-ms="200" />
+      </div>
     </section>
 
     <section v-else-if="step === 'review'" class="step-section result-preview-section">

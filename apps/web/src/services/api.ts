@@ -12,6 +12,7 @@ import {
   resolveEffectiveStructuredMatchingText,
   resolveWorkbenchStructuredInfo,
 } from '../utils/structured-matching';
+import { readSseLines, readSseSegments } from '../utils/sseStream';
 
 // Type helpers
 type PathMethod<T extends keyof paths> = {
@@ -122,6 +123,47 @@ export interface SseCallbacks {
     meta?: { finalText?: string; contentSafety?: ContentSafetyScanResult }
   ) => void;
   onError?: (error: string) => void;
+}
+
+export type SseStreamOptions = { signal?: AbortSignal };
+
+async function ensureAuthToken(): Promise<string> {
+  const { useAuthStore } = await import('../stores/auth');
+  await useAuthStore().ensureFreshSession();
+  return localStorage.getItem('token') || '';
+}
+
+async function requestAuthorizedSse(
+  url: string,
+  init: { method: string; body?: string; signal?: AbortSignal },
+  parseMode: 'segments' | 'lines',
+  onDataLine: (dataLine: string) => void
+): Promise<void> {
+  const token = await ensureAuthToken();
+  const response = await fetch(url, {
+    method: init.method,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: init.body,
+    signal: init.signal,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      redirectToLogin();
+    }
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(errorBody || `SSE request failed: ${response.statusText}`);
+  }
+
+  if (parseMode === 'lines') {
+    await readSseLines(response, onDataLine, init.signal);
+    return;
+  }
+
+  await readSseSegments(response, onDataLine, init.signal);
 }
 
 export interface ProjectWritingStats {
@@ -363,43 +405,20 @@ export const apiClient = {
       onProgress?: (event: { event: string; action: string; status: string }) => void;
       onDone?: () => void;
       onError?: (message: string) => void;
-    }
+    },
+    options?: SseStreamOptions
   ): Promise<void> {
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-    const token = localStorage.getItem('token');
-
-    const response = await fetch(
+    await requestAuthorizedSse(
       `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/after-save`,
       {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({ actions }),
-      }
-    );
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(body || response.statusText);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
+        signal: options?.signal,
+      },
+      'lines',
+      (dataLine) => {
         try {
-          const data = JSON.parse(line.slice(6)) as {
+          const data = JSON.parse(dataLine) as {
             event: string;
             action?: string;
             status?: string;
@@ -420,7 +439,7 @@ export const apiClient = {
           // ignore malformed SSE
         }
       }
-    }
+    );
   },
 
   async previewRetrieval(
@@ -976,58 +995,21 @@ export const apiClient = {
       onContent?: (text: string) => void;
       onEnd?: (result: WriteChapterOutlineResult) => void;
       onError?: (message: string) => void;
-    }
+    },
+    options?: SseStreamOptions
   ): Promise<void> {
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-
-    const token = localStorage.getItem('token');
     const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/write/outline`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(task),
+        signal: options?.signal,
       },
-      body: JSON.stringify(task),
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin();
-      }
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(errorBody || `生成章节大纲失败: ${response.statusText}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let reading = true;
-
-    while (reading) {
-      const { done, value } = await reader.read();
-      if (done) {
-        reading = false;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const segments = buffer.split('\n\n');
-      buffer = segments.pop() || '';
-
-      for (const segment of segments) {
-        const trimmed = segment.trim();
-        if (!trimmed.startsWith('data:')) {
-          continue;
-        }
-        const dataPart = trimmed.replace(/^data:\s*/, '');
-        if (!dataPart) {
-          continue;
-        }
-
+      'segments',
+      (dataPart) => {
         try {
           const event = JSON.parse(dataPart) as {
             event?: 'start' | 'content' | 'end' | 'error';
@@ -1057,7 +1039,7 @@ export const apiClient = {
             case 'content':
               callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
               break;
-            case 'end': {
+            case 'end':
               callbacks.onEnd?.({
                 traceId: event.traceId || '',
                 outlineText: (event.outlineText || '').trim(),
@@ -1071,19 +1053,16 @@ export const apiClient = {
                     usedRelationEvents: [],
                   } as WriteChapterOutlineBasis),
               });
-              reading = false;
               break;
-            }
             case 'error':
               callbacks.onError?.(event.data || '生成章节大纲失败');
-              reading = false;
               break;
           }
         } catch {
           // skip malformed SSE lines
         }
       }
-    }
+    );
   },
 
   async generateDraftSSE(
@@ -1104,125 +1083,93 @@ export const apiClient = {
       outlineTraceId?: string;
     },
     citations: CitationItem[],
-    callbacks: SseCallbacks
+    callbacks: SseCallbacks,
+    options?: SseStreamOptions
   ): Promise<void> {
     await this.syncProjectContext(projectId, {
       selectedEventIds: task.selectedEventIds,
     });
 
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-
-    const token = localStorage.getItem('token');
     const ragBaseURL = getRagOrchestratorBaseURL();
     const draftUrl = ragBaseURL ? `${ragBaseURL}/api/generate/draft` : '/api/generate/draft';
 
-    const response = await fetch(draftUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    await requestAuthorizedSse(
+      draftUrl,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId,
+          task,
+          citations,
+          confirmedOutlineText: outline.confirmedOutlineText,
+          outlineId: outline.outlineId,
+          outlineTraceId: outline.outlineTraceId,
+        }),
+        signal: options?.signal,
       },
-      body: JSON.stringify({
-        projectId,
-        task,
-        citations,
-        confirmedOutlineText: outline.confirmedOutlineText,
-        outlineId: outline.outlineId,
-        outlineTraceId: outline.outlineTraceId,
-      }),
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin();
-      }
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(errorBody || `Generation failed: ${response.statusText}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let reading = true;
-
-    while (reading) {
-      const { done, value } = await reader.read();
-      if (done) {
-        reading = false;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data: SseEvent & {
-              event: string;
-              taskKey?: string;
-              stage?: string;
-              message?: string;
-              currentStep?: number;
-              totalSteps?: number;
-            } = JSON.parse(line.slice(6));
-            switch (data.event) {
-              case 'start':
-                callbacks.onStart?.(data.traceId, data.chapterNo);
-                break;
-              case 'retrieving':
-              case 'building_prompt':
-              case 'waiting_llm':
-              case 'generating':
-              case 'checking':
-              case 'content_safety_scan':
-              case 'content_safety_rewrite':
-                callbacks.onPhase?.(data.event as GenerationPhase);
-                break;
-              case 'progress':
-                if (data.traceId && data.taskKey && data.stage && data.message) {
-                  callbacks.onProgress?.({
-                    traceId: data.traceId,
-                    taskKey: data.taskKey,
-                    stage: data.stage,
-                    message: data.message,
-                    currentStep: data.currentStep,
-                    totalSteps: data.totalSteps,
-                  });
+      'lines',
+      (dataLine) => {
+        try {
+          const data: SseEvent & {
+            event: string;
+            taskKey?: string;
+            stage?: string;
+            message?: string;
+            currentStep?: number;
+            totalSteps?: number;
+          } = JSON.parse(dataLine);
+          switch (data.event) {
+            case 'start':
+              callbacks.onStart?.(data.traceId, data.chapterNo);
+              break;
+            case 'retrieving':
+            case 'building_prompt':
+            case 'waiting_llm':
+            case 'generating':
+            case 'checking':
+            case 'content_safety_scan':
+            case 'content_safety_rewrite':
+              callbacks.onPhase?.(data.event as GenerationPhase);
+              break;
+            case 'progress':
+              if (data.traceId && data.taskKey && data.stage && data.message) {
+                callbacks.onProgress?.({
+                  traceId: data.traceId,
+                  taskKey: data.taskKey,
+                  stage: data.stage,
+                  message: data.message,
+                  currentStep: data.currentStep,
+                  totalSteps: data.totalSteps,
+                });
+              }
+              break;
+            case 'content_replace':
+              callbacks.onContentReplace?.((data.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'content':
+              callbacks.onContent?.(data.data.replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.(
+                data.traceId,
+                data.citations,
+                data.consistencyNotes,
+                data.usedRelationEvents || [],
+                {
+                  finalText: data.finalText,
+                  contentSafety: data.contentSafety,
                 }
-                break;
-              case 'content_replace':
-                callbacks.onContentReplace?.((data.data || '').replace(/\\n/g, '\n'));
-                break;
-              case 'content':
-                callbacks.onContent?.(data.data.replace(/\\n/g, '\n'));
-                break;
-              case 'end':
-                callbacks.onEnd?.(
-                  data.traceId,
-                  data.citations,
-                  data.consistencyNotes,
-                  data.usedRelationEvents || [],
-                  {
-                    finalText: data.finalText,
-                    contentSafety: data.contentSafety,
-                  }
-                );
-                reading = false;
-                break;
-              case 'error':
-                callbacks.onError?.(data.data);
-                reading = false;
-                break;
-            }
-          } catch {
-            // skip malformed SSE lines
+              );
+              break;
+            case 'error':
+              callbacks.onError?.(data.data);
+              break;
           }
+        } catch {
+          // skip malformed SSE lines
         }
       }
-    }
+    );
   },
 
   async optimizeChapterPlanSSE(
@@ -1235,58 +1182,21 @@ export const apiClient = {
       existingSegmentDiagnoses?: string[];
       resumeFromSegmentIndex?: number;
     },
-    callbacks: ChapterOptimizePlanCallbacks
+    callbacks: ChapterOptimizePlanCallbacks,
+    options?: SseStreamOptions
   ): Promise<void> {
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-
-    const token = localStorage.getItem('token');
     const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/plan`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
       },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin();
-      }
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(errorBody || `生成优化方案失败: ${response.statusText}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let reading = true;
-
-    while (reading) {
-      const { done, value } = await reader.read();
-      if (done) {
-        reading = false;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const segments = buffer.split('\n\n');
-      buffer = segments.pop() || '';
-
-      for (const segment of segments) {
-        const trimmed = segment.trim();
-        if (!trimmed.startsWith('data:')) {
-          continue;
-        }
-        const dataPart = trimmed.replace(/^data:\s*/, '');
-        if (!dataPart) {
-          continue;
-        }
-
+      'segments',
+      (dataPart) => {
         try {
           const event = JSON.parse(dataPart) as {
             event?: 'start' | 'content' | 'end' | 'error' | 'stage';
@@ -1357,7 +1267,6 @@ export const apiClient = {
                 segmentDiagnoses: event.segmentDiagnoses,
               };
               callbacks.onEnd?.(result);
-              reading = false;
               break;
             }
             case 'error':
@@ -1367,14 +1276,13 @@ export const apiClient = {
                 segmentDiagnoses: event.segmentDiagnoses,
                 retryable: event.retryable,
               });
-              reading = false;
               break;
           }
         } catch {
           // skip malformed SSE lines
         }
       }
-    }
+    );
   },
 
   async optimizeChapterDraftSSE(
@@ -1388,58 +1296,21 @@ export const apiClient = {
       selectedEventIds?: string[];
       segmentDiagnoses?: string[];
     },
-    callbacks: ChapterOptimizeDraftCallbacks
+    callbacks: ChapterOptimizeDraftCallbacks,
+    options?: SseStreamOptions
   ): Promise<void> {
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-
-    const token = localStorage.getItem('token');
     const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/draft`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
       },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin();
-      }
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(errorBody || `优化正文生成失败: ${response.statusText}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let reading = true;
-
-    while (reading) {
-      const { done, value } = await reader.read();
-      if (done) {
-        reading = false;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const segments = buffer.split('\n\n');
-      buffer = segments.pop() || '';
-
-      for (const segment of segments) {
-        const trimmed = segment.trim();
-        if (!trimmed.startsWith('data:')) {
-          continue;
-        }
-        const dataPart = trimmed.replace(/^data:\s*/, '');
-        if (!dataPart) {
-          continue;
-        }
-
+      'segments',
+      (dataPart) => {
         try {
           const event = JSON.parse(dataPart) as {
             event?:
@@ -1507,11 +1378,9 @@ export const apiClient = {
                 finalDraftText: event.finalDraftText,
                 contentSafety: event.contentSafety,
               });
-              reading = false;
               break;
             case 'error':
               callbacks.onError?.(event.data || '优化正文生成失败');
-              reading = false;
               break;
             case 'segment_start': {
               let segData: { segmentIndex: number; totalSegments: number } | null = null;
@@ -1530,7 +1399,7 @@ export const apiClient = {
           // skip malformed SSE events
         }
       }
-    }
+    );
   },
 
   async applyChapterOptimization(
@@ -1720,58 +1589,21 @@ export const apiClient = {
     chapterNo: number,
     sessionId: string,
     phase: 'outline' | 'rewrite',
-    callbacks: ChapterPipelineRunCallbacks
+    callbacks: ChapterPipelineRunCallbacks,
+    options?: SseStreamOptions
   ): Promise<void> {
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-
-    const token = localStorage.getItem('token');
     const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/run/${phase}`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+        signal: options?.signal,
       },
-      body: JSON.stringify({}),
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin();
-      }
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(errorBody || `合规检验执行失败: ${response.statusText}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let reading = true;
-
-    while (reading) {
-      const { done, value } = await reader.read();
-      if (done) {
-        reading = false;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const segments = buffer.split('\n\n');
-      buffer = segments.pop() || '';
-
-      for (const segment of segments) {
-        const trimmed = segment.trim();
-        if (!trimmed.startsWith('data:')) {
-          continue;
-        }
-        const dataPart = trimmed.replace(/^data:\s*/, '');
-        if (!dataPart) {
-          continue;
-        }
-
+      'segments',
+      (dataPart) => {
         try {
           const event = JSON.parse(dataPart) as {
             event?: 'start' | 'content' | 'end' | 'error' | 'stage';
@@ -1819,7 +1651,7 @@ export const apiClient = {
           // ignore malformed SSE chunk
         }
       }
-    }
+    );
   },
 
   async runChapterPipelineModuleSSE(
@@ -1828,58 +1660,21 @@ export const apiClient = {
     sessionId: string,
     module: ChapterPipelineRunModule,
     payload: { issueId?: string; forceRegenerate?: boolean } | undefined,
-    callbacks: ChapterPipelineRunCallbacks
+    callbacks: ChapterPipelineRunCallbacks,
+    options?: SseStreamOptions
   ): Promise<void> {
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-
-    const token = localStorage.getItem('token');
     const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/run/${module}`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload ?? {}),
+        signal: options?.signal,
       },
-      body: JSON.stringify(payload ?? {}),
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin();
-      }
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(errorBody || `分步精修执行失败: ${response.statusText}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let reading = true;
-
-    while (reading) {
-      const { done, value } = await reader.read();
-      if (done) {
-        reading = false;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const segments = buffer.split('\n\n');
-      buffer = segments.pop() || '';
-
-      for (const segment of segments) {
-        const trimmed = segment.trim();
-        if (!trimmed.startsWith('data:')) {
-          continue;
-        }
-        const dataPart = trimmed.replace(/^data:\s*/, '');
-        if (!dataPart) {
-          continue;
-        }
-
+      'segments',
+      (dataPart) => {
         try {
           const event = JSON.parse(dataPart) as {
             event?: 'start' | 'content' | 'end' | 'error' | 'stage';
@@ -1921,20 +1716,16 @@ export const apiClient = {
               break;
             case 'end':
               callbacks.onEnd?.(event);
-              if (isTerminalChapterPipelineRunEnd(module, event)) {
-                reading = false;
-              }
               break;
             case 'error':
               callbacks.onError?.(event.data || '分步精修执行失败');
-              reading = false;
               break;
           }
         } catch {
           // skip malformed SSE
         }
       }
-    }
+    );
   },
 
   async checkChapterOptimizationTypos(
@@ -1953,58 +1744,21 @@ export const apiClient = {
     projectId: string,
     chapterNo: number,
     payload: { draftText: string; issues?: ChapterTypoIssue[] },
-    callbacks: ChapterOptimizeTypoFixCallbacks
+    callbacks: ChapterOptimizeTypoFixCallbacks,
+    options?: SseStreamOptions
   ): Promise<void> {
-    const { useAuthStore } = await import('../stores/auth');
-    await useAuthStore().ensureFreshSession();
-
-    const token = localStorage.getItem('token');
     const baseURL = getApiBaseURL();
     const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/typo-fix`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
       },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        redirectToLogin();
-      }
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(errorBody || `错字自动修正失败: ${response.statusText}`);
-    }
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let reading = true;
-
-    while (reading) {
-      const { done, value } = await reader.read();
-      if (done) {
-        reading = false;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const segments = buffer.split('\n\n');
-      buffer = segments.pop() || '';
-
-      for (const segment of segments) {
-        const trimmed = segment.trim();
-        if (!trimmed.startsWith('data:')) {
-          continue;
-        }
-        const dataPart = trimmed.replace(/^data:\s*/, '');
-        if (!dataPart) {
-          continue;
-        }
-
+      'segments',
+      (dataPart) => {
         try {
           const event = JSON.parse(dataPart) as {
             event?: 'start' | 'content' | 'content_replace' | 'end' | 'error' | 'progress';
@@ -2050,18 +1804,16 @@ export const apiClient = {
                 finalDraftText: event.finalDraftText,
                 contentSafety: event.contentSafety,
               });
-              reading = false;
               break;
             case 'error':
               callbacks.onError?.(event.data || '错字自动修正失败');
-              reading = false;
               break;
           }
         } catch {
           // skip malformed SSE events
         }
       }
-    }
+    );
   },
 
   async exportProjectChaptersTxt(projectId: string): Promise<Blob> {

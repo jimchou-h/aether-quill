@@ -11,6 +11,7 @@ export interface AiTaskProgressState {
   currentStep: number | null;
   totalSteps: number | null;
   active: boolean;
+  cancelled: boolean;
   error: string | null;
 }
 
@@ -23,6 +24,7 @@ export function createAiTaskProgressState(): Ref<AiTaskProgressState> {
     currentStep: null,
     totalSteps: null,
     active: false,
+    cancelled: false,
     error: null,
   });
 }
@@ -39,6 +41,7 @@ export function startAiTaskProgress(
     currentStep: null,
     totalSteps: null,
     active: true,
+    cancelled: false,
     error: null,
   };
 }
@@ -58,6 +61,7 @@ export function applyAiTaskProgressEvent(
     totalSteps:
       typeof event.totalSteps === 'number' ? event.totalSteps : state.value.totalSteps,
     active: true,
+    cancelled: false,
     error: null,
   };
 }
@@ -70,6 +74,7 @@ export function completeAiTaskProgress(
     ...state.value,
     message,
     active: false,
+    cancelled: false,
     error: null,
   };
 }
@@ -83,7 +88,19 @@ export function failAiTaskProgress(
     ...state.value,
     traceId: traceId ?? state.value.traceId,
     active: false,
+    cancelled: false,
     error,
+  };
+}
+
+export function cancelAiTaskProgress(state: Ref<AiTaskProgressState>, message = '已中断') {
+  state.value = {
+    ...state.value,
+    stage: 'cancelled',
+    message,
+    active: false,
+    cancelled: true,
+    error: null,
   };
 }
 
@@ -96,6 +113,7 @@ export function resetAiTaskProgress(state: Ref<AiTaskProgressState>) {
     currentStep: null,
     totalSteps: null,
     active: false,
+    cancelled: false,
     error: null,
   };
 }
@@ -109,6 +127,8 @@ const TASK_PROGRESS_MESSAGES: Record<string, string> = {
   'chapter.pipeline.run': '分步精修执行中…',
   'chapter.pipeline.run-all': '一键精修执行中…',
   'chapter.pipeline.final-polish': '一键终稿执行中…',
+  'chapter.compliance.outline': '合规大纲生成中…',
+  'chapter.compliance.rewrite': '合规改写中…',
   'chapter.summarize': '正在生成章节摘要…',
   'chapter.relation-events': '正在抽取关系事件…',
   'chapter.structured-parse': '正在解析结构化信息…',

@@ -8,7 +8,11 @@ const props = defineProps<{
 }>();
 
 const showPanel = computed(
-  () => props.progress.active || Boolean(props.progress.message) || Boolean(props.progress.error)
+  () =>
+    props.progress.active ||
+    props.progress.cancelled ||
+    Boolean(props.progress.message) ||
+    Boolean(props.progress.error)
 );
 
 const stepLabel = computed(() => {
@@ -26,11 +30,17 @@ const stepLabel = computed(() => {
     class="ai-task-progress"
     role="status"
     aria-live="polite"
-    :class="{ 'ai-task-progress--error': Boolean(progress.error) }"
+    :class="{
+      'ai-task-progress--error': Boolean(progress.error),
+      'ai-task-progress--cancelled': progress.cancelled,
+    }"
   >
     <p v-if="progress.message" class="ai-task-progress__message">
       <span v-if="stepLabel" class="ai-task-progress__step">{{ stepLabel }}</span>
       {{ progress.message }}
+    </p>
+    <p v-if="progress.cancelled && !progress.error" class="ai-task-progress__cancelled">
+      任务已中断，可重新发起。
     </p>
     <p v-if="progress.error" class="ai-task-progress__error">
       {{ progress.error }}
@@ -55,6 +65,17 @@ const stepLabel = computed(() => {
 .ai-task-progress--error {
   border-color: #fecaca;
   background: #fef2f2;
+}
+
+.ai-task-progress--cancelled {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.ai-task-progress__cancelled {
+  margin: 0.35rem 0 0;
+  color: #92400e;
+  font-size: 0.84rem;
 }
 
 .ai-task-progress__message {

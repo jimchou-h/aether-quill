@@ -12,13 +12,18 @@ import { presentErrorFromCaught, presentInfo, presentSuccess } from '../../utils
 import { confirmAction } from '../../composables/useAppConfirm';
 import {
   applyAiTaskProgressEvent,
+  cancelAiTaskProgress,
   completeAiTaskProgress,
   createAiTaskProgressState,
   failAiTaskProgress,
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
+import { useAbortableSse } from '../../composables/useAbortableSse';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
+import MarkdownContent from '../common/MarkdownContent.vue';
+import SseInterruptButton from '../common/SseInterruptButton.vue';
+import { isSseAbortError } from '../../utils/sseStream';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 
 type DialogStep = 'running' | 'review';
@@ -44,6 +49,7 @@ const streamingText = ref('');
 const progressLabel = ref('');
 const cachedHint = ref('');
 const aiTaskProgress = createAiTaskProgressState();
+const sseControl = useAbortableSse();
 const chapterUpdatedAtSnapshot = ref('');
 const previewMode = ref<'final' | 'diff'>('diff');
 const editableFinalText = ref('');
@@ -145,8 +151,17 @@ watch(
   }
 );
 
+function interruptStream() {
+  sseControl.abort();
+  cancelAiTaskProgress(aiTaskProgress);
+  running.value = false;
+}
+
 function close() {
-  if (isBusy.value) {
+  if (running.value) {
+    interruptStream();
+  }
+  if (applying.value) {
     return;
   }
   emit('close');
@@ -182,6 +197,7 @@ async function runFinalPolishPipeline(forceRegenerate = false) {
     taskKey: 'chapter.pipeline.final-polish',
     message: forceRegenerate ? '正在换一版终稿…' : '一键终稿执行中…',
   });
+  const signal = sseControl.begin();
 
   try {
     if (!sessionId.value) {
@@ -236,15 +252,21 @@ async function runFinalPolishPipeline(forceRegenerate = false) {
           step.value = 'review';
           failAiTaskProgress(aiTaskProgress, message);
         },
-      }
+      },
+      { signal }
     );
   } catch (error) {
+    if (isSseAbortError(error)) {
+      cancelAiTaskProgress(aiTaskProgress);
+      return;
+    }
     errorMessage.value = error instanceof Error ? error.message : '一键终稿失败';
     step.value = 'review';
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
     presentErrorFromCaught(error, '一键终稿失败');
   } finally {
     running.value = false;
+    sseControl.abort();
   }
 }
 
@@ -319,8 +341,8 @@ async function doApply(text: string, useOverride: boolean) {
     :width="920"
     :title="`一键终稿${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
-    :mask-closable="!isBusy"
-    :closable="!isBusy"
+    :mask-closable="true"
+    :closable="true"
     destroy-on-close
     @cancel="close"
   >
@@ -328,6 +350,9 @@ async function doApply(text: string, useOverride: boolean) {
       一次点击，后台自动跑完「角色 → 感官 → 规则」全流程（等同分步精修 run-all，无需逐步确认）；生成后在此审核，不满意可点「换一版」。
     </p>
 
+    <div v-if="running" class="stream-actions">
+      <SseInterruptButton @interrupt="interruptStream" />
+    </div>
     <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
     <p v-if="progressLabel && step === 'running'" class="meta-line progress-line">{{ progressLabel }}</p>
     <p v-if="cachedHint" class="message message-info">{{ cachedHint }}</p>
@@ -335,7 +360,9 @@ async function doApply(text: string, useOverride: boolean) {
 
     <section v-if="step === 'running' && streamingText" class="step-section">
       <h4 class="section-title">生成预览</h4>
-      <pre class="stream-preview">{{ streamingText }}</pre>
+      <div class="stream-preview markdown-pane">
+        <MarkdownContent :source="streamingText" :throttle-ms="200" />
+      </div>
     </section>
 
     <section v-if="step === 'review' && finalText" class="step-section result-preview-section">
@@ -445,10 +472,12 @@ async function doApply(text: string, useOverride: boolean) {
           </button>
         </div>
 
-        <pre
+        <div
           v-if="previewMode === 'final' || !hasResultDiff"
-          class="final-preview final-preview-done"
-        >{{ finalText }}</pre>
+          class="final-preview final-preview-done markdown-pane"
+        >
+          <MarkdownContent :source="finalText" :throttle-ms="0" />
+        </div>
         <div v-else class="draft-compare-grid">
           <div class="compare-pane">
             <p class="field-label">原文（快照）</p>

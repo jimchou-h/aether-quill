@@ -8,6 +8,8 @@ import type {
 } from '../../services/api';
 import type { AiTaskProgressState } from '../../composables/useAiTaskProgress';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
+import MarkdownContent from '../common/MarkdownContent.vue';
+import SseInterruptButton from '../common/SseInterruptButton.vue';
 
 const PHASE_LABELS: Record<GenerationPhase, string> = {
   retrieving: '正在检索知识库...',
@@ -62,9 +64,16 @@ const props = withDefaults(
     currentStep: null,
     totalSteps: null,
     active: false,
+    cancelled: false,
     error: null,
   }) }
 );
+
+const emit = defineEmits<{
+  accept: [];
+  regenerate: [];
+  interrupt: [];
+}>();
 
 const showPhasePanel = computed(
   () => props.isStreaming && !props.phasePanelCollapsed && props.generationPhase !== null
@@ -81,16 +90,6 @@ function phaseStatus(phase: GenerationPhase): 'done' | 'active' | 'pending' {
   if (index === currentPhaseIndex.value) return 'active';
   return 'pending';
 }
-
-/**
- * 组件事件定义
- */
-const emit = defineEmits<{
-  /** 接受草稿 */
-  accept: [];
-  /** 重新生成 */
-  regenerate: [];
-}>();
 </script>
 
 <template>
@@ -101,6 +100,9 @@ const emit = defineEmits<{
     </header>
 
     <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
+    <div v-if="isStreaming" class="stream-actions">
+      <SseInterruptButton @interrupt="emit('interrupt')" />
+    </div>
 
     <div v-if="showPhasePanel" class="phase-panel" role="status" aria-live="polite">
       <p class="phase-panel-title">生成进度</p>
@@ -118,8 +120,8 @@ const emit = defineEmits<{
       </ol>
     </div>
 
-    <div v-if="draftText" class="draft-section">
-      <pre class="draft-output">{{ draftText }}</pre>
+    <div v-if="draftText" class="draft-section markdown-pane">
+      <MarkdownContent :source="draftText" :throttle-ms="isStreaming ? 200 : 0" />
     </div>
 
     <div v-if="!draftText && !isStreaming" class="empty-state">
@@ -128,6 +130,9 @@ const emit = defineEmits<{
     </div>
 
     <footer v-if="isDone || isStreaming" class="draft-footer">
+      <div v-if="isStreaming" class="actions">
+        <SseInterruptButton @interrupt="emit('interrupt')" />
+      </div>
       <div v-if="isDone" class="actions">
         <button
           class="wb-btn wb-btn--primary"

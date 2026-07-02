@@ -28,7 +28,10 @@ import {
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
+import { useChapterSseTask } from '../../composables/useChapterSseTask';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
+import MarkdownContent from '../common/MarkdownContent.vue';
+import SseInterruptButton from '../common/SseInterruptButton.vue';
 import {
   buildChapterDiffLines,
   type DiffLineResult,
@@ -71,6 +74,8 @@ const errorMessage = ref('');
 const strategyLabel = ref('');
 const progressLabel = ref('');
 const aiTaskProgress = createAiTaskProgressState();
+const { interruptStream, beginStream, handleStreamError, endStream } =
+  useChapterSseTask(aiTaskProgress);
 const planSegmentRecovery = ref<ChapterOptimizeSegmentRecovery | null>(null);
 const chapterOptimizeSegmentCharSize = ref(DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
 
@@ -106,6 +111,10 @@ const isBusy = computed(
     applying.value ||
     checkingTypos.value ||
     fixingTypos.value
+);
+
+const isStreaming = computed(
+  () => generatingPlan.value || generatingDraft.value || fixingTypos.value
 );
 
 const hasDraftDiff = computed(() => originalTextSnapshot.value.trim() !== draftText.value.trim());
@@ -166,10 +175,21 @@ async function resetState() {
 }
 
 function close() {
-  if (isBusy.value) {
+  if (isStreaming.value) {
+    handleInterruptStream();
+  }
+  if (applying.value || checkingTypos.value) {
     return;
   }
   emit('close');
+}
+
+function handleInterruptStream() {
+  interruptStream();
+  generatingPlan.value = false;
+  generatingDraft.value = false;
+  fixingTypos.value = false;
+  progressLabel.value = '';
 }
 
 function onOriginalScroll() {
@@ -217,6 +237,7 @@ async function runOptimizePlanGeneration(options?: {
     ? `从第 ${options.resumeFromSegmentIndex} 段重试…`
     : '准备生成方案…';
   strategyLabel.value = chapterStrategyLabel.value;
+  const signal = beginStream();
   try {
     await apiClient.optimizeChapterPlanSSE(
       props.projectId,
@@ -297,9 +318,14 @@ async function runOptimizePlanGeneration(options?: {
           planSegmentRecovery.value = null;
           step.value = 'instruction';
         },
-      }
+      },
+      { signal }
     );
   } catch (error) {
+    if (handleStreamError(error)) {
+      progressLabel.value = '';
+      return;
+    }
     errorMessage.value = presentErrorFromCaught(error, '生成优化方案失败');
     if (!planSegmentRecovery.value) {
       plan.value = null;
@@ -308,6 +334,7 @@ async function runOptimizePlanGeneration(options?: {
     progressLabel.value = '';
   } finally {
     generatingPlan.value = false;
+    endStream();
   }
 }
 
@@ -459,6 +486,7 @@ async function handleGenerateDraft() {
     message: '准备生成优化正文…',
   });
   strategyLabel.value = plan.value.strategyLabel || chapterStrategyLabel.value;
+  const signal = beginStream();
 
   try {
     await apiClient.optimizeChapterDraftSSE(
@@ -519,12 +547,19 @@ async function handleGenerateDraft() {
           failAiTaskProgress(aiTaskProgress, message || '优化正文生成失败', draftTraceId.value || undefined);
           errorMessage.value = presentError(message || '优化正文生成失败');
         },
-      }
+      },
+      { signal }
     );
   } catch (error) {
+    if (handleStreamError(error)) {
+      progressLabel.value = '';
+      return;
+    }
     generatingDraft.value = false;
     progressLabel.value = '';
     errorMessage.value = presentErrorFromCaught(error, '优化正文生成失败');
+  } finally {
+    endStream();
   }
 }
 
@@ -588,6 +623,7 @@ async function handleAutoFixTypos() {
     taskKey: 'chapter.optimize.typo-fix',
     message: '正在自动修正错字…',
   });
+  const signal = beginStream();
 
   try {
     await apiClient.fixChapterOptimizationTyposSSE(
@@ -633,13 +669,19 @@ async function handleAutoFixTypos() {
           failAiTaskProgress(aiTaskProgress, message || '自动修正重生成失败', draftTraceId.value || undefined);
           errorMessage.value = presentError(message || '自动修正重生成失败');
         },
-      }
+      },
+      { signal }
     );
   } catch (error) {
+    if (handleStreamError(error)) {
+      draftText.value = previousText;
+      return;
+    }
     draftText.value = previousText;
     errorMessage.value = presentErrorFromCaught(error, '自动修正重生成失败');
   } finally {
     fixingTypos.value = false;
+    endStream();
   }
 }
 
@@ -680,8 +722,8 @@ async function handleApply() {
     :wrap-class-name="step === 'draft' ? 'optimize-modal-fullscreen' : undefined"
     :title="`章节优化${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
-    :mask-closable="!isBusy"
-    :closable="!isBusy"
+    :mask-closable="!applying"
+    :closable="!applying"
     destroy-on-close
     @cancel="close"
   >
@@ -703,6 +745,10 @@ async function handleApply() {
       </ol>
 
       <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
+
+    <div v-if="isStreaming" class="stream-actions">
+      <SseInterruptButton @interrupt="handleInterruptStream" />
+    </div>
 
       <section v-if="step === 'instruction'" class="step-section">
         <p v-if="props.chapter" class="meta-line strategy-line">
@@ -738,9 +784,15 @@ async function handleApply() {
         <p v-if="strategyLabel" class="meta-line strategy-line">处理策略：{{ strategyLabel }}</p>
         <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
         <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
+        <div
+          v-if="generatingPlan && plan?.planText"
+          class="plan-stream-preview markdown-pane"
+        >
+          <MarkdownContent :source="plan.planText" :throttle-ms="200" />
+        </div>
         <label class="field-label" for="optimize-plan-text">方案内容</label>
         <textarea
-          v-if="plan"
+          v-if="plan && !generatingPlan"
           id="optimize-plan-text"
           v-model="plan.planText"
           class="field-textarea plan-text-editor"
@@ -846,15 +898,17 @@ async function handleApply() {
           </div>
           <div class="compare-pane">
             <label class="field-label" for="optimize-draft-text">优化正文（可直接编辑）</label>
+            <div v-if="generatingDraft" class="scroll-pane markdown-pane draft-stream-preview">
+              <MarkdownContent :source="draftText || '正在生成正文…'" :throttle-ms="200" />
+            </div>
             <textarea
+              v-else
               id="optimize-draft-text"
               ref="draftTextareaRef"
               v-model="draftText"
               class="scroll-pane draft-textarea"
-              :readonly="generatingDraft || fixingTypos"
-              :placeholder="
-                generatingDraft ? '正在生成正文...' : '生成完成后可在此修改，再确认覆盖原章节'
-              "
+              :readonly="fixingTypos"
+              placeholder="生成完成后可在此修改，再确认覆盖原章节"
               @scroll="onDraftScroll"
             />
           </div>
@@ -1349,6 +1403,24 @@ async function handleApply() {
 .secondary-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.stream-actions {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.markdown-pane {
+  max-height: 360px;
+  overflow: auto;
+  padding: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+  margin-bottom: 0.75rem;
+}
+
+.draft-stream-preview {
+  min-height: 280px;
 }
 
 @media (max-width: 900px) {

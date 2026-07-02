@@ -577,6 +577,7 @@ onMounted(() => {
             @generate-draft="handleGenerateDraft"
             @accept-draft="handleAcceptDraft"
             @regenerate-draft="handleRegenerateDraft"
+            @interrupt-streaming="generationStore.interruptStreaming"
           />
         </main>
       </div>

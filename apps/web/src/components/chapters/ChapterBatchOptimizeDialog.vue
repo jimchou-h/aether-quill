@@ -17,6 +17,8 @@ import {
   presentSuccess,
 } from '../../utils/pageFeedback';
 import { buildChapterDiffLines } from '../../utils/chapterOptimizeDiff';
+import { useAbortableSse } from '../../composables/useAbortableSse';
+import { isSseAbortError } from '../../utils/sseStream';
 
 type Phase = 'instruction' | 'workspace';
 type BatchItemStatus =
@@ -73,6 +75,7 @@ const originalScrollRef = ref<HTMLDivElement | null>(null);
 const draftTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const isScrolling = ref(false);
 const syncScrollEnabled = ref(true);
+const sseControl = useAbortableSse();
 
 const activeItem = computed(
   () => items.value.find((item) => item.chapterNo === activeChapterNo.value) ?? null
@@ -255,6 +258,7 @@ async function runPlanForChapter(
   }
   return new Promise((resolve, reject) => {
     let planResult: ChapterOptimizationPlanResult | null = null;
+    const signal = sseControl.begin();
 
     void apiClient
       .optimizeChapterPlanSSE(
@@ -326,9 +330,19 @@ async function runPlanForChapter(
             item.planSegmentRecovery = null;
             reject(new Error(message || '生成优化方案失败'));
           },
-        }
+        },
+        { signal }
       )
-      .catch(reject)
+      .catch((error) => {
+        if (isSseAbortError(error)) {
+          item.progressLabel = '';
+          item.status = 'error';
+          item.errorMessage = '已中断';
+          reject(error);
+          return;
+        }
+        reject(error);
+      })
       .finally(() => {
         item.generatingPlan = false;
       });
@@ -360,6 +374,7 @@ async function runDraftForChapter(
   item.progressLabel = '准备生成正文…';
   return new Promise((resolve, reject) => {
     let draft = '';
+    const signal = sseControl.begin();
 
     void apiClient
       .optimizeChapterDraftSSE(
@@ -393,9 +408,19 @@ async function runDraftForChapter(
             item.progressLabel = '';
             reject(new Error(message || '生成优化正文失败'));
           },
-        }
+        },
+        { signal }
       )
-      .catch(reject)
+      .catch((error) => {
+        if (isSseAbortError(error)) {
+          item.progressLabel = '';
+          item.status = item.draftText.trim() ? 'ready' : 'error';
+          item.errorMessage = item.draftText.trim() ? '' : '已中断（正文未完成）';
+          reject(error);
+          return;
+        }
+        reject(error);
+      })
       .finally(() => {
         item.generatingDraft = false;
       });
@@ -429,6 +454,9 @@ async function processChapter(item: BatchOptimizeItem) {
 
     item.status = 'ready';
   } catch (error) {
+    if (isSseAbortError(error)) {
+      return;
+    }
     item.status = 'error';
     item.errorMessage = error instanceof Error ? error.message : '处理失败';
   }
@@ -475,7 +503,8 @@ async function handleStartProcessing() {
 
 function handleCancelQueue() {
   cancelRequested.value = true;
-  presentInfo('已请求停止，当前章节处理完成后将保留已完成结果');
+  sseControl.abort();
+  presentInfo('已请求停止，当前章节流式任务将立即中断');
 }
 
 async function applyItem(item: BatchOptimizeItem): Promise<boolean> {

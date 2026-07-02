@@ -11,6 +11,8 @@ import {
   presentInfo,
   presentSuccess,
 } from '../../utils/pageFeedback';
+import { useAbortableSse } from '../../composables/useAbortableSse';
+import { isSseAbortError } from '../../utils/sseStream';
 
 type BatchStatus =
   | 'pending'
@@ -45,6 +47,7 @@ const items = ref<BatchPipelineItem[]>([]);
 const queueRunning = ref(false);
 const cancelRequested = ref(false);
 const batchApplying = ref(false);
+const sseControl = useAbortableSse();
 
 const isBusy = computed(() => queueRunning.value || batchApplying.value);
 
@@ -116,6 +119,7 @@ async function processItem(item: BatchPipelineItem) {
     item.sessionId = start.sessionId;
 
     await new Promise<void>((resolve, reject) => {
+      const signal = sseControl.begin();
       apiClient
         .runChapterPipelineModuleSSE(
           props.projectId,
@@ -141,11 +145,23 @@ async function processItem(item: BatchPipelineItem) {
               item.status = 'error';
               reject(new Error(message));
             },
-          }
+          },
+          { signal }
         )
-        .catch(reject);
+        .catch((error) => {
+          if (isSseAbortError(error)) {
+            item.status = 'error';
+            item.errorMessage = '已中断';
+            reject(error);
+            return;
+          }
+          reject(error);
+        });
     });
   } catch (error) {
+    if (isSseAbortError(error)) {
+      return;
+    }
     item.status = 'error';
     item.errorMessage = error instanceof Error ? error.message : '处理失败';
   }
@@ -167,6 +183,12 @@ async function runQueue() {
   if (awaitingOutlineCount.value > 0) {
     presentInfo(`${awaitingOutlineCount.value} 章待确认大纲，请逐章打开分步精修弹窗处理`);
   }
+}
+
+function handleCancelQueue() {
+  cancelRequested.value = true;
+  sseControl.abort();
+  presentInfo('已请求停止，当前章节流式任务将立即中断');
 }
 
 async function applyReady() {
@@ -239,7 +261,7 @@ async function applyReady() {
         class="secondary-button"
         type="button"
         :disabled="!queueRunning"
-        @click="cancelRequested = true"
+        @click="handleCancelQueue"
       >
         停止后续章节
       </button>
