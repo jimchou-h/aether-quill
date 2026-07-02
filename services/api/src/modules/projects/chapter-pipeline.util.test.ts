@@ -14,6 +14,7 @@ import {
   resolveOutlineSourceText,
   synthesizePipelineOutlineItemText,
   shouldRunCharacterTraitsModule,
+  isPipelineEditableVersionKey,
   relocateRuleIssuesInText,
   resolveFinalPolishQualityStatus,
   resolvePipelineApplyText,
@@ -641,4 +642,11 @@ test('stripPipelineOutlineJsonFence extracts fenced JSON from mixed output', () 
   const parsed = parsePipelineOutlineJson(raw);
   assert.equal(parsed.suggested.length, 1);
   assert.equal(parsed.suggested[0]?.text, '建议项');
+});
+
+test('isPipelineEditableVersionKey accepts pipeline version keys only', () => {
+  assert.equal(isPipelineEditableVersionKey('afterCharacterTraits'), true);
+  assert.equal(isPipelineEditableVersionKey('final'), true);
+  assert.equal(isPipelineEditableVersionKey('original'), false);
+  assert.equal(isPipelineEditableVersionKey('unknown'), false);
 });

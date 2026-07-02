@@ -51,7 +51,7 @@ function resolveForbiddenWordFixStrategy(
     return 'auto';
   }
   if (action === 'rewrite_sentence') {
-    return rulesFixMode === 'auto' ? 'ai_segment' : 'manual';
+    return 'ai_segment';
   }
   return 'manual';
 }

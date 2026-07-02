@@ -7,7 +7,7 @@ import {
   normalizeRuleIssues,
   scanPipelineRules,
 } from './chapter-pipeline-rule-classifier';
-import { shouldApplyAutoFix } from './chapter-pipeline.util';
+import { shouldApplyAiSegmentFix, shouldApplyAutoFix } from './chapter-pipeline.util';
 import type { PipelineRuleIssue } from './chapter-pipeline.util';
 
 test('scanPipelineRules returns empty when content safety scan disabled', () => {
@@ -136,6 +136,26 @@ test('applyAutoFixes does not delete medium forbidden word without replacement',
   assert.equal(fixed, text);
   assert.ok(updated.every((i) => i.category !== 'forbidden_word' || !i.fixed));
   assert.equal(issues[0]?.fixStrategy, 'ai_segment');
+});
+
+test('semi mode schedules ai_segment fix for medium forbidden words', () => {
+  const issues = scanPipelineRules(
+    '前文禁用演示词后文',
+    [
+      {
+        ruleId: 'custom-1',
+        pattern: '禁用演示词',
+        severity: 'medium',
+        action: 'rewrite_sentence',
+        type: 'keyword',
+      },
+    ],
+    true,
+    'semi'
+  );
+  assert.equal(issues[0]?.fixStrategy, 'ai_segment');
+  assert.equal(shouldApplyAiSegmentFix(issues[0]!, 'semi'), true);
+  assert.equal(shouldApplyAiSegmentFix(issues[0]!, 'manual'), false);
 });
 
 test('normalizeRuleIssues maps LLM issues to category defaults in semi mode', () => {
