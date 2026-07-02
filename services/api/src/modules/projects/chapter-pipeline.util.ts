@@ -187,6 +187,10 @@ export type ChapterPipelineStage =
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
   | 'pipeline_final_polish_done'
+  | 'compliance_outline'
+  | 'compliance_rewrite'
+  | 'compliance_rewrite_segment'
+  | 'compliance_rescan'
   | 'draft_segment'
   | 'merge_validation';
 
@@ -294,6 +298,20 @@ export interface PipelineHomogenizationIssue {
   text: string;
   priorChapterNo: number;
   suggestion: string;
+}
+
+export const PIPELINE_EDITABLE_VERSION_KEYS = [
+  'afterCharacter',
+  'afterCharacterTraits',
+  'afterSensory',
+  'afterRules',
+  'final',
+] as const;
+
+export type PipelineEditableVersionKey = (typeof PIPELINE_EDITABLE_VERSION_KEYS)[number];
+
+export function isPipelineEditableVersionKey(value: string): value is PipelineEditableVersionKey {
+  return (PIPELINE_EDITABLE_VERSION_KEYS as readonly string[]).includes(value);
 }
 
 export interface ChapterPipelineVersions {
@@ -1051,10 +1069,20 @@ export function shouldApplyAiSegmentFix(
   issue: PipelineRuleIssue,
   mode: 'auto' | 'semi' | 'manual'
 ): boolean {
-  if (mode !== 'auto' || issue.fixStrategy !== 'ai_segment') {
+  if (mode === 'manual' || issue.fixStrategy !== 'ai_segment') {
     return false;
   }
-  return isDeterministicRuleIssue(issue);
+  if (!isDeterministicRuleIssue(issue)) {
+    return false;
+  }
+  if (
+    mode === 'semi' &&
+    issue.category === 'forbidden_word' &&
+    issue.contentSafetyAction === 'rewrite_sentence'
+  ) {
+    return true;
+  }
+  return mode === 'auto';
 }
 
 export function relocateRuleIssuesInText(
@@ -1667,6 +1695,10 @@ export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
     pipeline_homogenization_scan: '同质化检测中…',
     pipeline_homogenization_rewrite: '同质化改写中…',
     pipeline_final_polish_done: '终稿已生成，等待审核',
+    compliance_outline: '生成合规大纲…',
+    compliance_rewrite: '合规改写中…',
+    compliance_rewrite_segment: '合规改写分段中…',
+    compliance_rescan: '硬规则复扫中…',
     draft_segment: '分段生成中…',
     merge_validation: '合并校验中…',
   };

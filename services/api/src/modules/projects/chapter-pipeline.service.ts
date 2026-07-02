@@ -18,7 +18,6 @@ import {
   scanPipelineRules,
 } from './chapter-pipeline-rule-classifier';
 import {
-  generatePipelinePlainText,
   streamPipelineGeneration,
 } from './chapter-pipeline-orchestrator.client';
 import { logPipelinePlainTextDebug, isPipelinePromptLoggingEnabled } from './chapter-pipeline-debug';
@@ -31,7 +30,6 @@ import {
 } from './chapter-pipeline-session.store';
 
 const PIPELINE_RULE_FIX_MAX_TOKENS = 2048;
-const PIPELINE_RULE_FIX_TIMEOUT_MS = 120_000;
 import {
   assertModulePrerequisites,
   applyRuleSegmentFix,
@@ -77,6 +75,7 @@ import {
   getOutlineState,
   getPipelineInputText,
   hashFingerprintPart,
+  isPipelineEditableVersionKey,
   makePipelineSessionId,
   makePipelineTraceId,
   mergePipelineConfig,
@@ -129,6 +128,29 @@ export class ChapterPipelineOutlineReviseInvalidError extends Error {
 @Injectable()
 export class ChapterPipelineService {
   constructor(private readonly projectsService: ProjectsService) {}
+
+  private async generatePipelineTextViaStream(input: {
+    projectId: string;
+    prompt: string;
+    templateKey: string;
+    context: Record<string, unknown>;
+    maxTokens?: number;
+    onContent?: (piece: string) => void;
+  }): Promise<string> {
+    const result = await streamPipelineGeneration({
+      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+      projectId: input.projectId,
+      prompt: input.prompt,
+      templateKey: input.templateKey,
+      maxTokens: input.maxTokens,
+      context: input.context,
+      callbacks: input.onContent ? { onContent: input.onContent } : {},
+    });
+    if (!result.ok) {
+      throw new Error(result.errorMessage || '调用生成服务失败');
+    }
+    return result.text;
+  }
 
   startSession(
     projectId: string,
@@ -240,6 +262,24 @@ export class ChapterPipelineService {
     return session;
   }
 
+  patchPipelineVersion(
+    sessionId: string,
+    payload: { versionKey: string; text: string },
+    userId?: string
+  ): ChapterPipelineSession {
+    const session = this.requireSession(sessionId, userId);
+    if (!isPipelineEditableVersionKey(payload.versionKey)) {
+      throw new BadRequestException(`无效的 versionKey: ${payload.versionKey}`);
+    }
+    const text = payload.text.trim();
+    if (!text) {
+      throw new BadRequestException('version 正文不能为空');
+    }
+    session.versions[payload.versionKey] = text;
+    putPipelineSession(session);
+    return session;
+  }
+
   async reviseOutline(
     sessionId: string,
     payload: {
@@ -283,8 +323,7 @@ export class ChapterPipelineService {
     const templateKey = resolveOutlineGenerationTemplateKey(payload.outlineType);
     const traceId = makePipelineTraceId(`outline-${mode}`);
     const taskSuffix = mode === 'recheck' ? 'outline.recheck' : 'outline.revise';
-    const raw = await generatePipelinePlainText({
-      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+    const raw = await this.generatePipelineTextViaStream({
       projectId: session.projectId,
       prompt,
       templateKey,
@@ -549,8 +588,7 @@ export class ChapterPipelineService {
     });
     callbacks.onStage?.({ stage: 'pipeline_character_outline' });
 
-    const raw = await generatePipelinePlainText({
-      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+    const raw = await this.generatePipelineTextViaStream({
       projectId: session.projectId,
       prompt,
       templateKey: CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
@@ -714,8 +752,7 @@ export class ChapterPipelineService {
       userPrompt: prompt,
     });
 
-    const raw = await generatePipelinePlainText({
-      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+    const raw = await this.generatePipelineTextViaStream({
       projectId: session.projectId,
       prompt,
       templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
@@ -880,8 +917,7 @@ export class ChapterPipelineService {
     callbacks.onStart?.({ traceId, chapterNo: session.chapterNo, stage: 'pipeline_sensory_outline' });
     callbacks.onStage?.({ stage: 'pipeline_sensory_outline' });
 
-    const raw = await generatePipelinePlainText({
-      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+    const raw = await this.generatePipelineTextViaStream({
       projectId: session.projectId,
       prompt,
       templateKey: CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
@@ -997,8 +1033,7 @@ export class ChapterPipelineService {
 
     let llmIssues: PipelineRuleIssue[] = [];
     try {
-      const raw = await generatePipelinePlainText({
-        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+      const raw = await this.generatePipelineTextViaStream({
         projectId: session.projectId,
         prompt: buildRulesScanUserPrompt({ sourceText, personaBlock }),
         templateKey: CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
@@ -1065,8 +1100,7 @@ export class ChapterPipelineService {
       const fixPrompt = buildRulesFixUserPrompt({ sourceText: resultText, issue });
       let raw = '';
       try {
-        raw = await generatePipelinePlainText({
-          orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+        raw = await this.generatePipelineTextViaStream({
           projectId: session.projectId,
           prompt: fixPrompt,
           templateKey: CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
@@ -1076,7 +1110,6 @@ export class ChapterPipelineService {
             issueId: issue.id,
           },
           maxTokens: PIPELINE_RULE_FIX_MAX_TOKENS,
-          timeoutMs: PIPELINE_RULE_FIX_TIMEOUT_MS,
         });
       } catch {
         continue;
@@ -1125,8 +1158,7 @@ export class ChapterPipelineService {
     const fixPrompt = buildRulesFixUserPrompt({ sourceText, issue });
     let raw = '';
     try {
-      raw = await generatePipelinePlainText({
-        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+      raw = await this.generatePipelineTextViaStream({
         projectId: session.projectId,
         prompt: fixPrompt,
         templateKey: CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
@@ -1136,7 +1168,6 @@ export class ChapterPipelineService {
           issueId,
         },
         maxTokens: PIPELINE_RULE_FIX_MAX_TOKENS,
-        timeoutMs: PIPELINE_RULE_FIX_TIMEOUT_MS,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : '规则修复失败';
@@ -1179,8 +1210,7 @@ export class ChapterPipelineService {
     });
     callbacks.onStage?.({ stage: 'pipeline_homogenization_scan' });
 
-    const raw = await generatePipelinePlainText({
-      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+    const raw = await this.generatePipelineTextViaStream({
       projectId: session.projectId,
       prompt,
       templateKey: CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY,
