@@ -20,6 +20,14 @@ import { DocumentsService } from '../documents/documents.service';
 import { ProjectsService } from './projects.service';
 import { ChapterPipelineService } from './chapter-pipeline.service';
 import {
+  ComplianceCheckOutlineNotConfirmedError,
+  ComplianceCheckOutlineReviseInvalidError,
+  ComplianceCheckQualityBlockedError,
+  ComplianceCheckService,
+  ComplianceCheckSessionNotFoundError,
+} from './compliance-check.service';
+import { serializeComplianceSessionView } from './compliance-check.util';
+import {
   ChapterPipelineGateNotConfirmedError,
   ChapterPipelineModuleFailedError,
   ChapterPipelineOutlineReviseInvalidError,
@@ -41,6 +49,7 @@ export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly chapterPipelineService: ChapterPipelineService,
+    private readonly complianceCheckService: ComplianceCheckService,
     @Inject(forwardRef(() => DocumentsService))
     private readonly documentsService: DocumentsService
   ) {}
@@ -693,6 +702,25 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/version')
+  patchChapterPipelineVersion(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      versionKey: string;
+      text: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const session = this.chapterPipelineService.patchPipelineVersion(
+      sessionId,
+      data,
+      req.user?.userId
+    );
+    return serializePipelineSessionView(session);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/apply')
   applyChapterPipeline(
     @Param('sessionId') sessionId: string,
@@ -765,6 +793,181 @@ export class ProjectsController {
         writeEvent({ event: 'error', data: error.message, code: error.code, module: error.module });
       } else {
         const message = error instanceof Error ? error.message : '分步精修执行失败';
+        writeEvent({ event: 'error', data: message });
+      }
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/compliance-check/start')
+  startComplianceCheck(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.complianceCheckService.startSession(id, Number(chapterNo), req.user?.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/knowledge/chapters/:chapterNo/compliance-check/session')
+  getComplianceCheckSession(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const session = this.complianceCheckService.getActiveSession(
+      id,
+      Number(chapterNo),
+      req.user?.userId
+    );
+    return serializeComplianceSessionView(session);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId')
+  getComplianceCheckSessionById(
+    @Param('sessionId') sessionId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      const session = this.complianceCheckService.getSession(sessionId, req.user?.userId);
+      return serializeComplianceSessionView(session);
+    } catch (error) {
+      if (error instanceof ComplianceCheckSessionNotFoundError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId/outline')
+  patchComplianceOutline(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      required: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      suggested: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      confirmed: boolean;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const session = this.complianceCheckService.patchOutline(sessionId, data, req.user?.userId);
+    return serializeComplianceSessionView(session);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId/outline/revise')
+  async reviseComplianceOutline(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      mode?: 'recheck' | 'revise';
+      currentOutline: {
+        required: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+        suggested: Array<{ id: string; text: string; priority: 'required' | 'suggested' }>;
+      };
+      userFeedback?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      return await this.complianceCheckService.reviseOutline(sessionId, data, req.user?.userId);
+    } catch (error) {
+      if (error instanceof ComplianceCheckOutlineReviseInvalidError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId/apply')
+  applyComplianceCheck(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      expectedChapterUpdatedAt: string;
+      preserveSummary?: boolean;
+      draftTextOverride?: string;
+      forceApply?: boolean;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      return this.complianceCheckService.applyCompliance(sessionId, data, req.user?.userId);
+    } catch (error) {
+      if (error instanceof ComplianceCheckQualityBlockedError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId/run/:phase')
+  async runComplianceCheckPhase(
+    @Param('sessionId') sessionId: string,
+    @Param('phase') phase: string,
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+    if (phase !== 'outline' && phase !== 'rewrite') {
+      throw new BadRequestException('phase 须为 outline 或 rewrite');
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(': keep-alive\n\n');
+
+    const writeEvent = (payload: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    try {
+      const callbacks = {
+        onStart: ({ traceId, chapterNo, stage }: { traceId: string; chapterNo: number; stage: string }) => {
+          writeEvent({ event: 'start', traceId, chapterNo, stage });
+        },
+        onStage: ({
+          stage,
+          segmentIndex,
+          segmentTotal,
+        }: {
+          stage: string;
+          segmentIndex?: number;
+          segmentTotal?: number;
+        }) => {
+          writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+        },
+        onContent: (text: string) => {
+          writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+        },
+        onEnd: (payload: Record<string, unknown>) => {
+          writeEvent({ event: 'end', ...payload });
+        },
+        onError: (message: string) => {
+          writeEvent({ event: 'error', data: message });
+        },
+      };
+
+      if (phase === 'outline') {
+        await this.complianceCheckService.runOutlineStream(sessionId, userId, callbacks);
+      } else {
+        await this.complianceCheckService.runRewriteStream(sessionId, userId, callbacks);
+      }
+    } catch (error) {
+      if (error instanceof ComplianceCheckOutlineNotConfirmedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else {
+        const message = error instanceof Error ? error.message : '合规检验执行失败';
         writeEvent({ event: 'error', data: message });
       }
     } finally {
