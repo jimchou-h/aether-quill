@@ -34,7 +34,10 @@ import {
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
+import { useChapterSseTask } from '../../composables/useChapterSseTask';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
+import MarkdownContent from '../common/MarkdownContent.vue';
+import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 
@@ -76,6 +79,8 @@ const errorMessage = ref('');
 const streamingText = ref('');
 const progressLabel = ref('');
 const aiTaskProgress = createAiTaskProgressState();
+const { interruptStream, beginStream, handleStreamError, endStream } =
+  useChapterSseTask(aiTaskProgress);
 const chapterUpdatedAtSnapshot = ref('');
 const outlineRevisionRound = ref(0);
 const activeOutlineType = ref<ChapterPipelineOutlineType>('sensory');
@@ -337,7 +342,11 @@ watch(
 );
 
 function close() {
-  if (isBusy.value) {
+  if (running.value) {
+    interruptStream();
+    running.value = false;
+  }
+  if (applying.value) {
     return;
   }
   emit('close');
@@ -538,6 +547,7 @@ async function runModule(module: ChapterPipelineRunModule) {
     taskKey: isRunAll ? 'chapter.pipeline.run-all' : 'chapter.pipeline.run',
     message: isRunAll ? '一键精修执行中…' : '分步精修执行中…',
   });
+  const signal = beginStream();
 
   try {
     await apiClient.runChapterPipelineModuleSSE(
@@ -643,14 +653,19 @@ async function runModule(module: ChapterPipelineRunModule) {
           errorMessage.value = message;
           failAiTaskProgress(aiTaskProgress, message);
         },
-      }
+      },
+      { signal }
     );
   } catch (error) {
+    if (handleStreamError(error)) {
+      return;
+    }
     errorMessage.value = error instanceof Error ? error.message : '执行失败';
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
     presentErrorFromCaught(error, '分步精修执行失败');
   } finally {
     running.value = false;
+    endStream();
   }
 }
 
@@ -971,8 +986,8 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     :width="920"
     :title="`分步精修${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
-    :mask-closable="!isBusy"
-    :closable="!isBusy"
+    :mask-closable="true"
+    :closable="true"
     destroy-on-close
     @cancel="close"
   >
@@ -989,6 +1004,9 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       </li>
     </ol>
 
+    <div v-if="running" class="stream-actions">
+      <SseInterruptButton @interrupt="() => { interruptStream(); running = false; }" />
+    </div>
     <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
     <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
@@ -1048,7 +1066,9 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
 
     <section v-if="streamingText && running" class="step-section">
       <h4 class="section-title">生成预览</h4>
-      <pre class="stream-preview">{{ streamingText }}</pre>
+      <div class="stream-preview markdown-pane">
+        <MarkdownContent :source="streamingText" :throttle-ms="200" />
+      </div>
     </section>
 
     <section v-if="showResultPreview" class="step-section result-preview-section">

@@ -2053,7 +2053,8 @@ export interface components {
     AiTaskProgressEvent: {
       traceId: string;
       taskKey: string;
-      stage: string;
+      /** @enum {string} */
+      stage: 'start' | 'progress' | 'done' | 'error' | 'cancelled' | string;
       message: string;
       currentStep?: number;
       totalSteps?: number;

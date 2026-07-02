@@ -40,6 +40,7 @@ const emit = defineEmits<{
   generateDraft: [];
   acceptDraft: [];
   regenerateDraft: [];
+  interruptStreaming: [];
 }>();
 
 const tabs = computed(() => [
@@ -103,6 +104,7 @@ function selectTab(id: 'outline' | 'draft' | 'evidence') {
           @confirm="emit('confirm')"
           @regenerate="emit('regenerateOutline')"
           @generate-draft="emit('generateDraft')"
+          @interrupt="emit('interruptStreaming')"
         />
       </div>
 
@@ -121,6 +123,7 @@ function selectTab(id: 'outline' | 'draft' | 'evidence') {
           embedded
           @accept="emit('acceptDraft')"
           @regenerate="emit('regenerateDraft')"
+          @interrupt="emit('interruptStreaming')"
         />
       </div>
 

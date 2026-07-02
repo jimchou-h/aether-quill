@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { presentInfo } from '../../utils/pageFeedback';
+import MarkdownContent from '../common/MarkdownContent.vue';
+import SseInterruptButton from '../common/SseInterruptButton.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +21,7 @@ const emit = defineEmits<{
   confirm: [];
   regenerate: [];
   'generate-draft': [];
+  interrupt: [];
 }>();
 
 const localOutline = ref(props.outlineText);
@@ -93,6 +96,14 @@ function handleGenerateDraft() {
       <span class="skeleton-line" />
       <span class="skeleton-line" />
       <span class="skeleton-line skeleton-line--short" />
+    </div>
+
+    <div v-if="isOutlineStreaming" class="stream-actions">
+      <SseInterruptButton @interrupt="emit('interrupt')" />
+    </div>
+
+    <div v-if="isOutlineStreaming && localOutline" class="outline-stream-preview markdown-pane">
+      <MarkdownContent :source="localOutline" :throttle-ms="200" />
     </div>
 
     <label v-else class="outline-field">

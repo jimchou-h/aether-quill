@@ -31,6 +31,8 @@ import {
   presentInfo,
   presentSuccess,
 } from '../utils/pageFeedback';
+import { useAbortableSse } from '../composables/useAbortableSse';
+import { isSseAbortError } from '../utils/sseStream';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -64,6 +66,7 @@ const finalPolishingChapter = ref<ChapterItem | null>(null);
 const complianceCheckingChapter = ref<ChapterItem | null>(null);
 const batchOptimizeChapters = ref<ChapterItem[]>([]);
 const batchPipelineChapters = ref<ChapterItem[]>([]);
+const afterSaveSse = useAbortableSse();
 const exportingChapters = ref(false);
 const renumbering = ref(false);
 const showHint = ref(true);
@@ -193,12 +196,23 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
         .join('\n');
       const ok = confirm(`内容已保存。是否执行以下后处理？\n\n${summary}`);
       if (ok) {
-        await apiClient.chapterAfterSaveSSE(projectId.value, payload.chapterNo, selected, {
-          onProgress: (event) => {
-            message.value = `正在执行：${event.action} (${event.status})`;
-          },
-        });
-        message.value = presentSuccess(`第${payload.chapterNo}章后处理已完成`);
+        const signal = afterSaveSse.begin();
+        try {
+          await apiClient.chapterAfterSaveSSE(projectId.value, payload.chapterNo, selected, {
+            onProgress: (event) => {
+              message.value = `正在执行：${event.action} (${event.status})`;
+            },
+          }, { signal });
+          message.value = presentSuccess(`第${payload.chapterNo}章后处理已完成`);
+        } catch (error) {
+          if (isSseAbortError(error)) {
+            message.value = presentInfo(`第${payload.chapterNo}章后处理已中断`);
+          } else {
+            throw error;
+          }
+        } finally {
+          afterSaveSse.abort();
+        }
       } else {
         message.value = presentSuccess(`第${payload.chapterNo}章已保存（未执行后处理）`);
       }
@@ -546,6 +560,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
+  afterSaveSse.abort();
 });
 </script>
 

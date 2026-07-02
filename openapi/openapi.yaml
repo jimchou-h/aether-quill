@@ -854,6 +854,15 @@ components:
           type: string
         stage:
           type: string
+          description: |
+            任务阶段。常见值：`start`、`progress`、`done`、`error`、`cancelled`。
+            客户端通过 `AbortSignal` 中断 fetch/SSE 时，前端应将进度面板置为 `cancelled`（服务端连接关闭后停止写流）。
+          enum:
+            - start
+            - progress
+            - done
+            - error
+            - cancelled
         message:
           type: string
         currentStep:
@@ -866,6 +875,23 @@ components:
           type: number
           minimum: 0
           maximum: 100
+    SseStreamAbortSemantics:
+      type: object
+      description: |
+        所有 `text/event-stream` 响应遵循统一中断语义：
+        - 客户端使用 `fetch` + `AbortController` 断开连接即视为取消任务；
+        - 服务端在 `req`/`res` `close` 后不再 `write` SSE 事件；
+        - 已创建的 session（分步精修、合规检验等）保留，用户可重试同一 phase/module；
+        - 取消不等同于 `error` 事件，前端展示「已中断」态。
+      properties:
+        clientAbort:
+          type: string
+          enum:
+            - fetch_abort_signal
+        serverBehavior:
+          type: string
+          enum:
+            - stop_writing_on_disconnect
     WriteContextReadiness:
       type: object
       required:
