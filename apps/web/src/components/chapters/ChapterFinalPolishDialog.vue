@@ -68,24 +68,31 @@ const residualIssues = computed<PipelineRuleIssue[]>(
   () => session.value?.finalPolishResult?.residualIssues ?? session.value?.ruleIssues ?? []
 );
 
+const applyBlocked = computed(() => qualityStatus.value === 'blocked');
+
+const currentReviewText = computed(() => {
+  if (applyBlocked.value) {
+    return editableFinalText.value;
+  }
+  return finalText.value;
+});
+
 const diffLines = computed(() => {
-  if (!originalText.value || !finalText.value) {
+  if (!originalText.value || !currentReviewText.value) {
     return [];
   }
-  return buildChapterDiffLines(originalText.value, finalText.value);
+  return buildChapterDiffLines(originalText.value, currentReviewText.value);
 });
 
 const diffAddedCount = computed(() => diffLines.value.filter((row) => row.type === 'added').length);
 const diffRemovedCount = computed(() => diffLines.value.filter((row) => row.type === 'removed').length);
 const diffModifiedCount = computed(() => diffLines.value.filter((row) => row.type === 'modified').length);
 
-const inlineDiff = computed(() => buildInlineDiffViews(originalText.value, finalText.value));
+const inlineDiff = computed(() => buildInlineDiffViews(originalText.value, currentReviewText.value));
 
 const hasResultDiff = computed(
-  () => Boolean(originalText.value && finalText.value && diffLines.value.length > 0)
+  () => Boolean(originalText.value && currentReviewText.value && diffLines.value.length > 0)
 );
-
-const applyBlocked = computed(() => qualityStatus.value === 'blocked');
 
 const qualityStatusLabel = computed(() => {
   switch (qualityStatus.value) {
@@ -219,6 +226,8 @@ async function runFinalPolishPipeline(forceRegenerate = false) {
             presentInfo(cachedHint.value);
           }
           await refreshSession();
+          previewMode.value =
+            session.value?.finalPolishResult?.qualityStatus === 'blocked' ? 'final' : 'diff';
           step.value = 'review';
           completeAiTaskProgress(aiTaskProgress, '终稿已生成，等待审核');
         },
@@ -360,12 +369,54 @@ async function doApply(text: string, useOverride: boolean) {
         <p class="blocked-hint editable-hint">
           对照上方风险项修订正文后应用；若保持原稿不变，点击「应用终稿」时将提示确认强制应用。
         </p>
+        <div v-if="hasResultDiff" class="diff-summary">
+          <span class="diff-badge diff-added">+{{ diffAddedCount }} 新增</span>
+          <span class="diff-badge diff-removed">-{{ diffRemovedCount }} 删除</span>
+          <span class="diff-badge diff-modified">~{{ diffModifiedCount }} 修改</span>
+        </div>
+        <div v-if="hasResultDiff" class="preview-toggle">
+          <button
+            type="button"
+            class="preview-toggle-btn"
+            :class="{ active: previewMode === 'final' }"
+            @click="previewMode = 'final'"
+          >
+            手动修订
+          </button>
+          <button
+            type="button"
+            class="preview-toggle-btn"
+            :class="{ active: previewMode === 'diff' }"
+            @click="previewMode = 'diff'"
+          >
+            对比视图
+          </button>
+        </div>
         <textarea
+          v-if="previewMode === 'final' || !hasResultDiff"
           v-model="editableFinalText"
           class="final-editor"
           rows="18"
           :disabled="isBusy"
         />
+        <div v-else class="draft-compare-grid">
+          <div class="compare-pane">
+            <p class="field-label">原文（快照）</p>
+            <div class="scroll-pane full-text-pane">
+              <template v-for="(seg, idx) in inlineDiff.originalSegments" :key="'blocked-o-' + idx">
+                <span :class="{ 'diff-removed-text': seg.removed }">{{ seg.text }}</span>
+              </template>
+            </div>
+          </div>
+          <div class="compare-pane">
+            <p class="field-label">手动修订稿</p>
+            <div class="scroll-pane full-text-pane">
+              <template v-for="(seg, idx) in inlineDiff.draftSegments" :key="'blocked-d-' + idx">
+                <span :class="{ 'diff-added-text': seg.added }">{{ seg.text }}</span>
+              </template>
+            </div>
+          </div>
+        </div>
       </div>
 
       <template v-else>
