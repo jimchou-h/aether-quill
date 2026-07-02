@@ -111,6 +111,16 @@ const reranker = new Reranker();
 const generationService = new GenerationService();
 const consistencyChecker = new ConsistencyChecker();
 
+const CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY = 'chapter.compliance.outline';
+const CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY = 'chapter.compliance.rewrite';
+
+function isComplianceTemplateKey(templateKey: string): boolean {
+  return (
+    templateKey === CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY ||
+    templateKey === CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY
+  );
+}
+
 function buildTargetWordsRequirement(targetWords: unknown): string {
   const parsed = Number(targetWords);
   if (Number.isFinite(parsed) && parsed > 0) {
@@ -842,6 +852,8 @@ app.post('/api/generate', async (req, res) => {
   const projectCtx = getOrCreateContext(projectId);
   const extra = extraContext as Record<string, unknown> | undefined;
   const tk = typeof templateKey === 'string' ? templateKey.trim() : '';
+  const isComplianceTask =
+    isComplianceTemplateKey(tk) || extra?.omitProjectSystemPrompt === true;
   const chapterNoRaw = extra?.chapterNo;
   const chapterNo =
     typeof chapterNoRaw === 'number' && Number.isFinite(chapterNoRaw)
@@ -897,9 +909,10 @@ app.post('/api/generate', async (req, res) => {
   let retrievedChunkIds: string[] = [];
   let retrievedEvidence = '';
   let retrievedFullDocuments: Array<Record<string, unknown>> = [];
-  // Step 2: 检索证据 — 结构化 KB（标题匹配）或向量检索（Qdrant + rerank）
-  try {
-    if (useStructuredChapterKb) {
+  // Step 2: 检索证据 — 合规检验等任务跳过 RAG
+  if (!isComplianceTask) {
+    try {
+      if (useStructuredChapterKb) {
       const optimizeInstruction =
         typeof extra?.retrievalInstruction === 'string' ? extra.retrievalInstruction.trim() : '';
       const appearingCharacters = parseAppearingCharactersFromExtra(extra);
@@ -969,14 +982,24 @@ app.post('/api/generate', async (req, res) => {
       retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
       retrievedFullDocuments = (retrieval.fullDocuments ?? []).map((d) => ({ ...d }));
     }
-  } catch (error) {
-    console.error('Generate retrieval failed:', error);
+    } catch (error) {
+      console.error('Generate retrieval failed:', error);
+    }
   }
 
-  // Step 3: 拼装叙事上下文（与检索证据分离，见 GenerationService.buildPrompt）
-  const generationContext = await getGenerationContext(projectId, narrativeCurrentChapter, {
-    includeNextChapterHead: isChapterOptimizeTemplateKey(tk),
-  });
+  // Step 3: 拼装叙事上下文（合规检验不注入叙事/RAG）
+  let generationContext: GenerationContext & { narrativeMeta?: NarrativeContextMeta };
+  if (isComplianceTask) {
+    generationContext = {
+      systemPromptText: projectCtx.systemPromptText ?? '',
+      narrativeContext: '',
+      omitProjectSystemPrompt: true,
+    };
+  } else {
+    generationContext = await getGenerationContext(projectId, narrativeCurrentChapter, {
+      includeNextChapterHead: isChapterOptimizeTemplateKey(tk),
+    });
+  }
   const narrativeMeta = generationContext.narrativeMeta;
 
   const resolvedTaskSystemPrompt = resolveTaskSystemPromptFromContext({
@@ -988,13 +1011,16 @@ app.post('/api/generate', async (req, res) => {
     generationContext.taskSystemPrompt = resolvedTaskSystemPrompt;
   }
 
-  generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
+  if (extra?.omitProjectSystemPrompt === true && !isComplianceTask) {
+    generationContext.omitProjectSystemPrompt = true;
+  }
+
+  generationContext.retrievedEvidence = isComplianceTask
+    ? undefined
+    : retrievedEvidence.trim() || undefined;
 
   const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, projectCtx);
-  const resolvedSystemPrompt = assembleSystemMessageContent({
-    systemPromptText: generationContext.systemPromptText,
-    taskSystemPrompt: generationContext.taskSystemPrompt,
-  });
+  const resolvedSystemPrompt = generationService.buildSystemMessage(generationContext);
 
   const traceContext: Record<string, unknown> = {
     retrieval_query: retrievalQuery,
