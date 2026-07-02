@@ -10,6 +10,7 @@ import {
   type ChapterPipelineOutlineType,
   type ChapterPipelineRunModule,
   type ChapterPipelineSessionView,
+  type ChapterPipelineVersionKey,
   type PipelineOutlineItem,
   type PipelineOutlineState,
   type PipelineRuleIssue,
@@ -108,11 +109,53 @@ const currentVersionText = computed(() => {
   );
 });
 
+const previewMode = ref<'final' | 'diff'>('diff');
+const stepPreviewText = ref('');
+
+function resolveStepVersionKey(currentStep: PipelineStep): ChapterPipelineVersionKey | null {
+  switch (currentStep) {
+    case 'character':
+      return 'afterCharacter';
+    case 'character-traits':
+      return 'afterCharacterTraits';
+    case 'sensory-rewrite':
+      return 'afterSensory';
+    case 'rules':
+      return 'afterRules';
+    case 'homogenization':
+    case 'done':
+      return 'final';
+    default:
+      return null;
+  }
+}
+
+const stepVersionKey = computed(() => resolveStepVersionKey(step.value));
+
+const isOutlineStep = computed(() =>
+  ['character-outline', 'character-traits-outline', 'sensory-outline'].includes(step.value)
+);
+
+function readStepVersionFromSession(): string {
+  const key = stepVersionKey.value;
+  if (!key || !session.value?.versions) {
+    return '';
+  }
+  return session.value.versions[key] ?? '';
+}
+
+const previewCompareText = computed(() => {
+  if (stepVersionKey.value) {
+    return stepPreviewText.value.trim() || readStepVersionFromSession();
+  }
+  return currentVersionText.value;
+});
+
 const diffLines = computed(() => {
-  if (!originalText.value || !currentVersionText.value) {
+  if (!originalText.value || !previewCompareText.value) {
     return [];
   }
-  return buildChapterDiffLines(originalText.value, currentVersionText.value);
+  return buildChapterDiffLines(originalText.value, previewCompareText.value);
 });
 
 const diffAddedCount = computed(() => diffLines.value.filter((r) => r.type === 'added').length);
@@ -120,18 +163,22 @@ const diffRemovedCount = computed(() => diffLines.value.filter((r) => r.type ===
 const diffModifiedCount = computed(() => diffLines.value.filter((r) => r.type === 'modified').length);
 
 const inlineDiff = computed(() =>
-  buildInlineDiffViews(originalText.value, currentVersionText.value)
+  buildInlineDiffViews(originalText.value, previewCompareText.value)
 );
 
 const hasResultDiff = computed(
-  () => Boolean(originalText.value && currentVersionText.value && diffLines.value.length > 0)
+  () => Boolean(originalText.value && previewCompareText.value && diffLines.value.length > 0)
 );
 
-const showResultPreview = computed(
-  () => Boolean(currentVersionText.value && !running.value && step.value !== 'ready')
-);
-
-const previewMode = ref<'final' | 'diff'>('diff');
+const showResultPreview = computed(() => {
+  if (running.value || step.value === 'ready' || isOutlineStep.value) {
+    return false;
+  }
+  if (stepVersionKey.value) {
+    return Boolean(previewCompareText.value.trim());
+  }
+  return Boolean(currentVersionText.value);
+});
 
 const pipelineIncomplete = computed(() => {
   if (!session.value || step.value === 'done' || step.value === 'ready') {
@@ -139,17 +186,30 @@ const pipelineIncomplete = computed(() => {
   }
   const versions = session.value.versions;
   const modules = config.value?.pipelineEnabledModules ?? [1, 2, 3];
+  const traitsEnabled = config.value?.pipelineCharacterTraitsEnabled !== false;
+
   if (modules.includes(4) && config.value?.pipelineHomogenizationEnabled) {
-    return !versions.final?.trim();
+    if (!versions.final?.trim()) {
+      return true;
+    }
   }
   if (modules.includes(3)) {
-    return !versions.afterRules?.trim();
+    if (!versions.afterRules?.trim()) {
+      return true;
+    }
   }
   if (modules.includes(2)) {
-    return !versions.afterSensory?.trim();
+    if (!versions.afterSensory?.trim()) {
+      return true;
+    }
   }
   if (modules.includes(1)) {
-    return !versions.afterCharacter?.trim();
+    if (!versions.afterCharacter?.trim()) {
+      return true;
+    }
+    if (traitsEnabled && !versions.afterCharacterTraits?.trim()) {
+      return true;
+    }
   }
   return false;
 });
@@ -234,8 +294,25 @@ function resetState() {
   selectedPersonaNames.value = [];
   ruleIssues.value = [];
   previewMode.value = 'diff';
+  stepPreviewText.value = '';
   resetAiTaskProgress(aiTaskProgress);
 }
+
+function syncStepPreviewFromSession(force = false) {
+  const key = stepVersionKey.value;
+  if (!key || !session.value?.versions) {
+    if (force) {
+      stepPreviewText.value = '';
+    }
+    return;
+  }
+  const fromSession = session.value.versions[key] ?? '';
+  if (force || !stepPreviewText.value.trim()) {
+    stepPreviewText.value = fromSession;
+  }
+}
+
+watch(stepVersionKey, () => syncStepPreviewFromSession(true));
 
 watch(
   () => step.value,
@@ -314,6 +391,7 @@ async function refreshSession() {
   if (session.value.ruleIssues) {
     ruleIssues.value = [...session.value.ruleIssues];
   }
+  syncStepPreviewFromSession(true);
 }
 
 async function handleStart(runAll = false) {
@@ -521,6 +599,7 @@ async function runModule(module: ChapterPipelineRunModule) {
           }
           await refreshSession();
           applyPipelineStepFromEnd(endEvent);
+          syncStepPreviewFromSession(true);
           if (
             !isRunAll &&
             module === 'character-outline' &&
@@ -575,6 +654,19 @@ async function runModule(module: ChapterPipelineRunModule) {
   }
 }
 
+function resolveRunModuleAfterOutlineConfirm(
+  outlineType: ChapterPipelineOutlineType
+): ChapterPipelineRunModule {
+  switch (outlineType) {
+    case 'character':
+      return 'character';
+    case 'character-traits':
+      return 'character-traits';
+    default:
+      return 'sensory-rewrite';
+  }
+}
+
 async function confirmOutline() {
   if (!props.chapter || !sessionId.value) {
     return;
@@ -592,6 +684,7 @@ async function confirmOutline() {
         confirmed: true,
       }
     );
+    const nextModule = resolveRunModuleAfterOutlineConfirm(activeOutlineType.value);
     if (activeOutlineType.value === 'character') {
       step.value = 'character';
     } else if (activeOutlineType.value === 'character-traits') {
@@ -599,7 +692,7 @@ async function confirmOutline() {
     } else {
       step.value = 'sensory-rewrite';
     }
-    await runModule('run-all');
+    await runModule(nextModule);
   } catch (error) {
     presentErrorFromCaught(error, '确认大纲失败');
   } finally {
@@ -692,9 +785,66 @@ const outlineEditorHint = computed(() => {
   }
 });
 
-const isOutlineStep = computed(() =>
-  ['character-outline', 'character-traits-outline', 'sensory-outline'].includes(step.value)
+function resolveRetryModule(currentStep: PipelineStep): ChapterPipelineRunModule | null {
+  switch (currentStep) {
+    case 'character':
+      return 'character';
+    case 'character-traits':
+      return 'character-traits';
+    case 'sensory-rewrite':
+      return 'sensory-rewrite';
+    case 'rules':
+      return ruleIssues.value.length > 0 ? 'rules-fix' : 'rules-scan';
+    case 'homogenization':
+      return 'homogenization-rewrite';
+    default:
+      return null;
+  }
+}
+
+const canRetryCurrentStep = computed(
+  () =>
+    Boolean(
+      resolveRetryModule(step.value) &&
+        showResultPreview.value &&
+        !isOutlineStep.value &&
+        !running.value
+    )
 );
+
+async function persistStepPreviewText() {
+  const key = stepVersionKey.value;
+  if (!key || !props.chapter || !sessionId.value) {
+    return;
+  }
+  const text = stepPreviewText.value.trim();
+  if (!text) {
+    return;
+  }
+  if (session.value?.versions[key] === text) {
+    return;
+  }
+  session.value = await apiClient.patchChapterPipelineVersion(
+    props.projectId,
+    props.chapter.chapterNo,
+    sessionId.value,
+    { versionKey: key, text }
+  );
+}
+
+async function handleContinueNext() {
+  await persistStepPreviewText();
+  await runModule('run-all');
+}
+
+async function handleRetryCurrentStep() {
+  const module = resolveRetryModule(step.value);
+  if (!module) {
+    return;
+  }
+  streamingText.value = '';
+  await runModule(module);
+}
 
 async function handleApply() {
   if (!props.chapter || !sessionId.value) {
@@ -702,6 +852,7 @@ async function handleApply() {
   }
   applying.value = true;
   try {
+    await persistStepPreviewText();
     const result = await apiClient.applyChapterPipeline(
       props.projectId,
       props.chapter.chapterNo,
@@ -710,6 +861,10 @@ async function handleApply() {
         expectedChapterUpdatedAt: chapterUpdatedAtSnapshot.value,
         preserveSummary: true,
         useVersion: 'final',
+        draftTextOverride:
+          step.value === 'done' && stepPreviewText.value.trim()
+            ? stepPreviewText.value.trim()
+            : undefined,
       }
     );
     presentSuccess('分步精修已应用');
@@ -768,6 +923,30 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     step.value = 'done';
     return;
   }
+  switch (event.versionKey) {
+    case 'afterCharacter':
+      step.value = 'character';
+      return;
+    case 'afterCharacterTraits':
+      step.value = 'character-traits';
+      return;
+    case 'afterSensory':
+      step.value = 'sensory-rewrite';
+      return;
+    case 'afterRules':
+      step.value = 'rules';
+      return;
+    default:
+      break;
+  }
+  if (event.homogenizationReport) {
+    step.value = 'homogenization';
+    return;
+  }
+  if (event.ruleIssues?.length) {
+    step.value = 'rules';
+    return;
+  }
   if (typeof event.currentModule === 'number') {
     if (event.currentModule >= 4) {
       step.value = 'homogenization';
@@ -782,30 +961,6 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       return;
     }
     step.value = 'character';
-    return;
-  }
-  if (event.ruleIssues) {
-    step.value = 'rules';
-    return;
-  }
-  if (event.versionKey === 'afterRules') {
-    step.value = 'rules';
-    return;
-  }
-  if (event.versionKey === 'afterSensory') {
-    step.value = 'sensory-rewrite';
-    return;
-  }
-  if (event.versionKey === 'afterCharacterTraits') {
-    step.value = 'character-traits';
-    return;
-  }
-  if (event.versionKey === 'afterCharacter') {
-    step.value = 'character';
-    return;
-  }
-  if (event.homogenizationReport) {
-    step.value = 'homogenization';
   }
 }
 </script>
@@ -921,11 +1076,18 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
           对比视图
         </button>
       </div>
-      <pre
+      <p v-if="previewMode === 'final' && stepVersionKey" class="meta-line editable-hint">
+        可直接编辑正文；继续下一步或应用前会自动保存到当前步骤版本。
+      </p>
+      <textarea
         v-if="previewMode === 'final' || !hasResultDiff"
-        class="final-preview"
+        v-model="stepPreviewText"
+        class="final-editor"
         :class="{ 'final-preview-done': step === 'done' }"
-      >{{ currentVersionText }}</pre>
+        rows="18"
+        :readonly="!stepVersionKey"
+        :disabled="isBusy || !stepVersionKey"
+      />
       <div v-else class="draft-compare-grid">
         <div class="compare-pane">
           <p class="field-label">原文（快照）</p>
@@ -953,8 +1115,17 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       v-if="pipelineIncomplete && !running && step !== 'ready' && !isOutlineStep"
       class="step-actions"
     >
-      <button class="primary-button" type="button" :disabled="isBusy" @click="runModule('run-all')">
-        继续执行后续模块
+      <button
+        v-if="canRetryCurrentStep"
+        class="secondary-button"
+        type="button"
+        :disabled="isBusy"
+        @click="handleRetryCurrentStep"
+      >
+        重试当前步
+      </button>
+      <button class="primary-button" type="button" :disabled="isBusy" @click="handleContinueNext">
+        继续下一步（后续模块）
       </button>
     </div>
 
@@ -1284,6 +1455,32 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
 
 .final-preview-done {
   max-height: 420px;
+}
+
+.final-editor {
+  width: 100%;
+  min-height: 280px;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.88rem;
+  line-height: 1.65;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.final-editor.final-preview-done {
+  min-height: 360px;
+}
+
+.final-editor:disabled {
+  background: #f3f4f6;
+  cursor: not-allowed;
+}
+
+.editable-hint {
+  margin-bottom: 0.35rem;
 }
 
 .result-preview-section {
