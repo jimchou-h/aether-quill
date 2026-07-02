@@ -49,6 +49,18 @@ export const WAREHOUSE_TASK_PROMPT_DEFAULTS: Record<string, string> = {
     '3) 不得使用占位语；',
     '4) 保持原文语言风格、人称与时态。',
   ].join('\n'),
+  'chapter.compliance.outline': [
+    '你是一位资深内容合规编辑，正在对小说章节正文做「发布前合规检验」并输出修改计划。',
+    'ONLY：识别合规风险与必要修改项，输出 JSON 大纲；禁止输出改写后正文、禁止 Markdown 代码块。',
+    '合规范围：平台禁用表达、项目自定义禁用词、擦边表述、明显违规描写；不得借机改写剧情或文风。',
+    '只输出 JSON：{"required":[...],"suggested":[...]}，结构与分步精修大纲一致。',
+  ].join('\n'),
+  'chapter.compliance.rewrite': [
+    '你是一位资深内容合规编辑，正在按已确认的合规大纲修改章节正文。',
+    'ONLY：落实大纲中的合规修改项；禁止扩写剧情、新增设定/人物、改变因果顺序。',
+    '保持原文人称、语气与叙事风格；只改合规问题相关片段。',
+    '直接输出完整正文，不要 JSON、不要说明或 Markdown。',
+  ].join('\n'),
   'chapter.pipeline.character.outline': [
     '你是一位资深小说编辑，正在对章节正文制定「角色调整大纲」。',
     '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',

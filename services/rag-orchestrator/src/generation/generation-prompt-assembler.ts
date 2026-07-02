@@ -11,6 +11,8 @@ import {
 export interface GenerationContext {
   /** 项目级 systemPromptText（Settings） */
   systemPromptText: string;
+  /** true 时不拼接项目 systemPromptText（合规检验等任务） */
+  omitProjectSystemPrompt?: boolean;
   /** 任务级 system prompt（如章节优化 plan/draft override） */
   taskSystemPrompt?: string;
   /**
@@ -30,7 +32,7 @@ export interface LlmChatMessage {
 /** system 角色：全局默认 + 项目 systemPromptText + 任务 taskSystemPrompt */
 export function buildSystemMessage(context: GenerationContext): string {
   return assembleSystemMessageContent({
-    systemPromptText: context.systemPromptText,
+    systemPromptText: context.omitProjectSystemPrompt ? undefined : context.systemPromptText,
     taskSystemPrompt: context.taskSystemPrompt,
   });
 }
