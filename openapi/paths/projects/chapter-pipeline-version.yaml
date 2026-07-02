@@ -1,0 +1,54 @@
+patch:
+  tags:
+    - Projects
+  summary: Patch pipeline intermediate version text (manual edit)
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineVersionPatch'
+  responses:
+    '200':
+      description: Updated session view
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  payload:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineSessionView'
+    '400':
+      description: Invalid versionKey or empty text (1328)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Session not found (1326)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

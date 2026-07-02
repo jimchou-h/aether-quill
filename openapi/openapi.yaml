@@ -121,10 +121,26 @@ paths:
     $ref: './paths/projects/chapter-pipeline-outline.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/revise:
     $ref: './paths/projects/chapter-pipeline-outline-revise.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/version:
+    $ref: './paths/projects/chapter-pipeline-version.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/run/{module}:
     $ref: './paths/projects/chapter-pipeline-run.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/apply:
     $ref: './paths/projects/chapter-pipeline-apply.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/start:
+    $ref: './paths/projects/compliance-check-start.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/session:
+    $ref: './paths/projects/compliance-check-session-active.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}:
+    $ref: './paths/projects/compliance-check-session.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline:
+    $ref: './paths/projects/compliance-check-outline.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline/revise:
+    $ref: './paths/projects/compliance-check-outline-revise.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/run/{phase}:
+    $ref: './paths/projects/compliance-check-run.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/apply:
+    $ref: './paths/projects/compliance-check-apply.yaml'
   /api/projects/{id}/knowledge/chapters/import/preview:
     $ref: './paths/projects/chapter-import-preview.yaml'
   /api/projects/{id}/knowledge/chapters/import/confirm:
@@ -2034,6 +2050,23 @@ components:
             $ref: '#/components/schemas/PipelineOutlineItem'
         confirmed:
           type: boolean
+    ChapterPipelineVersionPatch:
+      type: object
+      required:
+        - versionKey
+        - text
+      properties:
+        versionKey:
+          type: string
+          enum:
+            - afterCharacter
+            - afterCharacterTraits
+            - afterSensory
+            - afterRules
+            - final
+        text:
+          type: string
+          minLength: 1
     ChapterPipelineOutlineReviseRequest:
       type: object
       required:

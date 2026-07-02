@@ -1,0 +1,33 @@
+patch:
+  tags:
+    - Projects
+  summary: Patch compliance outline
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required: [required, suggested, confirmed]
+          properties:
+            required:
+              type: array
+              items:
+                $ref: '../../openapi.yaml#/components/schemas/PipelineOutlineItem'
+            suggested:
+              type: array
+              items:
+                $ref: '../../openapi.yaml#/components/schemas/PipelineOutlineItem'
+            confirmed:
+              type: boolean
+  responses:
+    '200':
+      description: Updated session

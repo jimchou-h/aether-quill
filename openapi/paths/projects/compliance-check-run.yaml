@@ -1,0 +1,24 @@
+post:
+  tags:
+    - Projects
+  summary: Run compliance check phase (SSE)
+  description: phase=outline generates compliance outline; phase=rewrite rewrites body after outline confirmed
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: phase
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [outline, rewrite]
+  responses:
+    '200':
+      description: SSE stream
+    '400':
+      description: Outline not confirmed (1333) when phase=rewrite
