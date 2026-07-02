@@ -10,18 +10,18 @@ const emit = defineEmits<{
   rolledBack: [];
 }>();
 
-function handleSave() {
-  store.saveDraft(props.projectId);
+async function handleSave() {
+  await store.saveDraft(props.projectId);
   emit('saved');
 }
 
-function handlePublish() {
-  store.publish(props.projectId);
+async function handlePublish() {
+  await store.publish(props.projectId);
   emit('published');
 }
 
-function handleRollback() {
-  store.rollback(props.projectId, store.currentVersion - 1);
+async function handleRollback() {
+  await store.rollback(props.projectId, store.currentVersion - 1);
   emit('rolledBack');
 }
 </script>
@@ -57,7 +57,7 @@ function handleRollback() {
       </button>
       <button
         class="primary-button"
-        :disabled="store.publishing || !store.isDraftModified"
+        :disabled="store.publishing || !store.canPublish"
         @click="handlePublish"
       >
         {{ store.publishing ? '发布中...' : '发布' }}

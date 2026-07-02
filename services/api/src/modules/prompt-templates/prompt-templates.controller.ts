@@ -114,9 +114,27 @@ export class PromptTemplatesController {
   }
 
   @Post('api/projects/:projectId/prompt-config/publish')
-  publishConfig(@Param('projectId') projectId: string) {
+  publishConfig(
+    @Param('projectId') projectId: string,
+    @Body() data?: { systemPromptText?: string }
+  ) {
     const templates = this.service.findByProject(projectId);
-    const systemTemplate = templates.find((t) => t.category === 'system');
+    let systemTemplate = templates.find((t) => t.category === 'system');
+
+    if (typeof data?.systemPromptText === 'string') {
+      if (systemTemplate) {
+        systemTemplate = this.service.update(projectId, systemTemplate.id, {
+          content: data.systemPromptText,
+        });
+      } else {
+        systemTemplate = this.service.create(projectId, {
+          name: '系统默认模板',
+          category: 'system',
+          content: data.systemPromptText,
+        });
+      }
+    }
+
     if (!systemTemplate) {
       return { message: '没有可发布的系统模板', configId: null, version: 0 };
     }

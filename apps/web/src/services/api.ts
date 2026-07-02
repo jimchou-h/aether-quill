@@ -745,9 +745,13 @@ export const apiClient = {
     },
 
     async publish(
-      projectId: string
+      projectId: string,
+      payload?: { systemPromptText?: string }
     ): Promise<ResponseData<'/api/projects/{id}/prompt-config/publish', 'post'>> {
-      const response = await http.post(`/api/projects/${projectId}/prompt-config/publish`);
+      const response = await http.post(
+        `/api/projects/${projectId}/prompt-config/publish`,
+        payload ?? {}
+      );
       return response.data;
     },
 
@@ -1609,6 +1613,19 @@ export const apiClient = {
     return this.unwrapPayload<ChapterPipelineOutlineReviseResult>(response.data);
   },
 
+  async patchChapterPipelineVersion(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: { versionKey: ChapterPipelineVersionKey; text: string }
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/version`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineSessionView>(response.data);
+  },
+
   async applyChapterPipeline(
     projectId: string,
     chapterNo: number,
@@ -1625,6 +1642,184 @@ export const apiClient = {
       payload
     );
     return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
+  },
+
+  async startComplianceCheck(projectId: string, chapterNo: number) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/start`,
+      {}
+    );
+    return this.unwrapPayload<{ sessionId: string; chapterNo: number }>(response.data);
+  },
+
+  async getComplianceCheckSession(projectId: string, chapterNo: number) {
+    const response = await http.get(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/session`
+    );
+    return this.unwrapPayload<ComplianceCheckSessionView>(response.data);
+  },
+
+  async patchComplianceOutline(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: {
+      required: PipelineOutlineItem[];
+      suggested: PipelineOutlineItem[];
+      confirmed: boolean;
+    }
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/outline`,
+      payload
+    );
+    return this.unwrapPayload<ComplianceCheckSessionView>(response.data);
+  },
+
+  async reviseComplianceOutline(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: {
+      mode?: 'recheck' | 'revise';
+      currentOutline: { required: PipelineOutlineItem[]; suggested: PipelineOutlineItem[] };
+      userFeedback?: string;
+    }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/outline/revise`,
+      payload
+    );
+    return this.unwrapPayload<{
+      required: PipelineOutlineItem[];
+      suggested: PipelineOutlineItem[];
+      revisionRound: number;
+    }>(response.data);
+  },
+
+  async applyComplianceCheck(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: {
+      expectedChapterUpdatedAt: string;
+      preserveSummary?: boolean;
+      draftTextOverride?: string;
+      forceApply?: boolean;
+    }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/apply`,
+      payload
+    );
+    return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
+  },
+
+  async runComplianceCheckPhaseSSE(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    phase: 'outline' | 'rewrite',
+    callbacks: ChapterPipelineRunCallbacks
+  ): Promise<void> {
+    const { useAuthStore } = await import('../stores/auth');
+    await useAuthStore().ensureFreshSession();
+
+    const token = localStorage.getItem('token');
+    const baseURL = getApiBaseURL();
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/run/${phase}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        redirectToLogin();
+      }
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(errorBody || `合规检验执行失败: ${response.statusText}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let reading = true;
+
+    while (reading) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reading = false;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const segments = buffer.split('\n\n');
+      buffer = segments.pop() || '';
+
+      for (const segment of segments) {
+        const trimmed = segment.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        const dataPart = trimmed.replace(/^data:\s*/, '');
+        if (!dataPart) {
+          continue;
+        }
+
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            stage?: ChapterPipelineStage;
+            segmentIndex?: number;
+            segmentTotal?: number;
+            versionText?: string;
+            qualityStatus?: FinalPolishQualityStatus;
+            residualIssues?: PipelineRuleIssue[];
+            outline?: ComplianceOutlineState;
+            code?: number;
+          };
+
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId || '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                stage: event.stage || 'compliance_outline',
+              });
+              break;
+            case 'stage':
+              callbacks.onStage?.({
+                stage: event.stage || 'compliance_outline',
+                segmentIndex: event.segmentIndex,
+                segmentTotal: event.segmentTotal,
+              });
+              break;
+            case 'content': {
+              const piece = (event.data || '').replace(/\\n/g, '\n');
+              callbacks.onContent?.(piece);
+              break;
+            }
+            case 'end':
+              callbacks.onEnd?.(event);
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || '合规检验失败');
+              break;
+          }
+        } catch {
+          // ignore malformed SSE chunk
+        }
+      }
+    }
   },
 
   async runChapterPipelineModuleSSE(
@@ -2130,10 +2325,37 @@ export type ChapterPipelineStage =
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
   | 'pipeline_final_polish_done'
+  | 'compliance_outline'
+  | 'compliance_rewrite'
+  | 'compliance_rewrite_segment'
+  | 'compliance_rescan'
   | 'draft_segment'
   | 'merge_validation';
 
 export type FinalPolishQualityStatus = 'passed' | 'passed_with_warnings' | 'blocked';
+
+export interface ComplianceOutlineState {
+  required: PipelineOutlineItem[];
+  suggested: PipelineOutlineItem[];
+  userConfirmed: boolean;
+  revisionRound: number;
+  confirmedAt?: string;
+}
+
+export interface ComplianceCheckSessionView {
+  sessionId: string;
+  projectId: string;
+  chapterNo: number;
+  status: string;
+  sourceText: string;
+  outline?: ComplianceOutlineState;
+  versionText?: string;
+  residualIssues?: PipelineRuleIssue[];
+  qualityStatus?: FinalPolishQualityStatus;
+  traceIds: Record<string, string | undefined>;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface FinalPolishResult {
   fingerprint: string;
@@ -2173,6 +2395,13 @@ export interface ChapterPipelineConfig {
 }
 
 export type ChapterPipelineOutlineType = 'character' | 'character-traits' | 'sensory';
+
+export type ChapterPipelineVersionKey =
+  | 'afterCharacter'
+  | 'afterCharacterTraits'
+  | 'afterSensory'
+  | 'afterRules'
+  | 'final';
 
 export interface PipelineOutlineItem {
   id: string;
@@ -2323,6 +2552,16 @@ export function formatPipelineStageLabel(
       return '同质化改写中…';
     case 'pipeline_final_polish_done':
       return '终稿已生成，等待审核';
+    case 'compliance_outline':
+      return '生成合规大纲…';
+    case 'compliance_rewrite':
+      return '合规改写中…';
+    case 'compliance_rewrite_segment':
+      return segmentIndex && segmentTotal
+        ? `合规改写分段 ${segmentIndex}/${segmentTotal}…`
+        : '合规改写分段中…';
+    case 'compliance_rescan':
+      return '硬规则复扫中…';
     case 'draft_segment':
       return segmentIndex && segmentTotal
         ? `分段生成 ${segmentIndex}/${segmentTotal}`

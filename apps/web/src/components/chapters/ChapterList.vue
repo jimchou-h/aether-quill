@@ -11,6 +11,7 @@ const props = defineProps<{
   generatingRelationChapterNo: number | null;
   optimizingChapterNo: number | null;
   finalPolishingChapterNo: number | null;
+  complianceCheckingChapterNo: number | null;
   savingChapterNo: number | null;
   parsingStructuredChapterNo: number | null;
 }>();
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   generateRelationEvents: [chapterNo: number];
   optimize: [chapter: ChapterItem];
   finalPolish: [chapter: ChapterItem];
+  complianceCheck: [chapter: ChapterItem];
   pipelineOptimize: [chapter: ChapterItem];
   batchOptimize: [chapters: ChapterItem[]];
   batchPipelineOptimize: [chapters: ChapterItem[]];
@@ -165,6 +167,7 @@ function isBusy(chapterNo: number) {
     props.generatingRelationChapterNo === chapterNo ||
     props.optimizingChapterNo === chapterNo ||
     props.finalPolishingChapterNo === chapterNo ||
+    props.complianceCheckingChapterNo === chapterNo ||
     props.savingChapterNo === chapterNo ||
     props.parsingStructuredChapterNo === chapterNo ||
     (editingChapterNo.value !== null && editingChapterNo.value !== chapterNo)
@@ -490,6 +493,17 @@ defineExpose({ clearEditing, clearBatchSelection });
                   </svg>
                 </button>
                 <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('complianceCheck', selectedChapter)"
+                  >
+                    {{
+                      props.complianceCheckingChapterNo === selectedChapter.chapterNo
+                        ? '合规检验中...'
+                        : '终稿合规检验'
+                    }}
+                  </button>
                   <button
                     class="dropdown-item"
                     :disabled="isBusy(selectedChapter.chapterNo)"

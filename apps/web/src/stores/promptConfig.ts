@@ -47,11 +47,46 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
   const currentVersionInfo = computed(
     () => versions.value.find((v) => v.version === currentVersion.value) || null
   );
-  /** 草稿是否已修改 */
+  /** 草稿是否已修改（相对最近一次保存的版本） */
   const isDraftModified = computed(() => {
     const lastVersion = versions.value[versions.value.length - 1];
     return lastVersion ? draftText.value !== lastVersion.content : true;
   });
+
+  /** 当前编辑内容是否尚未发布（或相对已发布版本有变更） */
+  const canPublish = computed(() => {
+    const draft = draftText.value.trim();
+    if (!draft) {
+      return false;
+    }
+    if (!isPublished.value) {
+      return true;
+    }
+    const published = publishedVersion.value;
+    return published ? draft !== published.content : true;
+  });
+
+  async function persistDraft(projectId: string) {
+    const result = await apiClient.promptConfig.update(projectId, {
+      systemPromptText: draftText.value,
+    });
+    const data = apiClient.unwrapPayload<{
+      systemPromptText?: string;
+      templateId?: string;
+      version?: number;
+    }>(result);
+    currentVersion.value = data.version ?? currentVersion.value;
+    isPublished.value = false;
+    status.value = 'draft';
+    if (data.templateId || systemTemplateId.value) {
+      const tid = data.templateId || systemTemplateId.value;
+      if (tid) {
+        systemTemplateId.value = tid;
+      }
+      await loadVersions(projectId);
+    }
+    return data;
+  }
 
   /**
    * 加载提示词配置
@@ -110,20 +145,8 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     errorMessage.value = '';
     message.value = '';
     try {
-      const result = (await apiClient.promptConfig.update(projectId, {
-        systemPromptText: draftText.value,
-      })) as any;
-      const data = result?.data ?? result;
-      currentVersion.value = data.version ?? data.version ?? 1;
-      isPublished.value = false;
-      status.value = 'draft';
+      await persistDraft(projectId);
       message.value = presentSuccess('草稿已保存');
-
-      if (data.templateId || systemTemplateId.value) {
-        const tid = data.templateId || systemTemplateId.value;
-        if (tid) systemTemplateId.value = tid;
-        await loadVersions(projectId);
-      }
     } catch (error) {
       errorMessage.value = presentErrorFromCaught(error, '保存草稿失败');
     } finally {
@@ -132,7 +155,7 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
   }
 
   /**
-   * 发布配置
+   * 发布配置（先持久化当前编辑区内容，再发布）
    * @param {string} projectId - 项目ID
    */
   async function publish(projectId: string) {
@@ -140,13 +163,17 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     errorMessage.value = '';
     message.value = '';
     try {
-      const result = (await apiClient.promptConfig.publish(projectId)) as any;
-      const data = result?.data ?? result;
-      if (data.version) currentVersion.value = data.version;
+      const result = await apiClient.promptConfig.publish(projectId, {
+        systemPromptText: draftText.value,
+      });
+      const data = apiClient.unwrapPayload<{ version?: number }>(result);
+      if (data.version) {
+        currentVersion.value = data.version;
+      }
       isPublished.value = true;
       status.value = 'published';
+      await loadConfig(projectId);
       message.value = presentSuccess(`已发布版本 ${data.version || currentVersion.value}`);
-      await loadVersions(projectId);
     } catch (error) {
       errorMessage.value = presentErrorFromCaught(error, '发布失败');
     } finally {
@@ -199,6 +226,7 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
     publishedVersion,
     currentVersionInfo,
     isDraftModified,
+    canPublish,
     loadConfig,
     loadVersions,
     saveDraft,
