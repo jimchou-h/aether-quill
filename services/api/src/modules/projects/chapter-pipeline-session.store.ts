@@ -30,6 +30,26 @@ export function deletePipelineSession(sessionId: string): void {
   sessions.delete(sessionId);
 }
 
+/** 取本章最近一次未过期的创作精修 session（含一键终稿 pipeline session） */
+export function findLatestPipelineSessionForChapter(
+  projectId: string,
+  chapterNo: number
+): ChapterPipelineSession | undefined {
+  let latest: ChapterPipelineSession | undefined;
+  for (const session of sessions.values()) {
+    if (session.projectId !== projectId || session.chapterNo !== chapterNo) {
+      continue;
+    }
+    if (Date.now() - session.createdAt.getTime() > SESSION_TTL_MS) {
+      continue;
+    }
+    if (!latest || session.createdAt.getTime() > latest.createdAt.getTime()) {
+      latest = session;
+    }
+  }
+  return latest;
+}
+
 export function clearPipelineSessionsForTest(): void {
   sessions.clear();
   finalPolishCache.clear();

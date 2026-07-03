@@ -7,11 +7,15 @@ const props = defineProps<{
   projectId: string;
 }>();
 
-const pipelinePreset = ref<'full' | 'character_rules' | 'sensory_only'>('full');
+const pipelinePreset = ref<'creative_refine' | 'full' | 'character_rules' | 'sensory_only'>(
+  'creative_refine'
+);
 const skipOutlineReview = ref(false);
 const skipCharacterOutlineReview = ref(false);
 const skipCharacterTraitsOutlineReview = ref(false);
+const characterAdjustmentEnabled = ref(false);
 const characterTraitsEnabled = ref(true);
+const rulesModuleEnabled = ref(false);
 const rulesFixMode = ref<'auto' | 'semi' | 'manual'>('semi');
 const homogenizationEnabled = ref(false);
 const homogenizationPriorCount = ref(3);
@@ -36,7 +40,7 @@ async function loadSettings() {
     const settings = await apiClient.getSettings(props.projectId);
     applySettings(settings);
   } catch (error) {
-    presentErrorFromCaught(error, '加载分步精修设置失败');
+    presentErrorFromCaught(error, '加载创作精修设置失败');
   } finally {
     loading.value = false;
   }
@@ -47,18 +51,22 @@ function applySettings(settings: ProjectSettings & {
   pipelineSkipSensoryOutlineReview?: boolean;
   pipelineSkipCharacterOutlineReview?: boolean;
   pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterAdjustmentEnabled?: boolean;
   pipelineCharacterTraitsEnabled?: boolean;
+  pipelineRulesModuleEnabled?: boolean;
   pipelineRulesFixMode?: typeof rulesFixMode.value;
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
   protagonistProgressRules?: ProtagonistUnlockRule[];
 }) {
-  pipelinePreset.value = settings.pipelinePreset ?? 'full';
+  pipelinePreset.value = settings.pipelinePreset ?? 'creative_refine';
   skipOutlineReview.value = settings.pipelineSkipSensoryOutlineReview ?? false;
   skipCharacterOutlineReview.value = settings.pipelineSkipCharacterOutlineReview ?? false;
   skipCharacterTraitsOutlineReview.value =
     settings.pipelineSkipCharacterTraitsOutlineReview ?? false;
+  characterAdjustmentEnabled.value = settings.pipelineCharacterAdjustmentEnabled ?? false;
   characterTraitsEnabled.value = settings.pipelineCharacterTraitsEnabled ?? true;
+  rulesModuleEnabled.value = settings.pipelineRulesModuleEnabled ?? false;
   rulesFixMode.value = settings.pipelineRulesFixMode ?? 'semi';
   homogenizationEnabled.value = settings.pipelineHomogenizationEnabled ?? false;
   homogenizationPriorCount.value = settings.pipelineHomogenizationPriorChapterCount ?? 3;
@@ -73,7 +81,9 @@ async function saveSettings() {
       pipelineSkipSensoryOutlineReview: skipOutlineReview.value,
       pipelineSkipCharacterOutlineReview: skipCharacterOutlineReview.value,
       pipelineSkipCharacterTraitsOutlineReview: skipCharacterTraitsOutlineReview.value,
+      pipelineCharacterAdjustmentEnabled: characterAdjustmentEnabled.value,
       pipelineCharacterTraitsEnabled: characterTraitsEnabled.value,
+      pipelineRulesModuleEnabled: rulesModuleEnabled.value,
       pipelineRulesFixMode: rulesFixMode.value,
       pipelineHomogenizationEnabled: homogenizationEnabled.value,
       pipelineHomogenizationPriorChapterCount: homogenizationPriorCount.value,
@@ -81,7 +91,7 @@ async function saveSettings() {
         (r) => r.abilityKey.trim() && r.descriptionForPrompt.trim()
       ),
     } as Parameters<typeof apiClient.updateSettings>[1]);
-    presentSuccess('分步精修设置已保存');
+    presentSuccess('创作精修设置已保存');
   } catch (error) {
     presentErrorFromCaught(error, '保存失败');
   } finally {
@@ -96,18 +106,35 @@ onMounted(() => {
 
 <template>
   <section class="panel">
-    <h3 class="panel-title">分步精修流水线</h3>
-    <p class="field-hint">固定顺序：角色（含大纲）→ 特征润色（可选）→ 感官 → 规则 → 同质化（可选）。</p>
+    <h3 class="panel-title">创作精修流水线</h3>
+    <p class="field-hint">
+      默认链：特征润色 → 感官优化；硬规则请使用「终稿合规检验」。可选启用角色对白调整或规则模块（旧版）。
+    </p>
 
     <p v-if="loading" class="loading-text">加载中…</p>
     <template v-else>
       <div class="row">
         <label class="field-label" for="pipeline-preset">预设方案</label>
         <select id="pipeline-preset" v-model="pipelinePreset" class="field-select">
-          <option value="full">完整四步</option>
+          <option value="creative_refine">创作精修（推荐）</option>
+          <option value="full">完整四步含规则（旧版）</option>
           <option value="character_rules">角色 + 规则</option>
           <option value="sensory_only">仅感官</option>
         </select>
+      </div>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input v-model="characterAdjustmentEnabled" class="toggle-checkbox" type="checkbox" />
+          <span class="toggle-text">启用角色对白调整（模块一 a/b）</span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input v-model="rulesModuleEnabled" class="toggle-checkbox" type="checkbox" />
+          <span class="toggle-text">启用规则模块（旧版，创作精修内修硬规则）</span>
+        </label>
       </div>
 
       <div class="toggle-row">
@@ -201,7 +228,7 @@ onMounted(() => {
 
       <div class="action-bar">
         <button class="primary-button" type="button" :disabled="saving" @click="saveSettings">
-          {{ saving ? '保存中…' : '保存分步精修设置' }}
+          {{ saving ? '保存中…' : '保存创作精修设置' }}
         </button>
       </div>
     </template>

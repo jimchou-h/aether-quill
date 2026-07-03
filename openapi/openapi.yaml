@@ -652,9 +652,9 @@ components:
             $ref: '#/components/schemas/ProjectContentSafetyRule'
         pipelinePreset:
           type: string
-          enum: [full, character_rules, sensory_only]
-          default: full
-          description: 分步精修预设方案
+          enum: [creative_refine, full, character_rules, sensory_only]
+          default: creative_refine
+          description: 创作精修预设；full 含规则模块旧版
         pipelineSkipSensoryOutlineReview:
           type: boolean
           default: false
@@ -680,8 +680,21 @@ components:
             type: integer
             minimum: 1
             maximum: 4
-          default: [1, 2, 3]
-          description: 分步精修模块开关（顺序固定）
+          default: [1, 2]
+          description: 创作精修模块开关（顺序固定；3=规则旧版）
+        pipelineCharacterAdjustmentEnabled:
+          type: boolean
+          default: false
+          description: 是否启用角色对白调整（character-outline → character）
+        pipelineRulesModuleEnabled:
+          type: boolean
+          default: false
+          description: 在 creative_refine 预设下额外启用规则模块（旧版）
+        complianceRulesFixMode:
+          type: string
+          enum: [auto, semi, manual]
+          default: semi
+          description: 终稿合规残留修复模式
         protagonistProgressRules:
           type: array
           description: 主角能力/外形随章节解锁规则（注入模块一）
@@ -739,7 +752,14 @@ components:
             $ref: '#/components/schemas/ProjectContentSafetyRule'
         pipelinePreset:
           type: string
-          enum: [full, character_rules, sensory_only]
+          enum: [creative_refine, full, character_rules, sensory_only]
+        pipelineCharacterAdjustmentEnabled:
+          type: boolean
+        pipelineRulesModuleEnabled:
+          type: boolean
+        complianceRulesFixMode:
+          type: string
+          enum: [auto, semi, manual]
         pipelineSkipSensoryOutlineReview:
           type: boolean
         pipelineRulesFixMode:
@@ -1944,6 +1964,7 @@ components:
         - pipelineSkipSensoryOutlineReview
         - pipelineSkipCharacterOutlineReview
         - pipelineSkipCharacterTraitsOutlineReview
+        - pipelineCharacterAdjustmentEnabled
         - pipelineCharacterTraitsEnabled
         - pipelineRulesFixMode
         - pipelineHomogenizationEnabled
@@ -1952,7 +1973,14 @@ components:
       properties:
         pipelinePreset:
           type: string
-          enum: [full, character_rules, sensory_only]
+          enum: [creative_refine, full, character_rules, sensory_only]
+        pipelineCharacterAdjustmentEnabled:
+          type: boolean
+        pipelineRulesModuleEnabled:
+          type: boolean
+        complianceRulesFixMode:
+          type: string
+          enum: [auto, semi, manual]
         pipelineSkipSensoryOutlineReview:
           type: boolean
         pipelineSkipCharacterOutlineReview:
@@ -1981,7 +2009,7 @@ components:
       properties:
         preset:
           type: string
-          enum: [full, character_rules, sensory_only]
+          enum: [creative_refine, full, character_rules, sensory_only]
         mode:
           type: string
           enum: [pipeline, final-polish]

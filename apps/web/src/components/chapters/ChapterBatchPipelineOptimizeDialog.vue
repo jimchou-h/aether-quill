@@ -181,7 +181,7 @@ async function runQueue() {
   }
   queueRunning.value = false;
   if (awaitingOutlineCount.value > 0) {
-    presentInfo(`${awaitingOutlineCount.value} 章待确认大纲，请逐章打开分步精修弹窗处理`);
+    presentInfo(`${awaitingOutlineCount.value} 章待确认大纲，请逐章打开创作精修弹窗处理`);
   }
 }
 
@@ -228,14 +228,16 @@ async function applyReady() {
   <a-modal
     :open="props.visible"
     :width="720"
-    title="批量分步精修"
+    title="批量创作精修"
     :footer="null"
     :mask-closable="!isBusy"
     :closable="!isBusy"
     destroy-on-close
     @cancel="close"
   >
-    <p class="modal-subtitle">串行处理 {{ chapters.length }} 章（run-all）；需确认大纲的章节请单独打开分步精修弹窗。</p>
+    <p class="modal-subtitle">
+      串行全自动创作精修（特征润色 → 感官优化，默认不含硬规则）；需确认大纲的章节请单独打开「创作精修（分步）」弹窗。
+    </p>
 
     <div v-if="queueRunning" class="queue-progress">
       <span>批量处理中 {{ progressPercent }}%</span>
@@ -266,7 +268,7 @@ async function applyReady() {
         停止后续章节
       </button>
       <button class="primary-button" type="button" :disabled="isBusy" @click="runQueue">
-        {{ queueRunning ? '处理中…' : '开始批量精修' }}
+        {{ queueRunning ? '处理中…' : '开始批量创作精修' }}
       </button>
       <button
         class="primary-button"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import type { PipelineOutlineItem } from '../../services/api';
 
 const props = defineProps<{
@@ -9,6 +9,11 @@ const props = defineProps<{
   suggested: PipelineOutlineItem[];
   busy?: boolean;
   revisionRound?: number;
+  /** 大纲审阅时对照阅读的章节正文（只读） */
+  referenceText?: string;
+  referenceLabel?: string;
+  /** 为 false 时由外层 OutlineReviewLayout 展示正文对照 */
+  embedReference?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -22,6 +27,10 @@ const emit = defineEmits<{
 const feedback = ref('');
 const revising = ref(false);
 const rechecking = ref(false);
+
+const showEmbeddedReference = computed(
+  () => props.embedReference !== false && Boolean(props.referenceText?.trim())
+);
 
 function updateRequiredItem(id: string, patch: Partial<PipelineOutlineItem>) {
   emit(
@@ -117,77 +126,89 @@ async function submitRevise() {
       已复核/修订 {{ revisionRound }} 轮，可先「重新检查」对照正文，有具体修改点再「按意见修订」。
     </p>
 
-    <div class="outline-panel">
-      <div class="outline-group">
-        <div class="outline-group-header">
-          <p class="outline-label required">必需项</p>
-          <button class="text-button" type="button" :disabled="busy" @click="addManualItem('required')">
-            添加
-          </button>
-        </div>
-        <ul v-if="required.length" class="outline-list">
-          <li v-for="item in required" :key="item.id" class="outline-item-row editable">
-            <textarea
-              :value="item.text"
-              class="outline-text-input"
-              rows="2"
-              :disabled="busy"
-              @input="updateRequiredItem(item.id, { text: ($event.target as HTMLTextAreaElement).value })"
-            />
-            <div v-if="item.personaName || item.featureRef || item.anchorHint" class="outline-meta">
-              <span v-if="item.personaName">角色：{{ item.personaName }}</span>
-              <span v-if="item.featureRef">特征：{{ item.featureRef }}</span>
-              <span v-if="item.anchorHint">落笔：{{ item.anchorHint }}</span>
+    <div
+      class="outline-layout"
+      :class="{ 'with-reference': showEmbeddedReference }"
+    >
+      <div class="outline-main">
+        <div class="outline-panel">
+          <div class="outline-group">
+            <div class="outline-group-header">
+              <p class="outline-label required">必需项</p>
+              <button class="text-button" type="button" :disabled="busy" @click="addManualItem('required')">
+                添加
+              </button>
             </div>
-            <ul v-if="item.contentWarnings?.length" class="outline-warnings">
-              <li v-for="warning in item.contentWarnings" :key="warning">{{ warning }}</li>
+            <ul v-if="required.length" class="outline-list">
+              <li v-for="item in required" :key="item.id" class="outline-item-row editable">
+                <textarea
+                  :value="item.text"
+                  class="outline-text-input"
+                  rows="2"
+                  :disabled="busy"
+                  @input="updateRequiredItem(item.id, { text: ($event.target as HTMLTextAreaElement).value })"
+                />
+                <div v-if="item.personaName || item.featureRef || item.anchorHint" class="outline-meta">
+                  <span v-if="item.personaName">角色：{{ item.personaName }}</span>
+                  <span v-if="item.featureRef">特征：{{ item.featureRef }}</span>
+                  <span v-if="item.anchorHint">落笔：{{ item.anchorHint }}</span>
+                </div>
+                <ul v-if="item.contentWarnings?.length" class="outline-warnings">
+                  <li v-for="warning in item.contentWarnings" :key="warning">{{ warning }}</li>
+                </ul>
+                <div class="outline-item-actions">
+                  <button class="text-button" type="button" :disabled="busy" @click="togglePriority(item, 'required')">
+                    降为建议
+                  </button>
+                  <button class="text-button danger" type="button" :disabled="busy" @click="removeRequired(item.id)">
+                    删除
+                  </button>
+                </div>
+              </li>
             </ul>
-            <div class="outline-item-actions">
-              <button class="text-button" type="button" :disabled="busy" @click="togglePriority(item, 'required')">
-                降为建议
-              </button>
-              <button class="text-button danger" type="button" :disabled="busy" @click="removeRequired(item.id)">
-                删除
+            <p v-else class="empty-hint">暂无必需项</p>
+          </div>
+
+          <div class="outline-group">
+            <div class="outline-group-header">
+              <p class="outline-label suggested">建议项</p>
+              <button class="text-button" type="button" :disabled="busy" @click="addManualItem('suggested')">
+                添加
               </button>
             </div>
-          </li>
-        </ul>
-        <p v-else class="empty-hint">暂无必需项</p>
+            <ul v-if="suggested.length" class="outline-list">
+              <li v-for="item in suggested" :key="item.id" class="outline-item-row editable">
+                <textarea
+                  :value="item.text"
+                  class="outline-text-input"
+                  rows="2"
+                  :disabled="busy"
+                  @input="updateSuggestedItem(item.id, { text: ($event.target as HTMLTextAreaElement).value })"
+                />
+                <div v-if="item.personaName || item.featureRef || item.anchorHint" class="outline-meta">
+                  <span v-if="item.personaName">角色：{{ item.personaName }}</span>
+                  <span v-if="item.featureRef">特征：{{ item.featureRef }}</span>
+                  <span v-if="item.anchorHint">落笔：{{ item.anchorHint }}</span>
+                </div>
+                <div class="outline-item-actions">
+                  <button class="text-button" type="button" :disabled="busy" @click="togglePriority(item, 'suggested')">
+                    升为必需
+                  </button>
+                  <button class="text-button danger" type="button" :disabled="busy" @click="removeSuggested(item.id)">
+                    删除
+                  </button>
+                </div>
+              </li>
+            </ul>
+            <p v-else class="empty-hint">暂无建议项</p>
+          </div>
+        </div>
       </div>
 
-      <div class="outline-group">
-        <div class="outline-group-header">
-          <p class="outline-label suggested">建议项</p>
-          <button class="text-button" type="button" :disabled="busy" @click="addManualItem('suggested')">
-            添加
-          </button>
-        </div>
-        <ul v-if="suggested.length" class="outline-list">
-          <li v-for="item in suggested" :key="item.id" class="outline-item-row editable">
-            <textarea
-              :value="item.text"
-              class="outline-text-input"
-              rows="2"
-              :disabled="busy"
-              @input="updateSuggestedItem(item.id, { text: ($event.target as HTMLTextAreaElement).value })"
-            />
-            <div v-if="item.personaName || item.featureRef || item.anchorHint" class="outline-meta">
-              <span v-if="item.personaName">角色：{{ item.personaName }}</span>
-              <span v-if="item.featureRef">特征：{{ item.featureRef }}</span>
-              <span v-if="item.anchorHint">落笔：{{ item.anchorHint }}</span>
-            </div>
-            <div class="outline-item-actions">
-              <button class="text-button" type="button" :disabled="busy" @click="togglePriority(item, 'suggested')">
-                升为必需
-              </button>
-              <button class="text-button danger" type="button" :disabled="busy" @click="removeSuggested(item.id)">
-                删除
-              </button>
-            </div>
-          </li>
-        </ul>
-        <p v-else class="empty-hint">暂无建议项</p>
-      </div>
+      <aside v-if="showEmbeddedReference" class="reference-pane">
+        <p class="reference-label">{{ referenceLabel || '对照正文' }}</p>
+        <div class="reference-scroll">{{ referenceText }}</div>
+      </aside>
     </div>
 
     <div class="revise-block">
@@ -244,7 +265,63 @@ async function submitRevise() {
 .outline-panel {
   display: grid;
   gap: 0.75rem;
+}
+
+.outline-layout {
+  display: block;
   margin-bottom: 0.75rem;
+}
+
+.outline-layout.with-reference {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.outline-main {
+  min-width: 0;
+}
+
+.reference-pane {
+  min-width: 0;
+  position: sticky;
+  top: 0;
+}
+
+.reference-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.reference-scroll {
+  max-height: min(56vh, 560px);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: #1f2937;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.65rem 0.75rem;
+  background: #fafafa;
+}
+
+@media (max-width: 900px) {
+  .outline-layout.with-reference {
+    grid-template-columns: 1fr;
+  }
+
+  .reference-pane {
+    position: static;
+  }
+
+  .reference-scroll {
+    max-height: 240px;
+  }
 }
 
 .outline-group-header {

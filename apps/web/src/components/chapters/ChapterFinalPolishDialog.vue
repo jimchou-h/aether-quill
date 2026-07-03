@@ -103,11 +103,11 @@ const hasResultDiff = computed(
 const qualityStatusLabel = computed(() => {
   switch (qualityStatus.value) {
     case 'passed':
-      return '质量门禁已通过';
+      return '创作精修质检通过';
     case 'passed_with_warnings':
-      return '已通过，仍有少量硬风险需留意';
+      return '已通过，建议再跑终稿合规检验';
     case 'blocked':
-      return '存在阻断性硬风险，需手动修订或确认后应用';
+      return '正文存在需修订项，请手动修订或确认后应用';
     default:
       return '';
   }
@@ -347,7 +347,7 @@ async function doApply(text: string, useOverride: boolean) {
     @cancel="close"
   >
     <p class="modal-subtitle">
-      一次点击，后台自动跑完「角色 → 感官 → 规则」全流程（等同分步精修 run-all，无需逐步确认）；生成后在此审核，不满意可点「换一版」。
+      一次点击，后台自动跑完「特征润色 → 感官优化」创作精修链（等同创作精修 run-all，默认不含规则模块）；生成后在此审核，不满意可点「换一版」。建议再跑终稿合规检验。
     </p>
 
     <div v-if="running" class="stream-actions">
@@ -378,7 +378,8 @@ async function doApply(text: string, useOverride: boolean) {
       </div>
 
       <section v-if="residualIssues.length && applyBlocked" class="issue-section">
-        <h5 class="section-title">残留硬风险</h5>
+        <h5 class="section-title">需修订项</h5>
+        <p class="field-hint">以下为创作精修质检命中；硬规则请使用「终稿合规检验」。</p>
         <ul class="issue-list">
           <li v-for="issue in residualIssues" :key="issue.id" class="issue-item">
             <div class="issue-head">
@@ -394,7 +395,7 @@ async function doApply(text: string, useOverride: boolean) {
       <div v-if="applyBlocked" class="manual-edit-section">
         <p class="field-label">手动修订终稿</p>
         <p class="blocked-hint editable-hint">
-          对照上方风险项修订正文后应用；若保持原稿不变，点击「应用终稿」时将提示确认强制应用。
+          对照上方质检项修订正文后应用；硬规则请使用「终稿合规检验」。若保持原稿不变，点击「应用终稿」时将提示确认强制应用。
         </p>
         <div v-if="hasResultDiff" class="diff-summary">
           <span class="diff-badge diff-added">+{{ diffAddedCount }} 新增</span>
@@ -499,7 +500,8 @@ async function doApply(text: string, useOverride: boolean) {
       </template>
 
       <section v-if="residualIssues.length && !applyBlocked" class="issue-section">
-        <h5 class="section-title">残留硬风险</h5>
+        <h5 class="section-title">质检提示</h5>
+        <p class="field-hint">非硬规则项；发布前仍建议运行「终稿合规检验」。</p>
         <ul class="issue-list">
           <li v-for="issue in residualIssues" :key="issue.id" class="issue-item">
             <div class="issue-head">
@@ -573,6 +575,13 @@ async function doApply(text: string, useOverride: boolean) {
   margin: 0 0 0.5rem;
   font-size: 0.8rem;
   color: #6b7280;
+}
+
+.field-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+  line-height: 1.5;
 }
 
 .progress-line {

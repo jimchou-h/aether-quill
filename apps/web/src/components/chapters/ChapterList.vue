@@ -337,7 +337,7 @@ defineExpose({ clearEditing, clearBatchSelection });
             :disabled="selectedBatchCount < 2"
             @click="emitBatchPipelineOptimize"
           >
-            批量分步精修{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
+            批量创作精修{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
           </button>
         </div>
 
@@ -495,6 +495,7 @@ defineExpose({ clearEditing, clearBatchSelection });
                 <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">
                   <button
                     class="dropdown-item"
+                    title="发布前硬规则：预扫描 → 合规大纲 → 改写 → 复扫"
                     :disabled="isBusy(selectedChapter.chapterNo)"
                     @click="emit('complianceCheck', selectedChapter)"
                   >
@@ -506,10 +507,11 @@ defineExpose({ clearEditing, clearBatchSelection });
                   </button>
                   <button
                     class="dropdown-item"
+                    title="分步执行特征润色与感官优化；可人工确认大纲"
                     :disabled="isBusy(selectedChapter.chapterNo)"
                     @click="emit('pipelineOptimize', selectedChapter)"
                   >
-                    高级 · 分步精修
+                    创作精修（分步）
                   </button>
                   <button
                     class="dropdown-item"

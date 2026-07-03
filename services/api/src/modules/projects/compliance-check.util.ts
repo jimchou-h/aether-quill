@@ -6,8 +6,10 @@ import { randomUUID } from 'node:crypto';
 import type { ContentSafetyRule } from '@aether-quill/config';
 import {
   PIPELINE_OUTLINE_JSON_OUTPUT_RULE,
+  filterPipelinePersonas,
   type FinalPolishQualityStatus,
   type PipelineOutlineItem,
+  type PipelineRuleIssue,
 } from './chapter-pipeline.util';
 
 export const CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY = 'chapter.compliance.outline';
@@ -50,11 +52,14 @@ export interface ComplianceCheckSession {
   chapterNo: number;
   status: ComplianceCheckStatus;
   sourceText: string;
+  /** 复用本章最近一次创作精修检索预览确认的角色名；无则合规阶段回退全部已发布人物 */
+  selectedPersonaNames?: string[];
   outline?: ComplianceOutlineState;
   versionText?: string;
-  residualIssues?: import('./chapter-pipeline.util').PipelineRuleIssue[];
+  preScanIssues?: PipelineRuleIssue[];
+  residualIssues?: PipelineRuleIssue[];
   qualityStatus?: FinalPolishQualityStatus;
-  traceIds: { outline?: string; rewrite?: string; rescan?: string };
+  traceIds: { outline?: string; rewrite?: string; rescan?: string; preScan?: string };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -65,6 +70,7 @@ export const CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT = [
   '你是一位资深内容合规编辑，正在对小说章节正文做「发布前合规检验」并输出修改计划。',
   'ONLY：识别合规风险与必要修改项，输出 JSON 大纲；禁止输出改写后正文、禁止 Markdown 代码块。',
   '合规范围：平台禁用表达、项目自定义禁用词、擦边表述、明显违规描写；不得借机改写剧情或文风。',
+  '若提供【人物卡参考】：须核对正文与人设、称谓、关系、外观描述是否一致；不一致项写入大纲（category 可用 consistency）。',
   '保持原文人称、叙事视角与核心情节不变；修改计划须可定位到具体片段。',
   PIPELINE_OUTLINE_JSON_OUTPUT_RULE,
   'category 建议取值：forbidden_expression | platform_rule | consistency | other（写入 text 即可，勿拆字段）。',
@@ -73,6 +79,7 @@ export const CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT = [
 export const CHAPTER_COMPLIANCE_REWRITE_SYSTEM_PROMPT = [
   '你是一位资深内容合规编辑，正在按已确认的合规大纲修改章节正文。',
   'ONLY：落实大纲中的合规修改项；禁止扩写剧情、新增设定/人物、改变因果顺序。',
+  '若提供【人物卡参考】：改写时保持与人设一致，仅修正大纲标注的合规/一致性问题。',
   '保持原文人称、语气与叙事风格；只改合规问题相关片段。',
   '直接输出完整正文，不要 JSON、不要说明或 Markdown。',
 ].join('\n');
@@ -98,29 +105,68 @@ export function buildForbiddenWordsSummary(rules: ContentSafetyRule[]): string {
   return patterns.join('、');
 }
 
+export function buildCompliancePreScanSummary(issues: PipelineRuleIssue[]): string {
+  if (!issues.length) {
+    return '（预扫未发现硬规则命中）';
+  }
+  return issues
+    .slice(0, 50)
+    .map((issue) => `- [${issue.category}] ${issue.text}（${issue.fixStrategy}）`)
+    .join('\n');
+}
+
+export function buildCompliancePersonaBlock(
+  personas: Array<{ name: string; profile: string; state: string; status: string }>,
+  selectedPersonaNames?: string[]
+): string {
+  return filterPipelinePersonas(personas, selectedPersonaNames)
+    .map((persona) => `${persona.name}：${persona.profile}\n状态：${persona.state}`)
+    .join('\n\n');
+}
+
 export function buildComplianceOutlineUserPrompt(input: {
   sourceText: string;
   forbiddenWordsSummary: string;
+  preScanSummary?: string;
+  personaBlock?: string;
 }): string {
-  return [
+  const blocks = [
     '【输出要求】',
     COMPLIANCE_OUTLINE_JSON_FORMAT,
     `【项目高危禁用词参考】\n${input.forbiddenWordsSummary}`,
-    `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
-  ].join('\n\n');
+  ];
+  if (input.personaBlock?.trim()) {
+    blocks.push(
+      [
+        '【人物卡参考】',
+        input.personaBlock.trim(),
+        '（须核对正文与人设、称谓、关系是否一致；不一致写入大纲 consistency 类项）',
+      ].join('\n')
+    );
+  }
+  if (input.preScanSummary?.trim()) {
+    blocks.push(`【硬规则预扫命中摘要】\n${input.preScanSummary.trim()}`);
+  }
+  blocks.push(`<chapter-original>\n${input.sourceText}\n</chapter-original>`);
+  return blocks.join('\n\n');
 }
 
 export function buildComplianceRewriteUserPrompt(input: {
   sourceText: string;
   outline: PipelineOutlineItem[];
   forbiddenWordsSummary: string;
+  personaBlock?: string;
 }): string {
   const outlineJson = JSON.stringify({ items: input.outline }, null, 2);
-  return [
-    `【项目高危禁用词参考】\n${input.forbiddenWordsSummary}`,
+  const blocks = [`【项目高危禁用词参考】\n${input.forbiddenWordsSummary}`];
+  if (input.personaBlock?.trim()) {
+    blocks.push(`【人物卡参考】\n${input.personaBlock.trim()}`);
+  }
+  blocks.push(
     `<compliance-outline>\n${outlineJson}\n</compliance-outline>`,
-    `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
-  ].join('\n\n');
+    `<chapter-original>\n${input.sourceText}\n</chapter-original>`
+  );
+  return blocks.join('\n\n');
 }
 
 export function buildComplianceOutlineGateUserPrompt(input: {
@@ -173,8 +219,10 @@ export function serializeComplianceSessionView(session: ComplianceCheckSession) 
     chapterNo: session.chapterNo,
     status: session.status,
     sourceText: session.sourceText,
+    selectedPersonaNames: session.selectedPersonaNames,
     outline: session.outline,
     versionText: session.versionText,
+    preScanIssues: session.preScanIssues,
     residualIssues: session.residualIssues,
     qualityStatus: session.qualityStatus,
     traceIds: session.traceIds,
