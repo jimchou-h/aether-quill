@@ -238,12 +238,15 @@ export interface ProjectSettings {
   /** 项目自定义禁用词 */
   contentSafetyCustomRules: ProjectContentSafetyRule[];
   /** 分步精修预设（AQ-273） */
-  pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
+  pipelinePreset?: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
   pipelineSkipSensoryOutlineReview?: boolean;
   pipelineSkipCharacterOutlineReview?: boolean;
   pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterAdjustmentEnabled?: boolean;
   pipelineCharacterTraitsEnabled?: boolean;
   pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
+  pipelineRulesModuleEnabled?: boolean;
+  complianceRulesFixMode?: 'auto' | 'semi' | 'manual';
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
   pipelineEnabledModules?: number[];
@@ -707,12 +710,15 @@ export class ProjectsService implements OnModuleInit {
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
       contentSafetyCustomRules?: ProjectContentSafetyRule[];
-      pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
+      pipelinePreset?: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
       pipelineSkipSensoryOutlineReview?: boolean;
       pipelineSkipCharacterOutlineReview?: boolean;
       pipelineSkipCharacterTraitsOutlineReview?: boolean;
+      pipelineCharacterAdjustmentEnabled?: boolean;
       pipelineCharacterTraitsEnabled?: boolean;
       pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
+      pipelineRulesModuleEnabled?: boolean;
+      complianceRulesFixMode?: 'auto' | 'semi' | 'manual';
       pipelineHomogenizationEnabled?: boolean;
       pipelineHomogenizationPriorChapterCount?: number;
       pipelineEnabledModules?: number[];
@@ -801,8 +807,11 @@ export class ProjectsService implements OnModuleInit {
       pipelineSkipSensoryOutlineReview: payload.pipelineSkipSensoryOutlineReview,
       pipelineSkipCharacterOutlineReview: payload.pipelineSkipCharacterOutlineReview,
       pipelineSkipCharacterTraitsOutlineReview: payload.pipelineSkipCharacterTraitsOutlineReview,
+      pipelineCharacterAdjustmentEnabled: payload.pipelineCharacterAdjustmentEnabled,
       pipelineCharacterTraitsEnabled: payload.pipelineCharacterTraitsEnabled,
       pipelineRulesFixMode: payload.pipelineRulesFixMode,
+      pipelineRulesModuleEnabled: payload.pipelineRulesModuleEnabled,
+      complianceRulesFixMode: payload.complianceRulesFixMode,
       pipelineHomogenizationEnabled: payload.pipelineHomogenizationEnabled,
       pipelineHomogenizationPriorChapterCount: payload.pipelineHomogenizationPriorChapterCount,
       pipelineEnabledModules: payload.pipelineEnabledModules,
@@ -4426,8 +4435,11 @@ export class ProjectsService implements OnModuleInit {
       pipelineSkipSensoryOutlineReview: settings.pipelineSkipSensoryOutlineReview,
       pipelineSkipCharacterOutlineReview: settings.pipelineSkipCharacterOutlineReview,
       pipelineSkipCharacterTraitsOutlineReview: settings.pipelineSkipCharacterTraitsOutlineReview,
+      pipelineCharacterAdjustmentEnabled: settings.pipelineCharacterAdjustmentEnabled,
       pipelineCharacterTraitsEnabled: settings.pipelineCharacterTraitsEnabled,
       pipelineRulesFixMode: settings.pipelineRulesFixMode,
+      pipelineRulesModuleEnabled: settings.pipelineRulesModuleEnabled,
+      complianceRulesFixMode: settings.complianceRulesFixMode,
       pipelineHomogenizationEnabled: settings.pipelineHomogenizationEnabled,
       pipelineHomogenizationPriorChapterCount: settings.pipelineHomogenizationPriorChapterCount,
       pipelineEnabledModules: settings.pipelineEnabledModules

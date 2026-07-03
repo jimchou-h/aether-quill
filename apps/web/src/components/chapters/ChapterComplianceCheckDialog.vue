@@ -24,6 +24,7 @@ import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import MarkdownContent from '../common/MarkdownContent.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
+import OutlineReviewLayout from './OutlineReviewLayout.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 
 type DialogStep = 'ready' | 'outline' | 'rewriting' | 'review';
@@ -68,6 +69,10 @@ const qualityStatus = computed<FinalPolishQualityStatus | null>(
 
 const residualIssues = computed<PipelineRuleIssue[]>(() => session.value?.residualIssues ?? []);
 
+const preScanIssues = computed<PipelineRuleIssue[]>(() => session.value?.preScanIssues ?? []);
+
+const selectedPersonaNames = computed(() => session.value?.selectedPersonaNames ?? []);
+
 const diffLines = computed(() => {
   if (!originalText.value || !finalText.value) {
     return [];
@@ -78,6 +83,8 @@ const diffLines = computed(() => {
 const inlineDiff = computed(() => buildInlineDiffViews(originalText.value, finalText.value));
 
 const applyBlocked = computed(() => qualityStatus.value === 'blocked');
+
+const modalWidth = computed(() => (step.value === 'outline' ? 1080 : 920));
 
 const qualityStatusLabel = computed(() => {
   switch (qualityStatus.value) {
@@ -127,6 +134,53 @@ function syncOutlineFromSession() {
   outlineRevisionRound.value = outline?.revisionRound ?? 0;
 }
 
+async function runCompliancePhase(
+  phase: 'pre-scan' | 'outline' | 'rewrite',
+  progressMessage: string,
+  signal: AbortSignal,
+  onEnd?: () => void | Promise<void>
+) {
+  if (!props.chapter || !sessionId.value) {
+    return;
+  }
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: `compliance-check-${phase}`,
+    message: progressMessage,
+  });
+  await apiClient.runComplianceCheckPhaseSSE(
+    props.projectId,
+    props.chapter.chapterNo,
+    sessionId.value,
+    phase,
+    {
+      onStart: (event) => {
+        applyAiTaskProgressEvent(aiTaskProgress, event);
+      },
+      onStage: (event) => {
+        applyAiTaskProgressEvent(aiTaskProgress, {
+          ...event,
+          message: formatPipelineStageLabel(event.stage, event.segmentIndex, event.segmentTotal),
+        });
+      },
+      onEnd: async () => {
+        const refreshed = await apiClient.getComplianceCheckSession(
+          props.projectId,
+          props.chapter!.chapterNo
+        );
+        session.value = refreshed;
+        if (onEnd) {
+          await onEnd();
+        }
+      },
+      onError: (message) => {
+        errorMessage.value = message;
+        failAiTaskProgress(aiTaskProgress, message);
+      },
+    },
+    { signal }
+  );
+}
+
 async function startComplianceFlow() {
   if (!props.chapter || running.value) {
     return;
@@ -134,48 +188,21 @@ async function startComplianceFlow() {
   running.value = true;
   errorMessage.value = '';
   streamingText.value = '';
-  startAiTaskProgress(aiTaskProgress, {
-    taskKey: 'compliance-check',
-    message: '生成合规大纲…',
-  });
-  const signal = beginStream();
 
   try {
     const started = await apiClient.startComplianceCheck(props.projectId, props.chapter.chapterNo);
     sessionId.value = started.sessionId;
+    const signal = beginStream();
 
-    await apiClient.runComplianceCheckPhaseSSE(
-      props.projectId,
-      props.chapter.chapterNo,
-      sessionId.value,
-      'outline',
-      {
-        onStart: (event) => {
-          applyAiTaskProgressEvent(aiTaskProgress, event);
-        },
-        onStage: (event) => {
-          applyAiTaskProgressEvent(aiTaskProgress, {
-            ...event,
-            message: formatPipelineStageLabel(event.stage, event.segmentIndex, event.segmentTotal),
-          });
-        },
-        onEnd: async (event) => {
-          const refreshed = await apiClient.getComplianceCheckSession(
-            props.projectId,
-            props.chapter!.chapterNo
-          );
-          session.value = refreshed;
-          syncOutlineFromSession();
-          step.value = 'outline';
-          completeAiTaskProgress(aiTaskProgress, '合规大纲已生成，请确认');
-        },
-        onError: (message) => {
-          errorMessage.value = message;
-          failAiTaskProgress(aiTaskProgress, message);
-        },
-      },
-      { signal }
-    );
+    await runCompliancePhase('pre-scan', '硬规则预扫描…', signal, async () => {
+      completeAiTaskProgress(aiTaskProgress, '预扫完成，生成合规大纲…');
+    });
+
+    await runCompliancePhase('outline', '生成合规大纲…', signal, async () => {
+      syncOutlineFromSession();
+      step.value = 'outline';
+      completeAiTaskProgress(aiTaskProgress, '合规大纲已生成，请确认');
+    });
   } catch (error) {
     if (handleStreamError(error)) {
       return;
@@ -385,7 +412,7 @@ function handleClose() {
 <template>
   <a-modal
     :open="props.visible"
-    :width="920"
+    :width="modalWidth"
     :title="`终稿合规检验${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
     :mask-closable="true"
@@ -394,7 +421,10 @@ function handleClose() {
     @cancel="handleClose"
   >
     <p class="modal-subtitle">
-      发布前专检：先生成合规大纲并确认，再改正文；任务 Prompt 可配，不注入项目 systemPromptText；改写后硬规则复扫兜底。
+      发布前硬规则专检：预扫描 → 合规大纲 → 改写 → 复扫与残留修复。人物卡复用本章创作精修检索预览的选角（未精修过则用全部已发布人物）。
+    </p>
+    <p v-if="selectedPersonaNames.length" class="meta-line">
+      已选角色：{{ selectedPersonaNames.join('、') }}
     </p>
 
     <div v-if="running" class="stream-actions">
@@ -405,7 +435,10 @@ function handleClose() {
 
     <section v-if="step === 'ready'" class="step-section">
       <p class="intro-text">
-        将基于当前章节正文生成合规问题大纲，确认后按大纲改正文并完成硬规则复扫。
+        将先对正文做硬规则预扫描，再生成合规问题大纲；确认后改正文并完成复扫与 semi 残留修复。
+      </p>
+      <p v-if="!selectedPersonaNames.length" class="field-hint">
+        人物卡将复用本章最近一次创作精修检索预览的选角；启动后显示在下方。未精修过则使用全部已发布人物。
       </p>
       <div class="step-actions">
         <button type="button" class="primary-button" :disabled="isBusy" @click="startComplianceFlow">
@@ -415,19 +448,35 @@ function handleClose() {
     </section>
 
     <section v-else-if="step === 'outline'" class="step-section">
-      <PipelineOutlineEditor
-        title="合规修改大纲"
-        hint="必须项须落实后再进入改写；可在设置页维护「终稿合规 · 大纲/改写」任务 Prompt。"
-        :required="outlineRequired"
-        :suggested="outlineSuggested"
-        :busy="isBusy"
-        :revision-round="outlineRevisionRound"
-        @update:required="outlineRequired = $event"
-        @update:suggested="outlineSuggested = $event"
-        @recheck="handleRecheckOutline"
-        @revise="handleReviseOutline"
-        @confirm="confirmOutline"
-      />
+      <OutlineReviewLayout :reference-text="originalText" reference-label="本章正文">
+        <section v-if="preScanIssues.length" class="issue-section pre-scan-section">
+          <h5 class="section-title">硬规则预扫命中（{{ preScanIssues.length }}）</h5>
+          <p class="field-hint">以下问题已注入合规大纲生成；对照右侧正文审阅大纲，确认后改写。</p>
+          <ul class="issue-list">
+            <li v-for="issue in preScanIssues.slice(0, 12)" :key="issue.id" class="issue-item">
+              <div class="issue-head">
+                <span class="issue-category">{{ issue.category }}</span>
+              </div>
+              <p class="issue-text">{{ issue.text }}</p>
+              <p v-if="issue.context" class="issue-context">{{ issue.context }}</p>
+            </li>
+          </ul>
+        </section>
+        <PipelineOutlineEditor
+          title="合规修改大纲"
+          hint="必须项须落实后再进入改写；可在设置页维护「终稿合规 · 大纲/改写」任务 Prompt。"
+          :required="outlineRequired"
+          :suggested="outlineSuggested"
+          :busy="isBusy"
+          :revision-round="outlineRevisionRound"
+          :embed-reference="false"
+          @update:required="outlineRequired = $event"
+          @update:suggested="outlineSuggested = $event"
+          @recheck="handleRecheckOutline"
+          @revise="handleReviseOutline"
+          @confirm="confirmOutline"
+        />
+      </OutlineReviewLayout>
     </section>
 
     <section v-else-if="step === 'rewriting'" class="step-section">
@@ -527,6 +576,12 @@ function handleClose() {
   font-size: 0.85rem;
 }
 
+.meta-line {
+  margin: -0.5rem 0 0.75rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
 .message {
   margin: 0 0 0.8rem;
   padding: 0.5rem 0.65rem;
@@ -550,6 +605,13 @@ function handleClose() {
   font-size: 0.88rem;
   color: #374151;
   line-height: 1.6;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+  line-height: 1.5;
 }
 
 .section-title {
@@ -641,6 +703,13 @@ function handleClose() {
   margin: 0;
   font-size: 0.85rem;
   color: #374151;
+}
+
+.issue-context {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: #6b7280;
+  white-space: pre-wrap;
 }
 
 .preview-toggle {

@@ -1588,7 +1588,7 @@ export const apiClient = {
     projectId: string,
     chapterNo: number,
     sessionId: string,
-    phase: 'outline' | 'rewrite',
+    phase: 'pre-scan' | 'outline' | 'rewrite',
     callbacks: ChapterPipelineRunCallbacks,
     options?: SseStreamOptions
   ): Promise<void> {
@@ -1718,7 +1718,7 @@ export const apiClient = {
               callbacks.onEnd?.(event);
               break;
             case 'error':
-              callbacks.onError?.(event.data || '分步精修执行失败');
+              callbacks.onError?.(event.data || '创作精修执行失败');
               break;
           }
         } catch {
@@ -2077,10 +2077,12 @@ export type ChapterPipelineStage =
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
   | 'pipeline_final_polish_done'
+  | 'compliance_pre_scan'
   | 'compliance_outline'
   | 'compliance_rewrite'
   | 'compliance_rewrite_segment'
   | 'compliance_rescan'
+  | 'compliance_residual_fix'
   | 'draft_segment'
   | 'merge_validation';
 
@@ -2100,8 +2102,10 @@ export interface ComplianceCheckSessionView {
   chapterNo: number;
   status: string;
   sourceText: string;
+  selectedPersonaNames?: string[];
   outline?: ComplianceOutlineState;
   versionText?: string;
+  preScanIssues?: PipelineRuleIssue[];
   residualIssues?: PipelineRuleIssue[];
   qualityStatus?: FinalPolishQualityStatus;
   traceIds: Record<string, string | undefined>;
@@ -2135,10 +2139,11 @@ export type ChapterPipelineRunModule =
   | 'final-polish';
 
 export interface ChapterPipelineConfig {
-  pipelinePreset: 'full' | 'character_rules' | 'sensory_only';
+  pipelinePreset: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
   pipelineSkipSensoryOutlineReview: boolean;
   pipelineSkipCharacterOutlineReview: boolean;
   pipelineSkipCharacterTraitsOutlineReview: boolean;
+  pipelineCharacterAdjustmentEnabled: boolean;
   pipelineCharacterTraitsEnabled: boolean;
   pipelineRulesFixMode: 'auto' | 'semi' | 'manual';
   pipelineHomogenizationEnabled: boolean;
@@ -2304,6 +2309,8 @@ export function formatPipelineStageLabel(
       return '同质化改写中…';
     case 'pipeline_final_polish_done':
       return '终稿已生成，等待审核';
+    case 'compliance_pre_scan':
+      return '硬规则预扫描中…';
     case 'compliance_outline':
       return '生成合规大纲…';
     case 'compliance_rewrite':
@@ -2314,6 +2321,10 @@ export function formatPipelineStageLabel(
         : '合规改写分段中…';
     case 'compliance_rescan':
       return '硬规则复扫中…';
+    case 'compliance_residual_fix':
+      return segmentIndex && segmentTotal
+        ? `残留规则修复 ${segmentIndex}/${segmentTotal}…`
+        : '残留规则修复中…';
     case 'draft_segment':
       return segmentIndex && segmentTotal
         ? `分段生成 ${segmentIndex}/${segmentTotal}`

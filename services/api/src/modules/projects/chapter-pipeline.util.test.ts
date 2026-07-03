@@ -12,6 +12,7 @@ import {
   parsePipelineOutlineJson,
   resolveOutlineGenerationTemplateKey,
   resolveOutlineSourceText,
+  shouldRunCharacterAdjustmentModule,
   synthesizePipelineOutlineItemText,
   shouldRunCharacterTraitsModule,
   isPipelineEditableVersionKey,
@@ -68,6 +69,7 @@ test('getPipelineInputText uses version chain', () => {
       pipelineSkipSensoryOutlineReview: false,
       pipelineSkipCharacterOutlineReview: false,
       pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
       pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
@@ -102,6 +104,7 @@ test('getPostCharacterText prefers afterCharacterTraits', () => {
       pipelineSkipSensoryOutlineReview: false,
       pipelineSkipCharacterOutlineReview: false,
       pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
       pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
@@ -219,6 +222,7 @@ test('shouldRunCharacterTraitsModule requires module 1 enabled', () => {
       pipelineSkipSensoryOutlineReview: false,
       pipelineSkipCharacterOutlineReview: false,
       pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
       pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
@@ -233,6 +237,7 @@ test('shouldRunCharacterTraitsModule requires module 1 enabled', () => {
       pipelineSkipSensoryOutlineReview: false,
       pipelineSkipCharacterOutlineReview: false,
       pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
       pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
@@ -256,6 +261,7 @@ test('resolvePipelineApplyText prefers final when requested', () => {
       pipelineSkipSensoryOutlineReview: false,
       pipelineSkipCharacterOutlineReview: false,
       pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
       pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
@@ -268,6 +274,69 @@ test('resolvePipelineApplyText prefers final when requested', () => {
   };
   assert.equal(resolvePipelineApplyText(session, 'final'), 'f');
   assert.equal(resolvePipelineApplyText(session, 'afterRules'), 'f');
+});
+
+test('mergePipelineConfig creative_refine excludes rules module by default', () => {
+  const config = mergePipelineConfig(
+    { pipelinePreset: 'creative_refine', pipelineHomogenizationEnabled: false },
+    {}
+  );
+  assert.deepEqual(config.pipelineEnabledModules, [1, 2]);
+  assert.equal(config.pipelineCharacterAdjustmentEnabled, false);
+});
+
+test('mergePipelineConfig full preset enables character adjustment by default', () => {
+  const config = mergePipelineConfig(
+    { pipelinePreset: 'full', pipelineHomogenizationEnabled: false },
+    {}
+  );
+  assert.deepEqual(config.pipelineEnabledModules, [1, 2, 3]);
+  assert.equal(config.pipelineCharacterAdjustmentEnabled, true);
+});
+
+test('mergePipelineConfig rules module toggle adds module 3', () => {
+  const config = mergePipelineConfig(
+    {
+      pipelinePreset: 'creative_refine',
+      pipelineHomogenizationEnabled: false,
+      pipelineRulesModuleEnabled: true,
+    },
+    {}
+  );
+  assert.deepEqual(config.pipelineEnabledModules, [1, 2, 3]);
+});
+
+test('shouldRunCharacterAdjustmentModule respects config flag', () => {
+  assert.equal(
+    shouldRunCharacterAdjustmentModule({
+      pipelinePreset: 'creative_refine',
+      pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: false,
+      pipelineCharacterTraitsEnabled: true,
+      pipelineRulesFixMode: 'semi',
+      pipelineHomogenizationEnabled: false,
+      pipelineHomogenizationPriorChapterCount: 3,
+      pipelineEnabledModules: [1, 2],
+    }),
+    false
+  );
+  assert.equal(
+    shouldRunCharacterAdjustmentModule({
+      pipelinePreset: 'full',
+      pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: true,
+      pipelineCharacterTraitsEnabled: true,
+      pipelineRulesFixMode: 'semi',
+      pipelineHomogenizationEnabled: false,
+      pipelineHomogenizationPriorChapterCount: 3,
+      pipelineEnabledModules: [1, 2, 3],
+    }),
+    true
+  );
 });
 
 test('mergePipelineConfig removes module 4 when homogenization disabled', () => {
@@ -547,6 +616,18 @@ test('resolveOutlineSourceText aligns with outline module input text', () => {
       original: '原文',
       afterCharacter: '角色调整后',
       afterCharacterTraits: '特征润色后',
+    },
+    config: {
+      pipelinePreset: 'full',
+      pipelineSkipSensoryOutlineReview: false,
+      pipelineSkipCharacterOutlineReview: false,
+      pipelineSkipCharacterTraitsOutlineReview: false,
+      pipelineCharacterAdjustmentEnabled: true,
+      pipelineCharacterTraitsEnabled: true,
+      pipelineRulesFixMode: 'semi',
+      pipelineHomogenizationEnabled: false,
+      pipelineHomogenizationPriorChapterCount: 3,
+      pipelineEnabledModules: [1, 2, 3],
     },
   } as ChapterPipelineSession;
 

@@ -16,7 +16,7 @@ post:
       required: true
       schema:
         type: string
-        enum: [outline, rewrite]
+        enum: [pre-scan, outline, rewrite]
   responses:
     '200':
       description: SSE stream

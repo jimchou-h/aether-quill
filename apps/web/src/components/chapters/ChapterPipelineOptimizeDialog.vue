@@ -39,6 +39,7 @@ import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import MarkdownContent from '../common/MarkdownContent.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
+import OutlineReviewLayout from './OutlineReviewLayout.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 
 type PipelineStep =
@@ -141,6 +142,67 @@ const isOutlineStep = computed(() =>
   ['character-outline', 'character-traits-outline', 'sensory-outline'].includes(step.value)
 );
 
+type PipelineOutlineReferenceKey = ChapterPipelineVersionKey | 'original';
+
+function pickVersionText(
+  versions: ChapterPipelineSessionView['versions'] | undefined,
+  keys: PipelineOutlineReferenceKey[]
+): string {
+  if (!versions) {
+    return '';
+  }
+  for (const key of keys) {
+    const text = versions[key]?.trim();
+    if (text) {
+      return text;
+    }
+  }
+  return '';
+}
+
+const outlineReferenceText = computed(() => {
+  const fallback = props.chapter?.content?.trim() ?? '';
+  const versions = session.value?.versions;
+  if (!isOutlineStep.value) {
+    return fallback;
+  }
+  switch (step.value) {
+    case 'character-outline':
+      return pickVersionText(versions, ['original']) || fallback;
+    case 'character-traits-outline':
+      return pickVersionText(versions, ['afterCharacter', 'original']) || fallback;
+    case 'sensory-outline':
+      return (
+        pickVersionText(versions, ['afterCharacterTraits', 'afterCharacter', 'original']) ||
+        fallback
+      );
+    default:
+      return fallback;
+  }
+});
+
+const outlineReferenceLabel = computed(() => {
+  const versions = session.value?.versions;
+  switch (step.value) {
+    case 'character-outline':
+      return '本章正文';
+    case 'character-traits-outline':
+      return versions?.afterCharacter?.trim() ? '角色调整后正文' : '本章正文';
+    case 'sensory-outline':
+      if (versions?.afterCharacterTraits?.trim()) {
+        return '特征润色后正文';
+      }
+      if (versions?.afterCharacter?.trim()) {
+        return '角色调整后正文';
+      }
+      return '本章正文';
+    default:
+      return '对照正文';
+  }
+});
+
+const modalWidth = computed(() => (isOutlineStep.value ? 1080 : 920));
+
 function readStepVersionFromSession(): string {
   const key = stepVersionKey.value;
   if (!key || !session.value?.versions) {
@@ -190,8 +252,9 @@ const pipelineIncomplete = computed(() => {
     return false;
   }
   const versions = session.value.versions;
-  const modules = config.value?.pipelineEnabledModules ?? [1, 2, 3];
+  const modules = config.value?.pipelineEnabledModules ?? [1, 2];
   const traitsEnabled = config.value?.pipelineCharacterTraitsEnabled !== false;
+  const adjustmentEnabled = config.value?.pipelineCharacterAdjustmentEnabled === true;
 
   if (modules.includes(4) && config.value?.pipelineHomogenizationEnabled) {
     if (!versions.final?.trim()) {
@@ -209,7 +272,7 @@ const pipelineIncomplete = computed(() => {
     }
   }
   if (modules.includes(1)) {
-    if (!versions.afterCharacter?.trim()) {
+    if (adjustmentEnabled && !versions.afterCharacter?.trim()) {
       return true;
     }
     if (traitsEnabled && !versions.afterCharacterTraits?.trim()) {
@@ -219,11 +282,61 @@ const pipelineIncomplete = computed(() => {
   return false;
 });
 
+const rulesModuleEnabled = computed(
+  () => (config.value?.pipelineEnabledModules ?? [1, 2]).includes(3)
+);
+
+function resolvePipelineBootstrap(runAll: boolean): {
+  step: PipelineStep;
+  module: ChapterPipelineRunModule;
+} {
+  const modules = config.value?.pipelineEnabledModules ?? [1, 2];
+  const traitsEnabled = config.value?.pipelineCharacterTraitsEnabled !== false;
+  const adjustmentEnabled = config.value?.pipelineCharacterAdjustmentEnabled === true;
+
+  if (runAll) {
+    if (modules.includes(1)) {
+      if (adjustmentEnabled) {
+        return { step: 'character-outline', module: 'run-all' };
+      }
+      if (traitsEnabled) {
+        return { step: 'character-traits-outline', module: 'run-all' };
+      }
+    }
+    if (modules.includes(2)) {
+      return { step: 'sensory-outline', module: 'run-all' };
+    }
+    if (modules.includes(3)) {
+      return { step: 'rules', module: 'run-all' };
+    }
+    return { step: 'done', module: 'run-all' };
+  }
+
+  if (modules.includes(1)) {
+    if (adjustmentEnabled) {
+      return { step: 'character-outline', module: 'character-outline' };
+    }
+    if (traitsEnabled) {
+      return { step: 'character-traits-outline', module: 'character-traits-outline' };
+    }
+  }
+  if (modules.includes(2)) {
+    return { step: 'sensory-outline', module: 'sensory-outline' };
+  }
+  if (modules.includes(3)) {
+    return { step: 'rules', module: 'rules-scan' };
+  }
+  return { step: 'ready', module: 'run-all' };
+}
+
 const pipelineSteps = computed<PipelineStepItem[]>(() => {
-  const modules = config.value?.pipelineEnabledModules ?? [1, 2, 3];
+  const modules = config.value?.pipelineEnabledModules ?? [1, 2];
+  const adjustmentEnabled = config.value?.pipelineCharacterAdjustmentEnabled === true;
   const steps: PipelineStepItem[] = [{ key: 'ready', label: '准备' }];
   if (modules.includes(1)) {
-    steps.push({ key: 'character', label: '角色调整' });
+    if (adjustmentEnabled) {
+      steps.push({ key: 'character', label: '角色调整' });
+    }
     if (config.value?.pipelineCharacterTraitsEnabled !== false) {
       steps.push({ key: 'character-traits-outline', label: '特征润色' });
     }
@@ -465,7 +578,7 @@ async function openPersonaPreview() {
         personas: buildPersonasContextPayload(workspace.personas),
       },
       extraContext: {
-        retrievalInstruction: '分步精修',
+        retrievalInstruction: '创作精修',
         retrievalChapterTitle: props.chapter.title,
         retrievalChapterSummary: props.chapter.summary || props.chapter.content.slice(0, 500),
       },
@@ -513,23 +626,12 @@ async function startPipelineSession(runAll = false) {
     sessionId.value = result.sessionId;
     config.value = result.config;
     await refreshSession();
-    const modules = config.value?.pipelineEnabledModules ?? [1, 2, 3];
-    if (runAll) {
-      step.value = modules.includes(1) ? 'character-outline' : 'sensory-outline';
-      await runModule('run-all');
-    } else if (modules.includes(1)) {
-      step.value = 'character-outline';
-      await runModule('character-outline');
-    } else if (modules.includes(2)) {
-      step.value = 'sensory-outline';
-      await runModule('sensory-outline');
-    } else {
-      step.value = 'rules';
-      await runModule('rules-scan');
-    }
+    const { step: initialStep, module: initialModule } = resolvePipelineBootstrap(runAll);
+    step.value = initialStep;
+    await runModule(initialModule);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '启动失败';
-    presentErrorFromCaught(error, '启动分步精修失败');
+    presentErrorFromCaught(error, '启动创作精修失败');
   } finally {
     running.value = false;
   }
@@ -545,7 +647,7 @@ async function runModule(module: ChapterPipelineRunModule) {
   const isRunAll = module === 'run-all';
   startAiTaskProgress(aiTaskProgress, {
     taskKey: isRunAll ? 'chapter.pipeline.run-all' : 'chapter.pipeline.run',
-    message: isRunAll ? '一键精修执行中…' : '分步精修执行中…',
+    message: isRunAll ? '全自动精修执行中…' : '创作精修执行中…',
   });
   const signal = beginStream();
 
@@ -640,7 +742,7 @@ async function runModule(module: ChapterPipelineRunModule) {
           if (isTerminalChapterPipelineRunEnd(module, endEvent)) {
             completeAiTaskProgress(
               aiTaskProgress,
-              endEvent.currentModule === 'done' ? '一键精修完成' : '步骤完成'
+              endEvent.currentModule === 'done' ? '全自动精修完成' : '步骤完成'
             );
           } else if (isRunAll) {
             applyAiTaskProgressEvent(aiTaskProgress, {
@@ -662,7 +764,7 @@ async function runModule(module: ChapterPipelineRunModule) {
     }
     errorMessage.value = error instanceof Error ? error.message : '执行失败';
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
-    presentErrorFromCaught(error, '分步精修执行失败');
+    presentErrorFromCaught(error, '创作精修执行失败');
   } finally {
     running.value = false;
     endStream();
@@ -882,7 +984,7 @@ async function handleApply() {
             : undefined,
       }
     );
-    presentSuccess('分步精修已应用');
+    presentSuccess('创作精修已应用');
     emit('applied', result.chapter);
     emit('close');
   } catch (error) {
@@ -983,15 +1085,17 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
 <template>
   <a-modal
     :open="props.visible"
-    :width="920"
-    :title="`分步精修${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
+    :width="modalWidth"
+    :title="`创作精修${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
     :mask-closable="true"
     :closable="true"
     destroy-on-close
     @cancel="close"
   >
-    <p class="modal-subtitle">维度隔离四模块流水线；中间版本仅在会话内流转，应用后才写入章节正文。</p>
+    <p class="modal-subtitle">
+      默认链：特征润色 → 感官优化；硬规则请用「终稿合规检验」。中间版本仅在会话内流转，应用后才写入章节正文。
+    </p>
 
     <ol class="stepper">
       <li
@@ -1013,7 +1117,7 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
 
     <section v-if="step === 'ready'" class="step-section">
       <p class="intro-text">
-        将按项目预设依次执行各模块。启动前会弹出检索预览，请确认要注入的角色卡（与章节优化一致）；角色/特征/感官大纲均支持 gate 与 AI 修订。
+        将按项目预设依次执行创作精修模块。启动前会弹出检索预览，请确认要注入的角色卡；特征/感官大纲支持人工 gate 与 AI 修订。发布前硬规则请使用章节「更多 → 终稿合规检验」。
       </p>
       <p v-if="selectedPersonaNames.length" class="meta-line">
         已选角色：{{ selectedPersonaNames.join('、') }}
@@ -1022,30 +1126,46 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
         <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
           取消
         </button>
-        <button class="secondary-button" type="button" :disabled="isBusy" @click="handleStart(true)">
-          {{ running ? '执行中…' : '一键精修' }}
+        <button
+          class="secondary-button"
+          type="button"
+          :disabled="isBusy"
+          title="按项目设置跳过 gate，自动跑完当前预设链"
+          @click="handleStart(true)"
+        >
+          {{ running ? '执行中…' : '全自动精修' }}
         </button>
         <button class="primary-button" type="button" :disabled="isBusy" @click="handleStart()">
-          {{ running ? '启动中…' : '开始分步精修' }}
+          {{ running ? '启动中…' : '开始创作精修' }}
         </button>
       </div>
     </section>
 
-    <PipelineOutlineEditor
+    <OutlineReviewLayout
       v-else-if="isOutlineStep"
-      :title="outlineEditorTitle"
-      :hint="outlineEditorHint"
-      v-model:required="outlineRequired"
-      v-model:suggested="outlineSuggested"
-      :busy="isBusy"
-      :revision-round="outlineRevisionRound"
-      @confirm="confirmOutline"
-      @recheck="recheckOutline"
-      @revise="reviseOutlineWithFeedback"
-    />
+      :reference-text="outlineReferenceText"
+      :reference-label="outlineReferenceLabel"
+    >
+      <PipelineOutlineEditor
+        :title="outlineEditorTitle"
+        :hint="outlineEditorHint"
+        v-model:required="outlineRequired"
+        v-model:suggested="outlineSuggested"
+        :busy="isBusy"
+        :revision-round="outlineRevisionRound"
+        :embed-reference="false"
+        @confirm="confirmOutline"
+        @recheck="recheckOutline"
+        @revise="reviseOutlineWithFeedback"
+      />
+    </OutlineReviewLayout>
 
-    <section v-else-if="step === 'rules' && ruleIssues.length" class="step-section">
-      <h4 class="section-title">规则扫描清单</h4>
+    <section
+      v-else-if="rulesModuleEnabled && step === 'rules' && ruleIssues.length"
+      class="step-section"
+    >
+      <h4 class="section-title">规则模块扫描（旧版）</h4>
+      <p class="field-hint">默认创作精修不含此步；推荐改用「终稿合规检验」处理硬规则。</p>
       <ul class="issue-list">
         <li
           v-for="issue in ruleIssues"
@@ -1148,6 +1268,10 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
         继续下一步（后续模块）
       </button>
     </div>
+
+    <p v-if="step === 'done'" class="field-hint compliance-hint">
+      应用前请确认正文质量；发布前硬规则请再运行「终稿合规检验」。
+    </p>
 
     <div v-if="step === 'done'" class="step-actions">
       <button class="secondary-button" type="button" :disabled="isBusy" @click="close">取消</button>
@@ -1263,6 +1387,17 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
   font-size: 0.9rem;
   color: #4b5563;
   line-height: 1.55;
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.compliance-hint {
+  margin-bottom: 0.5rem;
 }
 
 .outline-panel {

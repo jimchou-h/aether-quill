@@ -27,8 +27,11 @@ export type ProjectSettingsJsonExtensions = {
   pipelineSkipSensoryOutlineReview?: boolean;
   pipelineSkipCharacterOutlineReview?: boolean;
   pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterAdjustmentEnabled?: boolean;
   pipelineCharacterTraitsEnabled?: boolean;
   pipelineRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
+  pipelineRulesModuleEnabled?: boolean;
+  complianceRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
   pipelineEnabledModules?: number[];
@@ -55,8 +58,11 @@ export function pickProjectSettingsJsonExtensions(
     pipelineSkipSensoryOutlineReview: raw.pipelineSkipSensoryOutlineReview,
     pipelineSkipCharacterOutlineReview: raw.pipelineSkipCharacterOutlineReview,
     pipelineSkipCharacterTraitsOutlineReview: raw.pipelineSkipCharacterTraitsOutlineReview,
+    pipelineCharacterAdjustmentEnabled: raw.pipelineCharacterAdjustmentEnabled,
     pipelineCharacterTraitsEnabled: raw.pipelineCharacterTraitsEnabled,
     pipelineRulesFixMode: raw.pipelineRulesFixMode,
+    pipelineRulesModuleEnabled: raw.pipelineRulesModuleEnabled,
+    complianceRulesFixMode: raw.complianceRulesFixMode,
     pipelineHomogenizationEnabled: raw.pipelineHomogenizationEnabled,
     pipelineHomogenizationPriorChapterCount: raw.pipelineHomogenizationPriorChapterCount,
     pipelineEnabledModules: raw.pipelineEnabledModules,
@@ -109,8 +115,17 @@ export function applyProjectSettingsJsonExtensions<T extends ProjectSettingsJson
   if (extensions.pipelineCharacterTraitsEnabled !== undefined) {
     target.pipelineCharacterTraitsEnabled = extensions.pipelineCharacterTraitsEnabled;
   }
+  if (extensions.pipelineCharacterAdjustmentEnabled !== undefined) {
+    target.pipelineCharacterAdjustmentEnabled = extensions.pipelineCharacterAdjustmentEnabled;
+  }
   if (extensions.pipelineRulesFixMode !== undefined) {
     target.pipelineRulesFixMode = extensions.pipelineRulesFixMode;
+  }
+  if (extensions.pipelineRulesModuleEnabled !== undefined) {
+    target.pipelineRulesModuleEnabled = extensions.pipelineRulesModuleEnabled;
+  }
+  if (extensions.complianceRulesFixMode !== undefined) {
+    target.complianceRulesFixMode = extensions.complianceRulesFixMode;
   }
   if (extensions.pipelineHomogenizationEnabled !== undefined) {
     target.pipelineHomogenizationEnabled = extensions.pipelineHomogenizationEnabled;
@@ -170,8 +185,11 @@ export function serializeProjectSettingsForJsonMirror(settings: {
   pipelineSkipSensoryOutlineReview?: boolean;
   pipelineSkipCharacterOutlineReview?: boolean;
   pipelineSkipCharacterTraitsOutlineReview?: boolean;
+  pipelineCharacterAdjustmentEnabled?: boolean;
   pipelineCharacterTraitsEnabled?: boolean;
   pipelineRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
+  pipelineRulesModuleEnabled?: boolean;
+  complianceRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
   pipelineEnabledModules?: number[];
@@ -209,6 +227,9 @@ export function serializeProjectSettingsForJsonMirror(settings: {
     pipelineSkipCharacterTraitsOutlineReview:
       settings.pipelineSkipCharacterTraitsOutlineReview ??
       DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
+    pipelineCharacterAdjustmentEnabled:
+      settings.pipelineCharacterAdjustmentEnabled ??
+      DEFAULT_PIPELINE_CONFIG.pipelineCharacterAdjustmentEnabled,
     pipelineCharacterTraitsEnabled:
       settings.pipelineCharacterTraitsEnabled ?? DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
     pipelineRulesFixMode:
@@ -240,6 +261,7 @@ export const PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS = {
   pipelineSkipCharacterOutlineReview: DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
   pipelineSkipCharacterTraitsOutlineReview:
     DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
+  pipelineCharacterAdjustmentEnabled: DEFAULT_PIPELINE_CONFIG.pipelineCharacterAdjustmentEnabled,
   pipelineCharacterTraitsEnabled: DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
   pipelineRulesFixMode: DEFAULT_PIPELINE_CONFIG.pipelineRulesFixMode,
   pipelineHomogenizationEnabled: DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationEnabled,

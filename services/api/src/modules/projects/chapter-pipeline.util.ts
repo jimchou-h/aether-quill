@@ -112,8 +112,8 @@ export const CHAPTER_PIPELINE_SENSORY_OUTLINE_SYSTEM_PROMPT = [
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_SYSTEM_PROMPT = [
   '你是一位资深小说写作助手，正在按已确认的感官优化大纲改写章节正文。',
   DIMENSION_BOUNDARY,
-  'ONLY：按 <sensory-outline> 提升感官描写质量。',
-  '禁止：修改角色性格、对白口吻、禁用词、剧情走向。',
+  'ONLY：按 <sensory-outline> 提升亲密场景的感官描写质量（触觉/听觉/视觉等）。',
+  '禁止：修改角色性格、对白口吻、剧情走向、叙事规则与合规红线（禁用词/平台规则由终稿合规专检，本步不负责）。',
   '大纲每条 text 仅为方向性指引；具体描写由你创作，不得照搬大纲中的任何短语或例句。',
   '直接输出完整正文，不要输出说明或 Markdown。',
 ].join('\n');
@@ -149,7 +149,7 @@ export const CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_SYSTEM_PROMPT = [
 
 // ── Types ──────────────────────────────────────────────────────
 
-export type ChapterPipelinePreset = 'full' | 'character_rules' | 'sensory_only';
+export type ChapterPipelinePreset = 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
 export type ChapterPipelineRulesFixMode = 'auto' | 'semi' | 'manual';
 export type ChapterPipelineModule = 1 | 2 | 3 | 4;
 export type ChapterPipelineRunModule =
@@ -187,10 +187,12 @@ export type ChapterPipelineStage =
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
   | 'pipeline_final_polish_done'
+  | 'compliance_pre_scan'
   | 'compliance_outline'
   | 'compliance_rewrite'
   | 'compliance_rewrite_segment'
   | 'compliance_rescan'
+  | 'compliance_residual_fix'
   | 'draft_segment'
   | 'merge_validation';
 
@@ -244,6 +246,8 @@ export interface ChapterPipelineConfig {
   pipelineSkipSensoryOutlineReview: boolean;
   pipelineSkipCharacterOutlineReview: boolean;
   pipelineSkipCharacterTraitsOutlineReview: boolean;
+  /** 是否跑模块一 a/b 角色对白调整（character-outline → character） */
+  pipelineCharacterAdjustmentEnabled: boolean;
   pipelineCharacterTraitsEnabled: boolean;
   pipelineRulesFixMode: ChapterPipelineRulesFixMode;
   pipelineHomogenizationEnabled: boolean;
@@ -349,15 +353,16 @@ export interface ChapterPipelineSession {
 // ── Defaults ───────────────────────────────────────────────────
 
 export const DEFAULT_PIPELINE_CONFIG: ChapterPipelineConfig = {
-  pipelinePreset: 'full',
+  pipelinePreset: 'creative_refine',
   pipelineSkipSensoryOutlineReview: false,
   pipelineSkipCharacterOutlineReview: false,
   pipelineSkipCharacterTraitsOutlineReview: false,
+  pipelineCharacterAdjustmentEnabled: false,
   pipelineCharacterTraitsEnabled: true,
   pipelineRulesFixMode: 'semi',
   pipelineHomogenizationEnabled: false,
   pipelineHomogenizationPriorChapterCount: 3,
-  pipelineEnabledModules: [1, 2, 3],
+  pipelineEnabledModules: [1, 2],
 };
 
 export const PIPELINE_OUTLINE_REVISION_HISTORY_LIMIT = 5;
@@ -368,10 +373,21 @@ export const DEFAULT_PROTAGONIST_PROGRESS_RULES: ProtagonistUnlockRule[] = [];
 // ── Config resolution ──────────────────────────────────────────
 
 const PRESET_MODULES: Record<ChapterPipelinePreset, ChapterPipelineModule[]> = {
+  creative_refine: [1, 2],
   full: [1, 2, 3, 4],
   character_rules: [1, 3],
   sensory_only: [2],
 };
+
+function resolveDefaultCharacterAdjustmentEnabled(
+  preset: ChapterPipelinePreset,
+  explicit?: boolean
+): boolean {
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  return preset === 'full' || preset === 'character_rules';
+}
 
 export function resolvePipelineEnabledModules(
   preset: ChapterPipelinePreset,
@@ -390,19 +406,32 @@ export function resolvePipelineEnabledModules(
 export function mergePipelineConfig(
   projectDefaults: Partial<ChapterPipelineConfig> & {
     protagonistProgressRules?: ProtagonistUnlockRule[];
+    pipelineRulesModuleEnabled?: boolean;
   },
-  overrides?: Partial<ChapterPipelineConfig>
+  overrides?: Partial<ChapterPipelineConfig> & { pipelineRulesModuleEnabled?: boolean }
 ): ChapterPipelineConfig {
-  const preset = overrides?.pipelinePreset ?? projectDefaults.pipelinePreset ?? 'full';
+  const preset =
+    overrides?.pipelinePreset ?? projectDefaults.pipelinePreset ?? DEFAULT_PIPELINE_CONFIG.pipelinePreset;
   const homogenizationEnabled =
     overrides?.pipelineHomogenizationEnabled ??
     projectDefaults.pipelineHomogenizationEnabled ??
     false;
-  const enabledModules = resolvePipelineEnabledModules(
+  let enabledModules = resolvePipelineEnabledModules(
     preset,
     homogenizationEnabled,
     overrides?.pipelineEnabledModules ?? projectDefaults.pipelineEnabledModules
   );
+  const rulesModuleEnabled =
+    overrides?.pipelineRulesModuleEnabled ?? projectDefaults.pipelineRulesModuleEnabled;
+  if (rulesModuleEnabled && !enabledModules.includes(3)) {
+    enabledModules = [...enabledModules, 3].sort((a, b) => a - b) as ChapterPipelineModule[];
+  }
+  const characterAdjustmentEnabled = resolveDefaultCharacterAdjustmentEnabled(
+    preset,
+    overrides?.pipelineCharacterAdjustmentEnabled ??
+      projectDefaults.pipelineCharacterAdjustmentEnabled
+  );
+
   return {
     pipelinePreset: preset,
     pipelineSkipSensoryOutlineReview:
@@ -417,6 +446,7 @@ export function mergePipelineConfig(
       overrides?.pipelineSkipCharacterTraitsOutlineReview ??
       projectDefaults.pipelineSkipCharacterTraitsOutlineReview ??
       false,
+    pipelineCharacterAdjustmentEnabled: characterAdjustmentEnabled,
     pipelineCharacterTraitsEnabled:
       overrides?.pipelineCharacterTraitsEnabled ??
       projectDefaults.pipelineCharacterTraitsEnabled ??
@@ -439,6 +469,21 @@ export function mergePipelineConfig(
 
 export function shouldRunCharacterTraitsModule(config: ChapterPipelineConfig): boolean {
   return config.pipelineCharacterTraitsEnabled && config.pipelineEnabledModules.includes(1);
+}
+
+export function shouldRunCharacterAdjustmentModule(config: ChapterPipelineConfig): boolean {
+  return config.pipelineCharacterAdjustmentEnabled && config.pipelineEnabledModules.includes(1);
+}
+
+export function resolveTraitsRewriteSourceText(session: ChapterPipelineSession): string {
+  if (
+    session.config &&
+    shouldRunCharacterAdjustmentModule(session.config) &&
+    session.versions.afterCharacter?.trim()
+  ) {
+    return session.versions.afterCharacter;
+  }
+  return session.versions.original;
 }
 
 export function filterPipelinePersonas<T extends { name: string; status: string }>(
@@ -541,7 +586,7 @@ export function resolveOutlineSourceText(
     case 'character':
       return getPipelineInputText(session, 1);
     case 'character-traits':
-      return session.versions.afterCharacter ?? getPipelineInputText(session, 1);
+      return resolveTraitsRewriteSourceText(session);
     case 'sensory':
       return getPipelineInputText(session, 2);
     default:
@@ -616,6 +661,11 @@ export function assertModulePrerequisites(
   const enabled = session.config.pipelineEnabledModules;
   const traitsEnabled = shouldRunCharacterTraitsModule(session.config);
 
+  if (module === 'character-outline' || module === 'character') {
+    if (!shouldRunCharacterAdjustmentModule(session.config)) {
+      throw new Error('角色对白调整未启用');
+    }
+  }
   if (module === 'character-outline') {
     if (!enabled.includes(1)) {
       throw new Error('模块一未启用');
@@ -634,7 +684,10 @@ export function assertModulePrerequisites(
     if (!traitsEnabled) {
       throw new Error('角色特征润色未启用');
     }
-    if (!session.versions.afterCharacter?.trim()) {
+    if (
+      shouldRunCharacterAdjustmentModule(session.config) &&
+      !session.versions.afterCharacter?.trim()
+    ) {
       throw new Error('请先完成模块一（角色调整）');
     }
   }
@@ -648,10 +701,14 @@ export function assertModulePrerequisites(
     if (!enabled.includes(2)) {
       throw new Error('模块二未启用');
     }
-    if (enabled.includes(1) && !session.versions.afterCharacter) {
+    if (
+      enabled.includes(1) &&
+      shouldRunCharacterAdjustmentModule(session.config) &&
+      !session.versions.afterCharacter
+    ) {
       throw new Error('请先完成模块一（角色调整）');
     }
-    if (traitsEnabled && !session.versions.afterCharacterTraits && !session.versions.afterCharacter) {
+    if (traitsEnabled && !session.versions.afterCharacterTraits?.trim()) {
       throw new Error('请先完成角色特征润色');
     }
   }
@@ -870,6 +927,7 @@ export function buildSensoryRewriteUserPrompt(input: {
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
     [
       '【改写原则】',
+      '本步仅提升感官描写质量，不修复禁用词、平台红线或叙事规则问题。',
       '感官大纲每条 text 仅为方向指引，不是可照搬的成品句子。',
       '请根据方向自行创作描写，不得复制大纲中的具体短语或示例。',
     ].join('\n'),
@@ -1695,10 +1753,12 @@ export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
     pipeline_homogenization_scan: '同质化检测中…',
     pipeline_homogenization_rewrite: '同质化改写中…',
     pipeline_final_polish_done: '终稿已生成，等待审核',
+    compliance_pre_scan: '硬规则预扫描中…',
     compliance_outline: '生成合规大纲…',
     compliance_rewrite: '合规改写中…',
     compliance_rewrite_segment: '合规改写分段中…',
     compliance_rescan: '硬规则复扫中…',
+    compliance_residual_fix: '残留规则修复中…',
     draft_segment: '分段生成中…',
     merge_validation: '合并校验中…',
   };

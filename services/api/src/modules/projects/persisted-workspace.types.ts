@@ -48,10 +48,11 @@ export interface PersistedProjectState {
         severity: 'low' | 'medium' | 'high';
         enabled: boolean;
       }>;
-      pipelinePreset?: 'full' | 'character_rules' | 'sensory_only';
+      pipelinePreset?: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
       pipelineSkipSensoryOutlineReview?: boolean;
       pipelineSkipCharacterOutlineReview?: boolean;
       pipelineSkipCharacterTraitsOutlineReview?: boolean;
+      pipelineCharacterAdjustmentEnabled?: boolean;
       pipelineCharacterTraitsEnabled?: boolean;
       pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
       pipelineHomogenizationEnabled?: boolean;

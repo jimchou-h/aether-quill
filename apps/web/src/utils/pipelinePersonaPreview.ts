@@ -27,7 +27,7 @@ function extractPersonaNameFromPreviewItem(item: PreviewRetrievalItem): string |
   return title || null;
 }
 
-/** 从检索预览勾选结果解析分步精修使用的角色名（仅 persona_card 池） */
+/** 从检索预览勾选结果解析创作精修使用的角色名（仅 persona_card 池） */
 export function resolvePersonaNamesFromPreviewSelection(
   result: PreviewRetrievalResult,
   selectedIds: string[]

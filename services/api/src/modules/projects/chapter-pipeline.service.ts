@@ -94,12 +94,14 @@ import {
   sanitizeSensoryOutlineWithContentScan,
   setOutlineState,
   shouldApplyAiSegmentFix,
+  shouldRunCharacterAdjustmentModule,
   shouldRunCharacterTraitsModule,
+  resolveTraitsRewriteSourceText,
   resolvePipelineSegmentStrategy,
   resolveProtagonistContext,
   splitPipelineText,
 } from './chapter-pipeline.util';
-import { mergeSegmentDraftTexts } from './chapter-optimize.util';
+import { mergeSegmentDraftTexts, validateMergedChapterDraft } from './chapter-optimize.util';
 import type { PersonaRecord } from './projects.service';
 import { ProjectsService } from './projects.service';
 
@@ -176,10 +178,11 @@ export class ChapterPipelineService {
     const finalPolishDefaults =
       payload.mode === 'final-polish'
         ? {
-            pipelinePreset: 'full' as ChapterPipelineConfig['pipelinePreset'],
+            pipelinePreset: 'creative_refine' as ChapterPipelineConfig['pipelinePreset'],
             pipelineSkipCharacterOutlineReview: true,
             pipelineSkipCharacterTraitsOutlineReview: true,
             pipelineSkipSensoryOutlineReview: true,
+            pipelineCharacterAdjustmentEnabled: false,
             pipelineRulesFixMode: 'semi' as ChapterPipelineConfig['pipelineRulesFixMode'],
           }
         : {};
@@ -473,24 +476,27 @@ export class ChapterPipelineService {
   ): Promise<void> {
     const enabled = session.config.pipelineEnabledModules;
     const traitsEnabled = shouldRunCharacterTraitsModule(session.config);
+    const adjustmentEnabled = shouldRunCharacterAdjustmentModule(session.config);
 
     if (enabled.includes(1)) {
-      if (!session.characterOutline) {
-        await this.runCharacterOutlineModule(session, userId, callbacks);
-      }
-      if (
-        !session.config.pipelineSkipCharacterOutlineReview &&
-        !session.characterOutline?.userConfirmed
-      ) {
-        callbacks.onGate?.('character-outline', {
-          characterOutline: session.characterOutline,
-        });
-        return;
-      }
-      if (!session.versions.afterCharacter?.trim()) {
-        await this.runCharacterModule(session, userId, callbacks);
-        if (!session.versions.afterCharacter) {
+      if (adjustmentEnabled) {
+        if (!session.characterOutline) {
+          await this.runCharacterOutlineModule(session, userId, callbacks);
+        }
+        if (
+          !session.config.pipelineSkipCharacterOutlineReview &&
+          !session.characterOutline?.userConfirmed
+        ) {
+          callbacks.onGate?.('character-outline', {
+            characterOutline: session.characterOutline,
+          });
           return;
+        }
+        if (!session.versions.afterCharacter?.trim()) {
+          await this.runCharacterModule(session, userId, callbacks);
+          if (!session.versions.afterCharacter) {
+            return;
+          }
         }
       }
 
@@ -725,7 +731,7 @@ export class ChapterPipelineService {
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const resolvedPersonas = this.resolveSessionPersonas(session, personas);
     const personaBlock = this.buildPersonaBlock(personas, session);
-    const sourceText = session.versions.afterCharacter ?? getPipelineInputText(session, 1);
+    const sourceText = resolveTraitsRewriteSourceText(session);
     const prompt = buildCharacterTraitsOutlineUserPrompt({
       sourceText,
       personaBlock,
@@ -826,7 +832,7 @@ export class ChapterPipelineService {
     await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
-    const sourceText = session.versions.afterCharacter ?? getPipelineInputText(session, 1);
+    const sourceText = resolveTraitsRewriteSourceText(session);
     const allItems = [...outline.required, ...outline.suggested];
     const prompt = buildCharacterTraitsRewriteUserPrompt({
       sourceText,
@@ -979,26 +985,67 @@ export class ChapterPipelineService {
     callbacks.onStart?.({ traceId, chapterNo: session.chapterNo, stage: 'pipeline_sensory_rewrite' });
     callbacks.onStage?.({ stage: 'pipeline_sensory_rewrite' });
 
-    const result = await streamPipelineGeneration({
-      orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
-      projectId: session.projectId,
-      prompt,
-      templateKey: CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
-      context: { task: 'chapter.pipeline.sensory.rewrite', chapterNo: session.chapterNo, traceId },
-      callbacks: { onContent: callbacks.onContent },
-    });
+    const segmentCharSize = settings.chapterOptimizeSegmentCharSize;
+    const strategy = resolvePipelineSegmentStrategy(sourceText.length, segmentCharSize);
+    const segments = splitPipelineText(sourceText, segmentCharSize);
+    const chapter = this.projectsService.getChapterRecordForPipeline(
+      session.projectId,
+      session.chapterNo
+    );
+    const segmentTexts: string[] = [];
 
-    if (!result.ok) {
-      callbacks.onError?.(result.errorMessage || '感官改写失败');
-      throw new ChapterPipelineModuleFailedError(result.errorMessage || '感官改写失败', 'sensory-rewrite');
+    for (let i = 0; i < segments.length; i += 1) {
+      if (strategy.mode === 'segmented') {
+        callbacks.onStage?.({
+          stage: 'draft_segment',
+          segmentIndex: i + 1,
+          segmentTotal: segments.length,
+        });
+      }
+      const result = await streamPipelineGeneration({
+        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+        projectId: session.projectId,
+        prompt: prompt.replace(sourceText, segments[i]),
+        templateKey: CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
+        context: {
+          task: 'chapter.pipeline.sensory.rewrite',
+          chapterNo: session.chapterNo,
+          traceId,
+          segmentIndex: i,
+          segmentTotal: segments.length,
+          retrievalChapterTitle: chapter?.title ?? '',
+        },
+        callbacks: { onContent: callbacks.onContent },
+      });
+      if (!result.ok) {
+        callbacks.onError?.(result.errorMessage || '感官改写失败');
+        throw new ChapterPipelineModuleFailedError(result.errorMessage || '感官改写失败', 'sensory-rewrite');
+      }
+      segmentTexts.push(result.text);
     }
 
-    session.versions.afterSensory = result.text;
+    const merged =
+      segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
+
+    if (segmentTexts.length > 1) {
+      const qualityCheck = validateMergedChapterDraft({
+        originalContent: sourceText,
+        mergedDraft: merged,
+        planText: '',
+      });
+      if (!qualityCheck.passed) {
+        const message = `感官改写合并校验未通过：${qualityCheck.failures.join('；')}`;
+        callbacks.onError?.(message);
+        throw new ChapterPipelineModuleFailedError(message, 'sensory-rewrite');
+      }
+    }
+
+    session.versions.afterSensory = merged;
     session.currentModule = 3;
     putPipelineSession(session);
     callbacks.onEnd?.({
       traceId,
-      versionText: result.text,
+      versionText: merged,
       versionKey: 'afterSensory',
       currentModule: 3,
     });
@@ -1451,8 +1498,9 @@ export class ChapterPipelineService {
       systemPromptFingerprint: hashFingerprintPart(settings.systemPromptText ?? ''),
       pipelineEngineFingerprint: hashFingerprintPart(
         JSON.stringify({
-          engine: 'silent-run-all-v3',
+          engine: 'silent-run-all-v4',
           modules: session.config.pipelineEnabledModules,
+          characterAdjustment: session.config.pipelineCharacterAdjustmentEnabled,
           skipCharacterOutline: session.config.pipelineSkipCharacterOutlineReview,
           skipCharacterTraitsOutline: session.config.pipelineSkipCharacterTraitsOutlineReview,
           characterTraitsEnabled: session.config.pipelineCharacterTraitsEnabled,
@@ -1585,9 +1633,11 @@ export class ChapterPipelineService {
     settings: ReturnType<ProjectsService['getSettings']>
   ): Partial<ChapterPipelineConfig> & {
     protagonistProgressRules?: typeof DEFAULT_PROTAGONIST_PROGRESS_RULES;
+    pipelineRulesModuleEnabled?: boolean;
   } {
     const ext = settings as Partial<ChapterPipelineConfig> & {
       protagonistProgressRules?: typeof DEFAULT_PROTAGONIST_PROGRESS_RULES;
+      pipelineRulesModuleEnabled?: boolean;
     };
     return {
       pipelinePreset: ext.pipelinePreset ?? DEFAULT_PIPELINE_CONFIG.pipelinePreset,
@@ -1602,8 +1652,10 @@ export class ChapterPipelineService {
         DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
       pipelineCharacterTraitsEnabled:
         ext.pipelineCharacterTraitsEnabled ?? DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
+      pipelineCharacterAdjustmentEnabled: ext.pipelineCharacterAdjustmentEnabled,
       pipelineRulesFixMode:
         ext.pipelineRulesFixMode ?? DEFAULT_PIPELINE_CONFIG.pipelineRulesFixMode,
+      pipelineRulesModuleEnabled: ext.pipelineRulesModuleEnabled,
       pipelineHomogenizationEnabled:
         ext.pipelineHomogenizationEnabled ?? DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationEnabled,
       pipelineHomogenizationPriorChapterCount:

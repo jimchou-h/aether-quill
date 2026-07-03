@@ -898,8 +898,8 @@ export class ProjectsController {
     @Res() res: ExpressResponse
   ) {
     const userId = req.user?.userId;
-    if (phase !== 'outline' && phase !== 'rewrite') {
-      throw new BadRequestException('phase 须为 outline 或 rewrite');
+    if (phase !== 'outline' && phase !== 'rewrite' && phase !== 'pre-scan') {
+      throw new BadRequestException('phase 须为 pre-scan、outline 或 rewrite');
     }
 
     const sse = createSseStreamContext(req, res);
@@ -937,7 +937,9 @@ export class ProjectsController {
         },
       };
 
-      if (phase === 'outline') {
+      if (phase === 'pre-scan') {
+        await this.complianceCheckService.runPreScanStream(sessionId, userId, callbacks);
+      } else if (phase === 'outline') {
         await this.complianceCheckService.runOutlineStream(sessionId, userId, callbacks);
       } else {
         await this.complianceCheckService.runRewriteStream(sessionId, userId, callbacks);

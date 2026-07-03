@@ -7,6 +7,9 @@ import { mergeContentSafetyRules } from '@aether-quill/config';
 import { randomUUID } from 'node:crypto';
 import { streamPipelineGeneration } from './chapter-pipeline-orchestrator.client';
 import {
+  applyRuleSegmentFix,
+  buildRulesFixUserPrompt,
+  CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
   parsePipelineOutlineJson,
   PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS,
   relocateRuleIssuesInText,
@@ -14,12 +17,17 @@ import {
   resolvePipelineSegmentStrategy,
   sanitizeRuleIssuesForText,
   sanitizeSensoryOutlineWithContentScan,
+  shouldApplyAiSegmentFix,
   splitPipelineText,
   type PipelineOutlineItem,
 } from './chapter-pipeline.util';
 import type { PipelineStreamCallbacks } from './chapter-pipeline.service';
-import { scanPipelineRules } from './chapter-pipeline-rule-classifier';
+import {
+  applyAutoFixes,
+  scanPipelineRules,
+} from './chapter-pipeline-rule-classifier';
 import { mergeSegmentDraftTexts } from './chapter-optimize.util';
+import { findLatestPipelineSessionForChapter } from './chapter-pipeline-session.store';
 import {
   findActiveComplianceSession,
   getComplianceSession,
@@ -28,6 +36,8 @@ import {
 import {
   buildComplianceOutlineGateUserPrompt,
   buildComplianceOutlineUserPrompt,
+  buildCompliancePersonaBlock,
+  buildCompliancePreScanSummary,
   buildComplianceRewriteUserPrompt,
   buildForbiddenWordsSummary,
   CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY,
@@ -42,6 +52,8 @@ import {
   type ComplianceOutlineState,
 } from './compliance-check.util';
 import { ProjectsService } from './projects.service';
+
+const COMPLIANCE_RULE_FIX_MAX_TOKENS = 2048;
 
 export class ComplianceCheckSessionNotFoundError extends Error {
   readonly code = COMPLIANCE_ERROR.sessionNotFound;
@@ -101,12 +113,18 @@ export class ComplianceCheckService {
       throw new BadRequestException(`第${chapterNo}章正文为空，无法启动合规检验`);
     }
 
+    const pipelineSession = findLatestPipelineSessionForChapter(projectId, chapterNo);
+    const selectedPersonaNames = pipelineSession?.selectedPersonaNames
+      ?.map((name) => name.trim())
+      .filter((name) => name.length > 0);
+
     const session: ComplianceCheckSession = {
       sessionId: randomUUID(),
       projectId,
       chapterNo,
       status: 'outline_pending',
       sourceText: chapter.content,
+      selectedPersonaNames: selectedPersonaNames?.length ? selectedPersonaNames : undefined,
       traceIds: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -196,9 +214,13 @@ export class ComplianceCheckService {
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
     const forbiddenWordsSummary = buildForbiddenWordsSummary(rules);
+    const preScanSummary = buildCompliancePreScanSummary(session.preScanIssues ?? []);
+    const personaBlock = this.resolveCompliancePersonaBlock(session, userId);
     const baseUserPrompt = buildComplianceOutlineUserPrompt({
       sourceText: session.sourceText,
       forbiddenWordsSummary,
+      preScanSummary,
+      personaBlock,
     });
     const prompt = buildComplianceOutlineGateUserPrompt({
       baseUserPrompt,
@@ -248,6 +270,34 @@ export class ComplianceCheckService {
     }
   }
 
+  async runPreScanStream(
+    sessionId: string,
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks
+  ): Promise<void> {
+    const session = this.requireSession(sessionId, userId);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const traceId = makeComplianceTraceId('pre-scan');
+    session.traceIds.preScan = traceId;
+
+    callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: 'compliance_pre_scan',
+    });
+    callbacks.onStage?.({ stage: 'compliance_pre_scan' });
+
+    const issues = this.runPreScanIssues(session, settings);
+    session.preScanIssues = issues;
+    session.updatedAt = new Date();
+    putComplianceSession(session);
+
+    callbacks.onEnd?.({
+      traceId,
+      preScanIssues: issues,
+    });
+  }
+
   async runOutlineStream(
     sessionId: string,
     userId: string | undefined,
@@ -256,11 +306,19 @@ export class ComplianceCheckService {
     const session = this.requireSession(sessionId, userId);
     await this.projectsService.syncContextForChapterPipeline(session.projectId, userId);
     const settings = this.projectsService.getSettings(session.projectId, userId);
+    if (session.preScanIssues === undefined) {
+      session.preScanIssues = this.runPreScanIssues(session, settings);
+      putComplianceSession(session);
+    }
     const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
     const forbiddenWordsSummary = buildForbiddenWordsSummary(rules);
+    const preScanSummary = buildCompliancePreScanSummary(session.preScanIssues);
+    const personaBlock = this.resolveCompliancePersonaBlock(session, userId);
     const prompt = buildComplianceOutlineUserPrompt({
       sourceText: session.sourceText,
       forbiddenWordsSummary,
+      preScanSummary,
+      personaBlock,
     });
     const traceId = makeComplianceTraceId('outline');
     session.traceIds.outline = traceId;
@@ -322,10 +380,12 @@ export class ComplianceCheckService {
     const forbiddenWordsSummary = buildForbiddenWordsSummary(rules);
     const allItems = [...outline.required, ...outline.suggested];
     const sourceText = session.sourceText;
+    const personaBlock = this.resolveCompliancePersonaBlock(session, userId);
     const basePrompt = buildComplianceRewriteUserPrompt({
       sourceText,
       outline: allItems,
       forbiddenWordsSummary,
+      personaBlock,
     });
     const traceId = makeComplianceTraceId('rewrite');
     session.traceIds.rewrite = traceId;
@@ -384,17 +444,20 @@ export class ComplianceCheckService {
 
     callbacks.onStage?.({ stage: 'compliance_rescan' });
     const scanEnabled = settings.contentSafetyScanEnabled !== false;
-    const residualIssues = sanitizeRuleIssuesForText(
-      versionText,
-      relocateRuleIssuesInText(
-        versionText,
-        scanPipelineRules(versionText, rules, scanEnabled, 'manual')
-      )
-    );
+    const fixMode = this.resolveComplianceFixMode(settings);
+    const { text: fixedText, issues: residualIssues } = await this.applyComplianceResidualFixes({
+      projectId: session.projectId,
+      chapterNo: session.chapterNo,
+      sourceText: versionText,
+      rules,
+      scanEnabled,
+      fixMode,
+      callbacks,
+    });
     const qualityStatus = resolveFinalPolishQualityStatus(residualIssues);
     const rescanTraceId = makeComplianceTraceId('rescan');
 
-    session.versionText = versionText;
+    session.versionText = fixedText;
     session.residualIssues = residualIssues;
     session.qualityStatus = qualityStatus;
     session.status = 'review';
@@ -404,10 +467,137 @@ export class ComplianceCheckService {
 
     callbacks.onEnd?.({
       traceId,
-      versionText,
+      versionText: fixedText,
       qualityStatus,
       residualIssues,
     });
+  }
+
+  private resolveCompliancePersonaBlock(
+    session: ComplianceCheckSession,
+    userId: string | undefined
+  ): string {
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    let selectedPersonaNames = session.selectedPersonaNames;
+    if (!selectedPersonaNames?.length) {
+      const pipelineSession = findLatestPipelineSessionForChapter(
+        session.projectId,
+        session.chapterNo
+      );
+      selectedPersonaNames = pipelineSession?.selectedPersonaNames;
+    }
+    return buildCompliancePersonaBlock(personas, selectedPersonaNames);
+  }
+
+  private runPreScanIssues(
+    session: ComplianceCheckSession,
+    settings: ReturnType<ProjectsService['getSettings']>
+  ) {
+    const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
+    const scanEnabled = settings.contentSafetyScanEnabled !== false;
+    const fixMode = this.resolveComplianceFixMode(settings);
+    return sanitizeRuleIssuesForText(
+      session.sourceText,
+      relocateRuleIssuesInText(
+        session.sourceText,
+        scanPipelineRules(session.sourceText, rules, scanEnabled, fixMode)
+      )
+    );
+  }
+
+  private resolveComplianceFixMode(
+    settings: ReturnType<ProjectsService['getSettings']>
+  ): 'auto' | 'semi' | 'manual' {
+    const ext = settings as {
+      complianceRulesFixMode?: 'auto' | 'semi' | 'manual';
+      pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
+    };
+    return ext.complianceRulesFixMode ?? ext.pipelineRulesFixMode ?? 'semi';
+  }
+
+  private async applyComplianceResidualFixes(input: {
+    projectId: string;
+    chapterNo: number;
+    sourceText: string;
+    rules: ReturnType<typeof mergeContentSafetyRules>;
+    scanEnabled: boolean;
+    fixMode: 'auto' | 'semi' | 'manual';
+    callbacks: PipelineStreamCallbacks;
+  }): Promise<{ text: string; issues: import('./chapter-pipeline.util').PipelineRuleIssue[] }> {
+    let resultText = input.sourceText;
+    let issues = sanitizeRuleIssuesForText(
+      resultText,
+      relocateRuleIssuesInText(
+        resultText,
+        scanPipelineRules(resultText, input.rules, input.scanEnabled, input.fixMode)
+      )
+    );
+
+    const { text: afterAuto, issues: updatedIssues } = applyAutoFixes(
+      resultText,
+      issues,
+      input.fixMode
+    );
+    resultText = afterAuto;
+    issues = updatedIssues;
+
+    let relocatedIssues = relocateRuleIssuesInText(resultText, issues);
+    const pendingAi = relocatedIssues.filter(
+      (issue) => !issue.fixed && shouldApplyAiSegmentFix(issue, input.fixMode)
+    );
+
+    if (pendingAi.length > 0) {
+      input.callbacks.onStage?.({ stage: 'compliance_residual_fix' });
+    }
+
+    for (let index = 0; index < pendingAi.length; index += 1) {
+      const issue = pendingAi[index];
+      input.callbacks.onStage?.({
+        stage: 'compliance_residual_fix',
+        segmentIndex: index + 1,
+        segmentTotal: pendingAi.length,
+      });
+      const fixPrompt = buildRulesFixUserPrompt({ sourceText: resultText, issue });
+      let raw = '';
+      try {
+        const result = await streamPipelineGeneration({
+          orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+          projectId: input.projectId,
+          prompt: fixPrompt,
+          templateKey: CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
+          context: {
+            task: 'chapter.compliance.residual-fix',
+            chapterNo: input.chapterNo,
+            issueId: issue.id,
+          },
+          maxTokens: COMPLIANCE_RULE_FIX_MAX_TOKENS,
+          callbacks: {},
+        });
+        if (!result.ok) {
+          continue;
+        }
+        raw = result.text;
+      } catch {
+        continue;
+      }
+
+      const { text: nextText, applied } = applyRuleSegmentFix(resultText, issue, raw);
+      if (applied) {
+        resultText = nextText;
+        issue.fixed = true;
+        const issueIndex = relocatedIssues.findIndex((item) => item.id === issue.id);
+        if (issueIndex >= 0) {
+          relocatedIssues[issueIndex] = { ...issue };
+        }
+        input.callbacks.onContent?.(raw.slice(0, 300));
+      }
+      relocatedIssues = relocateRuleIssuesInText(resultText, relocatedIssues);
+    }
+
+    return {
+      text: resultText,
+      issues: sanitizeRuleIssuesForText(resultText, relocatedIssues),
+    };
   }
 
   applyCompliance(
