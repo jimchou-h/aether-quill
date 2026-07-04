@@ -113,6 +113,13 @@ export const WAREHOUSE_TASK_PROMPT_DEFAULTS: Record<string, string> = {
     '大纲每条 text 仅为方向性指引；具体描写由你创作，不得照搬大纲中的任何短语或例句。',
     '直接输出完整正文，不要输出说明或 Markdown。',
   ].join('\n'),
+  'chapter.pipeline.sensory.rewrite.revise': [
+    '你是一位资深小说写作助手，正在按用户意见对已生成的感官改写草稿做定向修订。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：在保持剧情、对白、角色特征不变的前提下，按 <revision-feedback> 调整感官描写。',
+    '须遵守 <sensory-outline> 的方向约束；不负责硬规则与合规红线。',
+    '直接输出完整正文，不要输出说明或 Markdown。',
+  ].join('\n'),
   'chapter.pipeline.rules.scan': [
     '你是一位资深小说规则审查员，正在扫描章节正文中的规则违规项。',
     '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',

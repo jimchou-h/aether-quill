@@ -25,6 +25,8 @@ export const CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY =
 export const CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY = 'chapter.pipeline.character-traits';
 export const CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY = 'chapter.pipeline.sensory.outline';
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY = 'chapter.pipeline.sensory.rewrite';
+export const CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY =
+  'chapter.pipeline.sensory.rewrite.revise';
 export const CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY = 'chapter.pipeline.rules.scan';
 export const CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY = 'chapter.pipeline.rules.fix';
 export const CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY =
@@ -39,6 +41,7 @@ export const CHAPTER_PIPELINE_TEMPLATE_KEYS = [
   CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
   CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY,
@@ -118,6 +121,14 @@ export const CHAPTER_PIPELINE_SENSORY_REWRITE_SYSTEM_PROMPT = [
   '直接输出完整正文，不要输出说明或 Markdown。',
 ].join('\n');
 
+export const CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_SYSTEM_PROMPT = [
+  '你是一位资深小说写作助手，正在按用户意见对已生成的感官改写草稿做定向修订。',
+  DIMENSION_BOUNDARY,
+  'ONLY：在保持剧情、对白、角色特征不变的前提下，按 <revision-feedback> 调整感官描写。',
+  '须遵守 <sensory-outline> 的方向约束；不负责硬规则与合规红线。',
+  '直接输出完整正文，不要输出说明或 Markdown。',
+].join('\n');
+
 export const CHAPTER_PIPELINE_RULES_SCAN_SYSTEM_PROMPT = [
   '你是一位资深小说规则审查员，正在扫描章节正文中的规则违规项。',
   DIMENSION_BOUNDARY,
@@ -182,6 +193,7 @@ export type ChapterPipelineStage =
   | 'pipeline_character_traits'
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
+  | 'pipeline_sensory_rewrite_revise'
   | 'pipeline_rules_scan'
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
@@ -278,6 +290,53 @@ export interface PipelineOutlineState {
     suggested: PipelineOutlineItem[];
   }>;
 }
+
+/** 大纲是否无任何有效修改项（required+suggested 均无 trim 后 text） */
+export function isPipelineOutlineEmpty(outline: {
+  required: PipelineOutlineItem[];
+  suggested: PipelineOutlineItem[];
+}): boolean {
+  return ![...outline.required, ...outline.suggested].some((item) => Boolean(item.text?.trim()));
+}
+
+export type PipelineOutlinePassthroughModule = 'character' | 'character-traits' | 'sensory-rewrite';
+
+export type PipelineOutlinePassthroughVersionKey =
+  | 'afterCharacter'
+  | 'afterCharacterTraits'
+  | 'afterSensory';
+
+/** 已确认大纲无有效修改项时跳过 LLM 改写 */
+export function shouldPassthroughOutlineRewrite(
+  outline:
+    | {
+        required: PipelineOutlineItem[];
+        suggested: PipelineOutlineItem[];
+      }
+    | undefined
+): boolean {
+  if (!outline) {
+    return false;
+  }
+  return isPipelineOutlineEmpty(outline);
+}
+
+export function resolvePipelineOutlinePassthroughVersionKey(
+  module: PipelineOutlinePassthroughModule
+): PipelineOutlinePassthroughVersionKey {
+  switch (module) {
+    case 'character':
+      return 'afterCharacter';
+    case 'character-traits':
+      return 'afterCharacterTraits';
+    case 'sensory-rewrite':
+      return 'afterSensory';
+  }
+}
+
+export type ChapterPipelineRewriteReviseModule = 'sensory-rewrite';
+
+export const PIPELINE_REWRITE_REVISE_FEEDBACK_MAX_CHARS = 2000;
 
 export interface PipelineRuleIssue {
   id: string;
@@ -411,7 +470,9 @@ export function mergePipelineConfig(
   overrides?: Partial<ChapterPipelineConfig> & { pipelineRulesModuleEnabled?: boolean }
 ): ChapterPipelineConfig {
   const preset =
-    overrides?.pipelinePreset ?? projectDefaults.pipelinePreset ?? DEFAULT_PIPELINE_CONFIG.pipelinePreset;
+    overrides?.pipelinePreset ??
+    projectDefaults.pipelinePreset ??
+    DEFAULT_PIPELINE_CONFIG.pipelinePreset;
   const homogenizationEnabled =
     overrides?.pipelineHomogenizationEnabled ??
     projectDefaults.pipelineHomogenizationEnabled ??
@@ -764,8 +825,7 @@ export function resolveProtagonistContext(
     }
   }
   for (const rule of rules) {
-    const unlocked =
-      rule.unlockAtChapter !== undefined && chapterNo >= rule.unlockAtChapter;
+    const unlocked = rule.unlockAtChapter !== undefined && chapterNo >= rule.unlockAtChapter;
     const status = unlocked ? '已解锁' : '未解锁';
     let line = `- ${rule.abilityKey}（${status}）：${rule.descriptionForPrompt}`;
     if (rule.unlockAfterCondition && !unlocked) {
@@ -839,10 +899,7 @@ export function buildCharacterTraitsRewriteUserPrompt(input: {
   const outlineJson = JSON.stringify({ items: input.outline }, null, 2);
   return [
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
-    [
-      '【改写原则】',
-      '严格按大纲补缺角色卡特征；不改动情节骨架、对白、体位顺序。',
-    ].join('\n'),
+    ['【改写原则】', '严格按大纲补缺角色卡特征；不改动情节骨架、对白、体位顺序。'].join('\n'),
     `<character-traits-outline>\n${outlineJson}\n</character-traits-outline>`,
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
   ]
@@ -933,6 +990,29 @@ export function buildSensoryRewriteUserPrompt(input: {
     ].join('\n'),
     `<sensory-outline>\n${outlineJson}\n</sensory-outline>`,
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function buildSensoryRewriteReviseUserPrompt(input: {
+  draftText: string;
+  outline: PipelineOutlineItem[];
+  userFeedback: string;
+  personaBlock: string;
+}): string {
+  const outlineJson = JSON.stringify({ items: input.outline }, null, 2);
+  return [
+    input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
+    [
+      '【改写原则】',
+      '在既有感官改写草稿上按用户意见局部调整感官描写。',
+      '不修复禁用词、平台红线或叙事规则问题；不改动对白、剧情、角色特征。',
+      '须符合已确认感官大纲，不得违背其中约束。',
+    ].join('\n'),
+    `<sensory-outline>\n${outlineJson}\n</sensory-outline>`,
+    `<chapter-draft>\n${input.draftText}\n</chapter-draft>`,
+    `<revision-feedback>\n${input.userFeedback.trim()}\n</revision-feedback>`,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -1392,19 +1472,9 @@ export function normalizePipelineOutlineItemPartial(
   }
 
   const character = pickOutlineStringField(item, ['character', 'persona', 'role', 'name']);
-  const category = pickOutlineStringField(item, [
-    'category',
-    'issueType',
-    'type',
-    'problemType',
-  ]);
+  const category = pickOutlineStringField(item, ['category', 'issueType', 'type', 'problemType']);
   const location = pickOutlineStringField(item, ['location', 'anchor', 'position', 'loc']);
-  const problem = pickOutlineStringField(item, [
-    'problem',
-    'issue',
-    'description',
-    'conflict',
-  ]);
+  const problem = pickOutlineStringField(item, ['problem', 'issue', 'description', 'conflict']);
   const fix = pickOutlineStringField(item, [
     'fix',
     'direction',
@@ -1677,7 +1747,10 @@ export function parsePipelineOutlineJson(raw: string): {
 }
 
 export function parseRuleIssuesJson(raw: string): PipelineRuleIssue[] {
-  const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
+  const cleaned = raw
+    .replace(/^```json?\s*/i, '')
+    .replace(/```\s*$/, '')
+    .trim();
   const parsed = JSON.parse(cleaned) as {
     issues?: Array<Partial<PipelineRuleIssue>>;
   };
@@ -1695,7 +1768,10 @@ export function parseRuleIssuesJson(raw: string): PipelineRuleIssue[] {
 }
 
 export function parseHomogenizationReportJson(raw: string): PipelineHomogenizationIssue[] {
-  const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
+  const cleaned = raw
+    .replace(/^```json?\s*/i, '')
+    .replace(/```\s*$/, '')
+    .trim();
   const parsed = JSON.parse(cleaned) as {
     issues?: Array<Partial<PipelineHomogenizationIssue>>;
   };
@@ -1748,6 +1824,7 @@ export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
     pipeline_character_traits: '角色特征润色中…',
     pipeline_sensory_outline: '生成感官优化大纲…',
     pipeline_sensory_rewrite: '感官优化改写中…',
+    pipeline_sensory_rewrite_revise: '感官正文按意见修订中…',
     pipeline_rules_scan: '规则扫描中…',
     pipeline_rules_fix: '规则修复中…',
     pipeline_homogenization_scan: '同质化检测中…',

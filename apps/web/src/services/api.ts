@@ -794,9 +794,7 @@ export const apiClient = {
 
     async get(projectId: string, templateKey: string): Promise<TaskPromptListItem> {
       const encodedKey = encodeURIComponent(templateKey);
-      const response = await http.get(
-        `/api/projects/${projectId}/task-prompts/${encodedKey}`
-      );
+      const response = await http.get(`/api/projects/${projectId}/task-prompts/${encodedKey}`);
       return apiClient.unwrapPayload<TaskPromptListItem>(response.data);
     },
 
@@ -1482,6 +1480,72 @@ export const apiClient = {
     return this.unwrapPayload<ChapterPipelineOutlineReviseResult>(response.data);
   },
 
+  async reviseChapterPipelineRewriteSSE(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineRewriteReviseRequest,
+    callbacks: ChapterPipelineRunCallbacks,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const baseURL = getApiBaseURL();
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/rewrite/revise`;
+
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            stage?: ChapterPipelineStage;
+            segmentIndex?: number;
+            segmentTotal?: number;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                stage: event.stage ?? 'pipeline_sensory_rewrite_revise',
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
+              break;
+            case 'content': {
+              const piece = (event.data || '').replace(/\\n/g, '\n');
+              callbacks.onContent?.(piece);
+              break;
+            }
+            case 'end':
+              callbacks.onEnd?.(event);
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || '创作精修改写修订失败');
+              break;
+          }
+        } catch {
+          // ignore malformed SSE chunk
+        }
+      }
+    );
+  },
+
   async patchChapterPipelineVersion(
     projectId: string,
     chapterNo: number,
@@ -2072,6 +2136,7 @@ export type ChapterPipelineStage =
   | 'pipeline_character_traits'
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
+  | 'pipeline_sensory_rewrite_revise'
   | 'pipeline_rules_scan'
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
@@ -2221,6 +2286,33 @@ export interface ChapterPipelineOutlinePatch extends ChapterPipelineSensoryOutli
 
 export type ChapterPipelineOutlineReviseMode = 'recheck' | 'revise';
 
+export type ChapterPipelineRewriteReviseModule = 'sensory-rewrite';
+
+export interface ChapterPipelineRewriteReviseRequest {
+  module: ChapterPipelineRewriteReviseModule;
+  userFeedback: string;
+  draftTextOverride?: string;
+}
+
+export interface ChapterPipelineRunEndEvent {
+  sessionId?: string;
+  traceId?: string;
+  chapterNo?: number;
+  currentModule?: number | 'done';
+  versionKey?: ChapterPipelineVersionKey;
+  versionText?: string;
+  gateRequired?: boolean;
+  gate?: 'character-outline' | 'character-traits-outline' | 'sensory-outline';
+  /** 已确认大纲无有效项时跳过 LLM，正文原样透传 */
+  outlinePassthrough?: boolean;
+  characterOutline?: PipelineOutlineState;
+  characterTraitsOutline?: PipelineOutlineState;
+  sensoryOutline?: PipelineOutlineState;
+  ruleIssues?: PipelineRuleIssue[];
+  homogenizationReport?: PipelineHomogenizationIssue[];
+  finalPolishResult?: FinalPolishResult;
+}
+
 export interface ChapterPipelineOutlineReviseRequest {
   outlineType: ChapterPipelineOutlineType;
   mode?: ChapterPipelineOutlineReviseMode;
@@ -2297,6 +2389,8 @@ export function formatPipelineStageLabel(
       return '生成感官优化大纲…';
     case 'pipeline_sensory_rewrite':
       return '感官优化改写中…';
+    case 'pipeline_sensory_rewrite_revise':
+      return '按意见修订感官正文中…';
     case 'pipeline_rules_scan':
       return '规则扫描中…';
     case 'pipeline_rules_fix':

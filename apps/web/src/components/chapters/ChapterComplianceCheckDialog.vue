@@ -11,6 +11,7 @@ import {
 } from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
 import { confirmAction } from '../../composables/useAppConfirm';
+import { isPipelineOutlineEmpty } from '../../utils/pipelineOutline';
 import {
   applyAiTaskProgressEvent,
   completeAiTaskProgress,
@@ -220,6 +221,16 @@ async function confirmOutline() {
   if (!props.chapter || !sessionId.value || running.value) {
     return;
   }
+  if (isPipelineOutlineEmpty(outlineRequired.value, outlineSuggested.value)) {
+    const confirmed = await confirmAction({
+      title: '确认空大纲',
+      content: '当前无修改项，确认后将保留原文并继续',
+      okText: '确认并继续',
+    });
+    if (!confirmed) {
+      return;
+    }
+  }
   running.value = true;
   errorMessage.value = '';
   try {
@@ -272,7 +283,8 @@ async function runRewrite() {
       onContent: (piece) => {
         streamingText.value += piece;
       },
-      onEnd: async () => {
+      onEnd: async (event) => {
+        const endEvent = event as { outlinePassthrough?: boolean };
         const refreshed = await apiClient.getComplianceCheckSession(
           props.projectId,
           props.chapter!.chapterNo
@@ -280,6 +292,9 @@ async function runRewrite() {
         session.value = refreshed;
         editableFinalText.value = refreshed.versionText ?? streamingText.value;
         step.value = 'review';
+        if (endEvent.outlinePassthrough) {
+          presentSuccess('无大纲修改项，已保留原文');
+        }
         completeAiTaskProgress(aiTaskProgress, '合规改写完成，请审核');
       },
       onError: (message) => {

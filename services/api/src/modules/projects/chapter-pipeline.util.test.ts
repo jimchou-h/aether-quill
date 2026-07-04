@@ -4,18 +4,22 @@ import {
   applyRuleSegmentFix,
   buildCharacterOutlineUserPrompt,
   buildOutlineGateRecheckUserPrompt,
+  buildSensoryRewriteReviseUserPrompt,
   computeFinalPolishFingerprint,
   filterPipelinePersonas,
   getPipelineInputText,
   getPostCharacterText,
   mergePipelineConfig,
   parsePipelineOutlineJson,
+  resolvePipelineOutlinePassthroughVersionKey,
   resolveOutlineGenerationTemplateKey,
   resolveOutlineSourceText,
   shouldRunCharacterAdjustmentModule,
   synthesizePipelineOutlineItemText,
   shouldRunCharacterTraitsModule,
+  shouldPassthroughOutlineRewrite,
   isPipelineEditableVersionKey,
+  isPipelineOutlineEmpty,
   relocateRuleIssuesInText,
   resolveFinalPolishQualityStatus,
   resolvePipelineApplyText,
@@ -304,6 +308,66 @@ test('mergePipelineConfig rules module toggle adds module 3', () => {
     {}
   );
   assert.deepEqual(config.pipelineEnabledModules, [1, 2, 3]);
+});
+
+test('isPipelineOutlineEmpty treats whitespace-only items as empty', () => {
+  assert.equal(
+    isPipelineOutlineEmpty({
+      required: [{ id: 'r1', text: '  ', priority: 'required' }],
+      suggested: [],
+    }),
+    true
+  );
+  assert.equal(
+    isPipelineOutlineEmpty({
+      required: [],
+      suggested: [{ id: 's1', text: '加强触觉', priority: 'suggested' }],
+    }),
+    false
+  );
+  assert.equal(
+    isPipelineOutlineEmpty({ required: [], suggested: [] }),
+    true
+  );
+});
+
+test('shouldPassthroughOutlineRewrite requires outline and empty items', () => {
+  assert.equal(shouldPassthroughOutlineRewrite(undefined), false);
+  assert.equal(
+    shouldPassthroughOutlineRewrite({ required: [], suggested: [] }),
+    true
+  );
+  assert.equal(
+    shouldPassthroughOutlineRewrite({
+      required: [{ id: 'r1', text: '调整', priority: 'required' }],
+      suggested: [],
+    }),
+    false
+  );
+});
+
+test('resolvePipelineOutlinePassthroughVersionKey maps rewrite modules', () => {
+  assert.equal(resolvePipelineOutlinePassthroughVersionKey('character'), 'afterCharacter');
+  assert.equal(
+    resolvePipelineOutlinePassthroughVersionKey('character-traits'),
+    'afterCharacterTraits'
+  );
+  assert.equal(resolvePipelineOutlinePassthroughVersionKey('sensory-rewrite'), 'afterSensory');
+});
+
+test('buildSensoryRewriteReviseUserPrompt includes draft feedback and outline', () => {
+  const prompt = buildSensoryRewriteReviseUserPrompt({
+    draftText: '草稿正文',
+    outline: [{ id: 'r1', text: '加强触觉', priority: 'required' }],
+    userFeedback: '减轻嗅觉描写',
+    personaBlock: '角色A',
+  });
+  assert.match(prompt, /<chapter-draft>/);
+  assert.match(prompt, /草稿正文/);
+  assert.match(prompt, /<revision-feedback>/);
+  assert.match(prompt, /减轻嗅觉描写/);
+  assert.match(prompt, /<sensory-outline>/);
+  assert.match(prompt, /加强触觉/);
 });
 
 test('shouldRunCharacterAdjustmentModule respects config flag', () => {

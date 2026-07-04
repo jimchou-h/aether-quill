@@ -121,6 +121,8 @@ paths:
     $ref: './paths/projects/chapter-pipeline-outline.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/revise:
     $ref: './paths/projects/chapter-pipeline-outline-revise.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/rewrite/revise:
+    $ref: './paths/projects/chapter-pipeline-rewrite-revise.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/version:
     $ref: './paths/projects/chapter-pipeline-version.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/run/{module}:
@@ -2104,6 +2106,9 @@ components:
             $ref: '#/components/schemas/PipelineOutlineItem'
         confirmed:
           type: boolean
+          description: |
+            确认大纲。若 required 与 suggested 均无有效 text（trim 后非空），
+            后续对应改写模块将 **outlinePassthrough**：跳过 LLM，输入正文原样写入版本键。
     ChapterPipelineVersionPatch:
       type: object
       required:
@@ -2173,6 +2178,73 @@ components:
         revisionRound:
           type: integer
           minimum: 0
+    ChapterPipelineRewriteReviseModule:
+      type: string
+      enum: [sensory-rewrite]
+      description: V1 仅支持感官改写后再改；后续可扩展 character-traits / character
+    ChapterPipelineRewriteReviseRequest:
+      type: object
+      required:
+        - module
+        - userFeedback
+      properties:
+        module:
+          $ref: '#/components/schemas/ChapterPipelineRewriteReviseModule'
+        userFeedback:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 修改意见，1~2000 字
+        draftTextOverride:
+          type: string
+          description: 当前预览草稿；缺省则使用 session 内该模块版本正文（如 afterSensory）
+    ChapterPipelineRunEndEvent:
+      type: object
+      description: pipeline run SSE `end` 事件 data 结构（JSON 字符串解析后）
+      properties:
+        sessionId:
+          type: string
+        traceId:
+          type: string
+        chapterNo:
+          type: integer
+        currentModule:
+          oneOf:
+            - type: integer
+              minimum: 1
+              maximum: 4
+            - type: string
+              enum: [done]
+        versionKey:
+          type: string
+          enum: [afterCharacter, afterCharacterTraits, afterSensory, afterRules, final]
+        versionText:
+          type: string
+        gateRequired:
+          type: boolean
+        gate:
+          type: string
+          enum: [character-outline, character-traits-outline, sensory-outline]
+        outlinePassthrough:
+          type: boolean
+          description: |
+            true 表示已确认大纲无有效修改项，改写模块跳过 LLM，versionText 与输入正文一致。
+        characterOutline:
+          $ref: '#/components/schemas/PipelineOutlineState'
+        characterTraitsOutline:
+          $ref: '#/components/schemas/PipelineOutlineState'
+        sensoryOutline:
+          $ref: '#/components/schemas/PipelineOutlineState'
+        ruleIssues:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineRuleIssue'
+        homogenizationReport:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineHomogenizationIssue'
+        finalPolishResult:
+          $ref: '#/components/schemas/FinalPolishResult'
     PipelineRuleIssue:
       type: object
       required:

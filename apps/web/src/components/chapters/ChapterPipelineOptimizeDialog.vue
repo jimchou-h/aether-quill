@@ -41,6 +41,8 @@ import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
 import OutlineReviewLayout from './OutlineReviewLayout.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
+import { confirmAction } from '../../composables/useAppConfirm';
+import { isPipelineOutlineEmpty } from '../../utils/pipelineOutline';
 
 type PipelineStep =
   | 'ready'
@@ -117,6 +119,7 @@ const currentVersionText = computed(() => {
 
 const previewMode = ref<'final' | 'diff'>('diff');
 const stepPreviewText = ref('');
+const sensoryRewriteFeedback = ref('');
 
 function resolveStepVersionKey(currentStep: PipelineStep): ChapterPipelineVersionKey | null {
   switch (currentStep) {
@@ -413,6 +416,7 @@ function resetState() {
   ruleIssues.value = [];
   previewMode.value = 'diff';
   stepPreviewText.value = '';
+  sensoryRewriteFeedback.value = '';
   resetAiTaskProgress(aiTaskProgress);
 }
 
@@ -712,6 +716,9 @@ async function runModule(module: ChapterPipelineRunModule) {
           await refreshSession();
           applyPipelineStepFromEnd(endEvent);
           syncStepPreviewFromSession(true);
+          if (endEvent.outlinePassthrough) {
+            presentSuccess('无大纲修改项，已保留原文');
+          }
           if (
             !isRunAll &&
             module === 'character-outline' &&
@@ -787,6 +794,16 @@ function resolveRunModuleAfterOutlineConfirm(
 async function confirmOutline() {
   if (!props.chapter || !sessionId.value) {
     return;
+  }
+  if (isPipelineOutlineEmpty(outlineRequired.value, outlineSuggested.value)) {
+    const confirmed = await confirmAction({
+      title: '确认空大纲',
+      content: '当前无修改项，确认后将保留原文并继续',
+      okText: '确认并继续',
+    });
+    if (!confirmed) {
+      return;
+    }
   }
   running.value = true;
   try {
@@ -929,6 +946,10 @@ const canRetryCurrentStep = computed(
     )
 );
 
+const showSensoryRevisePanel = computed(
+  () => step.value === 'sensory-rewrite' && showResultPreview.value && !running.value
+);
+
 async function persistStepPreviewText() {
   const key = stepVersionKey.value;
   if (!key || !props.chapter || !sessionId.value) {
@@ -961,6 +982,79 @@ async function handleRetryCurrentStep() {
   }
   streamingText.value = '';
   await runModule(module);
+}
+
+async function reviseSensoryRewriteWithFeedback() {
+  if (!props.chapter || !sessionId.value || running.value) {
+    return;
+  }
+  const feedback = sensoryRewriteFeedback.value.trim();
+  if (!feedback) {
+    return;
+  }
+  await persistStepPreviewText();
+  running.value = true;
+  errorMessage.value = '';
+  streamingText.value = '';
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.pipeline.sensory-rewrite.revise',
+    message: '感官正文按意见修订中…',
+  });
+  const signal = beginStream();
+
+  try {
+    await apiClient.reviseChapterPipelineRewriteSSE(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      {
+        module: 'sensory-rewrite',
+        userFeedback: feedback,
+        draftTextOverride: stepPreviewText.value.trim() || undefined,
+      },
+      {
+        onStart: ({ stage }) => {
+          streamingText.value = '';
+          progressLabel.value = formatPipelineStageLabel(stage);
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal }) => {
+          progressLabel.value = formatPipelineStageLabel(stage, segmentIndex, segmentTotal);
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.pipeline.sensory-rewrite.revise',
+            stage,
+            message: progressLabel.value,
+            currentStep: segmentIndex,
+            totalSteps: segmentTotal,
+          });
+        },
+        onContent: (text) => {
+          streamingText.value += text;
+        },
+        onEnd: async () => {
+          await refreshSession();
+          syncStepPreviewFromSession(true);
+          sensoryRewriteFeedback.value = '';
+          completeAiTaskProgress(aiTaskProgress, '感官正文已按意见修订');
+          presentSuccess('感官正文已按意见修订');
+        },
+        onError: (message) => {
+          errorMessage.value = message;
+          failAiTaskProgress(aiTaskProgress, message);
+        },
+      },
+      { signal }
+    );
+  } catch (error) {
+    if (handleStreamError(error)) {
+      return;
+    }
+    errorMessage.value = error instanceof Error ? error.message : '感官正文修订失败';
+    failAiTaskProgress(aiTaskProgress, errorMessage.value);
+    presentErrorFromCaught(error, '感官正文按意见修订失败');
+  } finally {
+    running.value = false;
+    endStream();
+  }
 }
 
 async function handleApply() {
@@ -1015,6 +1109,7 @@ type PipelineEndEvent = {
   ruleIssues?: PipelineRuleIssue[];
   versionKey?: string;
   homogenizationReport?: ChapterPipelineSessionView['homogenizationReport'];
+  outlinePassthrough?: boolean;
 };
 
 function applyPipelineStepFromEnd(event: PipelineEndEvent) {
@@ -1249,6 +1344,26 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       <p v-if="hasResultDiff" class="meta-line compare-hint">
         红色删除线 = 原文有而精修删去；绿色 = 精修新增。两侧均为完整正文，不会漏段。
       </p>
+      <div v-if="showSensoryRevisePanel" class="revise-block">
+        <label class="field-label" for="sensory-rewrite-feedback">修改意见（AI 按意见再改）</label>
+        <textarea
+          id="sensory-rewrite-feedback"
+          v-model="sensoryRewriteFeedback"
+          class="feedback-input"
+          rows="3"
+          maxlength="2000"
+          placeholder="例如：第 3 段嗅觉描写过重，减轻一些；保留触觉细节"
+          :disabled="isBusy"
+        />
+        <button
+          class="secondary-button"
+          type="button"
+          :disabled="isBusy || !sensoryRewriteFeedback.trim()"
+          @click="reviseSensoryRewriteWithFeedback"
+        >
+          {{ running ? '修订中…' : 'AI 按意见再改' }}
+        </button>
+      </div>
     </section>
 
     <div
@@ -1647,6 +1762,22 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
   font-size: 0.78rem;
   font-weight: 600;
   color: #6b7280;
+}
+
+.revise-block {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.feedback-input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.88rem;
+  font-family: inherit;
+  resize: vertical;
 }
 
 .draft-compare-grid {

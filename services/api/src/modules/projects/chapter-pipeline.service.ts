@@ -10,6 +10,7 @@ const PIPELINE_ERROR = {
   gateNotConfirmed: 1328,
   moduleFailed: 1329,
   outlineReviseInvalid: 1331,
+  rewriteReviseInvalid: 1336,
 } as const;
 import {
   applyAutoFixes,
@@ -44,6 +45,7 @@ import {
   buildRulesScanUserPrompt,
   buildSensoryOutlineUserPrompt,
   buildSensoryRewriteUserPrompt,
+  buildSensoryRewriteReviseUserPrompt,
   CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
@@ -54,16 +56,19 @@ import {
   CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
   type ChapterPipelineConfig,
   type ChapterPipelineOutlineGate,
   type ChapterPipelineOutlineReviseMode,
   type ChapterPipelineOutlineType,
+  type ChapterPipelineRewriteReviseModule,
   type ChapterPipelineRunModule,
   type ChapterPipelineSession,
   type ChapterPipelineStage,
   type FinalPolishResult,
   type PipelineOutlineItem,
   type PipelineOutlineState,
+  type PipelineOutlinePassthroughVersionKey,
   type PipelineRuleIssue,
   computeContentSafetyRulesFingerprint,
   computeFinalPolishFingerprint,
@@ -84,6 +89,7 @@ import {
   parseRuleIssuesJson,
   parseSensoryOutlineJson,
   PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS,
+  PIPELINE_REWRITE_REVISE_FEEDBACK_MAX_CHARS,
   pushOutlineRevisionHistory,
   relocateRuleIssuesInText,
   resolveFinalPolishQualityStatus,
@@ -97,6 +103,7 @@ import {
   shouldRunCharacterAdjustmentModule,
   shouldRunCharacterTraitsModule,
   resolveTraitsRewriteSourceText,
+  shouldPassthroughOutlineRewrite,
   resolvePipelineSegmentStrategy,
   resolveProtagonistContext,
   splitPipelineText,
@@ -127,6 +134,10 @@ export class ChapterPipelineOutlineReviseInvalidError extends Error {
   readonly code = PIPELINE_ERROR.outlineReviseInvalid;
 }
 
+export class ChapterPipelineRewriteReviseInvalidError extends Error {
+  readonly code = PIPELINE_ERROR.rewriteReviseInvalid;
+}
+
 @Injectable()
 export class ChapterPipelineService {
   constructor(private readonly projectsService: ProjectsService) {}
@@ -152,6 +163,167 @@ export class ChapterPipelineService {
       throw new Error(result.errorMessage || '调用生成服务失败');
     }
     return result.text;
+  }
+
+  private emitOutlinePassthrough(
+    session: ChapterPipelineSession,
+    input: {
+      sourceText: string;
+      versionKey: PipelineOutlinePassthroughVersionKey;
+      currentModule: ChapterPipelineSession['currentModule'];
+      traceModule: string;
+      stage: ChapterPipelineStage;
+      callbacks: PipelineStreamCallbacks;
+    }
+  ): void {
+    const traceId = makePipelineTraceId(input.traceModule);
+    session.traceIds[input.traceModule] = traceId;
+    session.versions[input.versionKey] = input.sourceText;
+    session.currentModule = input.currentModule;
+    putPipelineSession(session);
+
+    input.callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: input.stage,
+    });
+    input.callbacks.onStage?.({ stage: input.stage });
+    input.callbacks.onEnd?.({
+      traceId,
+      versionText: input.sourceText,
+      versionKey: input.versionKey,
+      currentModule: input.currentModule,
+      outlinePassthrough: true,
+    });
+  }
+
+  async reviseRewriteStream(
+    sessionId: string,
+    payload: {
+      module: ChapterPipelineRewriteReviseModule;
+      userFeedback: string;
+      draftTextOverride?: string;
+    },
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks
+  ): Promise<void> {
+    const session = this.requireSession(sessionId, userId);
+
+    if (payload.module !== 'sensory-rewrite') {
+      throw new ChapterPipelineRewriteReviseInvalidError('当前仅支持感官改写后再改');
+    }
+
+    const feedback = payload.userFeedback?.trim() ?? '';
+    if (!feedback) {
+      throw new ChapterPipelineRewriteReviseInvalidError(
+        `按意见再改须填写 1~${PIPELINE_REWRITE_REVISE_FEEDBACK_MAX_CHARS} 字修改意见`
+      );
+    }
+    if (feedback.length > PIPELINE_REWRITE_REVISE_FEEDBACK_MAX_CHARS) {
+      throw new ChapterPipelineRewriteReviseInvalidError(
+        `修改意见须不超过 ${PIPELINE_REWRITE_REVISE_FEEDBACK_MAX_CHARS} 字`
+      );
+    }
+
+    const outline = session.sensoryOutline;
+    if (!outline) {
+      throw new ChapterPipelineGateNotConfirmedError('感官大纲尚未生成');
+    }
+    if (!outline.userConfirmed && !session.config.pipelineSkipSensoryOutlineReview) {
+      throw new ChapterPipelineGateNotConfirmedError('感官大纲尚未确认');
+    }
+
+    const draftText = payload.draftTextOverride?.trim() || session.versions.afterSensory?.trim();
+    if (!draftText) {
+      throw new ChapterPipelineRewriteReviseInvalidError('请先完成感官改写或提供当前预览草稿');
+    }
+
+    await this.prepareContext(session);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    const allItems = [...outline.required, ...outline.suggested];
+    const prompt = buildSensoryRewriteReviseUserPrompt({
+      draftText,
+      outline: allItems,
+      userFeedback: feedback,
+      personaBlock: this.buildPersonaBlock(personas, session),
+    });
+    const traceId = makePipelineTraceId('sensory-rewrite-revise');
+    session.traceIds.sensoryRewriteRevise = traceId;
+
+    callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: 'pipeline_sensory_rewrite_revise',
+    });
+    callbacks.onStage?.({ stage: 'pipeline_sensory_rewrite_revise' });
+
+    const segmentCharSize = settings.chapterOptimizeSegmentCharSize;
+    const strategy = resolvePipelineSegmentStrategy(draftText.length, segmentCharSize);
+    const segments = splitPipelineText(draftText, segmentCharSize);
+    const chapter = this.projectsService.getChapterRecordForPipeline(
+      session.projectId,
+      session.chapterNo
+    );
+    const segmentTexts: string[] = [];
+
+    for (let i = 0; i < segments.length; i += 1) {
+      if (strategy.mode === 'segmented') {
+        callbacks.onStage?.({
+          stage: 'draft_segment',
+          segmentIndex: i + 1,
+          segmentTotal: segments.length,
+        });
+      }
+      const result = await streamPipelineGeneration({
+        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+        projectId: session.projectId,
+        prompt: prompt.replace(draftText, segments[i]),
+        templateKey: CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
+        context: {
+          task: 'chapter.pipeline.sensory.rewrite.revise',
+          chapterNo: session.chapterNo,
+          traceId,
+          segmentIndex: i,
+          segmentTotal: segments.length,
+          retrievalChapterTitle: chapter?.title ?? '',
+        },
+        callbacks: { onContent: callbacks.onContent },
+      });
+      if (!result.ok) {
+        callbacks.onError?.(result.errorMessage || '感官正文按意见修订失败');
+        throw new ChapterPipelineModuleFailedError(
+          result.errorMessage || '感官正文按意见修订失败',
+          'sensory-rewrite-revise'
+        );
+      }
+      segmentTexts.push(result.text);
+    }
+
+    const merged =
+      segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
+
+    if (segmentTexts.length > 1) {
+      const qualityCheck = validateMergedChapterDraft({
+        originalContent: draftText,
+        mergedDraft: merged,
+        planText: '',
+      });
+      if (!qualityCheck.passed) {
+        const message = `感官正文修订合并校验未通过：${qualityCheck.failures.join('；')}`;
+        callbacks.onError?.(message);
+        throw new ChapterPipelineModuleFailedError(message, 'sensory-rewrite-revise');
+      }
+    }
+
+    session.versions.afterSensory = merged;
+    putPipelineSession(session);
+    callbacks.onEnd?.({
+      traceId,
+      versionText: merged,
+      versionKey: 'afterSensory',
+      currentModule: session.currentModule,
+    });
   }
 
   startSession(
@@ -647,6 +819,18 @@ export class ChapterPipelineService {
       protagonist
     );
     const characterOutline = session.characterOutline;
+    if (shouldPassthroughOutlineRewrite(characterOutline)) {
+      const traitsEnabled = shouldRunCharacterTraitsModule(session.config);
+      this.emitOutlinePassthrough(session, {
+        sourceText,
+        versionKey: 'afterCharacter',
+        currentModule: traitsEnabled ? 1 : 2,
+        traceModule: 'character',
+        stage: 'pipeline_character',
+        callbacks,
+      });
+      return;
+    }
     const outlineItems = characterOutline
       ? [...characterOutline.required, ...characterOutline.suggested]
       : undefined;
@@ -833,6 +1017,17 @@ export class ChapterPipelineService {
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const sourceText = resolveTraitsRewriteSourceText(session);
+    if (shouldPassthroughOutlineRewrite(outline)) {
+      this.emitOutlinePassthrough(session, {
+        sourceText,
+        versionKey: 'afterCharacterTraits',
+        currentModule: 2,
+        traceModule: 'character-traits',
+        stage: 'pipeline_character_traits',
+        callbacks,
+      });
+      return;
+    }
     const allItems = [...outline.required, ...outline.suggested];
     const prompt = buildCharacterTraitsRewriteUserPrompt({
       sourceText,
@@ -973,6 +1168,17 @@ export class ChapterPipelineService {
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const sourceText = getPipelineInputText(session, 2);
+    if (shouldPassthroughOutlineRewrite(outline)) {
+      this.emitOutlinePassthrough(session, {
+        sourceText,
+        versionKey: 'afterSensory',
+        currentModule: 3,
+        traceModule: 'sensory-rewrite',
+        stage: 'pipeline_sensory_rewrite',
+        callbacks,
+      });
+      return;
+    }
     const allItems = [...outline.required, ...outline.suggested];
     const prompt = buildSensoryRewriteUserPrompt({
       sourceText,

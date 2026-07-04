@@ -31,6 +31,7 @@ import {
   ChapterPipelineGateNotConfirmedError,
   ChapterPipelineModuleFailedError,
   ChapterPipelineOutlineReviseInvalidError,
+  ChapterPipelineRewriteReviseInvalidError,
 } from './chapter-pipeline.service';
 import type {
   ChapterPipelineOutlineReviseMode,
@@ -776,6 +777,66 @@ export class ProjectsController {
         writeEvent({ event: 'error', data: error.message, code: error.code, module: error.module });
       } else {
         const message = error instanceof Error ? error.message : '分步精修执行失败';
+        writeEvent({ event: 'error', data: message });
+      }
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/rewrite/revise')
+  async reviseChapterPipelineRewrite(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      module: 'sensory-rewrite';
+      userFeedback: string;
+      draftTextOverride?: string;
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.chapterPipelineService.reviseRewriteStream(
+        sessionId,
+        data,
+        req.user?.userId,
+        {
+          onStart: ({ traceId, chapterNo, stage }) => {
+            writeEvent({ event: 'start', traceId, chapterNo, stage });
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal }) => {
+            writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (payload) => {
+            writeEvent({ event: 'end', ...payload });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      if (error instanceof ChapterPipelineGateNotConfirmedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else if (error instanceof ChapterPipelineRewriteReviseInvalidError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else if (error instanceof ChapterPipelineModuleFailedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code, module: error.module });
+      } else {
+        const message = error instanceof Error ? error.message : '感官正文按意见修订失败';
         writeEvent({ event: 'error', data: message });
       }
     } finally {
