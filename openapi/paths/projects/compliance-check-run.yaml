@@ -2,7 +2,8 @@ post:
   tags:
     - Projects
   summary: Run compliance check phase (SSE)
-  description: phase=outline generates compliance outline; phase=rewrite rewrites body after outline confirmed
+  description: phase=outline generates compliance outline; phase=rewrite rewrites body after outline confirmed.
+    Empty confirmed outline triggers outlinePassthrough (skip LLM, keep sourceText).
   security:
     - BearerAuth: []
   parameters:

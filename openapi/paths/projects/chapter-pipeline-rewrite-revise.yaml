@@ -1,0 +1,54 @@
+post:
+  tags:
+    - Projects
+  summary: AI-assisted pipeline rewrite revision (SSE)
+  description: |
+    Revises an already-generated module draft using user feedback (V1: `sensory-rewrite` only).
+    SSE events align with `run/{module}`: start → stage → content → end / error.
+
+    Requires a confirmed outline for the target module and an existing draft in session
+    (`afterSensory` unless `draftTextOverride` is provided).
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineRewriteReviseRequest'
+  responses:
+    '200':
+      description: SSE stream
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Invalid feedback (1331 or 1336), gate not confirmed (1328), or invalid module order (1327)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Session not found (1326)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

@@ -18,6 +18,7 @@ import {
   sanitizeRuleIssuesForText,
   sanitizeSensoryOutlineWithContentScan,
   shouldApplyAiSegmentFix,
+  shouldPassthroughOutlineRewrite,
   splitPipelineText,
   type PipelineOutlineItem,
 } from './chapter-pipeline.util';
@@ -381,12 +382,6 @@ export class ComplianceCheckService {
     const allItems = [...outline.required, ...outline.suggested];
     const sourceText = session.sourceText;
     const personaBlock = this.resolveCompliancePersonaBlock(session, userId);
-    const basePrompt = buildComplianceRewriteUserPrompt({
-      sourceText,
-      outline: allItems,
-      forbiddenWordsSummary,
-      personaBlock,
-    });
     const traceId = makeComplianceTraceId('rewrite');
     session.traceIds.rewrite = traceId;
     session.status = 'rewriting';
@@ -398,49 +393,61 @@ export class ComplianceCheckService {
     });
     callbacks.onStage?.({ stage: 'compliance_rewrite' });
 
-    const segmentCharSize =
-      (settings as { complianceCheckSegmentCharSize?: number }).complianceCheckSegmentCharSize ??
-      settings.chapterOptimizeSegmentCharSize;
-    const strategy = resolvePipelineSegmentStrategy(sourceText.length, segmentCharSize);
-    const segments = splitPipelineText(sourceText, segmentCharSize);
-    const segmentTexts: string[] = [];
+    let versionText = sourceText;
+    const outlinePassthrough = shouldPassthroughOutlineRewrite(outline);
 
-    for (let i = 0; i < segments.length; i += 1) {
-      if (strategy.mode === 'segmented') {
-        callbacks.onStage?.({
-          stage: 'compliance_rewrite_segment',
-          segmentIndex: i + 1,
-          segmentTotal: segments.length,
-        });
-      }
-      const segmentPrompt =
-        segments.length > 1
-          ? basePrompt.replace(sourceText, segments[i])
-          : basePrompt;
-      const result = await streamPipelineGeneration({
-        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
-        projectId: session.projectId,
-        prompt: segmentPrompt,
-        templateKey: CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY,
-        context: {
-          ...COMPLIANCE_GENERATION_CONTEXT,
-          task: 'chapter.compliance.rewrite',
-          chapterNo: session.chapterNo,
-          traceId,
-          segmentIndex: i,
-          segmentTotal: segments.length,
-        },
-        callbacks: { onContent: callbacks.onContent },
+    if (!outlinePassthrough) {
+      const basePrompt = buildComplianceRewriteUserPrompt({
+        sourceText,
+        outline: allItems,
+        forbiddenWordsSummary,
+        personaBlock,
       });
-      if (!result.ok) {
-        callbacks.onError?.(result.errorMessage || '合规改写失败');
-        throw new BadRequestException(result.errorMessage || '合规改写失败');
-      }
-      segmentTexts.push(result.text);
-    }
 
-    const versionText =
-      segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
+      const segmentCharSize =
+        (settings as { complianceCheckSegmentCharSize?: number }).complianceCheckSegmentCharSize ??
+        settings.chapterOptimizeSegmentCharSize;
+      const strategy = resolvePipelineSegmentStrategy(sourceText.length, segmentCharSize);
+      const segments = splitPipelineText(sourceText, segmentCharSize);
+      const segmentTexts: string[] = [];
+
+      for (let i = 0; i < segments.length; i += 1) {
+        if (strategy.mode === 'segmented') {
+          callbacks.onStage?.({
+            stage: 'compliance_rewrite_segment',
+            segmentIndex: i + 1,
+            segmentTotal: segments.length,
+          });
+        }
+        const segmentPrompt =
+          segments.length > 1
+            ? basePrompt.replace(sourceText, segments[i])
+            : basePrompt;
+        const result = await streamPipelineGeneration({
+          orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+          projectId: session.projectId,
+          prompt: segmentPrompt,
+          templateKey: CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY,
+          context: {
+            ...COMPLIANCE_GENERATION_CONTEXT,
+            task: 'chapter.compliance.rewrite',
+            chapterNo: session.chapterNo,
+            traceId,
+            segmentIndex: i,
+            segmentTotal: segments.length,
+          },
+          callbacks: { onContent: callbacks.onContent },
+        });
+        if (!result.ok) {
+          callbacks.onError?.(result.errorMessage || '合规改写失败');
+          throw new BadRequestException(result.errorMessage || '合规改写失败');
+        }
+        segmentTexts.push(result.text);
+      }
+
+      versionText =
+        segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
+    }
 
     callbacks.onStage?.({ stage: 'compliance_rescan' });
     const scanEnabled = settings.contentSafetyScanEnabled !== false;
@@ -470,6 +477,7 @@ export class ComplianceCheckService {
       versionText: fixedText,
       qualityStatus,
       residualIssues,
+      ...(outlinePassthrough ? { outlinePassthrough: true } : {}),
     });
   }
 

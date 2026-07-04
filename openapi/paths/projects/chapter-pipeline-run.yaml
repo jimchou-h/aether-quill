@@ -5,7 +5,11 @@ post:
   description: |
     Execute one pipeline module or run-all. SSE events align with chapter optimize draft:
     start → stage → content → end / error.
-    Gate pause (sensory outline) returns end event with gateRequired=true.
+    Gate pause (outline review) returns end event with gateRequired=true.
+
+    **Outline passthrough**: when the confirmed outline has no valid items (required+suggested
+    all empty text), rewrite modules skip LLM and copy input text to versionKey;
+    end event sets outlinePassthrough=true. See `ChapterPipelineRunEndEvent`.
   security:
     - BearerAuth: []
   parameters:

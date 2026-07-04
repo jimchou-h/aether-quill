@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { PipelineOutlineItem } from '../../services/api';
+import { isPipelineOutlineEmpty } from '../../utils/pipelineOutline';
 
 const props = defineProps<{
   title: string;
@@ -30,6 +31,10 @@ const rechecking = ref(false);
 
 const showEmbeddedReference = computed(
   () => props.embedReference !== false && Boolean(props.referenceText?.trim())
+);
+
+const isOutlineEmpty = computed(() =>
+  isPipelineOutlineEmpty(props.required, props.suggested)
 );
 
 function updateRequiredItem(id: string, patch: Partial<PipelineOutlineItem>) {
@@ -243,6 +248,9 @@ async function submitRevise() {
     </div>
 
     <div class="step-actions">
+      <p v-if="isOutlineEmpty" class="empty-outline-hint">
+        当前无修改项，确认后将保留原文并继续。
+      </p>
       <button class="primary-button" type="button" :disabled="busy" @click="emit('confirm')">
         确认大纲并改写
       </button>
@@ -420,8 +428,17 @@ async function submitRevise() {
 
 .step-actions {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   gap: 0.5rem;
+}
+
+.empty-outline-hint {
+  margin: 0;
+  width: 100%;
+  font-size: 0.82rem;
+  color: #b45309;
+  text-align: right;
 }
 
 .empty-hint {

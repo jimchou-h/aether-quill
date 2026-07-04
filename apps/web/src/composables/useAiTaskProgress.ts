@@ -126,6 +126,7 @@ const TASK_PROGRESS_MESSAGES: Record<string, string> = {
   'chapter.optimize.typo-fix': '正在自动修正错字…',
   'chapter.pipeline.run': '创作精修执行中…',
   'chapter.pipeline.run-all': '全自动精修执行中…',
+  'chapter.pipeline.sensory-rewrite.revise': '感官正文按意见修订中…',
   'chapter.pipeline.final-polish': '一键终稿执行中…',
   'chapter.compliance.outline': '合规大纲生成中…',
   'chapter.compliance.rewrite': '合规改写中…',
