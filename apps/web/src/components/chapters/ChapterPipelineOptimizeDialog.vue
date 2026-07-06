@@ -40,9 +40,17 @@ import MarkdownContent from '../common/MarkdownContent.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
 import OutlineReviewLayout from './OutlineReviewLayout.vue';
+import OutlineCoverageChecklist from './OutlineCoverageChecklist.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 import { confirmAction } from '../../composables/useAppConfirm';
-import { isPipelineOutlineEmpty } from '../../utils/pipelineOutline';
+import {
+  areRequiredOutlineItemsResolved,
+  isPipelineOutlineEmpty,
+} from '../../utils/pipelineOutline';
+import type {
+  ChapterPipelineRewriteFixItemsModule,
+  PipelineOutlineCoverageSummary,
+} from '../../services/api';
 
 type PipelineStep =
   | 'ready'
@@ -120,6 +128,116 @@ const currentVersionText = computed(() => {
 const previewMode = ref<'final' | 'diff'>('diff');
 const stepPreviewText = ref('');
 const sensoryRewriteFeedback = ref('');
+const coverageSummary = ref<PipelineOutlineCoverageSummary | null>(null);
+const coverageVerifying = ref(false);
+/** 最近一次完成改写的模块（run-all 跳到 done 后仍保留验收上下文） */
+const activeCoverageModule = ref<ChapterPipelineRewriteFixItemsModule | null>(null);
+
+function moduleToCoverageContext(module: ChapterPipelineRewriteFixItemsModule): {
+  outlineType: ChapterPipelineOutlineType;
+  module: ChapterPipelineRewriteFixItemsModule;
+} {
+  switch (module) {
+    case 'character':
+      return { outlineType: 'character', module: 'character' };
+    case 'character-traits':
+      return { outlineType: 'character-traits', module: 'character-traits' };
+    default:
+      return { outlineType: 'sensory', module: 'sensory-rewrite' };
+  }
+}
+
+function versionKeyToCoverageModule(
+  versionKey?: string
+): ChapterPipelineRewriteFixItemsModule | null {
+  switch (versionKey) {
+    case 'afterCharacter':
+      return 'character';
+    case 'afterCharacterTraits':
+      return 'character-traits';
+    case 'afterSensory':
+      return 'sensory-rewrite';
+    default:
+      return null;
+  }
+}
+
+function coverageModuleToStep(module: ChapterPipelineRewriteFixItemsModule): PipelineStep {
+  switch (module) {
+    case 'character':
+      return 'character';
+    case 'character-traits':
+      return 'character-traits';
+    default:
+      return 'sensory-rewrite';
+  }
+}
+
+function shouldPauseForSensoryCoverageReview(): boolean {
+  const outline = session.value?.sensoryOutline;
+  if (!outline?.userConfirmed || isPipelineOutlineEmpty(outline.required, outline.suggested)) {
+    return false;
+  }
+  if (!session.value?.versions.afterSensory?.trim()) {
+    return false;
+  }
+  const modules = config.value?.pipelineEnabledModules ?? [1, 2];
+  return modules.includes(2);
+}
+
+function resolveCoverageContext(currentStep: PipelineStep): {
+  outlineType: ChapterPipelineOutlineType;
+  module: ChapterPipelineRewriteFixItemsModule;
+} | null {
+  switch (currentStep) {
+    case 'character':
+      return { outlineType: 'character', module: 'character' };
+    case 'character-traits':
+      return { outlineType: 'character-traits', module: 'character-traits' };
+    case 'sensory-rewrite':
+      return { outlineType: 'sensory', module: 'sensory-rewrite' };
+    default:
+      return null;
+  }
+}
+
+const coverageContext = computed(() => resolveCoverageContext(step.value));
+
+const effectiveCoverageContext = computed(() => {
+  if (activeCoverageModule.value) {
+    return moduleToCoverageContext(activeCoverageModule.value);
+  }
+  return coverageContext.value;
+});
+
+const coverageOutlineState = computed(() => {
+  const ctx = effectiveCoverageContext.value;
+  if (!ctx || !session.value) {
+    return null;
+  }
+  switch (ctx.outlineType) {
+    case 'character':
+      return session.value.characterOutline;
+    case 'character-traits':
+      return session.value.characterTraitsOutline;
+    default:
+      return session.value.sensoryOutline;
+  }
+});
+
+const showCoverageChecklist = computed(() => {
+  if (running.value || step.value === 'ready' || isOutlineStep.value) {
+    return false;
+  }
+  const outline = coverageOutlineState.value;
+  if (!effectiveCoverageContext.value || !outline) {
+    return false;
+  }
+  return !isPipelineOutlineEmpty(outline.required, outline.suggested);
+});
+
+const coverageRequired = computed(() => coverageOutlineState.value?.required ?? []);
+const coverageSuggested = computed(() => coverageOutlineState.value?.suggested ?? []);
 
 function resolveStepVersionKey(currentStep: PipelineStep): ChapterPipelineVersionKey | null {
   switch (currentStep) {
@@ -216,7 +334,11 @@ function readStepVersionFromSession(): string {
 
 const previewCompareText = computed(() => {
   if (stepVersionKey.value) {
-    return stepPreviewText.value.trim() || readStepVersionFromSession();
+    const direct = stepPreviewText.value.trim() || readStepVersionFromSession();
+    if (direct.trim()) {
+      return direct;
+    }
+    return currentVersionText.value;
   }
   return currentVersionText.value;
 });
@@ -417,6 +539,9 @@ function resetState() {
   previewMode.value = 'diff';
   stepPreviewText.value = '';
   sensoryRewriteFeedback.value = '';
+  coverageSummary.value = null;
+  coverageVerifying.value = false;
+  activeCoverageModule.value = null;
   resetAiTaskProgress(aiTaskProgress);
 }
 
@@ -612,6 +737,176 @@ async function confirmPersonaPreviewAndStart(selectedIds: string[]) {
   await startPipelineSession(pendingRunAll.value);
 }
 
+async function maybeAutoVerifyCoverageAfterRewrite() {
+  if (!effectiveCoverageContext.value) {
+    return;
+  }
+  await runCoverageVerify(true);
+}
+
+async function runCoverageVerify(showToastOnComplete = true) {
+  const ctx = effectiveCoverageContext.value;
+  if (!ctx || !props.chapter || !sessionId.value || coverageVerifying.value) {
+    return;
+  }
+  const outline = coverageOutlineState.value;
+  if (!outline || isPipelineOutlineEmpty(outline.required, outline.suggested)) {
+    coverageSummary.value = null;
+    return;
+  }
+
+  coverageVerifying.value = true;
+  errorMessage.value = '';
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.pipeline.coverage.verify',
+    message: '对照大纲验收落实中…',
+  });
+
+  try {
+    const result = await apiClient.verifyChapterPipelineOutlineCoverage(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      {
+        outlineType: ctx.outlineType,
+        module: ctx.module,
+        draftTextOverride: stepPreviewText.value.trim() || undefined,
+      }
+    );
+    coverageSummary.value = result.summary;
+    await refreshSession();
+    if (showToastOnComplete) {
+      const missed = result.summary.requiredMissed;
+      if (missed > 0) {
+        presentSuccess(`验收完成：${missed} 条必需项待补修`);
+      } else {
+        presentSuccess('必需大纲项均已落实');
+      }
+    }
+    completeAiTaskProgress(aiTaskProgress, '大纲验收完成');
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '大纲验收失败';
+    failAiTaskProgress(aiTaskProgress, errorMessage.value);
+    if (showToastOnComplete) {
+      presentErrorFromCaught(error, '大纲验收失败');
+    }
+  } finally {
+    coverageVerifying.value = false;
+  }
+}
+
+async function handleFixCoverageItems(itemIds: string[]) {
+  const ctx = effectiveCoverageContext.value;
+  if (!ctx || !props.chapter || !sessionId.value || running.value || !itemIds.length) {
+    return;
+  }
+
+  await persistStepPreviewText();
+  running.value = true;
+  streamingText.value = '';
+  errorMessage.value = '';
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.pipeline.rewrite.fix-items',
+    message: '按清单补修正文中…',
+  });
+  const signal = beginStream();
+
+  try {
+    await apiClient.fixChapterPipelineRewriteItemsSSE(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      {
+        module: ctx.module,
+        itemIds,
+        draftTextOverride: stepPreviewText.value.trim() || undefined,
+      },
+      {
+        onStart: ({ stage }) => {
+          streamingText.value = '';
+          progressLabel.value = formatPipelineStageLabel(stage);
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal }) => {
+          progressLabel.value = formatPipelineStageLabel(stage, segmentIndex, segmentTotal);
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.pipeline.rewrite.fix-items',
+            stage,
+            message: progressLabel.value,
+            currentStep: segmentIndex,
+            totalSteps: segmentTotal,
+          });
+        },
+        onContent: (text) => {
+          streamingText.value += text;
+        },
+        onEnd: async (event) => {
+          const endEvent = event as { versionText?: string };
+          await refreshSession();
+          if (endEvent.versionText) {
+            stepPreviewText.value = endEvent.versionText;
+          } else {
+            syncStepPreviewFromSession(true);
+          }
+          completeAiTaskProgress(aiTaskProgress, '按清单补修完成');
+          presentSuccess('已按选中大纲项补修');
+          await maybeAutoVerifyCoverageAfterRewrite();
+        },
+        onError: (message) => {
+          errorMessage.value = message;
+          failAiTaskProgress(aiTaskProgress, message);
+        },
+      },
+      { signal }
+    );
+  } catch (error) {
+    if (handleStreamError(error)) {
+      return;
+    }
+    errorMessage.value = error instanceof Error ? error.message : '按清单补修失败';
+    failAiTaskProgress(aiTaskProgress, errorMessage.value);
+    presentErrorFromCaught(error, '按清单补修失败');
+  } finally {
+    running.value = false;
+    endStream();
+  }
+}
+
+async function handlePatchCoverage(
+  updates: Array<{
+    id: string;
+    coverageStatus: 'manual' | 'skipped';
+    coverageNote?: string;
+  }>
+) {
+  const ctx = effectiveCoverageContext.value;
+  if (!ctx || !props.chapter || !sessionId.value || !updates.length) {
+    return;
+  }
+  try {
+    session.value = await apiClient.patchChapterPipelineOutlineCoverage(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      { outlineType: ctx.outlineType, updates }
+    );
+    const outline = coverageOutlineState.value;
+    if (outline) {
+      coverageSummary.value = {
+        requiredTotal: outline.required.length,
+        requiredResolved: outline.required.filter(
+          (item) => item.coverageStatus === 'done' || item.coverageStatus === 'manual'
+        ).length,
+        requiredMissed: outline.required.filter(
+          (item) => item.coverageStatus === 'missed' || item.coverageStatus === 'partial'
+        ).length,
+        suggestedTotal: outline.suggested.length,
+      };
+    }
+  } catch (error) {
+    presentErrorFromCaught(error, '更新验收状态失败');
+  }
+}
+
 async function startPipelineSession(runAll = false) {
   if (!props.chapter?.content?.trim()) {
     errorMessage.value = '章节正文为空';
@@ -714,10 +1009,28 @@ async function runModule(module: ChapterPipelineRunModule) {
             return;
           }
           await refreshSession();
+          const coverageModule = versionKeyToCoverageModule(endEvent.versionKey);
+          if (coverageModule) {
+            activeCoverageModule.value = coverageModule;
+          }
+          if (endEvent.currentModule === 'done' && shouldPauseForSensoryCoverageReview()) {
+            activeCoverageModule.value = 'sensory-rewrite';
+            step.value = 'sensory-rewrite';
+            syncStepPreviewFromSession(true);
+            if (endEvent.outlinePassthrough) {
+              presentSuccess('无大纲修改项，已保留原文');
+            }
+            await maybeAutoVerifyCoverageAfterRewrite();
+            completeAiTaskProgress(aiTaskProgress, '感官改写完成，请验收大纲落实');
+            return;
+          }
           applyPipelineStepFromEnd(endEvent);
           syncStepPreviewFromSession(true);
           if (endEvent.outlinePassthrough) {
             presentSuccess('无大纲修改项，已保留原文');
+          }
+          if (!endEvent.gateRequired && effectiveCoverageContext.value) {
+            await maybeAutoVerifyCoverageAfterRewrite();
           }
           if (
             !isRunAll &&
@@ -972,6 +1285,23 @@ async function persistStepPreviewText() {
 
 async function handleContinueNext() {
   await persistStepPreviewText();
+  const outline = coverageOutlineState.value;
+  if (
+    outline &&
+    !isPipelineOutlineEmpty(outline.required, outline.suggested) &&
+    !areRequiredOutlineItemsResolved(outline.required)
+  ) {
+    const missed = coverageSummary.value?.requiredMissed ?? outline.required.length;
+    const confirmed = await confirmAction({
+      title: '必需大纲项未全部落实',
+      content: `仍有 ${missed} 条必需项未通过验收（未落实或仅部分落实）。继续下一步可能导致遗漏，是否仍要继续？`,
+      okText: '仍要继续',
+    });
+    if (!confirmed) {
+      return;
+    }
+  }
+  activeCoverageModule.value = null;
   await runModule('run-all');
 }
 
@@ -1036,6 +1366,7 @@ async function reviseSensoryRewriteWithFeedback() {
           sensoryRewriteFeedback.value = '';
           completeAiTaskProgress(aiTaskProgress, '感官正文已按意见修订');
           presentSuccess('感官正文已按意见修订');
+          await maybeAutoVerifyCoverageAfterRewrite();
         },
         onError: (message) => {
           errorMessage.value = message;
@@ -1284,6 +1615,19 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       <div class="stream-preview markdown-pane">
         <MarkdownContent :source="streamingText" :throttle-ms="200" />
       </div>
+    </section>
+
+    <section v-if="showCoverageChecklist && !running" class="step-section coverage-section">
+      <OutlineCoverageChecklist
+        :required="coverageRequired"
+        :suggested="coverageSuggested"
+        :summary="coverageSummary"
+        :busy="isBusy"
+        :verifying="coverageVerifying"
+        @verify="runCoverageVerify(true)"
+        @fix-items="handleFixCoverageItems"
+        @patch-coverage="handlePatchCoverage"
+      />
     </section>
 
     <section v-if="showResultPreview" class="step-section result-preview-section">

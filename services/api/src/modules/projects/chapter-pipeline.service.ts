@@ -11,6 +11,8 @@ const PIPELINE_ERROR = {
   moduleFailed: 1329,
   outlineReviseInvalid: 1331,
   rewriteReviseInvalid: 1336,
+  coverageVerifyInvalid: 1337,
+  rewriteFixItemsInvalid: 1338,
 } as const;
 import {
   applyAutoFixes,
@@ -46,6 +48,21 @@ import {
   buildSensoryOutlineUserPrompt,
   buildSensoryRewriteUserPrompt,
   buildSensoryRewriteReviseUserPrompt,
+  buildOutlineCoverageVerifyUserPrompt,
+  buildRewriteFixItemsUserPrompt,
+  applyCoverageVerifyToOutlineState,
+  summarizeOutlineCoverage,
+  findOutlineItemsByIds,
+  listOutlineItems,
+  parseOutlineCoverageVerifyJson,
+  patchOutlineCoverageManual,
+  resolveCoverageVerifyTemplateKey,
+  resolveRewriteFixItemsTemplateKey,
+  resolveRewriteFixItemsStage,
+  resolveOutlineTypeForFixModule,
+  resolveVersionKeyForFixModule,
+  resolveFixItemsOutlineTag,
+  resolveFixItemsModuleLabel,
   CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
@@ -62,6 +79,7 @@ import {
   type ChapterPipelineOutlineReviseMode,
   type ChapterPipelineOutlineType,
   type ChapterPipelineRewriteReviseModule,
+  type ChapterPipelineRewriteFixItemsModule,
   type ChapterPipelineRunModule,
   type ChapterPipelineSession,
   type ChapterPipelineStage,
@@ -136,6 +154,14 @@ export class ChapterPipelineOutlineReviseInvalidError extends Error {
 
 export class ChapterPipelineRewriteReviseInvalidError extends Error {
   readonly code = PIPELINE_ERROR.rewriteReviseInvalid;
+}
+
+export class ChapterPipelineCoverageVerifyInvalidError extends Error {
+  readonly code = PIPELINE_ERROR.coverageVerifyInvalid;
+}
+
+export class ChapterPipelineRewriteFixItemsInvalidError extends Error {
+  readonly code = PIPELINE_ERROR.rewriteFixItemsInvalid;
 }
 
 @Injectable()
@@ -324,6 +350,249 @@ export class ChapterPipelineService {
       versionKey: 'afterSensory',
       currentModule: session.currentModule,
     });
+  }
+
+  async verifyOutlineCoverage(
+    sessionId: string,
+    payload: {
+      outlineType: ChapterPipelineOutlineType;
+      module: ChapterPipelineRewriteFixItemsModule;
+      draftTextOverride?: string;
+    },
+    userId?: string
+  ): Promise<{
+    items: Array<{
+      id: string;
+      status: 'done' | 'partial' | 'missed';
+      note?: string;
+      priority: 'required' | 'suggested';
+    }>;
+    summary: ReturnType<typeof summarizeOutlineCoverage>;
+  }> {
+    const session = this.requireSession(sessionId, userId);
+    const outline = getOutlineState(session, payload.outlineType);
+    if (!outline?.userConfirmed) {
+      throw new ChapterPipelineGateNotConfirmedError('大纲尚未确认');
+    }
+    if (shouldPassthroughOutlineRewrite(outline)) {
+      return {
+        items: [],
+        summary: {
+          requiredTotal: 0,
+          requiredResolved: 0,
+          requiredMissed: 0,
+          suggestedTotal: 0,
+        },
+      };
+    }
+
+    const draftText = this.resolveModuleDraftText(session, payload.module, payload.draftTextOverride);
+    if (!draftText) {
+      throw new ChapterPipelineCoverageVerifyInvalidError('请先完成改写或提供当前草稿');
+    }
+
+    const outlineItems = listOutlineItems(outline).filter((item) => item.text?.trim());
+    if (outlineItems.length === 0) {
+      return {
+        items: [],
+        summary: summarizeOutlineCoverage(outline),
+      };
+    }
+
+    await this.prepareContext(session);
+    const prompt = buildOutlineCoverageVerifyUserPrompt({
+      outlineItems,
+      draftText,
+      moduleLabel: resolveFixItemsModuleLabel(payload.module),
+    });
+    const templateKey = resolveCoverageVerifyTemplateKey(payload.outlineType);
+    const traceId = makePipelineTraceId('coverage-verify');
+    const raw = await this.generatePipelineTextViaStream({
+      projectId: session.projectId,
+      prompt,
+      templateKey,
+      context: {
+        task: `chapter.pipeline.${payload.outlineType}.coverage.verify`,
+        chapterNo: session.chapterNo,
+        traceId,
+        module: payload.module,
+      },
+    });
+
+    try {
+      const verified = parseOutlineCoverageVerifyJson(raw);
+      const nextState = applyCoverageVerifyToOutlineState(outline, verified);
+      setOutlineState(session, payload.outlineType, nextState);
+      putPipelineSession(session);
+      const items = verified.map((item) => {
+        const source = outlineItems.find((row) => row.id === item.id);
+        return {
+          ...item,
+          priority: source?.priority ?? ('required' as const),
+        };
+      });
+      return { items, summary: summarizeOutlineCoverage(nextState) };
+    } catch {
+      throw new ChapterPipelineCoverageVerifyInvalidError('大纲落实验收 JSON 解析失败');
+    }
+  }
+
+  patchOutlineCoverage(
+    sessionId: string,
+    payload: {
+      outlineType: ChapterPipelineOutlineType;
+      updates: Array<{
+        id: string;
+        coverageStatus: 'manual' | 'skipped';
+        coverageNote?: string;
+      }>;
+    },
+    userId?: string
+  ): ChapterPipelineSession {
+    const session = this.requireSession(sessionId, userId);
+    const outline = getOutlineState(session, payload.outlineType);
+    if (!outline) {
+      throw new ChapterPipelineCoverageVerifyInvalidError('大纲不存在');
+    }
+    const nextState = patchOutlineCoverageManual(outline, payload.updates);
+    setOutlineState(session, payload.outlineType, nextState);
+    putPipelineSession(session);
+    return session;
+  }
+
+  async fixRewriteItemsStream(
+    sessionId: string,
+    payload: {
+      module: ChapterPipelineRewriteFixItemsModule;
+      itemIds: string[];
+      draftTextOverride?: string;
+    },
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks
+  ): Promise<void> {
+    const session = this.requireSession(sessionId, userId);
+    const outlineType = resolveOutlineTypeForFixModule(payload.module);
+    const outline = getOutlineState(session, outlineType);
+    if (!outline?.userConfirmed) {
+      throw new ChapterPipelineGateNotConfirmedError('大纲尚未确认');
+    }
+
+    const itemIds = [...new Set(payload.itemIds.map((id) => id.trim()).filter(Boolean))];
+    if (itemIds.length === 0) {
+      throw new ChapterPipelineRewriteFixItemsInvalidError('须指定至少一条大纲项');
+    }
+
+    const fixItems = findOutlineItemsByIds(outline, itemIds);
+    if (fixItems.length !== itemIds.length) {
+      throw new ChapterPipelineRewriteFixItemsInvalidError('存在无效的大纲项 id');
+    }
+
+    const draftText = this.resolveModuleDraftText(session, payload.module, payload.draftTextOverride);
+    if (!draftText) {
+      throw new ChapterPipelineRewriteFixItemsInvalidError('请先完成改写或提供当前草稿');
+    }
+
+    await this.prepareContext(session);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personas = this.projectsService.getPersonas(session.projectId, userId);
+    const prompt = buildRewriteFixItemsUserPrompt({
+      draftText,
+      outlineItems: fixItems,
+      personaBlock: this.buildPersonaBlock(personas, session),
+      outlineTag: resolveFixItemsOutlineTag(payload.module),
+      moduleLabel: resolveFixItemsModuleLabel(payload.module),
+      fixModule: payload.module,
+    });
+    const templateKey = resolveRewriteFixItemsTemplateKey(payload.module);
+    const stage = resolveRewriteFixItemsStage(payload.module);
+    const traceId = makePipelineTraceId(`${payload.module}-fix-items`);
+    session.traceIds[`${payload.module}FixItems`] = traceId;
+
+    callbacks.onStart?.({ traceId, chapterNo: session.chapterNo, stage });
+    callbacks.onStage?.({ stage });
+
+    const segmentCharSize = settings.chapterOptimizeSegmentCharSize;
+    const strategy = resolvePipelineSegmentStrategy(draftText.length, segmentCharSize);
+    const segments = splitPipelineText(draftText, segmentCharSize);
+    const chapter = this.projectsService.getChapterRecordForPipeline(
+      session.projectId,
+      session.chapterNo
+    );
+    const segmentTexts: string[] = [];
+
+    for (let i = 0; i < segments.length; i += 1) {
+      if (strategy.mode === 'segmented') {
+        callbacks.onStage?.({
+          stage: 'draft_segment',
+          segmentIndex: i + 1,
+          segmentTotal: segments.length,
+        });
+      }
+      const result = await streamPipelineGeneration({
+        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+        projectId: session.projectId,
+        prompt: prompt.replace(draftText, segments[i]),
+        templateKey,
+        context: {
+          task: `chapter.pipeline.${payload.module}.rewrite.fix-items`,
+          chapterNo: session.chapterNo,
+          traceId,
+          segmentIndex: i,
+          segmentTotal: segments.length,
+          retrievalChapterTitle: chapter?.title ?? '',
+          itemIds,
+        },
+        callbacks: { onContent: callbacks.onContent },
+      });
+      if (!result.ok) {
+        callbacks.onError?.(result.errorMessage || '按清单补修失败');
+        throw new ChapterPipelineModuleFailedError(
+          result.errorMessage || '按清单补修失败',
+          `${payload.module}-fix-items`
+        );
+      }
+      segmentTexts.push(result.text);
+    }
+
+    const merged =
+      segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
+
+    if (segmentTexts.length > 1) {
+      const qualityCheck = validateMergedChapterDraft({
+        originalContent: draftText,
+        mergedDraft: merged,
+        planText: '',
+      });
+      if (!qualityCheck.passed) {
+        const message = `按清单补修合并校验未通过：${qualityCheck.failures.join('；')}`;
+        callbacks.onError?.(message);
+        throw new ChapterPipelineModuleFailedError(message, `${payload.module}-fix-items`);
+      }
+    }
+
+    const versionKey = resolveVersionKeyForFixModule(payload.module);
+    session.versions[versionKey] = merged;
+    putPipelineSession(session);
+    callbacks.onEnd?.({
+      traceId,
+      versionText: merged,
+      versionKey,
+      currentModule: session.currentModule,
+      fixedItemIds: itemIds,
+    });
+  }
+
+  private resolveModuleDraftText(
+    session: ChapterPipelineSession,
+    module: ChapterPipelineRewriteFixItemsModule,
+    draftTextOverride?: string
+  ): string {
+    const override = draftTextOverride?.trim();
+    if (override) {
+      return override;
+    }
+    const versionKey = resolveVersionKeyForFixModule(module);
+    return session.versions[versionKey]?.trim() ?? '';
   }
 
   startSession(

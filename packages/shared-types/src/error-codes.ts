@@ -77,6 +77,8 @@ export const GenerationErrorCodes = {
   ComplianceCheckQualityBlocked: 1334,
   ComplianceCheckUnsupportedTemplate: 1335,
   ChapterPipelineRewriteReviseInvalid: 1336,
+  ChapterPipelineCoverageVerifyInvalid: 1337,
+  ChapterPipelineRewriteFixItemsInvalid: 1338,
 } as const;
 
 /**
@@ -144,7 +146,9 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
       errorCode === 1333 ||
       errorCode === 1334 ||
       errorCode === 1335 ||
-      errorCode === 1336
+      errorCode === 1336 ||
+      errorCode === 1337 ||
+      errorCode === 1338
     )
       return 400;
     if (errorCode === 1332) return 404;
@@ -226,6 +230,8 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1334: 'Compliance check blocked by quality gate',
     1335: 'Compliance check unsupported template key',
     1336: 'Chapter pipeline rewrite revise invalid',
+    1337: 'Chapter pipeline coverage verify invalid',
+    1338: 'Chapter pipeline rewrite fix-items invalid',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

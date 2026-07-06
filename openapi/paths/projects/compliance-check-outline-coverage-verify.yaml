@@ -1,0 +1,54 @@
+post:
+  tags:
+    - Projects
+  summary: Verify compliance outline coverage against rewrite draft
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ComplianceOutlineCoverageVerifyRequest'
+  responses:
+    '200':
+      description: Coverage verification result
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  payload:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineOutlineCoverageVerifyResult'
+    '400':
+      description: Invalid request (1337) or outline not confirmed (1333)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Session not found (1332)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

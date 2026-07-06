@@ -123,6 +123,12 @@ paths:
     $ref: './paths/projects/chapter-pipeline-outline-revise.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/rewrite/revise:
     $ref: './paths/projects/chapter-pipeline-rewrite-revise.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/rewrite/fix-items:
+    $ref: './paths/projects/chapter-pipeline-rewrite-fix-items.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/coverage-verify:
+    $ref: './paths/projects/chapter-pipeline-outline-coverage-verify.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/coverage:
+    $ref: './paths/projects/chapter-pipeline-outline-coverage.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/version:
     $ref: './paths/projects/chapter-pipeline-version.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/run/{module}:
@@ -139,6 +145,12 @@ paths:
     $ref: './paths/projects/compliance-check-outline.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline/revise:
     $ref: './paths/projects/compliance-check-outline-revise.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline/coverage-verify:
+    $ref: './paths/projects/compliance-check-outline-coverage-verify.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline/coverage:
+    $ref: './paths/projects/compliance-check-outline-coverage.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/rewrite/fix-items:
+    $ref: './paths/projects/compliance-check-rewrite-fix-items.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/run/{phase}:
     $ref: './paths/projects/compliance-check-run.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/apply:
@@ -2063,6 +2075,150 @@ components:
         featureRef:
           type: string
         anchorHint:
+          type: string
+        coverageStatus:
+          $ref: '#/components/schemas/PipelineOutlineCoverageStatus'
+        coverageNote:
+          type: string
+          description: AI 复检或人工备注
+    PipelineOutlineCoverageStatus:
+      type: string
+      enum: [pending, done, partial, missed, manual, skipped]
+    PipelineOutlineCoverageVerifyItemStatus:
+      type: string
+      enum: [done, partial, missed]
+    ChapterPipelineOutlineCoverageVerifyRequest:
+      type: object
+      required:
+        - outlineType
+        - module
+      properties:
+        outlineType:
+          type: string
+          enum: [character, character-traits, sensory]
+        module:
+          $ref: '#/components/schemas/ChapterPipelineRewriteFixItemsModule'
+        draftTextOverride:
+          type: string
+          description: 缺省使用 session 内该模块版本正文
+    ChapterPipelineOutlineCoverageVerifyResult:
+      type: object
+      required:
+        - items
+        - summary
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterPipelineOutlineCoverageVerifyItem'
+        summary:
+          $ref: '#/components/schemas/ChapterPipelineOutlineCoverageSummary'
+    ChapterPipelineOutlineCoverageVerifyItem:
+      type: object
+      required:
+        - id
+        - status
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/PipelineOutlineCoverageVerifyItemStatus'
+        note:
+          type: string
+        priority:
+          type: string
+          enum: [required, suggested]
+    ChapterPipelineOutlineCoverageSummary:
+      type: object
+      properties:
+        requiredTotal:
+          type: integer
+        requiredResolved:
+          type: integer
+          description: done + manual 的必需项数
+        requiredMissed:
+          type: integer
+          description: missed + partial 的必需项数
+        suggestedTotal:
+          type: integer
+    ChapterPipelineOutlineCoveragePatch:
+      type: object
+      required:
+        - outlineType
+        - updates
+      properties:
+        outlineType:
+          type: string
+          enum: [character, character-traits, sensory]
+        updates:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - coverageStatus
+            properties:
+              id:
+                type: string
+              coverageStatus:
+                type: string
+                enum: [manual, skipped]
+              coverageNote:
+                type: string
+    ChapterPipelineRewriteFixItemsModule:
+      type: string
+      enum: [character, character-traits, sensory-rewrite]
+    ChapterPipelineRewriteFixItemsRequest:
+      type: object
+      required:
+        - module
+        - itemIds
+      properties:
+        module:
+          $ref: '#/components/schemas/ChapterPipelineRewriteFixItemsModule'
+        itemIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        draftTextOverride:
+          type: string
+    ComplianceOutlineCoverageVerifyRequest:
+      type: object
+      properties:
+        draftTextOverride:
+          type: string
+    ComplianceOutlineCoveragePatch:
+      type: object
+      required:
+        - updates
+      properties:
+        updates:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - coverageStatus
+            properties:
+              id:
+                type: string
+              coverageStatus:
+                type: string
+                enum: [manual, skipped]
+              coverageNote:
+                type: string
+    ComplianceRewriteFixItemsRequest:
+      type: object
+      required:
+        - itemIds
+      properties:
+        itemIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        draftTextOverride:
           type: string
     PipelineOutlineState:
       type: object

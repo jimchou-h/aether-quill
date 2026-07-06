@@ -32,10 +32,13 @@ import {
   ChapterPipelineModuleFailedError,
   ChapterPipelineOutlineReviseInvalidError,
   ChapterPipelineRewriteReviseInvalidError,
+  ChapterPipelineCoverageVerifyInvalidError,
+  ChapterPipelineRewriteFixItemsInvalidError,
 } from './chapter-pipeline.service';
 import type {
   ChapterPipelineOutlineReviseMode,
   ChapterPipelineOutlineType,
+  ChapterPipelineRewriteFixItemsModule,
   ChapterPipelineSession,
 } from './chapter-pipeline.util';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -690,6 +693,65 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/outline/coverage-verify')
+  async verifyChapterPipelineOutlineCoverage(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      outlineType: ChapterPipelineOutlineType;
+      module: ChapterPipelineRewriteFixItemsModule;
+      draftTextOverride?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      return await this.chapterPipelineService.verifyOutlineCoverage(
+        sessionId,
+        data,
+        req.user?.userId
+      );
+    } catch (error) {
+      if (error instanceof ChapterPipelineGateNotConfirmedError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      if (error instanceof ChapterPipelineCoverageVerifyInvalidError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/outline/coverage')
+  patchChapterPipelineOutlineCoverage(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      outlineType: ChapterPipelineOutlineType;
+      updates: Array<{
+        id: string;
+        coverageStatus: 'manual' | 'skipped';
+        coverageNote?: string;
+      }>;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      const session = this.chapterPipelineService.patchOutlineCoverage(
+        sessionId,
+        data,
+        req.user?.userId
+      );
+      return serializePipelineSessionView(session);
+    } catch (error) {
+      if (error instanceof ChapterPipelineCoverageVerifyInvalidError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Patch(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/version')
   patchChapterPipelineVersion(
     @Param('sessionId') sessionId: string,
@@ -845,6 +907,66 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/rewrite/fix-items')
+  async fixChapterPipelineRewriteItems(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      module: ChapterPipelineRewriteFixItemsModule;
+      itemIds: string[];
+      draftTextOverride?: string;
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.chapterPipelineService.fixRewriteItemsStream(
+        sessionId,
+        data,
+        req.user?.userId,
+        {
+          onStart: ({ traceId, chapterNo, stage }) => {
+            writeEvent({ event: 'start', traceId, chapterNo, stage });
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal }) => {
+            writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (payload) => {
+            writeEvent({ event: 'end', ...payload });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      if (error instanceof ChapterPipelineGateNotConfirmedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else if (error instanceof ChapterPipelineRewriteFixItemsInvalidError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else if (error instanceof ChapterPipelineModuleFailedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code, module: error.module });
+      } else {
+        const message = error instanceof Error ? error.message : '按清单补修失败';
+        writeEvent({ event: 'error', data: message });
+      }
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/compliance-check/start')
   startComplianceCheck(
     @Param('id') id: string,
@@ -924,6 +1046,112 @@ export class ProjectsController {
         throw new BadRequestException({ code: error.code, msg: error.message });
       }
       throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId/outline/coverage-verify')
+  async verifyComplianceOutlineCoverage(
+    @Param('sessionId') sessionId: string,
+    @Body() data: { draftTextOverride?: string },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      return await this.complianceCheckService.verifyOutlineCoverage(
+        sessionId,
+        data,
+        req.user?.userId
+      );
+    } catch (error) {
+      if (error instanceof ComplianceCheckOutlineNotConfirmedError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      if (error instanceof ChapterPipelineCoverageVerifyInvalidError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId/outline/coverage')
+  patchComplianceOutlineCoverage(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      updates: Array<{
+        id: string;
+        coverageStatus: 'manual' | 'skipped';
+        coverageNote?: string;
+      }>;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      const session = this.complianceCheckService.patchOutlineCoverage(
+        sessionId,
+        data,
+        req.user?.userId
+      );
+      return serializeComplianceSessionView(session);
+    } catch (error) {
+      if (error instanceof ChapterPipelineCoverageVerifyInvalidError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/compliance-check/:sessionId/rewrite/fix-items')
+  async fixComplianceRewriteItems(
+    @Param('sessionId') sessionId: string,
+    @Body() data: { itemIds: string[]; draftTextOverride?: string },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.complianceCheckService.fixRewriteItemsStream(
+        sessionId,
+        data,
+        req.user?.userId,
+        {
+          onStart: ({ traceId, chapterNo, stage }) => {
+            writeEvent({ event: 'start', traceId, chapterNo, stage });
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal }) => {
+            writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (payload) => {
+            writeEvent({ event: 'end', ...payload });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      if (error instanceof ComplianceCheckOutlineNotConfirmedError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else if (error instanceof ChapterPipelineRewriteFixItemsInvalidError) {
+        writeEvent({ event: 'error', data: error.message, code: error.code });
+      } else {
+        const message = error instanceof Error ? error.message : '合规按项补修失败';
+        writeEvent({ event: 'error', data: message });
+      }
+    } finally {
+      res.end();
     }
   }
 
