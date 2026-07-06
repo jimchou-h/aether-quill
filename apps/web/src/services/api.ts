@@ -1546,6 +1546,98 @@ export const apiClient = {
     );
   },
 
+  async verifyChapterPipelineOutlineCoverage(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineOutlineCoverageVerifyRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/outline/coverage-verify`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineOutlineCoverageVerifyResult>(response.data);
+  },
+
+  async patchChapterPipelineOutlineCoverage(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineOutlineCoveragePatch
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/outline/coverage`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineSessionView>(response.data);
+  },
+
+  async fixChapterPipelineRewriteItemsSSE(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineRewriteFixItemsRequest,
+    callbacks: ChapterPipelineRunCallbacks,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const baseURL = getApiBaseURL();
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/rewrite/fix-items`;
+
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            stage?: ChapterPipelineStage;
+            segmentIndex?: number;
+            segmentTotal?: number;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                stage: event.stage ?? 'pipeline_character_rewrite_fix_items',
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
+              break;
+            case 'content': {
+              const piece = (event.data || '').replace(/\\n/g, '\n');
+              callbacks.onContent?.(piece);
+              break;
+            }
+            case 'end':
+              callbacks.onEnd?.(event);
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || '按清单补修失败');
+              break;
+          }
+        } catch {
+          // ignore malformed SSE chunk
+        }
+      }
+    );
+  },
+
   async patchChapterPipelineVersion(
     projectId: string,
     chapterNo: number,
@@ -1628,6 +1720,98 @@ export const apiClient = {
       suggested: PipelineOutlineItem[];
       revisionRound: number;
     }>(response.data);
+  },
+
+  async verifyComplianceOutlineCoverage(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload?: { draftTextOverride?: string }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/outline/coverage-verify`,
+      payload ?? {}
+    );
+    return this.unwrapPayload<ChapterPipelineOutlineCoverageVerifyResult>(response.data);
+  },
+
+  async patchComplianceOutlineCoverage(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ComplianceOutlineCoveragePatch
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/outline/coverage`,
+      payload
+    );
+    return this.unwrapPayload<ComplianceCheckSessionView>(response.data);
+  },
+
+  async fixComplianceRewriteItemsSSE(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ComplianceRewriteFixItemsRequest,
+    callbacks: ChapterPipelineRunCallbacks,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const baseURL = getApiBaseURL();
+    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/compliance-check/${sessionId}/rewrite/fix-items`;
+
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            stage?: ChapterPipelineStage;
+            segmentIndex?: number;
+            segmentTotal?: number;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                stage: event.stage ?? 'compliance_rewrite',
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
+              break;
+            case 'content': {
+              const piece = (event.data || '').replace(/\\n/g, '\n');
+              callbacks.onContent?.(piece);
+              break;
+            }
+            case 'end':
+              callbacks.onEnd?.(event);
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || '合规按项补修失败');
+              break;
+          }
+        } catch {
+          // ignore malformed SSE chunk
+        }
+      }
+    );
   },
 
   async applyComplianceCheck(
@@ -2137,6 +2321,10 @@ export type ChapterPipelineStage =
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
   | 'pipeline_sensory_rewrite_revise'
+  | 'pipeline_outline_coverage_verify'
+  | 'pipeline_character_rewrite_fix_items'
+  | 'pipeline_character_traits_rewrite_fix_items'
+  | 'pipeline_sensory_rewrite_fix_items'
   | 'pipeline_rules_scan'
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
@@ -2229,11 +2417,82 @@ export interface PipelineOutlineItem {
   id: string;
   text: string;
   priority: 'required' | 'suggested';
+  /** 确定性内容安全扫描告警（如禁用词） */
   contentWarnings?: string[];
   personaId?: string;
   personaName?: string;
   featureRef?: string;
   anchorHint?: string;
+  coverageStatus?: PipelineOutlineCoverageStatus;
+  coverageNote?: string;
+}
+
+export type PipelineOutlineCoverageStatus =
+  | 'pending'
+  | 'done'
+  | 'partial'
+  | 'missed'
+  | 'manual'
+  | 'skipped';
+
+export type PipelineOutlineCoverageVerifyItemStatus = 'done' | 'partial' | 'missed';
+
+export type ChapterPipelineRewriteFixItemsModule =
+  | 'character'
+  | 'character-traits'
+  | 'sensory-rewrite';
+
+export interface ChapterPipelineOutlineCoverageVerifyRequest {
+  outlineType: ChapterPipelineOutlineType;
+  module: ChapterPipelineRewriteFixItemsModule;
+  draftTextOverride?: string;
+}
+
+export interface ChapterPipelineOutlineCoverageVerifyItem {
+  id: string;
+  status: PipelineOutlineCoverageVerifyItemStatus;
+  note?: string;
+  priority?: 'required' | 'suggested';
+}
+
+export interface PipelineOutlineCoverageSummary {
+  requiredTotal: number;
+  requiredResolved: number;
+  requiredMissed: number;
+  suggestedTotal: number;
+}
+
+export interface ChapterPipelineOutlineCoverageVerifyResult {
+  items: ChapterPipelineOutlineCoverageVerifyItem[];
+  summary: PipelineOutlineCoverageSummary;
+}
+
+export interface ChapterPipelineOutlineCoveragePatch {
+  outlineType: ChapterPipelineOutlineType;
+  updates: Array<{
+    id: string;
+    coverageStatus: 'manual' | 'skipped';
+    coverageNote?: string;
+  }>;
+}
+
+export interface ChapterPipelineRewriteFixItemsRequest {
+  module: ChapterPipelineRewriteFixItemsModule;
+  itemIds: string[];
+  draftTextOverride?: string;
+}
+
+export interface ComplianceOutlineCoveragePatch {
+  updates: Array<{
+    id: string;
+    coverageStatus: 'manual' | 'skipped';
+    coverageNote?: string;
+  }>;
+}
+
+export interface ComplianceRewriteFixItemsRequest {
+  itemIds: string[];
+  draftTextOverride?: string;
 }
 
 export interface PipelineOutlineState {
@@ -2391,6 +2650,14 @@ export function formatPipelineStageLabel(
       return '感官优化改写中…';
     case 'pipeline_sensory_rewrite_revise':
       return '按意见修订感官正文中…';
+    case 'pipeline_outline_coverage_verify':
+      return '对照大纲验收落实中…';
+    case 'pipeline_character_rewrite_fix_items':
+      return '按清单补修角色调整正文中…';
+    case 'pipeline_character_traits_rewrite_fix_items':
+      return '按清单补修特征润色正文中…';
+    case 'pipeline_sensory_rewrite_fix_items':
+      return '按清单补修感官正文中…';
     case 'pipeline_rules_scan':
       return '规则扫描中…';
     case 'pipeline_rules_fix':

@@ -11,7 +11,11 @@ import {
 } from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
 import { confirmAction } from '../../composables/useAppConfirm';
-import { isPipelineOutlineEmpty } from '../../utils/pipelineOutline';
+import {
+  areRequiredOutlineItemsResolved,
+  isPipelineOutlineEmpty,
+} from '../../utils/pipelineOutline';
+import type { PipelineOutlineCoverageSummary } from '../../services/api';
 import {
   applyAiTaskProgressEvent,
   completeAiTaskProgress,
@@ -26,6 +30,7 @@ import MarkdownContent from '../common/MarkdownContent.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
 import OutlineReviewLayout from './OutlineReviewLayout.vue';
+import OutlineCoverageChecklist from './OutlineCoverageChecklist.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 
 type DialogStep = 'ready' | 'outline' | 'rewriting' | 'review';
@@ -57,6 +62,24 @@ const outlineSuggested = ref<PipelineOutlineItem[]>([]);
 const outlineRevisionRound = ref(0);
 const previewMode = ref<'final' | 'diff'>('diff');
 const editableFinalText = ref('');
+const coverageSummary = ref<PipelineOutlineCoverageSummary | null>(null);
+const coverageVerifying = ref(false);
+
+const complianceOutline = computed(() => session.value?.outline ?? null);
+
+const showComplianceCoverageChecklist = computed(() => {
+  if (step.value !== 'review' || coverageVerifying.value) {
+    return false;
+  }
+  const outline = complianceOutline.value;
+  if (!outline) {
+    return false;
+  }
+  return !isPipelineOutlineEmpty(outline.required, outline.suggested);
+});
+
+const coverageRequired = computed(() => complianceOutline.value?.required ?? []);
+const coverageSuggested = computed(() => complianceOutline.value?.suggested ?? []);
 
 const isBusy = computed(() => running.value || applying.value);
 
@@ -112,6 +135,8 @@ function resetState() {
   outlineSuggested.value = [];
   outlineRevisionRound.value = 0;
   editableFinalText.value = '';
+  coverageSummary.value = null;
+  coverageVerifying.value = false;
   resetAiTaskProgress(aiTaskProgress);
 }
 
@@ -133,6 +158,173 @@ function syncOutlineFromSession() {
   outlineRequired.value = outline?.required ? [...outline.required] : [];
   outlineSuggested.value = outline?.suggested ? [...outline.suggested] : [];
   outlineRevisionRound.value = outline?.revisionRound ?? 0;
+}
+
+async function maybeAutoVerifyComplianceCoverage() {
+  if (!complianceOutline.value || isPipelineOutlineEmpty(outlineRequired.value, outlineSuggested.value)) {
+    return;
+  }
+  await runComplianceCoverageVerify(false);
+}
+
+async function runComplianceCoverageVerify(showToastOnComplete = true) {
+  if (!props.chapter || !sessionId.value || coverageVerifying.value) {
+    return;
+  }
+  const outline = complianceOutline.value;
+  if (!outline || isPipelineOutlineEmpty(outline.required, outline.suggested)) {
+    coverageSummary.value = null;
+    return;
+  }
+
+  coverageVerifying.value = true;
+  errorMessage.value = '';
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.compliance.coverage.verify',
+    message: '合规大纲落实验收中…',
+  });
+
+  try {
+    const result = await apiClient.verifyComplianceOutlineCoverage(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      { draftTextOverride: editableFinalText.value.trim() || undefined }
+    );
+    coverageSummary.value = result.summary;
+    session.value = await apiClient.getComplianceCheckSession(
+      props.projectId,
+      props.chapter.chapterNo
+    );
+    if (showToastOnComplete) {
+      const missed = result.summary.requiredMissed;
+      if (missed > 0) {
+        presentSuccess(`验收完成：${missed} 条必需项待补修`);
+      } else {
+        presentSuccess('必需合规项均已落实');
+      }
+    }
+    completeAiTaskProgress(aiTaskProgress, '合规大纲验收完成');
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '合规大纲验收失败';
+    failAiTaskProgress(aiTaskProgress, errorMessage.value);
+    if (showToastOnComplete) {
+      presentErrorFromCaught(error, '合规大纲验收失败');
+    }
+  } finally {
+    coverageVerifying.value = false;
+  }
+}
+
+async function handleFixComplianceCoverageItems(itemIds: string[]) {
+  if (!props.chapter || !sessionId.value || running.value || !itemIds.length) {
+    return;
+  }
+
+  running.value = true;
+  streamingText.value = '';
+  errorMessage.value = '';
+  startAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.compliance.rewrite.fix-items',
+    message: '合规按项补修中…',
+  });
+  const signal = beginStream();
+
+  try {
+    await apiClient.fixComplianceRewriteItemsSSE(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      {
+        itemIds,
+        draftTextOverride: editableFinalText.value.trim() || undefined,
+      },
+      {
+        onStart: ({ stage }) => {
+          streamingText.value = '';
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.compliance.rewrite.fix-items',
+            stage,
+            message: formatPipelineStageLabel(stage),
+          });
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal }) => {
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.compliance.rewrite.fix-items',
+            stage,
+            message: formatPipelineStageLabel(stage, segmentIndex, segmentTotal),
+            currentStep: segmentIndex,
+            totalSteps: segmentTotal,
+          });
+        },
+        onContent: (text) => {
+          streamingText.value += text;
+        },
+        onEnd: async (event) => {
+          const endEvent = event as { versionText?: string };
+          session.value = await apiClient.getComplianceCheckSession(
+            props.projectId,
+            props.chapter!.chapterNo
+          );
+          editableFinalText.value =
+            endEvent.versionText ?? session.value?.versionText ?? streamingText.value;
+          completeAiTaskProgress(aiTaskProgress, '合规按项补修完成');
+          presentSuccess('已按选中合规项补修');
+          await maybeAutoVerifyComplianceCoverage();
+        },
+        onError: (message) => {
+          errorMessage.value = message;
+          failAiTaskProgress(aiTaskProgress, message);
+        },
+      },
+      { signal }
+    );
+  } catch (error) {
+    if (handleStreamError(error)) {
+      return;
+    }
+    errorMessage.value = error instanceof Error ? error.message : '合规按项补修失败';
+    failAiTaskProgress(aiTaskProgress, errorMessage.value);
+    presentErrorFromCaught(error, '合规按项补修失败');
+  } finally {
+    running.value = false;
+    endStream();
+  }
+}
+
+async function handlePatchComplianceCoverage(
+  updates: Array<{
+    id: string;
+    coverageStatus: 'manual' | 'skipped';
+    coverageNote?: string;
+  }>
+) {
+  if (!props.chapter || !sessionId.value || !updates.length) {
+    return;
+  }
+  try {
+    session.value = await apiClient.patchComplianceOutlineCoverage(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      { updates }
+    );
+    const outline = complianceOutline.value;
+    if (outline) {
+      coverageSummary.value = {
+        requiredTotal: outline.required.length,
+        requiredResolved: outline.required.filter(
+          (item) => item.coverageStatus === 'done' || item.coverageStatus === 'manual'
+        ).length,
+        requiredMissed: outline.required.filter(
+          (item) => item.coverageStatus === 'missed' || item.coverageStatus === 'partial'
+        ).length,
+        suggestedTotal: outline.suggested.length,
+      };
+    }
+  } catch (error) {
+    presentErrorFromCaught(error, '更新验收状态失败');
+  }
 }
 
 async function runCompliancePhase(
@@ -296,6 +488,7 @@ async function runRewrite() {
           presentSuccess('无大纲修改项，已保留原文');
         }
         completeAiTaskProgress(aiTaskProgress, '合规改写完成，请审核');
+        await maybeAutoVerifyComplianceCoverage();
       },
       onError: (message) => {
         errorMessage.value = message;
@@ -383,6 +576,23 @@ async function applyResult() {
       content: '硬规则复扫仍有阻断项，确定仍要应用到章节吗？',
       okText: '强制应用',
       danger: true,
+    });
+    if (!ok) {
+      return;
+    }
+  }
+
+  const outline = complianceOutline.value;
+  if (
+    outline &&
+    !isPipelineOutlineEmpty(outline.required, outline.suggested) &&
+    !areRequiredOutlineItemsResolved(outline.required)
+  ) {
+    const missed = coverageSummary.value?.requiredMissed ?? outline.required.length;
+    const ok = await confirmAction({
+      title: '必需合规项未全部落实',
+      content: `仍有 ${missed} 条必需项未通过验收。确定仍要应用合规正文吗？`,
+      okText: '仍要应用',
     });
     if (!ok) {
       return;
@@ -571,6 +781,18 @@ function handleClose() {
           :disabled="isBusy"
         />
       </div>
+
+      <OutlineCoverageChecklist
+        v-if="showComplianceCoverageChecklist"
+        :required="coverageRequired"
+        :suggested="coverageSuggested"
+        :summary="coverageSummary"
+        :busy="isBusy"
+        :verifying="coverageVerifying"
+        @verify="runComplianceCoverageVerify(true)"
+        @fix-items="handleFixComplianceCoverageItems"
+        @patch-coverage="handlePatchComplianceCoverage"
+      />
 
       <div class="step-actions">
         <button type="button" class="secondary-button" :disabled="isBusy" @click="emit('close')">

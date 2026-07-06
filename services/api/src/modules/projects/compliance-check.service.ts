@@ -20,9 +20,21 @@ import {
   shouldApplyAiSegmentFix,
   shouldPassthroughOutlineRewrite,
   splitPipelineText,
+  buildOutlineCoverageVerifyUserPrompt,
+  buildRewriteFixItemsUserPrompt,
+  applyCoverageVerifyToOutlineState,
+  summarizeOutlineCoverage,
+  findOutlineItemsByIds,
+  listOutlineItems,
+  parseOutlineCoverageVerifyJson,
+  patchOutlineCoverageManual,
   type PipelineOutlineItem,
 } from './chapter-pipeline.util';
 import type { PipelineStreamCallbacks } from './chapter-pipeline.service';
+import {
+  ChapterPipelineCoverageVerifyInvalidError,
+  ChapterPipelineRewriteFixItemsInvalidError,
+} from './chapter-pipeline.service';
 import {
   applyAutoFixes,
   scanPipelineRules,
@@ -43,6 +55,8 @@ import {
   buildForbiddenWordsSummary,
   CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY,
   CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY,
+  CHAPTER_COMPLIANCE_COVERAGE_VERIFY_TEMPLATE_KEY,
+  CHAPTER_COMPLIANCE_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
   COMPLIANCE_ERROR,
   COMPLIANCE_GENERATION_CONTEXT,
   COMPLIANCE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS,
@@ -82,17 +96,21 @@ export class ComplianceCheckService {
     traceId: string;
     chapterNo: number;
     mode?: ComplianceOutlineReviseMode;
+    templateKey?: string;
+    task?: string;
   }): Promise<string> {
+    const templateKey = input.templateKey ?? CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY;
+    const task =
+      input.task ??
+      (input.mode ? `chapter.compliance.outline.${input.mode}` : 'chapter.compliance.outline');
     const result = await streamPipelineGeneration({
       orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
       projectId: input.projectId,
       prompt: input.prompt,
-      templateKey: CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY,
+      templateKey,
       context: {
         ...COMPLIANCE_GENERATION_CONTEXT,
-        task: input.mode
-          ? `chapter.compliance.outline.${input.mode}`
-          : 'chapter.compliance.outline',
+        task,
         chapterNo: input.chapterNo,
         traceId: input.traceId,
         ...(input.mode ? { mode: input.mode } : {}),
@@ -606,6 +624,220 @@ export class ComplianceCheckService {
       text: resultText,
       issues: sanitizeRuleIssuesForText(resultText, relocatedIssues),
     };
+  }
+
+  async verifyOutlineCoverage(
+    sessionId: string,
+    payload: { draftTextOverride?: string },
+    userId?: string
+  ) {
+    const session = this.requireSession(sessionId, userId);
+    const outline = session.outline;
+    if (!outline?.userConfirmed) {
+      throw new ComplianceCheckOutlineNotConfirmedError('合规大纲尚未确认');
+    }
+    if (shouldPassthroughOutlineRewrite(outline)) {
+      return {
+        items: [] as Array<{
+          id: string;
+          status: 'done' | 'partial' | 'missed';
+          note?: string;
+          priority: 'required' | 'suggested';
+        }>,
+        summary: {
+          requiredTotal: 0,
+          requiredResolved: 0,
+          requiredMissed: 0,
+          suggestedTotal: 0,
+        },
+      };
+    }
+
+    const draftText = payload.draftTextOverride?.trim() || session.versionText?.trim() || '';
+    if (!draftText) {
+      throw new ChapterPipelineCoverageVerifyInvalidError('请先完成合规改写或提供当前草稿');
+    }
+
+    const outlineItems = listOutlineItems(outline).filter((item) => item.text?.trim());
+    if (outlineItems.length === 0) {
+      return { items: [], summary: summarizeOutlineCoverage(outline) };
+    }
+
+    await this.projectsService.syncContextForChapterPipeline(session.projectId, userId);
+    const prompt = buildOutlineCoverageVerifyUserPrompt({
+      outlineItems,
+      draftText,
+      moduleLabel: '终稿合规',
+    });
+    const traceId = makeComplianceTraceId('coverage-verify');
+    const raw = await this.generateComplianceOutlineViaStream({
+      projectId: session.projectId,
+      prompt,
+      traceId,
+      chapterNo: session.chapterNo,
+      templateKey: CHAPTER_COMPLIANCE_COVERAGE_VERIFY_TEMPLATE_KEY,
+      task: 'chapter.compliance.coverage.verify',
+    });
+
+    try {
+      const verified = parseOutlineCoverageVerifyJson(raw);
+      const nextState = applyCoverageVerifyToOutlineState(outline, verified);
+      session.outline = nextState;
+      session.updatedAt = new Date();
+      putComplianceSession(session);
+      const items = verified.map((item) => {
+        const source = outlineItems.find((row) => row.id === item.id);
+        return { ...item, priority: source?.priority ?? ('required' as const) };
+      });
+      return { items, summary: summarizeOutlineCoverage(nextState) };
+    } catch {
+      throw new ChapterPipelineCoverageVerifyInvalidError('合规落实验收 JSON 解析失败');
+    }
+  }
+
+  patchOutlineCoverage(
+    sessionId: string,
+    payload: {
+      updates: Array<{
+        id: string;
+        coverageStatus: 'manual' | 'skipped';
+        coverageNote?: string;
+      }>;
+    },
+    userId?: string
+  ): ComplianceCheckSession {
+    const session = this.requireSession(sessionId, userId);
+    if (!session.outline) {
+      throw new ChapterPipelineCoverageVerifyInvalidError('合规大纲不存在');
+    }
+    session.outline = patchOutlineCoverageManual(session.outline, payload.updates);
+    session.updatedAt = new Date();
+    putComplianceSession(session);
+    return session;
+  }
+
+  async fixRewriteItemsStream(
+    sessionId: string,
+    payload: { itemIds: string[]; draftTextOverride?: string },
+    userId: string | undefined,
+    callbacks: PipelineStreamCallbacks
+  ): Promise<void> {
+    const session = this.requireSession(sessionId, userId);
+    const outline = session.outline;
+    if (!outline?.userConfirmed) {
+      throw new ComplianceCheckOutlineNotConfirmedError('合规大纲尚未确认');
+    }
+
+    const itemIds = [...new Set(payload.itemIds.map((id) => id.trim()).filter(Boolean))];
+    if (itemIds.length === 0) {
+      throw new ChapterPipelineRewriteFixItemsInvalidError('须指定至少一条大纲项');
+    }
+
+    const fixItems = findOutlineItemsByIds(outline, itemIds);
+    if (fixItems.length !== itemIds.length) {
+      throw new ChapterPipelineRewriteFixItemsInvalidError('存在无效的大纲项 id');
+    }
+
+    const draftText = payload.draftTextOverride?.trim() || session.versionText?.trim() || '';
+    if (!draftText) {
+      throw new ChapterPipelineRewriteFixItemsInvalidError('请先完成合规改写或提供当前草稿');
+    }
+
+    await this.projectsService.syncContextForChapterPipeline(session.projectId, userId);
+    const settings = this.projectsService.getSettings(session.projectId, userId);
+    const personaBlock = this.resolveCompliancePersonaBlock(session, userId);
+    const rules = mergeContentSafetyRules(settings.contentSafetyCustomRules ?? []);
+    const forbiddenWordsSummary = buildForbiddenWordsSummary(rules);
+    const basePrompt = buildRewriteFixItemsUserPrompt({
+      draftText,
+      outlineItems: fixItems,
+      personaBlock,
+      outlineTag: 'compliance-outline',
+      moduleLabel: '终稿合规',
+    });
+    const prompt = `${basePrompt}\n\n【禁用词摘要】\n${forbiddenWordsSummary}`;
+    const traceId = makeComplianceTraceId('rewrite-fix-items');
+    session.traceIds.rewrite = traceId;
+    session.status = 'rewriting';
+
+    callbacks.onStart?.({
+      traceId,
+      chapterNo: session.chapterNo,
+      stage: 'compliance_rewrite',
+    });
+    callbacks.onStage?.({ stage: 'compliance_rewrite' });
+
+    const segmentCharSize =
+      (settings as { complianceCheckSegmentCharSize?: number }).complianceCheckSegmentCharSize ??
+      settings.chapterOptimizeSegmentCharSize;
+    const strategy = resolvePipelineSegmentStrategy(draftText.length, segmentCharSize);
+    const segments = splitPipelineText(draftText, segmentCharSize);
+    const segmentTexts: string[] = [];
+
+    for (let i = 0; i < segments.length; i += 1) {
+      if (strategy.mode === 'segmented') {
+        callbacks.onStage?.({
+          stage: 'compliance_rewrite_segment',
+          segmentIndex: i + 1,
+          segmentTotal: segments.length,
+        });
+      }
+      const segmentPrompt =
+        segments.length > 1 ? prompt.replace(draftText, segments[i]) : prompt;
+      const result = await streamPipelineGeneration({
+        orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
+        projectId: session.projectId,
+        prompt: segmentPrompt,
+        templateKey: CHAPTER_COMPLIANCE_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
+        context: {
+          ...COMPLIANCE_GENERATION_CONTEXT,
+          task: 'chapter.compliance.rewrite.fix-items',
+          chapterNo: session.chapterNo,
+          traceId,
+          segmentIndex: i,
+          segmentTotal: segments.length,
+          itemIds,
+        },
+        callbacks: { onContent: callbacks.onContent },
+      });
+      if (!result.ok) {
+        callbacks.onError?.(result.errorMessage || '合规按项补修失败');
+        throw new BadRequestException(result.errorMessage || '合规按项补修失败');
+      }
+      segmentTexts.push(result.text);
+    }
+
+    const versionText =
+      segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
+
+    callbacks.onStage?.({ stage: 'compliance_rescan' });
+    const scanEnabled = settings.contentSafetyScanEnabled !== false;
+    const fixMode = this.resolveComplianceFixMode(settings);
+    const { text: fixedText, issues: residualIssues } = await this.applyComplianceResidualFixes({
+      projectId: session.projectId,
+      chapterNo: session.chapterNo,
+      sourceText: versionText,
+      rules,
+      scanEnabled,
+      fixMode,
+      callbacks,
+    });
+    const qualityStatus = resolveFinalPolishQualityStatus(residualIssues);
+
+    session.versionText = fixedText;
+    session.residualIssues = residualIssues;
+    session.qualityStatus = qualityStatus;
+    session.status = 'review';
+    session.updatedAt = new Date();
+    putComplianceSession(session);
+
+    callbacks.onEnd?.({
+      traceId,
+      versionText: fixedText,
+      qualityStatus,
+      residualIssues,
+      fixedItemIds: itemIds,
+    });
   }
 
   applyCompliance(

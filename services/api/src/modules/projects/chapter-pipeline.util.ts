@@ -27,6 +27,18 @@ export const CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY = 'chapter.pipeline.s
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY = 'chapter.pipeline.sensory.rewrite';
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY =
   'chapter.pipeline.sensory.rewrite.revise';
+export const CHAPTER_PIPELINE_CHARACTER_COVERAGE_VERIFY_TEMPLATE_KEY =
+  'chapter.pipeline.character.coverage.verify';
+export const CHAPTER_PIPELINE_CHARACTER_TRAITS_COVERAGE_VERIFY_TEMPLATE_KEY =
+  'chapter.pipeline.character-traits.coverage.verify';
+export const CHAPTER_PIPELINE_SENSORY_COVERAGE_VERIFY_TEMPLATE_KEY =
+  'chapter.pipeline.sensory.coverage.verify';
+export const CHAPTER_PIPELINE_CHARACTER_REWRITE_FIX_ITEMS_TEMPLATE_KEY =
+  'chapter.pipeline.character.rewrite.fix-items';
+export const CHAPTER_PIPELINE_CHARACTER_TRAITS_REWRITE_FIX_ITEMS_TEMPLATE_KEY =
+  'chapter.pipeline.character-traits.rewrite.fix-items';
+export const CHAPTER_PIPELINE_SENSORY_REWRITE_FIX_ITEMS_TEMPLATE_KEY =
+  'chapter.pipeline.sensory.rewrite.fix-items';
 export const CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY = 'chapter.pipeline.rules.scan';
 export const CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY = 'chapter.pipeline.rules.fix';
 export const CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY =
@@ -55,7 +67,9 @@ const DIMENSION_BOUNDARY = '【维度边界】本步骤 ONLY 负责本模块职�
 export const CHAPTER_PIPELINE_CHARACTER_SYSTEM_PROMPT = [
   '你是一位资深小说编辑，正在对章节正文进行「角色维度」精修。',
   DIMENSION_BOUNDARY,
-  'ONLY：严格按已确认的 <character-outline> 校对话风格、行为反应、人物互动方式、情感表达。',
+  'ONLY：按 <writing-brief> 中的编辑意图校对话风格、行为反应、人物互动方式、情感表达。',
+  '大纲是编辑意图，不是逐条插入清单；优先保持叙事节奏、段落呼吸与人物语气。',
+  'required 表示读者体验上必须成立，不等于逐字照抄；不要为了完成条目新增突兀句。',
   '禁止：修改感官描写密度与质量、禁用词与叙事规则、解释型说明、跨章写法、角色卡特征硬补（特征归模块一-b）。',
   '直接输出改写后的完整章节正文，不要输出方案、说明或 Markdown。',
   '必须以下文 <chapter-original> 为蓝本；输出语言、人称、人物名称与原文保持一致。',
@@ -95,9 +109,11 @@ export const CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT = [
 ].join('\n');
 
 export const CHAPTER_PIPELINE_CHARACTER_TRAITS_SYSTEM_PROMPT = [
-  '你是一位资深小说写作助手，正在按已确认的特征润色大纲补充角色卡特征描写。',
+  '你是一位资深小说写作助手，正在按已确认的特征润色编辑意图补充角色卡特征描写。',
   DIMENSION_BOUNDARY,
-  'ONLY：在合理场景插入或微调相邻句以补足特征；不改动既有情节骨架。',
+  'ONLY：按 <writing-brief> 在合理场景自然织入特征；不改动既有情节骨架。',
+  '大纲是编辑意图，不是逐条插入清单；优先保持叙事节奏与对白口吻。',
+  'required 表示读者能感知到特征即可，不等于硬插说明句；不要为了完成条目破坏段落呼吸。',
   '禁止：修改对白内容/口吻、情节走向、人物出场顺序、体位顺序；禁止新增或删除对白句子、人物、体位、场景。',
   '直接输出完整正文，不要输出说明或 Markdown。',
 ].join('\n');
@@ -113,20 +129,43 @@ export const CHAPTER_PIPELINE_SENSORY_OUTLINE_SYSTEM_PROMPT = [
 ].join('\n');
 
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_SYSTEM_PROMPT = [
-  '你是一位资深小说写作助手，正在按已确认的感官优化大纲改写章节正文。',
+  '你是一位资深小说写作助手，正在按已确认的感官优化编辑意图改写章节正文。',
   DIMENSION_BOUNDARY,
-  'ONLY：按 <sensory-outline> 提升亲密场景的感官描写质量（触觉/听觉/视觉等）。',
+  'ONLY：按 <writing-brief> 提升亲密场景的感官描写质量（触觉/听觉/视觉等）。',
+  '整体文笔与叙事节奏优先；大纲是编辑意图，不是逐条插入清单。',
+  'required 表示读者体验上必须可感知，不等于逐字对应；不要为了完成条目硬插句子。',
   '禁止：修改角色性格、对白口吻、剧情走向、叙事规则与合规红线（禁用词/平台规则由终稿合规专检，本步不负责）。',
-  '大纲每条 text 仅为方向性指引；具体描写由你创作，不得照搬大纲中的任何短语或例句。',
-  '直接输出完整正文，不要输出说明或 Markdown。',
+  '具体描写由你创作，不得照搬 brief 中的任何短语；直接输出完整正文，不要说明或 Markdown。',
 ].join('\n');
 
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_SYSTEM_PROMPT = [
   '你是一位资深小说写作助手，正在按用户意见对已生成的感官改写草稿做定向修订。',
   DIMENSION_BOUNDARY,
   'ONLY：在保持剧情、对白、角色特征不变的前提下，按 <revision-feedback> 调整感官描写。',
-  '须遵守 <sensory-outline> 的方向约束；不负责硬规则与合规红线。',
+  '须遵守 <writing-brief> 的方向约束；条目服从文脉，不负责硬规则与合规红线。',
   '直接输出完整正文，不要输出说明或 Markdown。',
+].join('\n');
+
+export const CHAPTER_PIPELINE_OUTLINE_COVERAGE_VERIFY_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在对照已确认大纲验收章节改写稿的落实情况。',
+  DIMENSION_BOUNDARY,
+  'ONLY：逐条判断大纲编辑意图是否在正文中自然落实；禁止修改或输出正文。',
+  '只输出 JSON：{"items":[{"id":"r1","status":"done|partial|missed","note":"简要说明"}]}',
+  'status 含义：',
+  '- done：读者能自然感知该意图，且没有突兀插入或清单式硬补痕迹。',
+  '- partial：有相关内容，但力度、位置或融合度不足。',
+  '- missed：基本未体现该编辑意图。',
+  'note 须说明自然程度、融合问题或未落实原因；不要仅判断是否出现字面短语。',
+  '必须覆盖输入大纲中的每一条（按 id 对应），不得遗漏。',
+].join('\n');
+
+export const CHAPTER_PIPELINE_REWRITE_FIX_ITEMS_SYSTEM_PROMPT = [
+  '你是一位资深小说写作助手，正在按编辑意图子集对章节改写稿做织入式补修。',
+  DIMENSION_BOUNDARY,
+  'ONLY：围绕 <writing-brief> 中列出的意图，小范围重织相关段落与过渡句，使补修自然融入原文。',
+  '可调整相邻过渡句与句序以保证节奏；保持剧情事实、对白含义、人物关系不变。',
+  '禁止为完成条目简单插句或打补丁；禁止越界修改未列出的维度。',
+  '直接输出完整正文，不要说明或 Markdown。',
 ].join('\n');
 
 export const CHAPTER_PIPELINE_RULES_SCAN_SYSTEM_PROMPT = [
@@ -194,6 +233,10 @@ export type ChapterPipelineStage =
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
   | 'pipeline_sensory_rewrite_revise'
+  | 'pipeline_sensory_rewrite_fix_items'
+  | 'pipeline_character_rewrite_fix_items'
+  | 'pipeline_character_traits_rewrite_fix_items'
+  | 'pipeline_outline_coverage_verify'
   | 'pipeline_rules_scan'
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
@@ -277,7 +320,24 @@ export interface PipelineOutlineItem {
   personaName?: string;
   featureRef?: string;
   anchorHint?: string;
+  coverageStatus?: PipelineOutlineCoverageStatus;
+  coverageNote?: string;
 }
+
+export type PipelineOutlineCoverageStatus =
+  | 'pending'
+  | 'done'
+  | 'partial'
+  | 'missed'
+  | 'manual'
+  | 'skipped';
+
+export type PipelineOutlineCoverageVerifyStatus = 'done' | 'partial' | 'missed';
+
+export type ChapterPipelineRewriteFixItemsModule =
+  | 'character'
+  | 'character-traits'
+  | 'sensory-rewrite';
 
 export interface PipelineOutlineState {
   required: PipelineOutlineItem[];
@@ -836,6 +896,117 @@ export function resolveProtagonistContext(
   return lines.join('\n');
 }
 
+// ── Outline writing brief (AQ-323~326) ─────────────────────────
+
+/** V1 可选软字段：解析器可透传，不强制 OpenAPI */
+export interface PipelineOutlineItemWritingSoftFields {
+  intent?: string;
+  avoid?: string;
+  integrationHint?: string;
+  strictness?: 'hard' | 'soft';
+}
+
+export type PipelineOutlineItemForBrief = PipelineOutlineItem & PipelineOutlineItemWritingSoftFields;
+
+export const OUTLINE_WRITING_BRIEF_PROSE_GUARD = [
+  '【文笔保护】',
+  '- 大纲是编辑意图，不是逐条插入清单；id 仅用于验收追踪，不要在正文中显性回应条目编号。',
+  '- required 表示读者体验上必须成立，不等于逐字照抄或逐句对应。',
+  '- suggested 只在不破坏叙事节奏、段落呼吸、人物语气时采用。',
+  '- 优先保持原文叙事节奏与文风连贯，不要为了完成条目新增突兀句。',
+].join('\n');
+
+export const OUTLINE_WRITING_GOALS = {
+  sensory:
+    '在保持剧情、对白、角色特征不变的前提下，提升亲密场景的感官描写层次与临场感；具体措辞由你创作，不得照搬大纲短语。',
+  character:
+    '在保持情节骨架不变的前提下，校对话风格、行为反应、人物互动与情感表达，使其更贴合人物设定与场景。',
+  characterTraits:
+    '在合理场景中自然补足角色卡要求的特征描写，不改动对白内容、情节走向与体位顺序。',
+  fixItems:
+    '围绕下列尚未充分落实的编辑意图，小范围重织相关段落与过渡句，使补修自然织入原文。',
+  compliance:
+    '围绕下列合规修改意图，在保持叙事风格的前提下落实必要修改，避免为完成条目而硬插说明句。',
+} as const;
+
+export function resolveOutlineWritingGoalForModule(
+  module: ChapterPipelineRewriteFixItemsModule
+): string {
+  switch (module) {
+    case 'character':
+      return OUTLINE_WRITING_GOALS.character;
+    case 'character-traits':
+      return OUTLINE_WRITING_GOALS.characterTraits;
+    default:
+      return OUTLINE_WRITING_GOALS.sensory;
+  }
+}
+
+function renderOutlineBriefItemLine(item: PipelineOutlineItemForBrief): string {
+  const parts: string[] = [`${item.id}：${item.text.trim()}`];
+  if (item.anchorHint?.trim()) {
+    parts.push(`落笔参考：${item.anchorHint.trim()}`);
+  }
+  if (item.personaName?.trim()) {
+    parts.push(`角色：${item.personaName.trim()}`);
+  }
+  if (item.featureRef?.trim()) {
+    parts.push(`特征依据：${item.featureRef.trim()}`);
+  }
+  if (item.intent?.trim()) {
+    parts.push(`意图：${item.intent.trim()}`);
+  }
+  if (item.avoid?.trim()) {
+    parts.push(`避免：${item.avoid.trim()}`);
+  }
+  if (item.integrationHint?.trim()) {
+    parts.push(`融入方式：${item.integrationHint.trim()}`);
+  }
+  if (item.strictness === 'hard' || item.strictness === 'soft') {
+    parts.push(`约束强度：${item.strictness === 'hard' ? '必须事实级落实' : '文笔建议'}`);
+  }
+  return `- ${parts.join('；')}`;
+}
+
+export function renderOutlineWritingBrief(input: {
+  outlineItems: PipelineOutlineItem[];
+  moduleLabel: string;
+  writingGoal: string;
+}): string {
+  const items = input.outlineItems.filter((item) => Boolean(item.text?.trim()));
+  if (items.length === 0) {
+    return [input.writingGoal, '（无大纲修改项）', OUTLINE_WRITING_BRIEF_PROSE_GUARD].join('\n\n');
+  }
+
+  const required = items.filter((item) => item.priority === 'required');
+  const suggested = items.filter((item) => item.priority === 'suggested');
+  const blocks = [
+    `【本轮写作目标】${input.moduleLabel}`,
+    input.writingGoal,
+    '【说明】以下 id 仅用于后续验收追踪，写作时勿逐条显性回应或编号式插入。',
+  ];
+
+  if (required.length > 0) {
+    blocks.push(
+      ['【必须自然体现】', ...required.map((item) => renderOutlineBriefItemLine(item))].join('\n')
+    );
+  }
+  if (suggested.length > 0) {
+    blocks.push(
+      [
+        '【建议项（不破坏节奏时采用）】',
+        ...suggested.map((item) => renderOutlineBriefItemLine(item)),
+      ].join('\n')
+    );
+  }
+  blocks.push(OUTLINE_WRITING_BRIEF_PROSE_GUARD);
+  return blocks.join('\n\n');
+}
+
+function wrapWritingBriefTag(brief: string): string {
+  return `<writing-brief>\n${brief}\n</writing-brief>`;
+}
+
 // ── Prompt builders ────────────────────────────────────────────
 
 export function buildCharacterUserPrompt(input: {
@@ -846,7 +1017,13 @@ export function buildCharacterUserPrompt(input: {
 }): string {
   const outlineBlock =
     input.outline && input.outline.length > 0
-      ? `<character-outline>\n${JSON.stringify({ items: input.outline }, null, 2)}\n</character-outline>`
+      ? wrapWritingBriefTag(
+          renderOutlineWritingBrief({
+            outlineItems: input.outline,
+            moduleLabel: '角色调整',
+            writingGoal: OUTLINE_WRITING_GOALS.character,
+          })
+        )
       : '';
   return [
     input.protagonistContext,
@@ -896,11 +1073,15 @@ export function buildCharacterTraitsRewriteUserPrompt(input: {
   outline: PipelineOutlineItem[];
   personaBlock: string;
 }): string {
-  const outlineJson = JSON.stringify({ items: input.outline }, null, 2);
+  const brief = renderOutlineWritingBrief({
+    outlineItems: input.outline,
+    moduleLabel: '角色特征润色',
+    writingGoal: OUTLINE_WRITING_GOALS.characterTraits,
+  });
   return [
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
-    ['【改写原则】', '严格按大纲补缺角色卡特征；不改动情节骨架、对白、体位顺序。'].join('\n'),
-    `<character-traits-outline>\n${outlineJson}\n</character-traits-outline>`,
+    ['【改写原则】', '按编辑意图自然补足角色卡特征；不改动情节骨架、对白、体位顺序。'].join('\n'),
+    wrapWritingBriefTag(brief),
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
   ]
     .filter(Boolean)
@@ -979,16 +1160,19 @@ export function buildSensoryRewriteUserPrompt(input: {
   outline: PipelineOutlineItem[];
   personaBlock: string;
 }): string {
-  const outlineJson = JSON.stringify({ items: input.outline }, null, 2);
+  const brief = renderOutlineWritingBrief({
+    outlineItems: input.outline,
+    moduleLabel: '感官优化',
+    writingGoal: OUTLINE_WRITING_GOALS.sensory,
+  });
   return [
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
     [
       '【改写原则】',
       '本步仅提升感官描写质量，不修复禁用词、平台红线或叙事规则问题。',
-      '感官大纲每条 text 仅为方向指引，不是可照搬的成品句子。',
-      '请根据方向自行创作描写，不得复制大纲中的具体短语或示例。',
+      '编辑意图仅为方向指引，不是可照搬的成品句子；请根据 brief 自行创作描写。',
     ].join('\n'),
-    `<sensory-outline>\n${outlineJson}\n</sensory-outline>`,
+    wrapWritingBriefTag(brief),
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
   ]
     .filter(Boolean)
@@ -1001,21 +1185,290 @@ export function buildSensoryRewriteReviseUserPrompt(input: {
   userFeedback: string;
   personaBlock: string;
 }): string {
-  const outlineJson = JSON.stringify({ items: input.outline }, null, 2);
+  const brief = renderOutlineWritingBrief({
+    outlineItems: input.outline,
+    moduleLabel: '感官优化',
+    writingGoal: OUTLINE_WRITING_GOALS.sensory,
+  });
   return [
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
     [
       '【改写原则】',
       '在既有感官改写草稿上按用户意见局部调整感官描写。',
       '不修复禁用词、平台红线或叙事规则问题；不改动对白、剧情、角色特征。',
-      '须符合已确认感官大纲，不得违背其中约束。',
+      '须符合已确认编辑意图，条目服从文脉，不得违背其中约束。',
     ].join('\n'),
-    `<sensory-outline>\n${outlineJson}\n</sensory-outline>`,
+    wrapWritingBriefTag(brief),
     `<chapter-draft>\n${input.draftText}\n</chapter-draft>`,
     `<revision-feedback>\n${input.userFeedback.trim()}\n</revision-feedback>`,
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+export function buildOutlineCoverageVerifyUserPrompt(input: {
+  outlineItems: PipelineOutlineItem[];
+  draftText: string;
+  moduleLabel: string;
+}): string {
+  const outlineJson = JSON.stringify({ items: input.outlineItems }, null, 2);
+  return [
+    `【验收模块】${input.moduleLabel}`,
+    [
+      '【输出要求】',
+      '对照 <chapter-draft> 判断 <outline-items> 每条编辑意图是否已在正文中自然落实。',
+      '验收看读者体验与融合度，不要仅判断是否出现字面短语。',
+      '只输出 JSON 对象 {"items":[{"id":"…","status":"done|partial|missed","note":"…"}]}',
+      '不得输出正文、不得 Markdown 代码块。',
+    ].join('\n'),
+    `<outline-items>\n${outlineJson}\n</outline-items>`,
+    `<chapter-draft>\n${input.draftText}\n</chapter-draft>`,
+  ].join('\n\n');
+}
+
+export function parseOutlineCoverageVerifyJson(raw: string): Array<{
+  id: string;
+  status: PipelineOutlineCoverageVerifyStatus;
+  note?: string;
+}> {
+  const stripped = stripPipelineOutlineJsonFence(raw);
+  const parsed = JSON.parse(stripped) as {
+    items?: Array<{ id?: string; status?: string; note?: string }>;
+  };
+  if (!Array.isArray(parsed.items)) {
+    throw new Error('coverage verify JSON 缺少 items 数组');
+  }
+  const allowed = new Set<PipelineOutlineCoverageVerifyStatus>(['done', 'partial', 'missed']);
+  return parsed.items
+    .filter((item): item is { id: string; status: PipelineOutlineCoverageVerifyStatus; note?: string } => {
+      return (
+        typeof item.id === 'string' &&
+        item.id.trim().length > 0 &&
+        typeof item.status === 'string' &&
+        allowed.has(item.status as PipelineOutlineCoverageVerifyStatus)
+      );
+    })
+    .map((item) => ({
+      id: item.id.trim(),
+      status: item.status as PipelineOutlineCoverageVerifyStatus,
+      note: item.note?.trim() || undefined,
+    }));
+}
+
+export function buildRewriteFixItemsUserPrompt(input: {
+  draftText: string;
+  outlineItems: PipelineOutlineItem[];
+  personaBlock: string;
+  moduleLabel: string;
+  /** @deprecated 保留兼容；正文补修统一使用 writing-brief */
+  outlineTag?: string;
+  fixModule?: ChapterPipelineRewriteFixItemsModule;
+}): string {
+  void input.outlineTag;
+  const moduleGoal = input.fixModule
+    ? resolveOutlineWritingGoalForModule(input.fixModule)
+    : OUTLINE_WRITING_GOALS.compliance;
+  const brief = renderOutlineWritingBrief({
+    outlineItems: input.outlineItems,
+    moduleLabel: input.moduleLabel,
+    writingGoal: `${OUTLINE_WRITING_GOALS.fixItems}\n${moduleGoal}`,
+  });
+  return [
+    input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
+    [
+      '【补修原则】',
+      `本步仅针对 ${input.moduleLabel} 未充分落实的编辑意图做织入式补修。`,
+      '小范围重织相关段落与过渡句；可调整句序与节奏，保持剧情事实与人物关系不变。',
+      '禁止为完成条目简单插句；其余未涉及段落尽量保持与草稿一致。',
+    ].join('\n'),
+    wrapWritingBriefTag(brief),
+    `<chapter-draft>\n${input.draftText}\n</chapter-draft>`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function listOutlineItems(state: PipelineOutlineState): PipelineOutlineItem[] {
+  return [...state.required, ...state.suggested];
+}
+
+export function findOutlineItemsByIds(
+  state: PipelineOutlineState,
+  itemIds: string[]
+): PipelineOutlineItem[] {
+  const idSet = new Set(itemIds.map((id) => id.trim()).filter(Boolean));
+  return listOutlineItems(state).filter((item) => idSet.has(item.id));
+}
+
+export function applyCoverageVerifyToOutlineState(
+  state: PipelineOutlineState,
+  verified: Array<{ id: string; status: PipelineOutlineCoverageVerifyStatus; note?: string }>
+): PipelineOutlineState {
+  const byId = new Map(verified.map((item) => [item.id, item]));
+  const mapItems = (items: PipelineOutlineItem[]) =>
+    items.map((item) => {
+      const hit = byId.get(item.id);
+      if (!hit) {
+        return item;
+      }
+      if (item.coverageStatus === 'manual' || item.coverageStatus === 'skipped') {
+        return item;
+      }
+      return {
+        ...item,
+        coverageStatus: hit.status,
+        coverageNote: hit.note,
+      };
+    });
+  return {
+    ...state,
+    required: mapItems(state.required),
+    suggested: mapItems(state.suggested),
+  };
+}
+
+export interface PipelineOutlineCoverageSummary {
+  requiredTotal: number;
+  requiredResolved: number;
+  requiredMissed: number;
+  suggestedTotal: number;
+}
+
+export function summarizeOutlineCoverage(state: PipelineOutlineState): PipelineOutlineCoverageSummary {
+  const requiredResolved = state.required.filter(
+    (item) => item.coverageStatus === 'done' || item.coverageStatus === 'manual'
+  ).length;
+  const requiredMissed = state.required.filter(
+    (item) => item.coverageStatus === 'missed' || item.coverageStatus === 'partial'
+  ).length;
+  return {
+    requiredTotal: state.required.length,
+    requiredResolved,
+    requiredMissed,
+    suggestedTotal: state.suggested.length,
+  };
+}
+
+export function areRequiredOutlineItemsResolved(state: PipelineOutlineState): boolean {
+  if (state.required.length === 0) {
+    return true;
+  }
+  return state.required.every(
+    (item) => item.coverageStatus === 'done' || item.coverageStatus === 'manual'
+  );
+}
+
+export function resolveCoverageVerifyTemplateKey(
+  outlineType: ChapterPipelineOutlineType
+): string {
+  switch (outlineType) {
+    case 'character':
+      return CHAPTER_PIPELINE_CHARACTER_COVERAGE_VERIFY_TEMPLATE_KEY;
+    case 'character-traits':
+      return CHAPTER_PIPELINE_CHARACTER_TRAITS_COVERAGE_VERIFY_TEMPLATE_KEY;
+    default:
+      return CHAPTER_PIPELINE_SENSORY_COVERAGE_VERIFY_TEMPLATE_KEY;
+  }
+}
+
+export function resolveRewriteFixItemsTemplateKey(
+  module: ChapterPipelineRewriteFixItemsModule
+): string {
+  switch (module) {
+    case 'character':
+      return CHAPTER_PIPELINE_CHARACTER_REWRITE_FIX_ITEMS_TEMPLATE_KEY;
+    case 'character-traits':
+      return CHAPTER_PIPELINE_CHARACTER_TRAITS_REWRITE_FIX_ITEMS_TEMPLATE_KEY;
+    default:
+      return CHAPTER_PIPELINE_SENSORY_REWRITE_FIX_ITEMS_TEMPLATE_KEY;
+  }
+}
+
+export function resolveRewriteFixItemsStage(
+  module: ChapterPipelineRewriteFixItemsModule
+): ChapterPipelineStage {
+  switch (module) {
+    case 'character':
+      return 'pipeline_character_rewrite_fix_items';
+    case 'character-traits':
+      return 'pipeline_character_traits_rewrite_fix_items';
+    default:
+      return 'pipeline_sensory_rewrite_fix_items';
+  }
+}
+
+export function resolveOutlineTypeForFixModule(
+  module: ChapterPipelineRewriteFixItemsModule
+): ChapterPipelineOutlineType {
+  switch (module) {
+    case 'character':
+      return 'character';
+    case 'character-traits':
+      return 'character-traits';
+    default:
+      return 'sensory';
+  }
+}
+
+export function resolveVersionKeyForFixModule(
+  module: ChapterPipelineRewriteFixItemsModule
+): PipelineOutlinePassthroughVersionKey {
+  return resolvePipelineOutlinePassthroughVersionKey(module);
+}
+
+export function resolveFixItemsOutlineTag(
+  module: ChapterPipelineRewriteFixItemsModule
+): string {
+  switch (module) {
+    case 'character':
+      return 'character-outline';
+    case 'character-traits':
+      return 'character-traits-outline';
+    default:
+      return 'sensory-outline';
+  }
+}
+
+export function resolveFixItemsModuleLabel(module: ChapterPipelineRewriteFixItemsModule): string {
+  switch (module) {
+    case 'character':
+      return '角色调整';
+    case 'character-traits':
+      return '角色特征润色';
+    default:
+      return '感官优化';
+  }
+}
+
+export function patchOutlineCoverageManual(
+  state: PipelineOutlineState,
+  updates: Array<{
+    id: string;
+    coverageStatus: 'manual' | 'skipped';
+    coverageNote?: string;
+  }>
+): PipelineOutlineState {
+  const byId = new Map(updates.map((item) => [item.id, item]));
+  const mapItems = (items: PipelineOutlineItem[]) =>
+    items.map((item) => {
+      const hit = byId.get(item.id);
+      if (!hit) {
+        return item;
+      }
+      if (hit.coverageStatus === 'skipped' && item.priority !== 'suggested') {
+        return item;
+      }
+      return {
+        ...item,
+        coverageStatus: hit.coverageStatus,
+        coverageNote: hit.coverageNote ?? item.coverageNote,
+      };
+    });
+  return {
+    ...state,
+    required: mapItems(state.required),
+    suggested: mapItems(state.suggested),
+  };
 }
 
 export function buildRulesScanUserPrompt(input: {
@@ -1825,6 +2278,10 @@ export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
     pipeline_sensory_outline: '生成感官优化大纲…',
     pipeline_sensory_rewrite: '感官优化改写中…',
     pipeline_sensory_rewrite_revise: '感官正文按意见修订中…',
+    pipeline_sensory_rewrite_fix_items: '按清单补修感官正文中…',
+    pipeline_character_rewrite_fix_items: '按清单补修角色调整正文中…',
+    pipeline_character_traits_rewrite_fix_items: '按清单补修特征润色正文中…',
+    pipeline_outline_coverage_verify: '对照大纲验收落实中…',
     pipeline_rules_scan: '规则扫描中…',
     pipeline_rules_fix: '规则修复中…',
     pipeline_homogenization_scan: '同质化检测中…',

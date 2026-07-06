@@ -1,0 +1,48 @@
+patch:
+  tags:
+    - Projects
+  summary: Manually update compliance outline coverage status
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ComplianceOutlineCoveragePatch'
+  responses:
+    '200':
+      description: Updated compliance session
+      content:
+        application/json:
+          schema:
+            type: object
+    '400':
+      description: Invalid update (1337)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Session not found (1332)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

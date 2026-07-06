@@ -1,0 +1,51 @@
+post:
+  tags:
+    - Projects
+  summary: Fix selected outline items in module draft (SSE)
+  description: |
+    Rewrites the module draft focusing on a subset of outline items (`itemIds`).
+    SSE events align with `run/{module}`. After completion, client should call coverage-verify.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterPipelineRewriteFixItemsRequest'
+  responses:
+    '200':
+      description: SSE stream
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Invalid itemIds or module (1338), gate not confirmed (1328)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Session not found (1326)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

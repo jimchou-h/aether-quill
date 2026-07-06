@@ -5,6 +5,8 @@ import {
   buildCharacterOutlineUserPrompt,
   buildOutlineGateRecheckUserPrompt,
   buildSensoryRewriteReviseUserPrompt,
+  buildSensoryRewriteUserPrompt,
+  buildRewriteFixItemsUserPrompt,
   computeFinalPolishFingerprint,
   filterPipelinePersonas,
   getPipelineInputText,
@@ -20,6 +22,7 @@ import {
   shouldPassthroughOutlineRewrite,
   isPipelineEditableVersionKey,
   isPipelineOutlineEmpty,
+  renderOutlineWritingBrief,
   relocateRuleIssuesInText,
   resolveFinalPolishQualityStatus,
   resolvePipelineApplyText,
@@ -32,6 +35,10 @@ import {
   CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT,
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
+  applyCoverageVerifyToOutlineState,
+  parseOutlineCoverageVerifyJson,
+  summarizeOutlineCoverage,
+  areRequiredOutlineItemsResolved,
   type ChapterPipelineSession,
   type PipelineRuleIssue,
 } from './chapter-pipeline.util';
@@ -355,7 +362,7 @@ test('resolvePipelineOutlinePassthroughVersionKey maps rewrite modules', () => {
   assert.equal(resolvePipelineOutlinePassthroughVersionKey('sensory-rewrite'), 'afterSensory');
 });
 
-test('buildSensoryRewriteReviseUserPrompt includes draft feedback and outline', () => {
+test('buildSensoryRewriteReviseUserPrompt includes draft feedback and writing brief', () => {
   const prompt = buildSensoryRewriteReviseUserPrompt({
     draftText: '草稿正文',
     outline: [{ id: 'r1', text: '加强触觉', priority: 'required' }],
@@ -366,8 +373,73 @@ test('buildSensoryRewriteReviseUserPrompt includes draft feedback and outline', 
   assert.match(prompt, /草稿正文/);
   assert.match(prompt, /<revision-feedback>/);
   assert.match(prompt, /减轻嗅觉描写/);
-  assert.match(prompt, /<sensory-outline>/);
+  assert.match(prompt, /<writing-brief>/);
+  assert.doesNotMatch(prompt, /<sensory-outline>/);
   assert.match(prompt, /加强触觉/);
+  assert.doesNotMatch(prompt, /"items":/);
+});
+
+test('buildSensoryRewriteUserPrompt uses writing-brief instead of JSON outline', () => {
+  const prompt = buildSensoryRewriteUserPrompt({
+    sourceText: '原文',
+    outline: [
+      { id: 'r1', text: '加强触觉', priority: 'required' },
+      { id: 's1', text: '适度嗅觉', priority: 'suggested' },
+    ],
+    personaBlock: '',
+  });
+  assert.match(prompt, /<writing-brief>/);
+  assert.match(prompt, /【必须自然体现】/);
+  assert.match(prompt, /【建议项/);
+  assert.doesNotMatch(prompt, /"items":/);
+  assert.doesNotMatch(prompt, /<sensory-outline>/);
+});
+
+test('buildRewriteFixItemsUserPrompt uses writing-brief for fix subset', () => {
+  const prompt = buildRewriteFixItemsUserPrompt({
+    draftText: '草稿',
+    outlineItems: [{ id: 'r1', text: '补足触觉层次', priority: 'required' }],
+    personaBlock: '',
+    moduleLabel: '感官优化',
+    fixModule: 'sensory-rewrite',
+  });
+  assert.match(prompt, /<writing-brief>/);
+  assert.match(prompt, /织入式补修/);
+  assert.doesNotMatch(prompt, /<fix-outline>/);
+  assert.doesNotMatch(prompt, /"items":/);
+});
+
+test('renderOutlineWritingBrief groups required and suggested with anchorHint', () => {
+  const brief = renderOutlineWritingBrief({
+    outlineItems: [
+      {
+        id: 'r1',
+        text: '加强触觉',
+        priority: 'required',
+        anchorHint: '拥抱段落',
+      },
+      { id: 's1', text: '适度嗅觉', priority: 'suggested' },
+    ],
+    moduleLabel: '感官优化',
+    writingGoal: '提升感官层次',
+  });
+  assert.match(brief, /【必须自然体现】/);
+  assert.match(brief, /r1：加强触觉/);
+  assert.match(brief, /落笔参考：拥抱段落/);
+  assert.match(brief, /【建议项/);
+  assert.match(brief, /s1：适度嗅觉/);
+  assert.match(brief, /【文笔保护】/);
+  assert.match(brief, /不是逐条插入清单/);
+});
+
+test('renderOutlineWritingBrief handles empty outline with prose guard', () => {
+  const brief = renderOutlineWritingBrief({
+    outlineItems: [],
+    moduleLabel: '感官优化',
+    writingGoal: '提升感官层次',
+  });
+  assert.match(brief, /（无大纲修改项）/);
+  assert.match(brief, /【文笔保护】/);
 });
 
 test('shouldRunCharacterAdjustmentModule respects config flag', () => {
@@ -794,4 +866,71 @@ test('isPipelineEditableVersionKey accepts pipeline version keys only', () => {
   assert.equal(isPipelineEditableVersionKey('final'), true);
   assert.equal(isPipelineEditableVersionKey('original'), false);
   assert.equal(isPipelineEditableVersionKey('unknown'), false);
+});
+
+test('parseOutlineCoverageVerifyJson parses items with valid statuses', () => {
+  const raw = JSON.stringify({
+    items: [
+      { id: 'r1', status: 'done', note: '已体现' },
+      { id: 'r2', status: 'partial', note: '不充分' },
+      { id: 'bad', status: 'unknown' },
+    ],
+  });
+  const items = parseOutlineCoverageVerifyJson(raw);
+  assert.equal(items.length, 2);
+  assert.equal(items[0]?.id, 'r1');
+  assert.equal(items[1]?.status, 'partial');
+});
+
+test('applyCoverageVerifyToOutlineState updates coverage and preserves manual', () => {
+  const state = {
+    required: [
+      { id: 'r1', text: 'a', priority: 'required' as const, coverageStatus: 'manual' as const },
+      { id: 'r2', text: 'b', priority: 'required' as const },
+    ],
+    suggested: [],
+    userConfirmed: true,
+    revisionRound: 0,
+  };
+  const next = applyCoverageVerifyToOutlineState(state, [
+    { id: 'r1', status: 'missed' },
+    { id: 'r2', status: 'done', note: 'ok' },
+  ]);
+  assert.equal(next.required[0]?.coverageStatus, 'manual');
+  assert.equal(next.required[1]?.coverageStatus, 'done');
+  assert.equal(next.required[1]?.coverageNote, 'ok');
+});
+
+test('summarizeOutlineCoverage and areRequiredOutlineItemsResolved', () => {
+  const state = {
+    required: [
+      { id: 'r1', text: 'a', priority: 'required' as const, coverageStatus: 'done' as const },
+      { id: 'r2', text: 'b', priority: 'required' as const, coverageStatus: 'missed' as const },
+    ],
+    suggested: [{ id: 's1', text: 'c', priority: 'suggested' as const }],
+    userConfirmed: true,
+    revisionRound: 0,
+  };
+  const summary = summarizeOutlineCoverage(state);
+  assert.equal(summary.requiredTotal, 2);
+  assert.equal(summary.requiredResolved, 1);
+  assert.equal(summary.requiredMissed, 1);
+  assert.equal(areRequiredOutlineItemsResolved(state), false);
+  assert.equal(
+    areRequiredOutlineItemsResolved({
+      ...state,
+      required: [{ ...state.required[0]!, coverageStatus: 'manual' }, state.required[1]!],
+    }),
+    false
+  );
+  assert.equal(
+    areRequiredOutlineItemsResolved({
+      ...state,
+      required: [
+        { ...state.required[0]!, coverageStatus: 'manual' },
+        { ...state.required[1]!, coverageStatus: 'manual' },
+      ],
+    }),
+    true
+  );
 });
