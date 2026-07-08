@@ -1035,6 +1035,21 @@ export function buildCharacterUserPrompt(input: {
     .join('\n\n');
 }
 
+export function appendOutlineGenerationUserFeedback(prompt: string, userFeedback?: string): string {
+  const feedback = userFeedback?.trim();
+  if (!feedback) {
+    return prompt;
+  }
+  return [
+    prompt,
+    [
+      '【用户补充要求】',
+      '生成大纲时须优先落实以下意见：',
+      `<user-feedback>\n${feedback}\n</user-feedback>`,
+    ].join('\n'),
+  ].join('\n\n');
+}
+
 export function buildCharacterOutlineUserPrompt(input: {
   sourceText: string;
   protagonistContext: string;

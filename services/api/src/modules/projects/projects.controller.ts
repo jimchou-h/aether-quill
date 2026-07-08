@@ -791,7 +791,7 @@ export class ProjectsController {
   async runChapterPipelineModule(
     @Param('sessionId') sessionId: string,
     @Param('module') module: string,
-    @Body() data: { issueId?: string; forceRegenerate?: boolean },
+    @Body() data: { issueId?: string; forceRegenerate?: boolean; userFeedback?: string },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
   ) {
