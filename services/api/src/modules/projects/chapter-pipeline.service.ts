@@ -51,6 +51,7 @@ import {
   buildOutlineCoverageVerifyUserPrompt,
   buildRewriteFixItemsUserPrompt,
   applyCoverageVerifyToOutlineState,
+  appendOutlineGenerationUserFeedback,
   summarizeOutlineCoverage,
   findOutlineItemsByIds,
   listOutlineItems,
@@ -839,7 +840,7 @@ export class ChapterPipelineService {
   async runModuleStream(
     sessionId: string,
     module: ChapterPipelineRunModule,
-    payload: { issueId?: string; forceRegenerate?: boolean },
+    payload: { issueId?: string; forceRegenerate?: boolean; userFeedback?: string },
     userId: string | undefined,
     callbacks: PipelineStreamCallbacks
   ): Promise<void> {
@@ -870,19 +871,19 @@ export class ChapterPipelineService {
 
     switch (module) {
       case 'character-outline':
-        await this.runCharacterOutlineModule(session, userId, callbacks);
+        await this.runCharacterOutlineModule(session, userId, callbacks, payload.userFeedback);
         break;
       case 'character':
         await this.runCharacterModule(session, userId, callbacks);
         break;
       case 'character-traits-outline':
-        await this.runCharacterTraitsOutlineModule(session, userId, callbacks);
+        await this.runCharacterTraitsOutlineModule(session, userId, callbacks, payload.userFeedback);
         break;
       case 'character-traits':
         await this.runCharacterTraitsModule(session, userId, callbacks);
         break;
       case 'sensory-outline':
-        await this.runSensoryOutlineModule(session, userId, callbacks);
+        await this.runSensoryOutlineModule(session, userId, callbacks, payload.userFeedback);
         break;
       case 'sensory-rewrite':
         await this.runSensoryRewriteModule(session, userId, callbacks);
@@ -1004,7 +1005,8 @@ export class ChapterPipelineService {
   private async runCharacterOutlineModule(
     session: ChapterPipelineSession,
     userId: string | undefined,
-    callbacks: PipelineStreamCallbacks
+    callbacks: PipelineStreamCallbacks,
+    userFeedback?: string
   ): Promise<void> {
     await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
@@ -1020,11 +1022,14 @@ export class ChapterPipelineService {
       protagonistRules,
       protagonist
     );
-    const prompt = buildCharacterOutlineUserPrompt({
-      sourceText,
-      protagonistContext,
-      personaBlock: this.buildPersonaBlock(personas, session),
-    });
+    const prompt = appendOutlineGenerationUserFeedback(
+      buildCharacterOutlineUserPrompt({
+        sourceText,
+        protagonistContext,
+        personaBlock: this.buildPersonaBlock(personas, session),
+      }),
+      userFeedback
+    );
     const traceId = makePipelineTraceId('character-outline');
     session.traceIds.characterOutline = traceId;
 
@@ -1177,7 +1182,8 @@ export class ChapterPipelineService {
   private async runCharacterTraitsOutlineModule(
     session: ChapterPipelineSession,
     userId: string | undefined,
-    callbacks: PipelineStreamCallbacks
+    callbacks: PipelineStreamCallbacks,
+    userFeedback?: string
   ): Promise<void> {
     await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
@@ -1185,10 +1191,13 @@ export class ChapterPipelineService {
     const resolvedPersonas = this.resolveSessionPersonas(session, personas);
     const personaBlock = this.buildPersonaBlock(personas, session);
     const sourceText = resolveTraitsRewriteSourceText(session);
-    const prompt = buildCharacterTraitsOutlineUserPrompt({
-      sourceText,
-      personaBlock,
-    });
+    const prompt = appendOutlineGenerationUserFeedback(
+      buildCharacterTraitsOutlineUserPrompt({
+        sourceText,
+        personaBlock,
+      }),
+      userFeedback
+    );
     const traceId = makePipelineTraceId('character-traits-outline');
     session.traceIds.characterTraitsOutline = traceId;
 
@@ -1371,16 +1380,20 @@ export class ChapterPipelineService {
   private async runSensoryOutlineModule(
     session: ChapterPipelineSession,
     userId: string | undefined,
-    callbacks: PipelineStreamCallbacks
+    callbacks: PipelineStreamCallbacks,
+    userFeedback?: string
   ): Promise<void> {
     await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const sourceText = getPipelineInputText(session, 2);
-    const prompt = buildSensoryOutlineUserPrompt({
-      sourceText,
-      personaBlock: this.buildPersonaBlock(personas, session),
-    });
+    const prompt = appendOutlineGenerationUserFeedback(
+      buildSensoryOutlineUserPrompt({
+        sourceText,
+        personaBlock: this.buildPersonaBlock(personas, session),
+      }),
+      userFeedback
+    );
     const traceId = makePipelineTraceId('sensory-outline');
     session.traceIds.sensoryOutline = traceId;
 

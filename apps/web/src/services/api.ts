@@ -1907,7 +1907,7 @@ export const apiClient = {
     chapterNo: number,
     sessionId: string,
     module: ChapterPipelineRunModule,
-    payload: { issueId?: string; forceRegenerate?: boolean } | undefined,
+    payload: { issueId?: string; forceRegenerate?: boolean; userFeedback?: string } | undefined,
     callbacks: ChapterPipelineRunCallbacks,
     options?: SseStreamOptions
   ): Promise<void> {

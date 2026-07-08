@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyRuleSegmentFix,
+  appendOutlineGenerationUserFeedback,
   buildCharacterOutlineUserPrompt,
   buildOutlineGateRecheckUserPrompt,
   buildSensoryRewriteReviseUserPrompt,
@@ -59,6 +60,15 @@ test('buildCharacterOutlineUserPrompt reinforces JSON-only output in user messag
   });
   assert.match(prompt, /只输出一个 JSON 对象/);
   assert.match(prompt, /不要报告式说明/);
+});
+
+test('appendOutlineGenerationUserFeedback appends user-feedback block once', () => {
+  const base = 'base-prompt';
+  assert.equal(appendOutlineGenerationUserFeedback(base, ''), base);
+  assert.equal(appendOutlineGenerationUserFeedback(base, '   '), base);
+  const withFeedback = appendOutlineGenerationUserFeedback(base, '减轻嗅觉描写');
+  assert.match(withFeedback, /base-prompt/);
+  assert.match(withFeedback, /<user-feedback>\n减轻嗅觉描写\n<\/user-feedback>/);
 });
 
 test('getPipelineInputText uses version chain', () => {

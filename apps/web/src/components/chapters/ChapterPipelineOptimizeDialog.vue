@@ -22,10 +22,7 @@ import {
   hasSelectedPersonaCard,
   resolvePersonaNamesFromPreviewSelection,
 } from '../../utils/pipelinePersonaPreview';
-import {
-  presentErrorFromCaught,
-  presentSuccess,
-} from '../../utils/pageFeedback';
+import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
 import {
   applyAiTaskProgressEvent,
   completeAiTaskProgress,
@@ -47,22 +44,19 @@ import {
   areRequiredOutlineItemsResolved,
   isPipelineOutlineEmpty,
 } from '../../utils/pipelineOutline';
+import {
+  resolveGenerateModuleForOutlineStep,
+  resolveManualContinueAction,
+  resolveOutlineTypeForStep,
+  resolvePipelineBootstrapAction,
+  type PipelineDialogStep,
+} from '../../utils/chapterPipelineOptimizeFlow';
 import type {
   ChapterPipelineRewriteFixItemsModule,
   PipelineOutlineCoverageSummary,
 } from '../../services/api';
 
-type PipelineStep =
-  | 'ready'
-  | 'character-outline'
-  | 'character'
-  | 'character-traits-outline'
-  | 'character-traits'
-  | 'sensory-outline'
-  | 'sensory-rewrite'
-  | 'rules'
-  | 'homogenization'
-  | 'done';
+type PipelineStep = PipelineDialogStep;
 
 interface PipelineStepItem {
   key: PipelineStep | 'sensory' | 'character-traits-outline';
@@ -107,7 +101,9 @@ const selectedPersonaNames = ref<string[]>([]);
 
 const isBusy = computed(() => running.value || applying.value);
 
-const originalText = computed(() => session.value?.versions.original ?? props.chapter?.content ?? '');
+const originalText = computed(
+  () => session.value?.versions.original ?? props.chapter?.content ?? ''
+);
 
 const currentVersionText = computed(() => {
   const versions = session.value?.versions;
@@ -159,17 +155,6 @@ function versionKeyToCoverageModule(
       return 'sensory-rewrite';
     default:
       return null;
-  }
-}
-
-function coverageModuleToStep(module: ChapterPipelineRewriteFixItemsModule): PipelineStep {
-  switch (module) {
-    case 'character':
-      return 'character';
-    case 'character-traits':
-      return 'character-traits';
-    default:
-      return 'sensory-rewrite';
   }
 }
 
@@ -323,6 +308,16 @@ const outlineReferenceLabel = computed(() => {
 });
 
 const modalWidth = computed(() => (isOutlineStep.value ? 1080 : 920));
+const outlineGenerated = computed(() => {
+  switch (activeOutlineType.value) {
+    case 'character':
+      return Boolean(session.value?.characterOutline);
+    case 'character-traits':
+      return Boolean(session.value?.characterTraitsOutline);
+    default:
+      return Boolean(session.value?.sensoryOutline);
+  }
+});
 
 function readStepVersionFromSession(): string {
   const key = stepVersionKey.value;
@@ -352,14 +347,16 @@ const diffLines = computed(() => {
 
 const diffAddedCount = computed(() => diffLines.value.filter((r) => r.type === 'added').length);
 const diffRemovedCount = computed(() => diffLines.value.filter((r) => r.type === 'removed').length);
-const diffModifiedCount = computed(() => diffLines.value.filter((r) => r.type === 'modified').length);
+const diffModifiedCount = computed(
+  () => diffLines.value.filter((r) => r.type === 'modified').length
+);
 
 const inlineDiff = computed(() =>
   buildInlineDiffViews(originalText.value, previewCompareText.value)
 );
 
-const hasResultDiff = computed(
-  () => Boolean(originalText.value && previewCompareText.value && diffLines.value.length > 0)
+const hasResultDiff = computed(() =>
+  Boolean(originalText.value && previewCompareText.value && diffLines.value.length > 0)
 );
 
 const showResultPreview = computed(() => {
@@ -407,52 +404,9 @@ const pipelineIncomplete = computed(() => {
   return false;
 });
 
-const rulesModuleEnabled = computed(
-  () => (config.value?.pipelineEnabledModules ?? [1, 2]).includes(3)
+const rulesModuleEnabled = computed(() =>
+  (config.value?.pipelineEnabledModules ?? [1, 2]).includes(3)
 );
-
-function resolvePipelineBootstrap(runAll: boolean): {
-  step: PipelineStep;
-  module: ChapterPipelineRunModule;
-} {
-  const modules = config.value?.pipelineEnabledModules ?? [1, 2];
-  const traitsEnabled = config.value?.pipelineCharacterTraitsEnabled !== false;
-  const adjustmentEnabled = config.value?.pipelineCharacterAdjustmentEnabled === true;
-
-  if (runAll) {
-    if (modules.includes(1)) {
-      if (adjustmentEnabled) {
-        return { step: 'character-outline', module: 'run-all' };
-      }
-      if (traitsEnabled) {
-        return { step: 'character-traits-outline', module: 'run-all' };
-      }
-    }
-    if (modules.includes(2)) {
-      return { step: 'sensory-outline', module: 'run-all' };
-    }
-    if (modules.includes(3)) {
-      return { step: 'rules', module: 'run-all' };
-    }
-    return { step: 'done', module: 'run-all' };
-  }
-
-  if (modules.includes(1)) {
-    if (adjustmentEnabled) {
-      return { step: 'character-outline', module: 'character-outline' };
-    }
-    if (traitsEnabled) {
-      return { step: 'character-traits-outline', module: 'character-traits-outline' };
-    }
-  }
-  if (modules.includes(2)) {
-    return { step: 'sensory-outline', module: 'sensory-outline' };
-  }
-  if (modules.includes(3)) {
-    return { step: 'rules', module: 'rules-scan' };
-  }
-  return { step: 'ready', module: 'run-all' };
-}
 
 const pipelineSteps = computed<PipelineStepItem[]>(() => {
   const modules = config.value?.pipelineEnabledModules ?? [1, 2];
@@ -484,10 +438,7 @@ const activeStepIndex = computed(() => {
     if (step.value === 'character-outline' || step.value === 'character') {
       return item.key === 'character';
     }
-    if (
-      step.value === 'character-traits-outline' ||
-      step.value === 'character-traits'
-    ) {
+    if (step.value === 'character-traits-outline' || step.value === 'character-traits') {
       return item.key === 'character-traits-outline';
     }
     if (step.value === 'sensory-outline' || step.value === 'sensory-rewrite') {
@@ -545,6 +496,20 @@ function resetState() {
   resetAiTaskProgress(aiTaskProgress);
 }
 
+type PipelineEndEvent = {
+  gateRequired?: boolean;
+  gate?: string;
+  currentModule?: number | 'done';
+  characterOutline?: ChapterPipelineSessionView['characterOutline'];
+  characterTraitsOutline?: ChapterPipelineSessionView['characterTraitsOutline'];
+  sensoryOutline?: ChapterPipelineSessionView['sensoryOutline'];
+  ruleIssues?: PipelineRuleIssue[];
+  versionKey?: string;
+  versionText?: string;
+  homogenizationReport?: ChapterPipelineSessionView['homogenizationReport'];
+  outlinePassthrough?: boolean;
+};
+
 function syncStepPreviewFromSession(force = false) {
   const key = stepVersionKey.value;
   if (!key || !session.value?.versions) {
@@ -559,6 +524,14 @@ function syncStepPreviewFromSession(force = false) {
   }
 }
 
+function applyEndVersionText(endEvent: PipelineEndEvent) {
+  if (endEvent.versionText?.trim()) {
+    stepPreviewText.value = endEvent.versionText;
+    return;
+  }
+  syncStepPreviewFromSession(true);
+}
+
 watch(stepVersionKey, () => syncStepPreviewFromSession(true));
 
 watch(
@@ -566,6 +539,10 @@ watch(
   (nextStep) => {
     if (nextStep === 'done') {
       previewMode.value = 'diff';
+      return;
+    }
+    if (resolveStepVersionKey(nextStep)) {
+      previewMode.value = 'final';
     }
   }
 );
@@ -619,6 +596,28 @@ function applyOutlineToEditor(
 
 function loadOutlineFromSession(outlineType: ChapterPipelineOutlineType) {
   applyOutlineToEditor(outlineType);
+}
+
+function getOutlineStateForType(outlineType: ChapterPipelineOutlineType) {
+  switch (outlineType) {
+    case 'character':
+      return session.value?.characterOutline;
+    case 'character-traits':
+      return session.value?.characterTraitsOutline;
+    default:
+      return session.value?.sensoryOutline;
+  }
+}
+
+function enterOutlineGate(outlineType: ChapterPipelineOutlineType) {
+  activeOutlineType.value = outlineType;
+  step.value =
+    outlineType === 'character'
+      ? 'character-outline'
+      : outlineType === 'character-traits'
+        ? 'character-traits-outline'
+        : 'sensory-outline';
+  loadOutlineFromSession(outlineType);
 }
 
 async function refreshSession() {
@@ -702,8 +701,8 @@ async function openPersonaPreview() {
         })),
         chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
         chapterSummaryMemoryCount:
-          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
-          3,
+          (workspace.settings as { chapterSummaryMemoryCount?: number })
+            .chapterSummaryMemoryCount ?? 3,
         personas: buildPersonasContextPayload(workspace.personas),
       },
       extraContext: {
@@ -915,19 +914,21 @@ async function startPipelineSession(runAll = false) {
   running.value = true;
   errorMessage.value = '';
   try {
-    const result = await apiClient.startChapterPipeline(
-      props.projectId,
-      props.chapter.chapterNo,
-      {
-        selectedPersonaNames: selectedPersonaNames.value,
-      }
-    );
+    const result = await apiClient.startChapterPipeline(props.projectId, props.chapter.chapterNo, {
+      selectedPersonaNames: selectedPersonaNames.value,
+    });
     sessionId.value = result.sessionId;
     config.value = result.config;
     await refreshSession();
-    const { step: initialStep, module: initialModule } = resolvePipelineBootstrap(runAll);
-    step.value = initialStep;
-    await runModule(initialModule);
+    const action = resolvePipelineBootstrapAction(runAll, result.config, session.value);
+    step.value = action.step;
+    const outlineType = resolveOutlineTypeForStep(action.step);
+    if (outlineType) {
+      enterOutlineGate(outlineType);
+    }
+    if (action.autoRun && action.module) {
+      await runModule(action.module);
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '启动失败';
     presentErrorFromCaught(error, '启动创作精修失败');
@@ -936,9 +937,62 @@ async function startPipelineSession(runAll = false) {
   }
 }
 
-async function runModule(module: ChapterPipelineRunModule) {
-  if (!props.chapter || !sessionId.value) {
+function applyOutlineFromEndEvent(
+  outlineType: ChapterPipelineOutlineType,
+  endEvent: PipelineEndEvent | null
+) {
+  if (!endEvent) {
     return;
+  }
+  switch (outlineType) {
+    case 'character':
+      if (endEvent.characterOutline) {
+        applyOutlineToEditor('character', endEvent.characterOutline);
+      }
+      break;
+    case 'character-traits':
+      if (endEvent.characterTraitsOutline) {
+        applyOutlineToEditor('character-traits', endEvent.characterTraitsOutline);
+      }
+      break;
+    default:
+      if (endEvent.sensoryOutline) {
+        applyOutlineToEditor('sensory', endEvent.sensoryOutline);
+      }
+      break;
+  }
+}
+
+async function handleGenerateOutline(feedback?: string) {
+  const outlineType = resolveOutlineTypeForStep(step.value);
+  const module = resolveGenerateModuleForOutlineStep(step.value);
+  if (!module || !outlineType) {
+    return;
+  }
+  const trimmedFeedback = feedback?.trim();
+  const endEvent = await runModule(
+    module,
+    trimmedFeedback ? { userFeedback: trimmedFeedback } : undefined
+  );
+  if (trimmedFeedback) {
+    applyOutlineFromEndEvent(outlineType, endEvent);
+    if (isPipelineOutlineEmpty(outlineRequired.value, outlineSuggested.value)) {
+      await refreshSession();
+      loadOutlineFromSession(outlineType);
+    }
+    if (!isPipelineOutlineEmpty(outlineRequired.value, outlineSuggested.value)) {
+      presentSuccess('大纲已按意见生成，请继续审阅');
+    }
+    return;
+  }
+}
+
+async function runModule(
+  module: ChapterPipelineRunModule,
+  payload?: { issueId?: string; forceRegenerate?: boolean; userFeedback?: string }
+): Promise<PipelineEndEvent | null> {
+  if (!props.chapter || !sessionId.value) {
+    return null;
   }
   running.value = true;
   streamingText.value = '';
@@ -949,6 +1003,19 @@ async function runModule(module: ChapterPipelineRunModule) {
     message: isRunAll ? '全自动精修执行中…' : '创作精修执行中…',
   });
   const signal = beginStream();
+  let endEventResult: PipelineEndEvent | null = null;
+  let resolveOnEnd!: () => void;
+  const onEndSettled = new Promise<void>((resolve) => {
+    resolveOnEnd = resolve;
+  });
+  let onEndResolved = false;
+  const settleOnEnd = () => {
+    if (onEndResolved) {
+      return;
+    }
+    onEndResolved = true;
+    resolveOnEnd();
+  };
 
   try {
     await apiClient.runChapterPipelineModuleSSE(
@@ -956,7 +1023,7 @@ async function runModule(module: ChapterPipelineRunModule) {
       props.chapter.chapterNo,
       sessionId.value,
       module,
-      undefined,
+      payload,
       {
         onStart: ({ stage }) => {
           streamingText.value = '';
@@ -976,8 +1043,10 @@ async function runModule(module: ChapterPipelineRunModule) {
           streamingText.value += text;
         },
         onEnd: async (event) => {
-          const endEvent = event as PipelineEndEvent;
-          if (endEvent.gateRequired && endEvent.gate) {
+          try {
+            const endEvent = event as PipelineEndEvent;
+            endEventResult = endEvent;
+            if (endEvent.gateRequired && endEvent.gate) {
             if (endEvent.gate === 'character-outline') {
               step.value = 'character-outline';
               if (endEvent.characterOutline) {
@@ -1016,7 +1085,7 @@ async function runModule(module: ChapterPipelineRunModule) {
           if (endEvent.currentModule === 'done' && shouldPauseForSensoryCoverageReview()) {
             activeCoverageModule.value = 'sensory-rewrite';
             step.value = 'sensory-rewrite';
-            syncStepPreviewFromSession(true);
+            applyEndVersionText(endEvent);
             if (endEvent.outlinePassthrough) {
               presentSuccess('无大纲修改项，已保留原文');
             }
@@ -1025,7 +1094,7 @@ async function runModule(module: ChapterPipelineRunModule) {
             return;
           }
           applyPipelineStepFromEnd(endEvent);
-          syncStepPreviewFromSession(true);
+          applyEndVersionText(endEvent);
           if (endEvent.outlinePassthrough) {
             presentSuccess('无大纲修改项，已保留原文');
           }
@@ -1050,11 +1119,7 @@ async function runModule(module: ChapterPipelineRunModule) {
             await runModule('character-traits');
             return;
           }
-          if (
-            !isRunAll &&
-            module === 'sensory-outline' &&
-            endEvent.sensoryOutline?.userConfirmed
-          ) {
+          if (!isRunAll && module === 'sensory-outline' && endEvent.sensoryOutline?.userConfirmed) {
             step.value = 'sensory-rewrite';
             await runModule('sensory-rewrite');
             return;
@@ -1064,30 +1129,38 @@ async function runModule(module: ChapterPipelineRunModule) {
               aiTaskProgress,
               endEvent.currentModule === 'done' ? '全自动精修完成' : '步骤完成'
             );
-          } else if (isRunAll) {
-            applyAiTaskProgressEvent(aiTaskProgress, {
-              taskKey: 'chapter.pipeline.run-all',
-              message: progressLabel.value || '继续执行后续模块…',
-            });
+            } else if (isRunAll) {
+              applyAiTaskProgressEvent(aiTaskProgress, {
+                taskKey: 'chapter.pipeline.run-all',
+                message: progressLabel.value || '继续执行后续模块…',
+              });
+            }
+          } finally {
+            settleOnEnd();
           }
         },
         onError: (message) => {
           errorMessage.value = message;
           failAiTaskProgress(aiTaskProgress, message);
+          settleOnEnd();
         },
       },
       { signal }
     );
+    await onEndSettled;
+    return endEventResult;
   } catch (error) {
     if (handleStreamError(error)) {
-      return;
+      return null;
     }
     errorMessage.value = error instanceof Error ? error.message : '执行失败';
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
     presentErrorFromCaught(error, '创作精修执行失败');
+    return null;
   } finally {
     running.value = false;
     endStream();
+    settleOnEnd();
   }
 }
 
@@ -1178,7 +1251,10 @@ async function recheckOutline() {
   }
 }
 
-async function reviseOutlineWithFeedback(feedback: string) {
+async function reviseOutlineWithFeedback(
+  feedback: string,
+  successMessage = '大纲已按意见修订，请继续审阅'
+) {
   if (!props.chapter || !sessionId.value) {
     return;
   }
@@ -1202,7 +1278,7 @@ async function reviseOutlineWithFeedback(feedback: string) {
     outlineSuggested.value = [...result.suggested];
     outlineRevisionRound.value = result.revisionRound;
     await refreshSession();
-    presentSuccess('大纲已按意见修订，请继续审阅');
+    presentSuccess(successMessage);
   } catch (error) {
     presentErrorFromCaught(error, 'AI 修订大纲失败');
   } finally {
@@ -1249,31 +1325,54 @@ function resolveRetryModule(currentStep: PipelineStep): ChapterPipelineRunModule
   }
 }
 
-const canRetryCurrentStep = computed(
-  () =>
-    Boolean(
-      resolveRetryModule(step.value) &&
-        showResultPreview.value &&
-        !isOutlineStep.value &&
-        !running.value
-    )
+const canRetryCurrentStep = computed(() =>
+  Boolean(
+    resolveRetryModule(step.value) &&
+    showResultPreview.value &&
+    !isOutlineStep.value &&
+    !running.value
+  )
+);
+
+const canEditStepPreview = computed(() => Boolean(stepVersionKey.value));
+
+const showStepActions = computed(() => {
+  if (running.value || step.value === 'ready' || isOutlineStep.value || step.value === 'done') {
+    return false;
+  }
+  if (pipelineIncomplete.value) {
+    return true;
+  }
+  return canEditStepPreview.value && showResultPreview.value;
+});
+
+const continueButtonLabel = computed(() =>
+  pipelineIncomplete.value ? '继续下一步（后续模块）' : '完成精修并进入应用'
 );
 
 const showSensoryRevisePanel = computed(
   () => step.value === 'sensory-rewrite' && showResultPreview.value && !running.value
 );
 
-async function persistStepPreviewText() {
+async function persistStepPreviewText(
+  options: { requireContent?: boolean } = {}
+): Promise<boolean> {
   const key = stepVersionKey.value;
   if (!key || !props.chapter || !sessionId.value) {
-    return;
+    if (options.requireContent) {
+      throw new Error('当前步骤不可保存');
+    }
+    return false;
   }
   const text = stepPreviewText.value.trim();
   if (!text) {
-    return;
+    if (options.requireContent) {
+      throw new Error('正文为空，无法保存');
+    }
+    return false;
   }
   if (session.value?.versions[key] === text) {
-    return;
+    return true;
   }
   session.value = await apiClient.patchChapterPipelineVersion(
     props.projectId,
@@ -1281,6 +1380,16 @@ async function persistStepPreviewText() {
     sessionId.value,
     { versionKey: key, text }
   );
+  return true;
+}
+
+async function handleSaveStepEdits() {
+  try {
+    await persistStepPreviewText({ requireContent: true });
+    presentSuccess('已保存当前步骤正文');
+  } catch (error) {
+    presentErrorFromCaught(error, '保存失败');
+  }
 }
 
 async function handleContinueNext() {
@@ -1302,7 +1411,23 @@ async function handleContinueNext() {
     }
   }
   activeCoverageModule.value = null;
-  await runModule('run-all');
+  if (!pipelineIncomplete.value) {
+    step.value = 'done';
+    return;
+  }
+  if (!config.value) {
+    return;
+  }
+  const action = resolveManualContinueAction(step.value, config.value, session.value);
+  const outlineType = resolveOutlineTypeForStep(action.step);
+  if (outlineType) {
+    enterOutlineGate(outlineType);
+    return;
+  }
+  step.value = action.step;
+  if (action.autoRun && action.module) {
+    await runModule(action.module);
+  }
 }
 
 async function handleRetryCurrentStep() {
@@ -1360,9 +1485,10 @@ async function reviseSensoryRewriteWithFeedback() {
         onContent: (text) => {
           streamingText.value += text;
         },
-        onEnd: async () => {
+        onEnd: async (event) => {
+          const endEvent = event as PipelineEndEvent;
           await refreshSession();
-          syncStepPreviewFromSession(true);
+          applyEndVersionText(endEvent);
           sensoryRewriteFeedback.value = '';
           completeAiTaskProgress(aiTaskProgress, '感官正文已按意见修订');
           presentSuccess('感官正文已按意见修订');
@@ -1429,19 +1555,6 @@ function ruleFixStrategyLabel(strategy: PipelineRuleIssue['fixStrategy']) {
       return '人工';
   }
 }
-
-type PipelineEndEvent = {
-  gateRequired?: boolean;
-  gate?: string;
-  currentModule?: number | 'done';
-  characterOutline?: ChapterPipelineSessionView['characterOutline'];
-  characterTraitsOutline?: ChapterPipelineSessionView['characterTraitsOutline'];
-  sensoryOutline?: ChapterPipelineSessionView['sensoryOutline'];
-  ruleIssues?: PipelineRuleIssue[];
-  versionKey?: string;
-  homogenizationReport?: ChapterPipelineSessionView['homogenizationReport'];
-  outlinePassthrough?: boolean;
-};
 
 function applyPipelineStepFromEnd(event: PipelineEndEvent) {
   if (event.characterOutline && !event.characterOutline.userConfirmed) {
@@ -1520,7 +1633,8 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     @cancel="close"
   >
     <p class="modal-subtitle">
-      默认链：特征润色 → 感官优化；硬规则请用「终稿合规检验」。中间版本仅在会话内流转，应用后才写入章节正文。
+      默认链：特征润色 →
+      感官优化；硬规则请用「终稿合规检验」。中间版本仅在会话内流转，应用后才写入章节正文。
     </p>
 
     <ol class="stepper">
@@ -1535,7 +1649,14 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     </ol>
 
     <div v-if="running" class="stream-actions">
-      <SseInterruptButton @interrupt="() => { interruptStream(); running = false; }" />
+      <SseInterruptButton
+        @interrupt="
+          () => {
+            interruptStream();
+            running = false;
+          }
+        "
+      />
     </div>
     <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
     <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
@@ -1543,7 +1664,8 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
 
     <section v-if="step === 'ready'" class="step-section">
       <p class="intro-text">
-        将按项目预设依次执行创作精修模块。启动前会弹出检索预览，请确认要注入的角色卡；特征/感官大纲支持人工 gate 与 AI 修订。发布前硬规则请使用章节「更多 → 终稿合规检验」。
+        将按项目预设依次执行创作精修模块。启动前会弹出检索预览，请确认要注入的角色卡；特征/感官大纲支持人工
+        gate 与 AI 修订。发布前硬规则请使用章节「更多 → 终稿合规检验」。
       </p>
       <p v-if="selectedPersonaNames.length" class="meta-line">
         已选角色：{{ selectedPersonaNames.join('、') }}
@@ -1573,13 +1695,16 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       :reference-label="outlineReferenceLabel"
     >
       <PipelineOutlineEditor
-        :title="outlineEditorTitle"
-        :hint="outlineEditorHint"
         v-model:required="outlineRequired"
         v-model:suggested="outlineSuggested"
+        :title="outlineEditorTitle"
+        :hint="outlineEditorHint"
         :busy="isBusy"
+        :generated="outlineGenerated"
+        generate-label="生成大纲"
         :revision-round="outlineRevisionRound"
         :embed-reference="false"
+        @generate="handleGenerateOutline"
         @confirm="confirmOutline"
         @recheck="recheckOutline"
         @revise="reviseOutlineWithFeedback"
@@ -1710,10 +1835,16 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       </div>
     </section>
 
-    <div
-      v-if="pipelineIncomplete && !running && step !== 'ready' && !isOutlineStep"
-      class="step-actions"
-    >
+    <div v-if="showStepActions" class="step-actions">
+      <button
+        v-if="canEditStepPreview && showResultPreview"
+        class="secondary-button"
+        type="button"
+        :disabled="isBusy"
+        @click="handleSaveStepEdits"
+      >
+        保存编辑
+      </button>
       <button
         v-if="canRetryCurrentStep"
         class="secondary-button"
@@ -1724,7 +1855,7 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
         重试当前步
       </button>
       <button class="primary-button" type="button" :disabled="isBusy" @click="handleContinueNext">
-        继续下一步（后续模块）
+        {{ continueButtonLabel }}
       </button>
     </div>
 
