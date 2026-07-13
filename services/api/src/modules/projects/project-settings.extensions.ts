@@ -14,7 +14,7 @@ import {
   DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
 } from './project-settings.util';
 
-/** PG `project_settings` 表未收录的字段，以 JSON 镜像为准 */
+/** PG `project_settings.settings_extensions` 与 JSON 迁移脚本共用的扩展字段 */
 export type ProjectSettingsJsonExtensions = {
   priorChapterTailChars?: number;
   contextExcerptMaxChars?: number;
