@@ -2336,8 +2336,8 @@ components:
           minimum: 0
     ChapterPipelineRewriteReviseModule:
       type: string
-      enum: [sensory-rewrite]
-      description: V1 仅支持感官改写后再改；后续可扩展 character-traits / character
+      enum: [character, sensory-rewrite]
+      description: 角色调整或感官改写完成后，按用户意见再改正文
     ChapterPipelineRewriteReviseRequest:
       type: object
       required:
@@ -2353,7 +2353,7 @@ components:
           description: 修改意见，1~2000 字
         draftTextOverride:
           type: string
-          description: 当前预览草稿；缺省则使用 session 内该模块版本正文（如 afterSensory）
+          description: 当前预览草稿；缺省则使用 session 内该模块版本正文（如 afterCharacter / afterSensory）
     ChapterPipelineRunEndEvent:
       type: object
       description: pipeline run SSE `end` 事件 data 结构（JSON 字符串解析后）

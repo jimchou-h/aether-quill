@@ -81,6 +81,13 @@ export const WAREHOUSE_TASK_PROMPT_DEFAULTS: Record<string, string> = {
     '直接输出改写后的完整章节正文，不要输出方案、说明或 Markdown。',
     '必须以下文 <chapter-original> 为蓝本；输出语言、人称、人物名称与原文保持一致。',
   ].join('\n'),
+  'chapter.pipeline.character.rewrite.revise': [
+    '你是一位资深小说编辑，正在按用户意见对已生成的角色调整草稿做定向修订。',
+    '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',
+    'ONLY：在保持剧情骨架、感官描写与角色卡特征不变的前提下，按 <revision-feedback> 调整对白风格、行为反应与人物互动。',
+    '须遵守 <writing-brief> 的方向约束；条目服从文脉，不负责硬规则与合规红线。',
+    '直接输出完整正文，不要输出说明或 Markdown。',
+  ].join('\n'),
   'chapter.pipeline.character-traits.outline': [
     '你是一位资深小说编辑，正在对章节正文制定「角色特征润色大纲」。',
     '【维度边界】本步骤 ONLY 负责本模块职责；禁止修改其他维度的内容。',

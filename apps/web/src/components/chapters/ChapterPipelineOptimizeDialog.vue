@@ -53,6 +53,7 @@ import {
 } from '../../utils/chapterPipelineOptimizeFlow';
 import type {
   ChapterPipelineRewriteFixItemsModule,
+  ChapterPipelineRewriteReviseModule,
   PipelineOutlineCoverageSummary,
 } from '../../services/api';
 
@@ -123,7 +124,7 @@ const currentVersionText = computed(() => {
 
 const previewMode = ref<'final' | 'diff'>('diff');
 const stepPreviewText = ref('');
-const sensoryRewriteFeedback = ref('');
+const rewriteReviseFeedback = ref('');
 const coverageSummary = ref<PipelineOutlineCoverageSummary | null>(null);
 const coverageVerifying = ref(false);
 /** 最近一次完成改写的模块（run-all 跳到 done 后仍保留验收上下文） */
@@ -489,7 +490,7 @@ function resetState() {
   ruleIssues.value = [];
   previewMode.value = 'diff';
   stepPreviewText.value = '';
-  sensoryRewriteFeedback.value = '';
+  rewriteReviseFeedback.value = '';
   coverageSummary.value = null;
   coverageVerifying.value = false;
   activeCoverageModule.value = null;
@@ -629,6 +630,9 @@ async function refreshSession() {
     props.chapter.chapterNo,
     sessionId.value
   );
+  if (session.value.sourceUpdatedAt?.trim()) {
+    chapterUpdatedAtSnapshot.value = session.value.sourceUpdatedAt;
+  }
   if (step.value === 'character-outline') {
     loadOutlineFromSession('character');
   } else if (step.value === 'character-traits-outline') {
@@ -1350,8 +1354,32 @@ const continueButtonLabel = computed(() =>
   pipelineIncomplete.value ? '继续下一步（后续模块）' : '完成精修并进入应用'
 );
 
-const showSensoryRevisePanel = computed(
-  () => step.value === 'sensory-rewrite' && showResultPreview.value && !running.value
+const activeRewriteReviseModule = computed((): ChapterPipelineRewriteReviseModule | null => {
+  if (step.value === 'character') {
+    return 'character';
+  }
+  if (step.value === 'sensory-rewrite') {
+    return 'sensory-rewrite';
+  }
+  return null;
+});
+
+const showRewriteRevisePanel = computed(
+  () => Boolean(activeRewriteReviseModule.value && showResultPreview.value && !running.value)
+);
+
+const rewriteReviseFeedbackLabel = computed(() =>
+  step.value === 'character' ? '修改意见（AI 按意见再改）' : '修改意见（AI 按意见再改）'
+);
+
+const rewriteReviseFeedbackPlaceholder = computed(() =>
+  step.value === 'character'
+    ? '例如：男主对白再冷一点，女主反应别太突兀'
+    : '例如：第 3 段嗅觉描写过重，减轻一些；保留触觉细节'
+);
+
+const rewriteReviseSuccessMessage = computed(() =>
+  step.value === 'character' ? '角色正文已按意见修订' : '感官正文已按意见修订'
 );
 
 async function persistStepPreviewText(
@@ -1439,11 +1467,12 @@ async function handleRetryCurrentStep() {
   await runModule(module);
 }
 
-async function reviseSensoryRewriteWithFeedback() {
-  if (!props.chapter || !sessionId.value || running.value) {
+async function reviseRewriteWithFeedback() {
+  const module = activeRewriteReviseModule.value;
+  if (!module || !props.chapter || !sessionId.value || running.value) {
     return;
   }
-  const feedback = sensoryRewriteFeedback.value.trim();
+  const feedback = rewriteReviseFeedback.value.trim();
   if (!feedback) {
     return;
   }
@@ -1451,9 +1480,13 @@ async function reviseSensoryRewriteWithFeedback() {
   running.value = true;
   errorMessage.value = '';
   streamingText.value = '';
+  const taskKey =
+    module === 'character'
+      ? 'chapter.pipeline.character.revise'
+      : 'chapter.pipeline.sensory-rewrite.revise';
   startAiTaskProgress(aiTaskProgress, {
-    taskKey: 'chapter.pipeline.sensory-rewrite.revise',
-    message: '感官正文按意见修订中…',
+    taskKey,
+    message: module === 'character' ? '角色正文按意见修订中…' : '感官正文按意见修订中…',
   });
   const signal = beginStream();
 
@@ -1463,7 +1496,7 @@ async function reviseSensoryRewriteWithFeedback() {
       props.chapter.chapterNo,
       sessionId.value,
       {
-        module: 'sensory-rewrite',
+        module,
         userFeedback: feedback,
         draftTextOverride: stepPreviewText.value.trim() || undefined,
       },
@@ -1475,7 +1508,7 @@ async function reviseSensoryRewriteWithFeedback() {
         onStage: ({ stage, segmentIndex, segmentTotal }) => {
           progressLabel.value = formatPipelineStageLabel(stage, segmentIndex, segmentTotal);
           applyAiTaskProgressEvent(aiTaskProgress, {
-            taskKey: 'chapter.pipeline.sensory-rewrite.revise',
+            taskKey,
             stage,
             message: progressLabel.value,
             currentStep: segmentIndex,
@@ -1489,9 +1522,9 @@ async function reviseSensoryRewriteWithFeedback() {
           const endEvent = event as PipelineEndEvent;
           await refreshSession();
           applyEndVersionText(endEvent);
-          sensoryRewriteFeedback.value = '';
-          completeAiTaskProgress(aiTaskProgress, '感官正文已按意见修订');
-          presentSuccess('感官正文已按意见修订');
+          rewriteReviseFeedback.value = '';
+          completeAiTaskProgress(aiTaskProgress, rewriteReviseSuccessMessage.value);
+          presentSuccess(rewriteReviseSuccessMessage.value);
           await maybeAutoVerifyCoverageAfterRewrite();
         },
         onError: (message) => {
@@ -1505,9 +1538,12 @@ async function reviseSensoryRewriteWithFeedback() {
     if (handleStreamError(error)) {
       return;
     }
-    errorMessage.value = error instanceof Error ? error.message : '感官正文修订失败';
+    errorMessage.value = error instanceof Error ? error.message : '正文按意见修订失败';
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
-    presentErrorFromCaught(error, '感官正文按意见修订失败');
+    presentErrorFromCaught(
+      error,
+      module === 'character' ? '角色正文按意见修订失败' : '感官正文按意见修订失败'
+    );
   } finally {
     running.value = false;
     endStream();
@@ -1813,22 +1849,22 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       <p v-if="hasResultDiff" class="meta-line compare-hint">
         红色删除线 = 原文有而精修删去；绿色 = 精修新增。两侧均为完整正文，不会漏段。
       </p>
-      <div v-if="showSensoryRevisePanel" class="revise-block">
-        <label class="field-label" for="sensory-rewrite-feedback">修改意见（AI 按意见再改）</label>
+      <div v-if="showRewriteRevisePanel" class="revise-block">
+        <label class="field-label" for="rewrite-revise-feedback">{{ rewriteReviseFeedbackLabel }}</label>
         <textarea
-          id="sensory-rewrite-feedback"
-          v-model="sensoryRewriteFeedback"
+          id="rewrite-revise-feedback"
+          v-model="rewriteReviseFeedback"
           class="feedback-input"
           rows="3"
           maxlength="2000"
-          placeholder="例如：第 3 段嗅觉描写过重，减轻一些；保留触觉细节"
+          :placeholder="rewriteReviseFeedbackPlaceholder"
           :disabled="isBusy"
         />
         <button
           class="secondary-button"
           type="button"
-          :disabled="isBusy || !sensoryRewriteFeedback.trim()"
-          @click="reviseSensoryRewriteWithFeedback"
+          :disabled="isBusy || !rewriteReviseFeedback.trim()"
+          @click="reviseRewriteWithFeedback"
         >
           {{ running ? '修订中…' : 'AI 按意见再改' }}
         </button>
