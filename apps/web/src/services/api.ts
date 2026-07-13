@@ -2321,6 +2321,7 @@ export type ChapterPipelineStage =
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
   | 'pipeline_sensory_rewrite_revise'
+  | 'pipeline_character_rewrite_revise'
   | 'pipeline_outline_coverage_verify'
   | 'pipeline_character_rewrite_fix_items'
   | 'pipeline_character_traits_rewrite_fix_items'
@@ -2545,7 +2546,7 @@ export interface ChapterPipelineOutlinePatch extends ChapterPipelineSensoryOutli
 
 export type ChapterPipelineOutlineReviseMode = 'recheck' | 'revise';
 
-export type ChapterPipelineRewriteReviseModule = 'sensory-rewrite';
+export type ChapterPipelineRewriteReviseModule = 'character' | 'sensory-rewrite';
 
 export interface ChapterPipelineRewriteReviseRequest {
   module: ChapterPipelineRewriteReviseModule;
@@ -2650,6 +2651,8 @@ export function formatPipelineStageLabel(
       return '感官优化改写中…';
     case 'pipeline_sensory_rewrite_revise':
       return '按意见修订感官正文中…';
+    case 'pipeline_character_rewrite_revise':
+      return '按意见修订角色正文中…';
     case 'pipeline_outline_coverage_verify':
       return '对照大纲验收落实中…';
     case 'pipeline_character_rewrite_fix_items':

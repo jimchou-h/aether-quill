@@ -127,6 +127,7 @@ const TASK_PROGRESS_MESSAGES: Record<string, string> = {
   'chapter.pipeline.run': '创作精修执行中…',
   'chapter.pipeline.run-all': '全自动精修执行中…',
   'chapter.pipeline.sensory-rewrite.revise': '感官正文按意见修订中…',
+  'chapter.pipeline.character.revise': '角色正文按意见修订中…',
   'chapter.pipeline.coverage.verify': '对照大纲验收落实中…',
   'chapter.pipeline.rewrite.fix-items': '按清单补修正文中…',
   'chapter.pipeline.final-polish': '一键终稿执行中…',

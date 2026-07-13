@@ -27,6 +27,8 @@ export const CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY = 'chapter.pipeline.s
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY = 'chapter.pipeline.sensory.rewrite';
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY =
   'chapter.pipeline.sensory.rewrite.revise';
+export const CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_TEMPLATE_KEY =
+  'chapter.pipeline.character.rewrite.revise';
 export const CHAPTER_PIPELINE_CHARACTER_COVERAGE_VERIFY_TEMPLATE_KEY =
   'chapter.pipeline.character.coverage.verify';
 export const CHAPTER_PIPELINE_CHARACTER_TRAITS_COVERAGE_VERIFY_TEMPLATE_KEY =
@@ -54,6 +56,7 @@ export const CHAPTER_PIPELINE_TEMPLATE_KEYS = [
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
   CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY,
@@ -136,6 +139,14 @@ export const CHAPTER_PIPELINE_SENSORY_REWRITE_SYSTEM_PROMPT = [
   'required 表示读者体验上必须可感知，不等于逐字对应；不要为了完成条目硬插句子。',
   '禁止：修改角色性格、对白口吻、剧情走向、叙事规则与合规红线（禁用词/平台规则由终稿合规专检，本步不负责）。',
   '具体描写由你创作，不得照搬 brief 中的任何短语；直接输出完整正文，不要说明或 Markdown。',
+].join('\n');
+
+export const CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在按用户意见对已生成的角色调整草稿做定向修订。',
+  DIMENSION_BOUNDARY,
+  'ONLY：在保持剧情骨架、感官描写与角色卡特征不变的前提下，按 <revision-feedback> 调整对白风格、行为反应与人物互动。',
+  '须遵守 <writing-brief> 的方向约束；条目服从文脉，不负责硬规则与合规红线。',
+  '直接输出完整正文，不要输出说明或 Markdown。',
 ].join('\n');
 
 export const CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_SYSTEM_PROMPT = [
@@ -233,6 +244,7 @@ export type ChapterPipelineStage =
   | 'pipeline_sensory_outline'
   | 'pipeline_sensory_rewrite'
   | 'pipeline_sensory_rewrite_revise'
+  | 'pipeline_character_rewrite_revise'
   | 'pipeline_sensory_rewrite_fix_items'
   | 'pipeline_character_rewrite_fix_items'
   | 'pipeline_character_traits_rewrite_fix_items'
@@ -394,7 +406,7 @@ export function resolvePipelineOutlinePassthroughVersionKey(
   }
 }
 
-export type ChapterPipelineRewriteReviseModule = 'sensory-rewrite';
+export type ChapterPipelineRewriteReviseModule = 'character' | 'sensory-rewrite';
 
 export const PIPELINE_REWRITE_REVISE_FEEDBACK_MAX_CHARS = 2000;
 
@@ -1189,6 +1201,35 @@ export function buildSensoryRewriteUserPrompt(input: {
     ].join('\n'),
     wrapWritingBriefTag(brief),
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function buildCharacterRewriteReviseUserPrompt(input: {
+  draftText: string;
+  outline: PipelineOutlineItem[];
+  userFeedback: string;
+  personaBlock: string;
+  protagonistContext?: string;
+}): string {
+  const brief = renderOutlineWritingBrief({
+    outlineItems: input.outline,
+    moduleLabel: '角色调整',
+    writingGoal: OUTLINE_WRITING_GOALS.character,
+  });
+  return [
+    input.protagonistContext?.trim() || '',
+    input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
+    [
+      '【改写原则】',
+      '在既有角色调整草稿上按用户意见局部调整对白风格、行为反应与人物互动。',
+      '不修改感官描写密度、角色卡特征补缺、禁用词与叙事规则。',
+      '须符合已确认编辑意图，条目服从文脉。',
+    ].join('\n'),
+    wrapWritingBriefTag(brief),
+    `<chapter-draft>\n${input.draftText}\n</chapter-draft>`,
+    `<revision-feedback>\n${input.userFeedback.trim()}\n</revision-feedback>`,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -2293,6 +2334,7 @@ export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
     pipeline_sensory_outline: '生成感官优化大纲…',
     pipeline_sensory_rewrite: '感官优化改写中…',
     pipeline_sensory_rewrite_revise: '感官正文按意见修订中…',
+    pipeline_character_rewrite_revise: '角色正文按意见修订中…',
     pipeline_sensory_rewrite_fix_items: '按清单补修感官正文中…',
     pipeline_character_rewrite_fix_items: '按清单补修角色调整正文中…',
     pipeline_character_traits_rewrite_fix_items: '按清单补修特征润色正文中…',

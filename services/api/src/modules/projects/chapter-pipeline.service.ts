@@ -47,6 +47,7 @@ import {
   buildRulesScanUserPrompt,
   buildSensoryOutlineUserPrompt,
   buildSensoryRewriteUserPrompt,
+  buildCharacterRewriteReviseUserPrompt,
   buildSensoryRewriteReviseUserPrompt,
   buildOutlineCoverageVerifyUserPrompt,
   buildRewriteFixItemsUserPrompt,
@@ -74,6 +75,7 @@ import {
   CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
+  CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
   type ChapterPipelineConfig,
   type ChapterPipelineOutlineGate,
@@ -236,8 +238,8 @@ export class ChapterPipelineService {
   ): Promise<void> {
     const session = this.requireSession(sessionId, userId);
 
-    if (payload.module !== 'sensory-rewrite') {
-      throw new ChapterPipelineRewriteReviseInvalidError('当前仅支持感官改写后再改');
+    if (payload.module !== 'sensory-rewrite' && payload.module !== 'character') {
+      throw new ChapterPipelineRewriteReviseInvalidError('当前不支持该模块按意见再改');
     }
 
     const feedback = payload.userFeedback?.trim() ?? '';
@@ -252,38 +254,89 @@ export class ChapterPipelineService {
       );
     }
 
-    const outline = session.sensoryOutline;
+    const isCharacter = payload.module === 'character';
+    const outline = isCharacter ? session.characterOutline : session.sensoryOutline;
     if (!outline) {
-      throw new ChapterPipelineGateNotConfirmedError('感官大纲尚未生成');
+      throw new ChapterPipelineGateNotConfirmedError(
+        isCharacter ? '角色调整大纲尚未生成' : '感官大纲尚未生成'
+      );
     }
-    if (!outline.userConfirmed && !session.config.pipelineSkipSensoryOutlineReview) {
+    if (!outline.userConfirmed && !session.config.pipelineSkipCharacterOutlineReview && isCharacter) {
+      throw new ChapterPipelineGateNotConfirmedError('角色调整大纲尚未确认');
+    }
+    if (
+      !outline.userConfirmed &&
+      !session.config.pipelineSkipSensoryOutlineReview &&
+      !isCharacter
+    ) {
       throw new ChapterPipelineGateNotConfirmedError('感官大纲尚未确认');
     }
 
-    const draftText = payload.draftTextOverride?.trim() || session.versions.afterSensory?.trim();
+    const versionKey = isCharacter ? 'afterCharacter' : 'afterSensory';
+    const draftText =
+      payload.draftTextOverride?.trim() || session.versions[versionKey]?.trim();
     if (!draftText) {
-      throw new ChapterPipelineRewriteReviseInvalidError('请先完成感官改写或提供当前预览草稿');
+      throw new ChapterPipelineRewriteReviseInvalidError(
+        isCharacter
+          ? '请先完成角色调整或提供当前预览草稿'
+          : '请先完成感官改写或提供当前预览草稿'
+      );
     }
 
     await this.prepareContext(session);
     const settings = this.projectsService.getSettings(session.projectId, userId);
     const personas = this.projectsService.getPersonas(session.projectId, userId);
     const allItems = [...outline.required, ...outline.suggested];
-    const prompt = buildSensoryRewriteReviseUserPrompt({
-      draftText,
-      outline: allItems,
-      userFeedback: feedback,
-      personaBlock: this.buildPersonaBlock(personas, session),
-    });
-    const traceId = makePipelineTraceId('sensory-rewrite-revise');
-    session.traceIds.sensoryRewriteRevise = traceId;
+    let prompt: string;
+    if (isCharacter) {
+      const protagonist = this.resolveProtagonist(personas, settings.activePersonaId);
+      const protagonistRules =
+        (settings as { protagonistProgressRules?: typeof DEFAULT_PROTAGONIST_PROGRESS_RULES })
+          .protagonistProgressRules ?? DEFAULT_PROTAGONIST_PROGRESS_RULES;
+      const protagonistContext = resolveProtagonistContext(
+        session.chapterNo,
+        protagonistRules,
+        protagonist
+      );
+      prompt = buildCharacterRewriteReviseUserPrompt({
+        draftText,
+        outline: allItems,
+        userFeedback: feedback,
+        personaBlock: this.buildPersonaBlock(personas, session),
+        protagonistContext,
+      });
+    } else {
+      prompt = buildSensoryRewriteReviseUserPrompt({
+        draftText,
+        outline: allItems,
+        userFeedback: feedback,
+        personaBlock: this.buildPersonaBlock(personas, session),
+      });
+    }
+
+    const stage = isCharacter
+      ? ('pipeline_character_rewrite_revise' as const)
+      : ('pipeline_sensory_rewrite_revise' as const);
+    const templateKey = isCharacter
+      ? CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_TEMPLATE_KEY
+      : CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY;
+    const task = isCharacter
+      ? 'chapter.pipeline.character.rewrite.revise'
+      : 'chapter.pipeline.sensory.rewrite.revise';
+    const failedModule = isCharacter ? 'character-rewrite-revise' : 'sensory-rewrite-revise';
+    const traceId = makePipelineTraceId(failedModule);
+    if (isCharacter) {
+      session.traceIds.characterRewriteRevise = traceId;
+    } else {
+      session.traceIds.sensoryRewriteRevise = traceId;
+    }
 
     callbacks.onStart?.({
       traceId,
       chapterNo: session.chapterNo,
-      stage: 'pipeline_sensory_rewrite_revise',
+      stage,
     });
-    callbacks.onStage?.({ stage: 'pipeline_sensory_rewrite_revise' });
+    callbacks.onStage?.({ stage });
 
     const segmentCharSize = settings.chapterOptimizeSegmentCharSize;
     const strategy = resolvePipelineSegmentStrategy(draftText.length, segmentCharSize);
@@ -306,9 +359,9 @@ export class ChapterPipelineService {
         orchestratorUrl: this.projectsService.getRagOrchestratorUrlForPipeline(),
         projectId: session.projectId,
         prompt: prompt.replace(draftText, segments[i]),
-        templateKey: CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
+        templateKey,
         context: {
-          task: 'chapter.pipeline.sensory.rewrite.revise',
+          task,
           chapterNo: session.chapterNo,
           traceId,
           segmentIndex: i,
@@ -318,11 +371,9 @@ export class ChapterPipelineService {
         callbacks: { onContent: callbacks.onContent },
       });
       if (!result.ok) {
-        callbacks.onError?.(result.errorMessage || '感官正文按意见修订失败');
-        throw new ChapterPipelineModuleFailedError(
-          result.errorMessage || '感官正文按意见修订失败',
-          'sensory-rewrite-revise'
-        );
+        const message = result.errorMessage || (isCharacter ? '角色正文按意见修订失败' : '感官正文按意见修订失败');
+        callbacks.onError?.(message);
+        throw new ChapterPipelineModuleFailedError(message, failedModule);
       }
       segmentTexts.push(result.text);
     }
@@ -337,18 +388,18 @@ export class ChapterPipelineService {
         planText: '',
       });
       if (!qualityCheck.passed) {
-        const message = `感官正文修订合并校验未通过：${qualityCheck.failures.join('；')}`;
+        const message = `${isCharacter ? '角色正文' : '感官正文'}修订合并校验未通过：${qualityCheck.failures.join('；')}`;
         callbacks.onError?.(message);
-        throw new ChapterPipelineModuleFailedError(message, 'sensory-rewrite-revise');
+        throw new ChapterPipelineModuleFailedError(message, failedModule);
       }
     }
 
-    session.versions.afterSensory = merged;
+    session.versions[versionKey] = merged;
     putPipelineSession(session);
     callbacks.onEnd?.({
       traceId,
       versionText: merged,
-      versionKey: 'afterSensory',
+      versionKey,
       currentModule: session.currentModule,
     });
   }

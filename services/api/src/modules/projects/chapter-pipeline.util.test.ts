@@ -5,6 +5,7 @@ import {
   appendOutlineGenerationUserFeedback,
   buildCharacterOutlineUserPrompt,
   buildOutlineGateRecheckUserPrompt,
+  buildCharacterRewriteReviseUserPrompt,
   buildSensoryRewriteReviseUserPrompt,
   buildSensoryRewriteUserPrompt,
   buildRewriteFixItemsUserPrompt,
@@ -370,6 +371,22 @@ test('resolvePipelineOutlinePassthroughVersionKey maps rewrite modules', () => {
     'afterCharacterTraits'
   );
   assert.equal(resolvePipelineOutlinePassthroughVersionKey('sensory-rewrite'), 'afterSensory');
+});
+
+test('buildCharacterRewriteReviseUserPrompt includes draft feedback and writing brief', () => {
+  const prompt = buildCharacterRewriteReviseUserPrompt({
+    draftText: '角色草稿',
+    outline: [{ id: 'r1', text: '对白再冷一点', priority: 'required' }],
+    userFeedback: '男主别太热情',
+    personaBlock: '角色A',
+    protagonistContext: '男主视角',
+  });
+  assert.match(prompt, /<chapter-draft>/);
+  assert.match(prompt, /角色草稿/);
+  assert.match(prompt, /<revision-feedback>/);
+  assert.match(prompt, /男主别太热情/);
+  assert.match(prompt, /<writing-brief>/);
+  assert.match(prompt, /男主视角/);
 });
 
 test('buildSensoryRewriteReviseUserPrompt includes draft feedback and writing brief', () => {
