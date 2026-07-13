@@ -160,7 +160,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { usePostgresPersistence } from '../../persistence/use-postgres';
 import {
   loadWorkspaceFromPostgres,
+  syncProjectChaptersToPostgres,
   syncWorkspaceToPostgres,
+  updateProjectOutlineInPostgres,
+  upsertChapterInPostgres,
 } from '../../persistence/workspace-pg-sync';
 import type { PersistedProjectState } from './persisted-workspace.types';
 import { hashChapterContent } from './chapter-content-hash.util';
@@ -424,6 +427,12 @@ type RestoredWorkspace = {
   identityRelations: Record<string, PersonaIdentityRelationRecord[]>;
 };
 
+type WorkspacePgSyncScope =
+  | { type: 'full' }
+  | { type: 'chapter'; projectId: string; chapterNo: number }
+  | { type: 'project-knowledge'; projectId: string }
+  | { type: 'outline'; projectId: string };
+
 @Injectable()
 export class ProjectsService implements OnModuleInit {
   private readonly storagePath = join(resolve(process.cwd()), 'data', 'project-workspaces.json');
@@ -495,37 +504,16 @@ export class ProjectsService implements OnModuleInit {
       const fromPg = await loadWorkspaceFromPostgres(this.prisma);
       if (fromPg?.projects.length) {
         this.applyRestoredWorkspace(this.mapPersistedToRuntime(fromPg));
-        this.mergeJsonMirrorSettingsExtensions();
       } else {
-        const fromJson = this.restoreStateFromDisk();
-        if (fromJson) {
-          this.applyRestoredWorkspace(fromJson);
-        }
-        for (const project of this.projects) {
-          this.ensureProjectState(project.id);
-        }
-        if (this.projects.length > 0) {
-          await syncWorkspaceToPostgres(this.prisma, this.buildPersistedPayload());
-        }
+        console.warn(
+          '[persistence] PostgreSQL 中无项目数据。请运行 pnpm migrate:json-to-pg -- --confirm 完成灌库。'
+        );
       }
       for (const project of this.projects) {
         this.ensureProjectState(project.id);
-      }
-      if (this.jsonMirrorNeedsExtensionBackfill()) {
-        this.persistState();
       }
     } catch (err) {
-      console.error('[persistence] workspace PG 初始化失败，回退到 JSON 镜像', err);
-      const fromJson = this.restoreStateFromDisk();
-      if (fromJson) {
-        this.applyRestoredWorkspace(fromJson);
-      }
-      for (const project of this.projects) {
-        this.ensureProjectState(project.id);
-      }
-      if (this.jsonMirrorNeedsExtensionBackfill()) {
-        this.persistState();
-      }
+      console.error('[persistence] workspace PG 初始化失败', err);
     } finally {
       this.persistenceResolve();
     }
@@ -547,7 +535,7 @@ export class ProjectsService implements OnModuleInit {
     return this.getProjectOrThrow(id);
   }
 
-  remove(id: string, userId: string) {
+  async remove(id: string, userId: string) {
     this.checkAccess(id, userId, ['owner']);
 
     const index = this.projects.findIndex((project) => project.id === id);
@@ -570,12 +558,12 @@ export class ProjectsService implements OnModuleInit {
     this.summarizeJobsStore.delete(id);
     this.relationEventsStore.delete(id);
     this.identityRelationsStore.delete(id);
-    this.persistState();
+    await this.persistStateAndAwaitPgSync();
 
     return { id };
   }
 
-  create(data: Partial<ProjectRecord>, userId?: string) {
+  async create(data: Partial<ProjectRecord>, userId?: string) {
     const now = new Date();
     const project: ProjectRecord = {
       id: String(Date.now()),
@@ -596,7 +584,7 @@ export class ProjectsService implements OnModuleInit {
       });
     }
 
-    this.persistState();
+    await this.persistStateAndAwaitPgSync();
     return project;
   }
 
@@ -689,7 +677,6 @@ export class ProjectsService implements OnModuleInit {
   private getSettingsInternal(projectId: string): ProjectSettings {
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
-    this.mergeJsonMirrorSettingsExtensionsForProject(projectId);
     const settings = this.settingsStore.get(projectId)!;
     this.patchSettingsDefaults(settings);
     return this.serializeProjectSettings(settings);
@@ -1022,7 +1009,7 @@ export class ProjectsService implements OnModuleInit {
     };
   }
 
-  updateOutline(projectId: string, payload: { outlineSummary: string }, userId?: string) {
+  async updateOutline(projectId: string, payload: { outlineSummary: string }, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -1031,11 +1018,11 @@ export class ProjectsService implements OnModuleInit {
 
     const knowledge = this.knowledgeStore.get(projectId)!;
     knowledge.outlineSummary = payload.outlineSummary.trim();
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ type: 'outline', projectId });
     return knowledge;
   }
 
-  deleteChapter(projectId: string, chapterNo: number, userId?: string) {
+  async deleteChapter(projectId: string, chapterNo: number, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -1084,7 +1071,7 @@ export class ProjectsService implements OnModuleInit {
       persona.updatedAt = new Date();
     }
 
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ type: 'project-knowledge', projectId });
     return { id: deletedChapter.chapterNo };
   }
 
@@ -1172,7 +1159,11 @@ export class ProjectsService implements OnModuleInit {
       existing.title = payload.title.trim();
       existing.contentHash = nextHash;
       existing.updatedAt = now;
-      this.persistState();
+      await this.persistStateAndAwaitPgSync({
+        type: 'chapter',
+        projectId,
+        chapterNo,
+      });
       return {
         ...existing,
         contentChanged: false,
@@ -1220,7 +1211,11 @@ export class ProjectsService implements OnModuleInit {
       delete knowledge.workbenchStructuredByChapter[chapterNo];
     }
 
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({
+      type: 'chapter',
+      projectId,
+      chapterNo,
+    });
 
     void this.indexChapterSummaryVector(projectId, targetChapter).catch((error) => {
       console.error(
@@ -1253,7 +1248,6 @@ export class ProjectsService implements OnModuleInit {
     }
 
     this.relinkRelationEventsForProject(projectId);
-    this.persistState();
     return {
       ...targetChapter,
       contentChanged: true,
@@ -1384,7 +1378,7 @@ export class ProjectsService implements OnModuleInit {
     knowledge.chapters.push(targetChapter);
     knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
 
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ type: 'project-knowledge', projectId });
     if (knowledge.chapters.length > 0) {
       const settings = this.settingsStore.get(projectId)!;
       if (settings.updatePersonaOnSave !== false) {
@@ -1404,7 +1398,7 @@ export class ProjectsService implements OnModuleInit {
       }
     }
     this.relinkRelationEventsForProject(projectId);
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ type: 'project-knowledge', projectId });
     return targetChapter;
   }
 
@@ -1503,7 +1497,7 @@ export class ProjectsService implements OnModuleInit {
     });
 
     this.relinkRelationEventsForProject(projectId);
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ type: 'project-knowledge', projectId });
 
     return {
       importedCount: imported.length,
@@ -3129,7 +3123,11 @@ export class ProjectsService implements OnModuleInit {
       );
     }
     this.relinkRelationEventsForProject(projectId);
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({
+      type: 'chapter',
+      projectId,
+      chapterNo: normalizedChapterNo,
+    });
 
     if (summaryFields.reindexSummaryVector) {
       void this.indexChapterSummaryVector(projectId, chapter).catch((error) => {
@@ -3507,17 +3505,85 @@ export class ProjectsService implements OnModuleInit {
     return this.summarizeJobsStore.get(projectId)![0] || null;
   }
 
-  private persistState() {
-    const payload = this.buildPersistedPayload();
+  private writeJsonMirror(payload: PersistedProjectState) {
     const targetDir = dirname(this.storagePath);
     if (!existsSync(targetDir)) {
       mkdirSync(targetDir, { recursive: true });
     }
     writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
+  }
+
+  private persistState() {
+    const payload = this.buildPersistedPayload();
     if (usePostgresPersistence()) {
       void syncWorkspaceToPostgres(this.prisma, payload).catch((err) =>
         console.error('[persistence] workspace PG 同步失败', err)
       );
+      return;
+    }
+    this.writeJsonMirror(payload);
+  }
+
+  /** 关键写操作：持久化完成后再返回（PG 或 JSON 二选一） */
+  private async persistStateAndAwaitPgSync(
+    scope: WorkspacePgSyncScope = { type: 'full' }
+  ): Promise<void> {
+    const payload = this.buildPersistedPayload();
+    if (!usePostgresPersistence()) {
+      this.writeJsonMirror(payload);
+      return;
+    }
+
+    try {
+      switch (scope.type) {
+        case 'full':
+          await syncWorkspaceToPostgres(this.prisma, payload);
+          break;
+        case 'chapter': {
+          const knowledge = payload.knowledge[scope.projectId];
+          const chapter = knowledge?.chapters.find((item) => item.chapterNo === scope.chapterNo);
+          if (!chapter) {
+            throw new Error(
+              `[persistence] 无法同步章节：project=${scope.projectId} chapter=${scope.chapterNo}`
+            );
+          }
+          await upsertChapterInPostgres(this.prisma, scope.projectId, chapter, {
+            outlineSummary: knowledge?.outlineSummary,
+            indexVersion: knowledge?.indexVersion,
+            lastIndexedAt: knowledge?.lastIndexedAt ?? null,
+          });
+          break;
+        }
+        case 'project-knowledge': {
+          const knowledge = payload.knowledge[scope.projectId];
+          if (!knowledge) {
+            break;
+          }
+          await syncProjectChaptersToPostgres(
+            this.prisma,
+            scope.projectId,
+            knowledge.chapters,
+            {
+              outlineSummary: knowledge.outlineSummary,
+              indexVersion: knowledge.indexVersion,
+              lastIndexedAt: knowledge.lastIndexedAt ?? null,
+            }
+          );
+          break;
+        }
+        case 'outline': {
+          const knowledge = payload.knowledge[scope.projectId];
+          await updateProjectOutlineInPostgres(
+            this.prisma,
+            scope.projectId,
+            knowledge?.outlineSummary ?? ''
+          );
+          break;
+        }
+      }
+    } catch (err) {
+      console.error('[persistence] workspace PG 同步失败', err);
+      throw err;
     }
   }
 
@@ -4470,54 +4536,6 @@ export class ProjectsService implements OnModuleInit {
     return false;
   }
 
-  private mergeJsonMirrorSettingsExtensionsForProject(projectId: string) {
-    if (!existsSync(this.storagePath)) {
-      return;
-    }
-    if (!this.settingsStore.has(projectId)) {
-      return;
-    }
-    try {
-      const raw = readFileSync(this.storagePath, 'utf8');
-      const parsed = JSON.parse(raw) as PersistedProjectState;
-      const jsonSettings = parsed.settings?.[projectId];
-      if (!jsonSettings) {
-        return;
-      }
-      const settings = this.settingsStore.get(projectId)!;
-      applyProjectSettingsJsonExtensions(
-        settings,
-        pickProjectSettingsJsonExtensions(jsonSettings)
-      );
-      this.patchSettingsDefaults(settings);
-    } catch {
-      // JSON 镜像损坏时跳过扩展字段合并
-    }
-  }
-
-  private mergeJsonMirrorSettingsExtensions() {
-    if (!existsSync(this.storagePath)) {
-      return;
-    }
-    try {
-      const raw = readFileSync(this.storagePath, 'utf8');
-      const parsed = JSON.parse(raw) as PersistedProjectState;
-      for (const [projectId, settings] of this.settingsStore.entries()) {
-        const jsonSettings = parsed.settings?.[projectId];
-        if (!jsonSettings) {
-          continue;
-        }
-        applyProjectSettingsJsonExtensions(
-          settings,
-          pickProjectSettingsJsonExtensions(jsonSettings)
-        );
-        this.patchSettingsDefaults(settings);
-      }
-    } catch {
-      // JSON 镜像损坏时跳过扩展字段合并
-    }
-  }
-
   private buildContentSafetyRules(projectId: string) {
     this.ensureProjectState(projectId);
     const settings = this.settingsStore.get(projectId)!;
@@ -5043,7 +5061,6 @@ export class ProjectsService implements OnModuleInit {
 
   private isContentSafetyEnabled(projectId: string): boolean {
     this.ensureProjectState(projectId);
-    this.mergeJsonMirrorSettingsExtensionsForProject(projectId);
     const settings = this.settingsStore.get(projectId)!;
     return settings.contentSafetyScanEnabled !== false;
   }

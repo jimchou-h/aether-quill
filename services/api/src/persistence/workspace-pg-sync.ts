@@ -9,6 +9,163 @@ import {
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
   DEFAULT_GENERATION_TEMPERATURE,
 } from '../modules/projects/project-settings.util';
+import {
+  applyProjectSettingsJsonExtensions,
+  pickProjectSettingsJsonExtensions,
+} from '../modules/projects/project-settings.extensions';
+import {
+  parseIdentityRelationsFromPg,
+  parseWorkbenchStructuredFromPg,
+  serializeIdentityRelationsForPg,
+  serializeWorkbenchStructuredForPg,
+} from './workspace-pg-extensions.util';
+
+type PersistedChapter = PersistedProjectState['knowledge'][string]['chapters'][number];
+
+/** 全量 workspace 同步（章节多、体积大） */
+export const WORKSPACE_PG_FULL_TX_OPTIONS = {
+  maxWait: 30_000,
+  timeout: 300_000,
+} as const;
+
+/** 单章 upsert / 小范围更新 */
+export const WORKSPACE_PG_CHAPTER_TX_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 60_000,
+} as const;
+
+export const CHAPTER_CREATE_MANY_BATCH_SIZE = 40;
+
+export async function createManyInBatches<T>(
+  rows: T[],
+  batchSize: number,
+  createBatch: (batch: T[]) => Promise<unknown>
+): Promise<void> {
+  for (let index = 0; index < rows.length; index += batchSize) {
+    await createBatch(rows.slice(index, index + batchSize));
+  }
+}
+
+export function buildChapterRow(
+  projectId: string,
+  chapter: PersistedChapter
+): Omit<Prisma.ChapterCreateManyInput, 'id'> {
+  return {
+    projectId,
+    chapterNo: chapter.chapterNo,
+    title: chapter.title,
+    content: chapter.content,
+    summary: chapter.summary ?? '',
+    summarySource: chapter.summarySource ?? null,
+    summaryUpdatedAt: chapter.summaryUpdatedAt ? new Date(chapter.summaryUpdatedAt) : null,
+    ...(chapter.structuredInfo !== undefined && chapter.structuredInfo !== null
+      ? { structuredInfo: chapter.structuredInfo as unknown as Prisma.InputJsonValue }
+      : {}),
+    updatedAt: new Date(chapter.updatedAt),
+  };
+}
+
+export async function upsertChapterInPostgres(
+  prisma: PrismaClient,
+  projectId: string,
+  chapter: PersistedChapter,
+  projectPatch?: {
+    outlineSummary?: string;
+    indexVersion?: number;
+    lastIndexedAt?: string | null;
+  }
+): Promise<void> {
+  const row = buildChapterRow(projectId, chapter);
+  await prisma.$transaction(async (tx) => {
+    if (projectPatch) {
+      await tx.project.update({
+        where: { id: projectId },
+        data: {
+          ...(projectPatch.outlineSummary !== undefined
+            ? { outlineSummary: projectPatch.outlineSummary }
+            : {}),
+          ...(projectPatch.indexVersion !== undefined
+            ? { indexVersion: projectPatch.indexVersion }
+            : {}),
+          ...(projectPatch.lastIndexedAt !== undefined
+            ? {
+                lastIndexedAt: projectPatch.lastIndexedAt
+                  ? new Date(projectPatch.lastIndexedAt)
+                  : null,
+              }
+            : {}),
+        },
+      });
+    }
+    await tx.chapter.upsert({
+      where: {
+        projectId_chapterNo: { projectId, chapterNo: chapter.chapterNo },
+      },
+      create: row,
+      update: {
+        title: row.title,
+        content: row.content,
+        summary: row.summary,
+        summarySource: row.summarySource,
+        summaryUpdatedAt: row.summaryUpdatedAt,
+        structuredInfo: row.structuredInfo,
+        updatedAt: row.updatedAt,
+      },
+    });
+  }, WORKSPACE_PG_CHAPTER_TX_OPTIONS);
+}
+
+export async function updateProjectOutlineInPostgres(
+  prisma: PrismaClient,
+  projectId: string,
+  outlineSummary: string
+): Promise<void> {
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { outlineSummary },
+  });
+}
+
+export async function syncProjectChaptersToPostgres(
+  prisma: PrismaClient,
+  projectId: string,
+  chapters: PersistedChapter[],
+  projectPatch?: {
+    outlineSummary?: string;
+    indexVersion?: number;
+    lastIndexedAt?: string | null;
+  }
+): Promise<void> {
+  const chapterRows = chapters.map((chapter) => buildChapterRow(projectId, chapter));
+  await prisma.$transaction(async (tx) => {
+    if (projectPatch) {
+      await tx.project.update({
+        where: { id: projectId },
+        data: {
+          ...(projectPatch.outlineSummary !== undefined
+            ? { outlineSummary: projectPatch.outlineSummary }
+            : {}),
+          ...(projectPatch.indexVersion !== undefined
+            ? { indexVersion: projectPatch.indexVersion }
+            : {}),
+          ...(projectPatch.lastIndexedAt !== undefined
+            ? {
+                lastIndexedAt: projectPatch.lastIndexedAt
+                  ? new Date(projectPatch.lastIndexedAt)
+                  : null,
+              }
+            : {}),
+        },
+      });
+    }
+    await tx.chapter.deleteMany({ where: { projectId } });
+    if (chapterRows.length > 0) {
+      await createManyInBatches(chapterRows, CHAPTER_CREATE_MANY_BATCH_SIZE, (batch) =>
+        tx.chapter.createMany({ data: batch })
+      );
+    }
+  }, WORKSPACE_PG_FULL_TX_OPTIONS);
+}
 
 export async function loadWorkspaceFromPostgres(
   prisma: PrismaClient
@@ -47,6 +204,8 @@ export async function loadWorkspaceFromPostgres(
   const summarizeJobs: PersistedProjectState['summarizeJobs'] = {};
   const relationEvents: PersistedProjectState['relationEvents'] = {};
 
+  const identityRelations: PersistedProjectState['identityRelations'] = {};
+
   for (const p of rows) {
     for (const m of p.members) {
       members.push({
@@ -58,7 +217,7 @@ export async function loadWorkspaceFromPostgres(
     }
 
     if (p.settings) {
-      settings[p.id] = {
+      const settingsRow: PersistedProjectState['settings'][string] = {
         systemPromptText: p.settings.systemPromptText,
         activePersonaId: p.settings.activePersonaId,
         chapterSummaryPromptCount: p.settings.chapterSummaryPromptCount,
@@ -66,7 +225,18 @@ export async function loadWorkspaceFromPostgres(
         generationTemperature: p.settings.generationTemperature,
         updatedAt: p.settings.updatedAt.toISOString(),
       };
+      applyProjectSettingsJsonExtensions(
+        settingsRow,
+        pickProjectSettingsJsonExtensions(
+          p.settings.settingsExtensions as Parameters<typeof pickProjectSettingsJsonExtensions>[0]
+        )
+      );
+      settings[p.id] = settingsRow;
     }
+
+    const workbenchStructuredByChapter = parseWorkbenchStructuredFromPg(
+      p.workbenchStructuredJson
+    );
 
     personas[p.id] = p.personas.map((per) => ({
       id: per.id,
@@ -103,6 +273,7 @@ export async function loadWorkspaceFromPostgres(
             : undefined,
         updatedAt: ch.updatedAt.toISOString(),
       })),
+      ...(workbenchStructuredByChapter ? { workbenchStructuredByChapter } : {}),
       indexVersion: p.indexVersion,
       lastIndexedAt: p.lastIndexedAt ? p.lastIndexedAt.toISOString() : null,
     };
@@ -162,6 +333,8 @@ export async function loadWorkspaceFromPostgres(
       updatedAt: e.updatedAt.toISOString(),
       deletedAt: e.deletedAt ? e.deletedAt.toISOString() : null,
     }));
+
+    identityRelations[p.id] = parseIdentityRelationsFromPg(p.identityRelationsJson);
   }
 
   return {
@@ -173,8 +346,7 @@ export async function loadWorkspaceFromPostgres(
     indexJobs,
     summarizeJobs,
     relationEvents,
-    /** JSON 主存；PG 专项表未建前从 PG 加载时为空，由 JSON 镜像补全 */
-    identityRelations: {},
+    identityRelations,
   };
 }
 
@@ -195,6 +367,8 @@ export async function syncWorkspaceToPostgres(
 
     for (const p of payload.projects) {
       const k = payload.knowledge[p.id];
+      const workbenchJson = serializeWorkbenchStructuredForPg(k?.workbenchStructuredByChapter);
+      const identityJson = serializeIdentityRelationsForPg(payload.identityRelations[p.id]);
       await tx.project.upsert({
         where: { id: p.id },
         create: {
@@ -206,6 +380,8 @@ export async function syncWorkspaceToPostgres(
           outlineSummary: k?.outlineSummary ?? '',
           indexVersion: k?.indexVersion ?? 0,
           lastIndexedAt: k?.lastIndexedAt ? new Date(k.lastIndexedAt) : null,
+          workbenchStructuredJson: workbenchJson ?? Prisma.JsonNull,
+          identityRelationsJson: identityJson,
         },
         update: {
           name: p.name,
@@ -214,6 +390,8 @@ export async function syncWorkspaceToPostgres(
           outlineSummary: k?.outlineSummary ?? '',
           indexVersion: k?.indexVersion ?? 0,
           lastIndexedAt: k?.lastIndexedAt ? new Date(k.lastIndexedAt) : null,
+          workbenchStructuredJson: workbenchJson ?? Prisma.JsonNull,
+          identityRelationsJson: identityJson,
         },
       });
     }
@@ -247,6 +425,9 @@ export async function syncWorkspaceToPostgres(
           chapterSummaryMemoryCount:
             s.chapterSummaryMemoryCount ?? DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
           generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
+          settingsExtensions: pickProjectSettingsJsonExtensions(
+            s
+          ) as Prisma.InputJsonValue,
           updatedAt: new Date(s.updatedAt),
         },
         update: {
@@ -257,6 +438,9 @@ export async function syncWorkspaceToPostgres(
           chapterSummaryMemoryCount:
             s.chapterSummaryMemoryCount ?? DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
           generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
+          settingsExtensions: pickProjectSettingsJsonExtensions(
+            s
+          ) as Prisma.InputJsonValue,
           updatedAt: new Date(s.updatedAt),
         },
       });
@@ -294,23 +478,13 @@ export async function syncWorkspaceToPostgres(
       const k = payload.knowledge[pid];
       if (!k?.chapters?.length) continue;
       for (const ch of k.chapters) {
-        chapterRows.push({
-          projectId: pid,
-          chapterNo: ch.chapterNo,
-          title: ch.title,
-          content: ch.content,
-          summary: ch.summary ?? '',
-          summarySource: ch.summarySource ?? null,
-          summaryUpdatedAt: ch.summaryUpdatedAt ? new Date(ch.summaryUpdatedAt) : null,
-          ...(ch.structuredInfo !== undefined && ch.structuredInfo !== null
-            ? { structuredInfo: ch.structuredInfo as unknown as Prisma.InputJsonValue }
-            : {}),
-          updatedAt: new Date(ch.updatedAt),
-        });
+        chapterRows.push(buildChapterRow(pid, ch));
       }
     }
     if (chapterRows.length > 0) {
-      await tx.chapter.createMany({ data: chapterRows });
+      await createManyInBatches(chapterRows, CHAPTER_CREATE_MANY_BATCH_SIZE, (batch) =>
+        tx.chapter.createMany({ data: batch })
+      );
     }
 
     await tx.indexJob.deleteMany({ where: { projectId: { in: projectIds } } });
@@ -382,5 +556,5 @@ export async function syncWorkspaceToPostgres(
     if (relRows.length > 0) {
       await tx.relationEvent.createMany({ data: relRows });
     }
-  });
+  }, WORKSPACE_PG_FULL_TX_OPTIONS);
 }

@@ -35,14 +35,16 @@ model ProjectMember {
 }
 
 model Project {
-  id               String    @id @map("id")
-  name             String    @map("name")
-  description      String    @default("") @map("description")
-  createdAt        DateTime  @map("created_at")
-  updatedAt        DateTime  @map("updated_at")
-  outlineSummary   String    @default("") @map("outline_summary") @db.Text
-  indexVersion     Int       @default(0) @map("index_version")
-  lastIndexedAt    DateTime? @map("last_indexed_at")
+  id                      String    @id @map("id")
+  name                    String    @map("name")
+  description             String    @default("") @map("description")
+  createdAt               DateTime  @map("created_at")
+  updatedAt               DateTime  @map("updated_at")
+  outlineSummary          String    @default("") @map("outline_summary") @db.Text
+  indexVersion            Int       @default(0) @map("index_version")
+  lastIndexedAt           DateTime? @map("last_indexed_at")
+  workbenchStructuredJson Json?     @map("workbench_structured_json")
+  identityRelationsJson   Json?     @default("[]") @map("identity_relations_json")
 
   members          ProjectMember[]
   settings         ProjectSettings?
@@ -63,6 +65,7 @@ model ProjectSettings {
   chapterSummaryPromptCount   Int      @default(3) @map("chapter_summary_prompt_count")
   chapterSummaryMemoryCount   Int      @default(3) @map("chapter_summary_memory_count")
   generationTemperature       Float    @default(0.7) @map("generation_temperature")
+  settingsExtensions          Json?    @map("settings_extensions")
   updatedAt                   DateTime @map("updated_at")
   project                     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

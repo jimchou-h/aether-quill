@@ -96,19 +96,9 @@ export class PromptTemplatesService implements OnModuleInit {
       const fromPg = await loadPromptTemplatesFromPostgres(this.prisma);
       if (fromPg) {
         this.applyRestored(fromPg);
-      } else {
-        const fromJson = this.restoreStateFromDisk();
-        if (fromJson) {
-          this.applyRestored(fromJson);
-          await syncPromptTemplatesToPostgres(this.prisma, this.buildPersistedPayload());
-        }
       }
     } catch (err) {
       console.error('[persistence] prompt-templates PG 初始化失败', err);
-      const fromJson = this.restoreStateFromDisk();
-      if (fromJson) {
-        this.applyRestored(fromJson);
-      }
     }
   }
 
@@ -312,16 +302,17 @@ export class PromptTemplatesService implements OnModuleInit {
 
   private persistState() {
     const payload = this.buildPersistedPayload();
+    if (usePostgresPersistence()) {
+      void syncPromptTemplatesToPostgres(this.prisma, payload).catch((err) =>
+        console.error('[persistence] prompt-templates PG 同步失败', err)
+      );
+      return;
+    }
     const targetDir = dirname(this.storagePath);
     if (!existsSync(targetDir)) {
       mkdirSync(targetDir, { recursive: true });
     }
     writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
-    if (usePostgresPersistence()) {
-      void syncPromptTemplatesToPostgres(this.prisma, payload).catch((err) =>
-        console.error('[persistence] prompt-templates PG 同步失败', err)
-      );
-    }
   }
 
   private buildPersistedPayload(): PersistedPromptTemplatesPayload {

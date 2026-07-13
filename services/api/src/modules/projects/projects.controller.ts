@@ -75,7 +75,7 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  remove(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
+  async remove(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     const userId = req.user?.userId;
     if (!userId) {
       throw new Error('User not authenticated');
@@ -219,7 +219,7 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Put(':id/knowledge/outline')
-  updateOutline(
+  async updateOutline(
     @Param('id') id: string,
     @Body() data: { outlineSummary: string },
     @Request() req: AuthenticatedRequest
@@ -852,7 +852,7 @@ export class ProjectsController {
     @Param('sessionId') sessionId: string,
     @Body()
     data: {
-      module: 'sensory-rewrite';
+      module: 'character' | 'sensory-rewrite';
       userFeedback: string;
       draftTextOverride?: string;
     },
@@ -1406,7 +1406,7 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id/knowledge/chapters/:chapterNo')
-  deleteChapter(
+  async deleteChapter(
     @Param('id') id: string,
     @Param('chapterNo') chapterNo: string,
     @Request() req: AuthenticatedRequest
@@ -1551,7 +1551,7 @@ export class ProjectsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  create(
+  async create(
     @Body() data: { name: string; description: string },
     @Request() req: AuthenticatedRequest
   ) {
