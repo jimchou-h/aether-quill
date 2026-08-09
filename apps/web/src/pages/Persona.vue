@@ -12,6 +12,15 @@ import AppModal from '../components/common/AppModal.vue';
 import PersonaCardView from '../components/personas/PersonaCardView.vue';
 import PersonaRelationGraph from '../components/personas/PersonaRelationGraph.vue';
 import { presentError, presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
+import {
+  buildLinkedPersonaCardMap,
+  linkedPersonaCardTitle,
+  normalizeDocumentList,
+} from '../utils/personaCardLink';
+import {
+  collectPersonaStatusChapterOptions,
+  resolvePersonaStatusForView,
+} from '../utils/personaChapterStatus';
 import { formatPersonaStateDisplay } from '../utils/personaStateDisplay';
 
 type PersonaViewMode = 'table' | 'cards' | 'graph';
@@ -30,6 +39,8 @@ const errorMessage = shallowRef('');
 const projectName = shallowRef('project');
 const viewMode = ref<PersonaViewMode>('table');
 const selectedPersonaId = ref<string | null>(null);
+/** null = 最新；数字 = 截至第 N 章（只读） */
+const statusAsOfChapterNo = ref<number | null>(null);
 const relationEvents = ref<RelationEventItem[]>([]);
 const identityRelations = ref<PersonaIdentityRelationItem[]>([]);
 const documents = ref<DocumentItem[]>([]);
@@ -38,9 +49,29 @@ const personaName = shallowRef('');
 const personaProfile = shallowRef('');
 const personaState = shallowRef('');
 
+const linkedPersonaCardByPersonaId = computed(() =>
+  buildLinkedPersonaCardMap(documents.value)
+);
+
+const statusChapterOptions = computed(() => collectPersonaStatusChapterOptions(personas.value));
+
+const statusViewMode = computed(() =>
+  statusAsOfChapterNo.value === null
+    ? ('latest' as const)
+    : { asOfChapterNo: statusAsOfChapterNo.value }
+);
+
+function personaStatusText(persona: PersonaItem): string {
+  return resolvePersonaStatusForView(persona, statusViewMode.value).text;
+}
+
 const publishedPersona = computed(
   () => personas.value.find((item) => item.status === 'published') || null
 );
+
+function linkedCardTitle(personaId: string): string {
+  return linkedPersonaCardTitle(linkedPersonaCardByPersonaId.value, personaId);
+}
 
 const personaModalTitle = computed(() =>
   editingPersonaId.value ? '编辑人物设定' : '新增人物设定'
@@ -103,7 +134,7 @@ async function loadData() {
       apiClient.getRelationEvents(projectId.value),
       apiClient.documents.list(projectId.value),
     ]);
-    const docsPayload = (docsResponse as { data?: DocumentItem[] }).data ?? [];
+    const docsPayload = normalizeDocumentList(docsResponse);
     personas.value = workspace.personas.map((persona) => ({
       ...persona,
       relationEventIds: persona.relationEventIds ?? [],
@@ -113,11 +144,11 @@ async function loadData() {
     relationEvents.value = events;
     identityRelations.value = workspace.identityRelations ?? [];
     documents.value = docsPayload.map((doc) => ({
-      ...doc,
-      content: doc.content ?? '',
-      version: doc.version ?? 1,
-      createdAt: doc.createdAt ?? '',
-      updatedAt: doc.updatedAt ?? '',
+      ...(doc as DocumentItem),
+      content: (doc as DocumentItem).content ?? '',
+      version: (doc as DocumentItem).version ?? 1,
+      createdAt: (doc as DocumentItem).createdAt ?? '',
+      updatedAt: (doc as DocumentItem).updatedAt ?? '',
     }));
     projectName.value = workspace.project.name || 'project';
     if (!selectedPersonaId.value && personas.value.length > 0) {
@@ -308,7 +339,32 @@ onMounted(() => {
               关系图
             </button>
           </div>
+          <label class="status-as-of">
+            人物状态查看
+            <select
+              class="status-as-of-select"
+              :value="statusAsOfChapterNo === null ? '' : String(statusAsOfChapterNo)"
+              @change="
+                statusAsOfChapterNo =
+                  ($event.target as HTMLSelectElement).value === ''
+                    ? null
+                    : Number(($event.target as HTMLSelectElement).value)
+              "
+            >
+              <option value="">最新</option>
+              <option
+                v-for="chapterNo in statusChapterOptions"
+                :key="chapterNo"
+                :value="String(chapterNo)"
+              >
+                截至第{{ chapterNo }}章
+              </option>
+            </select>
+          </label>
         </div>
+        <p v-if="statusAsOfChapterNo !== null" class="field-hint status-as-of-hint">
+          当前为只读快照视图；编辑人物状态仍写入「最新」。
+        </p>
 
         <p v-if="personas.length === 0" class="empty-state">暂无人物设定，请点击右上角新增。</p>
 
@@ -319,6 +375,7 @@ onMounted(() => {
           :relation-events="relationEvents"
           :documents="documents"
           :selected-persona-id="selectedPersonaId"
+          :status-as-of-chapter-no="statusAsOfChapterNo"
           @select-persona="handleSelectPersona"
         />
 
@@ -337,7 +394,8 @@ onMounted(() => {
               <tr>
                 <th scope="col">人物名称</th>
                 <th scope="col">状态</th>
-                <th scope="col">人物设定</th>
+                <th scope="col">简介</th>
+                <th scope="col">关联角色卡</th>
                 <th scope="col">人物状态</th>
                 <th scope="col" class="actions-col">操作</th>
               </tr>
@@ -354,7 +412,18 @@ onMounted(() => {
                   </span>
                 </td>
                 <td class="profile-cell" :title="persona.profile">{{ persona.profile }}</td>
-                <td>{{ formatPersonaStateDisplay(persona.state) }}</td>
+                <td>
+                  <span
+                    :class="
+                      linkedPersonaCardByPersonaId.has(persona.id)
+                        ? 'link-ok'
+                        : 'link-missing'
+                    "
+                  >
+                    {{ linkedCardTitle(persona.id) }}
+                  </span>
+                </td>
+                <td>{{ personaStatusText(persona) }}</td>
                 <td class="actions-col">
                   <div class="row-actions">
                     <button class="table-button" type="button" @click="startEdit(persona)">
@@ -396,17 +465,20 @@ onMounted(() => {
         <input v-model="personaName" class="field-input" type="text" placeholder="例如：沈镜川" />
       </label>
       <label class="field-label">
-        人物设定（人物画像 / 语气风格 / 禁忌规则，每行一条）
+        人物简介（短画像 / 口吻提示；完整静态设定请在知识库角色卡维护）
         <textarea
           v-model="personaProfile"
           class="field-textarea"
-          placeholder="例如：
-人物画像：前刑警，谨慎克制
-语气风格：短句、冷静
-禁忌规则：不主动暴露底牌"
-          rows="6"
+          placeholder="例如：前刑警，谨慎克制；短句、冷静；不主动暴露底牌"
+          rows="4"
         />
       </label>
+      <p v-if="editingPersonaId" class="field-hint">
+        关联静态卡：{{ linkedCardTitle(editingPersonaId) }}
+        <template v-if="!linkedPersonaCardByPersonaId.has(editingPersonaId)">
+          · 建议在知识库创建角色卡并选择本人物
+        </template>
+      </p>
       <label class="field-label">
         人物状态（可选）
         <input
@@ -523,8 +595,28 @@ onMounted(() => {
 
 .view-switch-button.active {
   border-color: var(--aq-primary);
-  background: var(--aq-primary-soft);
-  color: var(--aq-primary-hover);
+  background: color-mix(in srgb, var(--aq-primary) 12%, var(--aq-surface));
+}
+
+.status-as-of {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--aq-text-muted, #6b7280);
+  margin-left: auto;
+}
+
+.status-as-of-select {
+  border: 1px solid var(--aq-border-strong);
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--aq-surface);
+  font-size: 0.85rem;
+}
+
+.status-as-of-hint {
+  margin: -0.35rem 0 0.75rem;
 }
 
 .panel-title {
@@ -577,6 +669,21 @@ onMounted(() => {
   color: #4b5563;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+.link-ok {
+  color: #027a48;
+}
+
+.link-missing {
+  color: #b54708;
+}
+
+.field-hint {
+  margin: 0.35rem 0 0.75rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+  line-height: 1.45;
 }
 
 .actions-col {

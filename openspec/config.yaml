@@ -1,0 +1,21 @@
+schema: spec-driven
+
+context: |
+  Product: Aether Quill — Chinese novel RAG writing platform (世界观/人物/大纲/章节).
+  Monorepo (pnpm): apps/web (Vue 3 + Vite + Pinia + Ant Design Vue),
+  services/api (NestJS), services/rag-orchestrator, services/worker (BullMQ),
+  packages/* (shared-types, config, model-providers, prompt-templates).
+  Contract First: OpenAPI under openapi/ is the API SSOT; sync docs before code.
+  Commits: Conventional Commits + AQ-XXX when binding legacy board tasks.
+  Domain glossary: CONTEXT.md; ADRs: docs/adr/; agent adapters: docs/agents/.
+  In-flight change SSOT: openspec/changes/<name>/ (do not fork a parallel .docs tree).
+  Historical progress board: .docs/02-开发执行/任务开发进度清单-v1.md.
+
+rules:
+  proposal:
+    - Keep proposals under 500 words when possible
+    - Always include a "Non-goals" section
+    - Call out OpenAPI / error-code impact explicitly
+  tasks:
+    - Prefer vertical slices (frontend + API + tests) over horizontal layers
+    - Bind each task to at least one automated test

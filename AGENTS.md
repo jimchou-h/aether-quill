@@ -46,12 +46,12 @@ aether-quill/
 
 | 维度        | 方案 v1 设计                               | 当前代码                                                                                                                                                    |
 | --------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 持久化       | PostgreSQL + Prisma（`DATABASE_URL` 可选） | 未配置时：`services/api/data/*.json` + in-memory；配置后：**PG 主存 + JSON 镜像双写**，`scripts/migrate-json-to-pg.ts`（`--dry-run` / `--confirm` / `--rollback`）         |
-| 向量库       | Qdrant / pgvector                      | 未接入；`vector-store.ts` 在内存里 cache chunks                                                                                                                 |
-| Embedding | 真模型（BGE / OpenAI）                      | `Math.sin(charCodeSum * i)` 模拟向量（见 `services/rag-orchestrator/src/retrieval/vector-store.ts:94` / `services/worker/src/jobs/ingestion.processor.ts:76`） |
-| 切分        | 语义段 + token + overlap                  | 500 字符硬切 + 0 overlap                                                                                                                                    |
-| 上下文注入     | query → retrieve → rerank → 注入相关证据     | 硬塞 `chapters.slice(-3)` + 全量大纲 / 人物                                                                                                                     |
-| Trace     | 落库可查询                                  | in-memory，重启即丢                                                                                                                                          |
+| 持久化       | PostgreSQL + Prisma（`DATABASE_URL` 可选） | 未配置时：`services/api/data/*.json` + in-memory；配置后：**PG 主存**（AQ-331 workspace PG-only persist），JSON 仅作迁移/备份工具                                                                 |
+| 向量库       | Qdrant / pgvector                      | **已接入 Qdrant**（`services/rag-orchestrator/src/retrieval/vector-store.ts`）；未配置时检索返回空                                                                 |
+| Embedding | 真模型（BGE / OpenAI）                      | **已接入** SiliconFlow 等真模型（`@aether-quill/model-providers`）；worker ingestion 使用 token 切分 + 真 embedding                                                          |
+| 切分        | 语义段 + token + overlap                  | worker 使用 `INGEST_CHUNK_TOKEN_SIZE` + overlap（见 `services/worker`）；非 500 字符硬切                                                                               |
+| 上下文注入     | query → retrieve → rerank → 注入相关证据     | 有章节锚定时走**标题匹配 + 向量补足融合**（AQ-360）；无结构化解析时向量兜底；叙事上下文含出场人物合并注入与块预算（AQ-362/365） |
+| Trace     | 落库可查询                                  | orchestrator **内存** TraceStore，重启即丢；`generation_tier` / model / temperature 已写入 trace 上下文（AQ-341）                                                          |
 
 
 结论：
@@ -251,3 +251,21 @@ pnpm --filter @aether-quill/api migrate:json-to-pg -- --dry-run
 - 无未记录的架构偏差
 
 否则一律不得标记完成。
+
+---
+
+## Agent skills
+
+面向 agent 的仓库适配配置（Matt / OpenSpec 工作流）：
+
+| 文档 | 用途 |
+|------|------|
+| `docs/agents/issue-tracker.md` | GitHub Issues + `gh` 约定 |
+| `docs/agents/triage-labels.md` | triage role → label 映射 |
+| `docs/agents/domain.md` | 如何消费 `CONTEXT.md` / `docs/adr/` |
+
+领域词汇：根目录 `CONTEXT.md`。架构决策：`docs/adr/`。
+
+**新需求 SSOT**：进行中的变更写在 `openspec/changes/<name>/`；历史看板仍在 `.docs/`。
+
+极简话术（Cursor skill `unified-dev-workflow`）：`uw <需求>` / `uw 继续` / `uw #N`。

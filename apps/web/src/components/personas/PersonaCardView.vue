@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import type { DocumentItem, PersonaItem, RelationEventItem } from '../../services/api';
 import { buildPersonaTimeline, getPersonaRelationEvents } from '../../utils/personaGraph';
-import { formatPersonaStateDisplay } from '../../utils/personaStateDisplay';
+import { resolvePersonaStatusForView } from '../../utils/personaChapterStatus';
 
 const props = defineProps<{
   projectId: string;
@@ -11,6 +11,7 @@ const props = defineProps<{
   relationEvents: RelationEventItem[];
   documents: DocumentItem[];
   selectedPersonaId: string | null;
+  statusAsOfChapterNo?: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -38,18 +39,52 @@ const timeline = computed(() => {
   return buildPersonaTimeline(selectedPersona.value, props.relationEvents);
 });
 
+const linkedPersonaCard = computed(() => {
+  if (!selectedPersona.value) {
+    return null;
+  }
+  return (
+    props.documents.find(
+      (doc) =>
+        (doc.docType ?? 'other') === 'persona_card' && doc.personaId === selectedPersona.value!.id
+    ) ?? null
+  );
+});
+
+const statusViewMode = computed(() =>
+  props.statusAsOfChapterNo == null
+    ? ('latest' as const)
+    : { asOfChapterNo: props.statusAsOfChapterNo }
+);
+
+function personaStatusText(persona: PersonaItem): string {
+  return resolvePersonaStatusForView(persona, statusViewMode.value).text;
+}
+
 const linkedDocuments = computed(() => {
   if (!selectedPersona.value) {
     return [];
   }
+  const personaId = selectedPersona.value.id;
   const keyword = selectedPersona.value.name.trim();
-  if (!keyword) {
-    return [];
-  }
-  return props.documents.filter(
-    (doc) => doc.title.includes(keyword) || doc.content.includes(keyword)
-  );
+  return props.documents.filter((doc) => {
+    if ((doc.docType ?? 'other') === 'persona_card' && doc.personaId === personaId) {
+      return true;
+    }
+    if (!keyword) {
+      return false;
+    }
+    return doc.title.includes(keyword) || doc.content.includes(keyword);
+  });
 });
+
+function jumpToKnowledgeDoc(docId: string) {
+  void router.push({
+    name: 'knowledge',
+    params: { id: props.projectId },
+    query: { docId },
+  });
+}
 
 function formatAppearance(persona: PersonaItem) {
   const chapters = persona.appearedChapterNos ?? [];
@@ -91,7 +126,7 @@ function jumpToChapter(chapterNo: number) {
         @click="jumpToPersona(persona.id)"
       >
         <strong>{{ persona.name }}</strong>
-        <span>{{ formatPersonaStateDisplay(persona.state) }}</span>
+        <span>{{ personaStatusText(persona) }}</span>
       </button>
     </aside>
 
@@ -100,7 +135,7 @@ function jumpToChapter(chapterNo: number) {
         <h3>{{ selectedPersona.name }}</h3>
         <p>
           状态：{{ selectedPersona.status === 'published' ? '已发布' : '草稿' }} · 人物状态：{{
-            formatPersonaStateDisplay(selectedPersona.state)
+            personaStatusText(selectedPersona)
           }}
         </p>
         <p>出场章节：{{ formatAppearance(selectedPersona) }}</p>
@@ -112,6 +147,31 @@ function jumpToChapter(chapterNo: number) {
           }}
         </p>
       </header>
+
+      <section class="card-section">
+        <h4>人物简介</h4>
+        <p class="profile-text">{{ selectedPersona.profile || '（暂无简介）' }}</p>
+      </section>
+
+      <section class="card-section">
+        <h4>关联静态设定卡</h4>
+        <template v-if="linkedPersonaCard">
+          <p class="meta">
+            <button
+              type="button"
+              class="link-button"
+              @click="jumpToKnowledgeDoc(linkedPersonaCard.id)"
+            >
+              {{ linkedPersonaCard.title }}
+            </button>
+            · 只读预览（编辑请前往知识库）
+          </p>
+          <pre class="card-preview">{{ linkedPersonaCard.content?.slice(0, 1200) || '（无内容）' }}</pre>
+        </template>
+        <p v-else class="empty-hint">
+          尚未关联知识库角色卡。请在知识库创建/编辑 persona_card 并选择本人物。
+        </p>
+      </section>
 
       <section class="card-section">
         <h4>关系网</h4>
@@ -147,9 +207,14 @@ function jumpToChapter(chapterNo: number) {
       <section class="card-section">
         <h4>关联文档（{{ linkedDocuments.length }} 篇）</h4>
         <ul v-if="linkedDocuments.length > 0" class="doc-list">
-          <li v-for="doc in linkedDocuments" :key="doc.id">{{ doc.title }}</li>
+          <li v-for="doc in linkedDocuments" :key="doc.id">
+            <button type="button" class="link-button" @click="jumpToKnowledgeDoc(doc.id)">
+              {{ doc.title }}
+            </button>
+            <span v-if="(doc.docType ?? 'other') === 'persona_card'" class="meta"> · 角色卡</span>
+          </li>
         </ul>
-        <p v-else class="empty-hint">暂无标题或正文包含该角色名的文档</p>
+        <p v-else class="empty-hint">暂无关联角色卡或标题/正文命中的文档</p>
       </section>
     </article>
 
@@ -245,5 +310,26 @@ function jumpToChapter(chapterNo: number) {
 .empty-hint {
   color: #6b7280;
   margin: 0;
+}
+
+.profile-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+  color: #374151;
+}
+
+.card-preview {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
 }
 </style>
