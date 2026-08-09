@@ -21,7 +21,7 @@ test('buildFallbackChapterSummary truncates long content to 160 characters', () 
   assert.ok(summary.endsWith('...'));
 });
 
-test('resolveChapterSummaryOnContentWrite refreshes summary when prior llm summary exists', () => {
+test('resolveChapterSummaryOnContentWrite preserves non-empty llm summary', () => {
   const updatedAt = new Date('2026-05-01T00:00:00.000Z');
   const content = '新的正文'.repeat(50);
   const result = resolveChapterSummaryOnContentWrite({
@@ -32,9 +32,9 @@ test('resolveChapterSummaryOnContentWrite refreshes summary when prior llm summa
       summaryUpdatedAt: updatedAt,
     },
   });
-  assert.equal(result.summary, buildFallbackChapterSummary(content));
-  assert.equal(result.summarySource, 'fallback');
-  assert.notEqual(result.summaryUpdatedAt, updatedAt);
+  assert.equal(result.summary, '旧语义摘要');
+  assert.equal(result.summarySource, 'llm');
+  assert.equal(result.summaryUpdatedAt, updatedAt);
 });
 
 test('resolveChapterSummaryOnContentWrite refreshes fallback summary when not llm', () => {

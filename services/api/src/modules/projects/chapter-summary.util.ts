@@ -10,8 +10,8 @@ export function buildFallbackChapterSummary(content: string): string {
 
 /**
  * 正文变更写入时的摘要字段。
- * 正文一旦变更即回退为正文截取（fallback），避免「近期摘要 / 语义记忆」仍引用旧 LLM 摘要。
- * 完整语义摘要需用户再次点击「生成摘要」。
+ * 已有非空 LLM 摘要时保留，避免手改保存冲掉语义摘要；
+ * 无 LLM 摘要时回退为正文截取（fallback）。完整语义摘要仍需用户点击「生成摘要」。
  */
 export function resolveChapterSummaryOnContentWrite(input: {
   content: string;
@@ -27,6 +27,14 @@ export function resolveChapterSummaryOnContentWrite(input: {
   summaryUpdatedAt: Date;
 } {
   const now = input.now ?? new Date();
+  const existingSummary = input.existing?.summary?.trim() ?? '';
+  if (input.existing?.summarySource === 'llm' && existingSummary) {
+    return {
+      summary: input.existing.summary ?? existingSummary,
+      summarySource: 'llm',
+      summaryUpdatedAt: input.existing.summaryUpdatedAt ?? now,
+    };
+  }
   return {
     summary: buildFallbackChapterSummary(input.content),
     summarySource: 'fallback',
@@ -65,10 +73,10 @@ export function resolveChapterSummaryOnOptimizeApply(input: {
     };
   }
 
-  const fields = resolveChapterSummaryOnContentWrite({
-    content: input.content,
-    existing: input.existing,
-    now,
-  });
+  const fields = {
+    summary: buildFallbackChapterSummary(input.content),
+    summarySource: 'fallback' as const,
+    summaryUpdatedAt: now,
+  };
   return { ...fields, reindexSummaryVector: true };
 }
