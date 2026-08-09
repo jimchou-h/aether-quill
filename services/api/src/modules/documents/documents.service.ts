@@ -15,16 +15,20 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { usePostgresPersistence } from '../../persistence/use-postgres';
 import {
+  deleteDocumentFromPostgres,
   loadDocumentsFromPostgres,
   syncDocumentsToPostgres,
+  syncSingleDocumentToPostgres,
   type PersistedDocumentsPayload,
   type RestoredDocumentsState,
 } from '../../persistence/documents-pg-sync';
+import { createAsyncSerialQueue } from '../../persistence/async-serial-queue';
 import {
   DEFAULT_USER_DOC_TYPE,
   docTypeForIngestion,
   normalizeDocType,
 } from './documents-type.util';
+import { nextIndexStatusAfterContentChange } from './documents-index-status.util';
 
 interface PersistedDocumentState {
   documents: Array<{
@@ -66,6 +70,11 @@ export class DocumentsService implements OnModuleInit {
   private readonly documents: DocumentRecord[] = [];
   private readonly versions = new Map<string, DocumentVersion[]>();
   private readonly chunks = new Map<string, ChunkRecord[]>();
+  /** PG 全量同步串行队列：避免并发 fire-and-forget 旧快照覆盖新快照 */
+  private readonly pgSyncQueue = createAsyncSerialQueue();
+  /** 同文档保存后自动索引防抖 */
+  private readonly reindexTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly REINDEX_DEBOUNCE_MS = 800;
 
   constructor(
     private readonly projectsService: ProjectsService,
@@ -126,10 +135,10 @@ export class DocumentsService implements OnModuleInit {
     return doc;
   }
 
-  create(
+  async create(
     projectId: string,
-    payload: { title: string; content: string; docType?: string }
-  ): DocumentRecord {
+    payload: { title: string; content: string; docType?: string; personaId?: string | null }
+  ): Promise<DocumentRecord> {
     this.projectsService.findOne(projectId);
 
     const title = payload.title?.trim();
@@ -143,6 +152,7 @@ export class DocumentsService implements OnModuleInit {
 
     const now = new Date();
     const docType = normalizeDocType(payload.docType);
+    const personaId = this.resolvePersonaIdForDocument(projectId, docType, payload.personaId);
 
     const doc: DocumentRecord = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -150,6 +160,7 @@ export class DocumentsService implements OnModuleInit {
       title,
       content,
       docType,
+      personaId,
       indexStatus: 'pending',
       version: 1,
       createdAt: now,
@@ -165,29 +176,49 @@ export class DocumentsService implements OnModuleInit {
         createdAt: now,
       },
     ]);
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ documentIds: [doc.id] });
+    this.scheduleAutoReindex(doc.id);
     return doc;
   }
 
-  update(
+  async update(
     documentId: string,
-    payload: { title?: string; content?: string; docType?: string }
-  ): DocumentRecord {
+    payload: { title?: string; content?: string; docType?: string; personaId?: string | null }
+  ): Promise<DocumentRecord> {
     const doc = this.findById(documentId);
 
     const now = new Date();
+    let contentChanged = false;
     if (payload.title !== undefined) {
-      doc.title = payload.title.trim() || doc.title;
+      const nextTitle = payload.title.trim() || doc.title;
+      if (nextTitle !== doc.title) {
+        contentChanged = true;
+      }
+      doc.title = nextTitle;
     }
     if (payload.content !== undefined) {
+      if (payload.content !== doc.content) {
+        contentChanged = true;
+      }
       doc.content = payload.content;
     }
     if (payload.docType !== undefined) {
-      doc.docType = normalizeDocType(payload.docType);
+      const nextType = normalizeDocType(payload.docType);
+      if (nextType !== doc.docType) {
+        contentChanged = true;
+      }
+      doc.docType = nextType;
+    }
+    if (payload.personaId !== undefined) {
+      doc.personaId = this.resolvePersonaIdForDocument(doc.projectId, doc.docType, payload.personaId);
     }
 
     doc.version += 1;
     doc.updatedAt = now;
+
+    if (contentChanged) {
+      doc.indexStatus = nextIndexStatusAfterContentChange(doc.indexStatus);
+    }
 
     const docVersions = this.versions.get(documentId) || [];
     docVersions.push({
@@ -198,19 +229,33 @@ export class DocumentsService implements OnModuleInit {
     });
     this.versions.set(documentId, docVersions);
 
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ documentIds: [documentId] });
+    if (contentChanged) {
+      this.scheduleAutoReindex(documentId);
+    }
     return doc;
   }
 
-  removeByProjectId(projectId: string): number {
+  async removeByProjectId(projectId: string): Promise<number> {
     const documentIds = listDocumentIdsForProject(this.documents, projectId);
     for (const documentId of documentIds) {
-      this.remove(documentId);
+      // 内存侧先删干净，最后一次落库，避免 N 次全量同步
+      this.findById(documentId);
+      const index = this.documents.findIndex((d) => d.id === documentId);
+      if (index !== -1) {
+        this.documents.splice(index, 1);
+      }
+      this.versions.delete(documentId);
+      this.chunks.delete(documentId);
+    }
+    if (documentIds.length > 0) {
+      await this.persistStateAndAwaitPgSync({ deletedDocumentIds: documentIds });
     }
     return documentIds.length;
   }
 
-  remove(documentId: string): void {
+  async remove(documentId: string): Promise<void> {
+    this.clearAutoReindex(documentId);
     this.findById(documentId);
     const index = this.documents.findIndex((d) => d.id === documentId);
     if (index === -1) {
@@ -220,15 +265,35 @@ export class DocumentsService implements OnModuleInit {
     this.documents.splice(index, 1);
     this.versions.delete(documentId);
     this.chunks.delete(documentId);
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ deletedDocumentIds: [documentId] });
   }
 
-  reindex(documentId: string): ReindexResult {
+  /** 保存后排队自动索引；同文档短时间多次保存合并为一次 */
+  private scheduleAutoReindex(documentId: string): void {
+    this.clearAutoReindex(documentId);
+    const timer = setTimeout(() => {
+      this.reindexTimers.delete(documentId);
+      void this.reindex(documentId).catch((err) => {
+        console.error(`[documents] 自动索引失败 document=${documentId}`, err);
+      });
+    }, DocumentsService.REINDEX_DEBOUNCE_MS);
+    this.reindexTimers.set(documentId, timer);
+  }
+
+  private clearAutoReindex(documentId: string): void {
+    const prev = this.reindexTimers.get(documentId);
+    if (prev) {
+      clearTimeout(prev);
+      this.reindexTimers.delete(documentId);
+    }
+  }
+
+  async reindex(documentId: string): Promise<ReindexResult> {
     const doc = this.findById(documentId);
 
     doc.indexStatus = 'indexing';
     doc.updatedAt = new Date();
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ documentIds: [documentId] });
 
     const workerUrl = process.env.WORKER_URL || 'http://localhost:3002';
 
@@ -246,7 +311,9 @@ export class DocumentsService implements OnModuleInit {
           error.message
         );
         doc.indexStatus = 'failed';
-        this.persistState();
+        void this.persistStateAndAwaitPgSync({ documentIds: [documentId] }).catch((err) =>
+          console.error('[persistence] documents PG 同步失败', err)
+        );
       });
 
     return { documentId, indexStatus: 'indexing' };
@@ -291,14 +358,17 @@ export class DocumentsService implements OnModuleInit {
     return out;
   }
 
-  commitIndexResult(documentId: string, payload: CommitIndexResultInput): DocumentRecord {
+  async commitIndexResult(
+    documentId: string,
+    payload: CommitIndexResultInput
+  ): Promise<DocumentRecord> {
     const doc = this.findById(documentId);
     const now = new Date();
 
     if (payload.status === 'failed') {
       doc.indexStatus = 'failed';
       doc.updatedAt = now;
-      this.persistState();
+      await this.persistStateAndAwaitPgSync({ documentIds: [documentId] });
       return doc;
     }
 
@@ -316,7 +386,7 @@ export class DocumentsService implements OnModuleInit {
     this.chunks.set(documentId, chunks);
     doc.indexStatus = 'completed';
     doc.updatedAt = now;
-    this.persistState();
+    await this.persistStateAndAwaitPgSync({ documentIds: [documentId] });
     return doc;
   }
 
@@ -356,19 +426,66 @@ export class DocumentsService implements OnModuleInit {
     return chunks;
   }
 
-  private persistState() {
+  /** 关键写：落库完成后再返回；PG 模式下经串行队列，防止旧快照覆盖 */
+  private resolvePersonaIdForDocument(
+    projectId: string,
+    docType: string,
+    personaId: string | null | undefined
+  ): string | null {
+    if (personaId === undefined) {
+      return null;
+    }
+    const normalized = personaId?.trim() || null;
+    if (!normalized) {
+      return null;
+    }
+    if (docType !== 'persona_card') {
+      throw new BadRequestException('仅 persona_card 文档可设置 personaId');
+    }
+    const personas = this.projectsService.getPersonas(projectId);
+    if (!personas.some((p) => p.id === normalized)) {
+      throw new BadRequestException(`personaId 不属于本项目: ${normalized}`);
+    }
+    return normalized;
+  }
+
+  /** 写路径默认增量同步；未指定 documentIds/deletedDocumentIds 时走全量（兼容启动对账） */
+  private async persistStateAndAwaitPgSync(options?: {
+    documentIds?: string[];
+    deletedDocumentIds?: string[];
+  }): Promise<void> {
     const payload = this.buildPersistedPayload();
-    if (usePostgresPersistence()) {
-      void syncDocumentsToPostgres(this.prisma, payload).catch((err) =>
-        console.error('[persistence] documents PG 同步失败', err)
-      );
+    if (!usePostgresPersistence()) {
+      const targetDir = dirname(this.storagePath);
+      if (!existsSync(targetDir)) {
+        mkdirSync(targetDir, { recursive: true });
+      }
+      writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
       return;
     }
-    const targetDir = dirname(this.storagePath);
-    if (!existsSync(targetDir)) {
-      mkdirSync(targetDir, { recursive: true });
+
+    try {
+      await this.pgSyncQueue.enqueue(async () => {
+        const deletedIds = options?.deletedDocumentIds ?? [];
+        for (const documentId of deletedIds) {
+          await deleteDocumentFromPostgres(this.prisma, documentId);
+        }
+        const documentIds = options?.documentIds;
+        if (documentIds && documentIds.length > 0) {
+          for (const documentId of documentIds) {
+            await syncSingleDocumentToPostgres(this.prisma, payload, documentId);
+          }
+          return;
+        }
+        if (deletedIds.length > 0 && (!documentIds || documentIds.length === 0)) {
+          return;
+        }
+        await syncDocumentsToPostgres(this.prisma, payload);
+      });
+    } catch (err) {
+      console.error('[persistence] documents PG 同步失败', err);
+      throw err;
     }
-    writeFileSync(this.storagePath, JSON.stringify(payload, null, 2), 'utf8');
   }
 
   private buildPersistedPayload(): PersistedDocumentsPayload {
