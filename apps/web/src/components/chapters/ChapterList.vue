@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import type { ChapterItem, ChapterStructuredInfo } from '../../services/api';
 import { isPersonaKeywordSupplement } from '../../utils/structured-matching';
+import StyleSampleCaptureModal from './StyleSampleCaptureModal.vue';
+import { WRITING_STYLE_SAMPLE_MIN_CHARS } from '../../constants/writingStyleSamples';
 
 const props = defineProps<{
+  projectId: string;
   chapters: ChapterItem[];
   loading: boolean;
   selectedChapterNo: number | null;
   summarizingChapterNo: number | null;
   generatingRelationChapterNo: number | null;
-  optimizingChapterNo: number | null;
   finalPolishingChapterNo: number | null;
   complianceCheckingChapterNo: number | null;
   savingChapterNo: number | null;
@@ -20,11 +22,10 @@ const emit = defineEmits<{
   select: [chapterNo: number];
   summarize: [chapterNo: number];
   generateRelationEvents: [chapterNo: number];
-  optimize: [chapter: ChapterItem];
+  writingOptimize: [chapter: ChapterItem];
   finalPolish: [chapter: ChapterItem];
   complianceCheck: [chapter: ChapterItem];
   pipelineOptimize: [chapter: ChapterItem];
-  batchOptimize: [chapters: ChapterItem[]];
   batchPipelineOptimize: [chapters: ChapterItem[]];
   save: [payload: { chapterNo: number; title: string; content: string }];
   parseStructured: [chapterNo: number];
@@ -56,7 +57,10 @@ const editingChapterNo = ref<number | null>(null);
 const editTitle = ref('');
 const editContent = ref('');
 const localError = ref('');
-const showMoreActions = ref(false);
+const contentPreRef = ref<HTMLElement | null>(null);
+const contentTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const showStyleSampleModal = ref(false);
+const styleSampleInitialText = ref('');
 
 const searchQuery = ref('');
 const jumpToChapterNo = ref('');
@@ -85,16 +89,6 @@ function selectAllForBatch() {
 
 function clearBatchSelection() {
   selectedForBatch.value = new Set();
-}
-
-function emitBatchOptimize() {
-  if (selectedBatchCount.value < 2) {
-    return;
-  }
-  const selected = props.chapters
-    .filter((chapter) => selectedForBatch.value.has(chapter.chapterNo))
-    .sort((a, b) => a.chapterNo - b.chapterNo);
-  emit('batchOptimize', selected);
 }
 
 function emitBatchPipelineOptimize() {
@@ -165,7 +159,6 @@ function isBusy(chapterNo: number) {
   return (
     props.summarizingChapterNo === chapterNo ||
     props.generatingRelationChapterNo === chapterNo ||
-    props.optimizingChapterNo === chapterNo ||
     props.finalPolishingChapterNo === chapterNo ||
     props.complianceCheckingChapterNo === chapterNo ||
     props.savingChapterNo === chapterNo ||
@@ -188,15 +181,51 @@ function cancelEdit() {
   localError.value = '';
 }
 
+function captureSelectionText(chapterNo: number): string {
+  if (isEditing(chapterNo) && contentTextareaRef.value) {
+    const element = contentTextareaRef.value;
+    const start = element.selectionStart;
+    const end = element.selectionEnd;
+    if (start === end) {
+      return '';
+    }
+    return element.value.slice(start, end).trim();
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !contentPreRef.value) {
+    return '';
+  }
+  const anchor = selection.anchorNode;
+  if (!anchor || !contentPreRef.value.contains(anchor)) {
+    return '';
+  }
+  return selection.toString().trim();
+}
+
+function openStyleSampleModal(chapterNo: number) {
+  const text = captureSelectionText(chapterNo);
+  if (!text) {
+    localError.value = `请先选中一段正文（至少 ${WRITING_STYLE_SAMPLE_MIN_CHARS} 字）`;
+    return;
+  }
+  if (text.length < WRITING_STYLE_SAMPLE_MIN_CHARS) {
+    localError.value = `选区过短，文风样本至少 ${WRITING_STYLE_SAMPLE_MIN_CHARS} 字`;
+    return;
+  }
+  localError.value = '';
+  styleSampleInitialText.value = text;
+  showStyleSampleModal.value = true;
+}
+
 function handleSave(chapterNo: number) {
   const title = editTitle.value.trim();
-  const content = editContent.value.trim();
-
+  // 空校验用 trim；emit 保留编辑器原文，避免仅空白差异触发 contentHash 变更
+  const content = editContent.value;
   if (!title) {
     localError.value = '请填写章节标题';
     return;
   }
-  if (!content) {
+  if (!content.trim()) {
     localError.value = '请填写章节正文';
     return;
   }
@@ -232,29 +261,6 @@ function scrollToSelectedChapter() {
 function clearEditing() {
   cancelEdit();
 }
-
-function toggleMoreActions() {
-  showMoreActions.value = !showMoreActions.value;
-}
-
-function handleClickOutside(event: MouseEvent) {
-  if (showMoreActions.value) {
-    const target = event.target as Node;
-    const moreBtn = document.querySelector('.more-actions-trigger');
-    const menu = document.querySelector('.more-actions-menu');
-    if (moreBtn && !moreBtn.contains(target) && menu && !menu.contains(target)) {
-      showMoreActions.value = false;
-    }
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('click', handleClickOutside);
-});
-
-onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside);
-});
 
 watch(
   () => props.selectedChapterNo,
@@ -327,14 +333,6 @@ defineExpose({ clearEditing, clearBatchSelection });
             class="secondary-button batch-optimize-button"
             type="button"
             :disabled="selectedBatchCount < 2"
-            @click="emitBatchOptimize"
-          >
-            批量优化{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
-          </button>
-          <button
-            class="secondary-button batch-optimize-button"
-            type="button"
-            :disabled="selectedBatchCount < 2"
             @click="emitBatchPipelineOptimize"
           >
             批量创作精修{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
@@ -351,7 +349,7 @@ defineExpose({ clearEditing, clearBatchSelection });
               <input
                 type="checkbox"
                 :checked="isBatchSelected(chapter.chapterNo)"
-                :aria-label="`选择第${chapter.chapterNo}章用于批量优化`"
+                :aria-label="`选择第${chapter.chapterNo}章用于批量创作精修`"
                 @change="toggleBatchSelect(chapter.chapterNo)"
               />
             </label>
@@ -418,121 +416,115 @@ defineExpose({ clearEditing, clearBatchSelection });
               >
                 取消
               </button>
+              <button
+                class="secondary-button"
+                :disabled="props.savingChapterNo === selectedChapter.chapterNo"
+                @click="openStyleSampleModal(selectedChapter.chapterNo)"
+              >
+                标为文风样本
+              </button>
             </template>
             <template v-else>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="startEdit(selectedChapter)"
-              >
-                编辑
-              </button>
-              <button
-                class="primary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('summarize', selectedChapter.chapterNo)"
-              >
-                {{
-                  props.summarizingChapterNo === selectedChapter.chapterNo
-                    ? '生成中...'
-                    : '生成摘要'
-                }}
-              </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('parseStructured', selectedChapter.chapterNo)"
-              >
-                {{
-                  props.parsingStructuredChapterNo === selectedChapter.chapterNo
-                    ? '解析中...'
-                    : '解析结构化信息'
-                }}
-              </button>
-              <button
-                class="primary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('finalPolish', selectedChapter)"
-              >
-                {{
-                  props.finalPolishingChapterNo === selectedChapter.chapterNo
-                    ? '终稿化中...'
-                    : '一键终稿'
-                }}
-              </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('optimize', selectedChapter)"
-              >
-                {{
-                  props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '章节优化'
-                }}
-              </button>
-              <div class="dropdown-container">
+              <div class="rewrite-tier-bar" role="group" aria-label="章节改文入口">
+                <span class="rewrite-tier-label">改文</span>
                 <button
-                  class="secondary-button more-actions-trigger"
+                  class="tier-button tier-writing secondary-button"
+                  title="按自由要求生成优化方案，再改写整章正文"
                   :disabled="isBusy(selectedChapter.chapterNo)"
-                  @click="toggleMoreActions"
+                  @click="emit('writingOptimize', selectedChapter)"
                 >
-                  更多
-                  <svg
-                    width="10"
-                    height="6"
-                    viewBox="0 0 10 6"
-                    fill="currentColor"
-                    style="margin-left: 0.25rem"
-                  >
-                    <path
-                      d="M1 1l4 4 4-4"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      fill="none"
-                      stroke-linecap="round"
-                    />
-                  </svg>
+                  文笔优化
                 </button>
-                <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">
-                  <button
-                    class="dropdown-item"
-                    title="发布前硬规则：预扫描 → 合规大纲 → 改写 → 复扫"
-                    :disabled="isBusy(selectedChapter.chapterNo)"
-                    @click="emit('complianceCheck', selectedChapter)"
-                  >
-                    {{
-                      props.complianceCheckingChapterNo === selectedChapter.chapterNo
-                        ? '合规检验中...'
-                        : '终稿合规检验'
-                    }}
-                  </button>
-                  <button
-                    class="dropdown-item"
-                    title="分步执行特征润色与感官优化；可人工确认大纲"
-                    :disabled="isBusy(selectedChapter.chapterNo)"
-                    @click="emit('pipelineOptimize', selectedChapter)"
-                  >
-                    创作精修（分步）
-                  </button>
-                  <button
-                    class="dropdown-item"
-                    :disabled="isBusy(selectedChapter.chapterNo)"
-                    @click="emit('generateRelationEvents', selectedChapter.chapterNo)"
-                  >
-                    {{
-                      props.generatingRelationChapterNo === selectedChapter.chapterNo
-                        ? '生成中...'
-                        : '生成关系事件'
-                    }}
-                  </button>
-                </div>
+                <button
+                  class="tier-button tier-fast primary-button"
+                  title="快：自动跑完特征润色与感官优化，生成后审核应用"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="emit('finalPolish', selectedChapter)"
+                >
+                  {{
+                    props.finalPolishingChapterNo === selectedChapter.chapterNo
+                      ? '终稿化中...'
+                      : '一键终稿'
+                  }}
+                </button>
+                <button
+                  class="tier-button tier-refine secondary-button"
+                  title="细：分步执行特征润色与感官优化，可人工确认大纲"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="emit('pipelineOptimize', selectedChapter)"
+                >
+                  创作精修
+                </button>
+                <button
+                  class="tier-button tier-compliance secondary-button"
+                  title="发布前：硬规则预扫描 → 合规大纲 → 改写 → 复扫"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="emit('complianceCheck', selectedChapter)"
+                >
+                  {{
+                    props.complianceCheckingChapterNo === selectedChapter.chapterNo
+                      ? '合规检验中...'
+                      : '终稿合规'
+                  }}
+                </button>
               </div>
-              <button
-                class="delete-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="confirmDelete(selectedChapter.chapterNo)"
-              >
-                删除章节
-              </button>
+
+              <div class="detail-utility-actions">
+                <button
+                  class="secondary-button"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="startEdit(selectedChapter)"
+                >
+                  编辑
+                </button>
+                <button
+                  class="secondary-button"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="openStyleSampleModal(selectedChapter.chapterNo)"
+                >
+                  标为文风样本
+                </button>
+                <button
+                  class="primary-button"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="emit('summarize', selectedChapter.chapterNo)"
+                >
+                  {{
+                    props.summarizingChapterNo === selectedChapter.chapterNo
+                      ? '生成中...'
+                      : '生成摘要'
+                  }}
+                </button>
+                <button
+                  class="secondary-button"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="emit('parseStructured', selectedChapter.chapterNo)"
+                >
+                  {{
+                    props.parsingStructuredChapterNo === selectedChapter.chapterNo
+                      ? '解析中...'
+                      : '解析结构化信息'
+                  }}
+                </button>
+                <button
+                  class="secondary-button"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="emit('generateRelationEvents', selectedChapter.chapterNo)"
+                >
+                  {{
+                    props.generatingRelationChapterNo === selectedChapter.chapterNo
+                      ? '生成中...'
+                      : '生成关系事件'
+                  }}
+                </button>
+                <button
+                  class="delete-button"
+                  :disabled="isBusy(selectedChapter.chapterNo)"
+                  @click="confirmDelete(selectedChapter.chapterNo)"
+                >
+                  删除章节
+                </button>
+              </div>
             </template>
           </div>
         </header>
@@ -633,11 +625,12 @@ defineExpose({ clearEditing, clearBatchSelection });
           </p>
           <textarea
             v-if="isEditing(selectedChapter.chapterNo)"
+            ref="contentTextareaRef"
             v-model="editContent"
             class="field-textarea"
             :disabled="props.savingChapterNo === selectedChapter.chapterNo"
           />
-          <pre v-else class="content-text">{{ selectedChapter.content || '暂无正文' }}</pre>
+          <pre v-else ref="contentPreRef" class="content-text">{{ selectedChapter.content || '暂无正文' }}</pre>
         </section>
       </template>
     </div>
@@ -657,6 +650,15 @@ defineExpose({ clearEditing, clearBatchSelection });
       </div>
     </div>
   </Teleport>
+
+  <StyleSampleCaptureModal
+    :open="showStyleSampleModal"
+    :project-id="props.projectId"
+    :chapter-no="selectedChapter?.chapterNo"
+    :initial-text="styleSampleInitialText"
+    @close="showStyleSampleModal = false"
+    @saved="showStyleSampleModal = false"
+  />
 </template>
 
 <style scoped>
@@ -1039,6 +1041,44 @@ defineExpose({ clearEditing, clearBatchSelection });
 
 .detail-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.55rem;
+  max-width: 100%;
+}
+
+.rewrite-tier-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.rewrite-tier-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9ca3af;
+  margin-right: 0.15rem;
+}
+
+.tier-button {
+  min-width: 5.5rem;
+}
+
+.tier-compliance {
+  border-color: #c4b5fd;
+  color: #5b21b6;
+}
+
+.detail-utility-actions {
+  display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.45rem;
@@ -1102,49 +1142,6 @@ defineExpose({ clearEditing, clearBatchSelection });
 
 .delete-button:disabled {
   opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.dropdown-container {
-  position: relative;
-}
-
-.dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 160px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  padding: 0.35rem;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.dropdown-item {
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0.7rem;
-  border: none;
-  background: transparent;
-  color: #111827;
-  font-size: 0.85rem;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-
-.dropdown-item:hover:not(:disabled) {
-  background: #f3f4f6;
-}
-
-.dropdown-item:disabled {
-  opacity: 0.4;
   cursor: not-allowed;
 }
 
