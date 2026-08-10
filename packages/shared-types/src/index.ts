@@ -117,6 +117,103 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/auth/generation-preferences': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get user global generation preferences
+     * @description 返回当前登录用户的全局生成偏好（写作/常规厂商与模型、写作温度与常规温度）
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Preferences retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['UserGenerationPreferences'];
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    /**
+     * Update user global generation preferences
+     * @description 更新当前登录用户的全局生成偏好
+     */
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path?: never;
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': components['schemas']['UserGenerationPreferencesUpdate'];
+        };
+      };
+      responses: {
+        /** @description Preferences updated */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['UserGenerationPreferences'];
+            };
+          };
+        };
+        /** @description Invalid preferences payload */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/projects': {
     parameters: {
       query?: never;
@@ -658,6 +755,7 @@ export interface paths {
             title: string;
             content: string;
             docType?: components['schemas']['DocType'];
+            personaId?: string | null;
           };
         };
       };
@@ -703,6 +801,150 @@ export interface paths {
       };
     };
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/documents/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get document
+     * @description Get a single document by id
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Document retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Document'];
+            };
+          };
+        };
+        /** @description Document not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    /**
+     * Update document
+     * @description Update title, content, docType, and/or persona link of a document
+     */
+    put: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': {
+            title?: string;
+            content?: string;
+            docType?: components['schemas']['DocType'];
+            personaId?: string | null;
+          };
+        };
+      };
+      responses: {
+        /** @description Document updated */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['Document'];
+            };
+          };
+        };
+        /** @description Invalid request (e.g. personaId not found in project) */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Document not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    post?: never;
+    /**
+     * Delete document
+     * @description Delete a document
+     */
+    delete: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Document deleted */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: null;
+            };
+          };
+        };
+        /** @description Document not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
     options?: never;
     head?: never;
     patch?: never;
@@ -802,7 +1044,7 @@ export interface paths {
                 /** Format: uuid */
                 documentId?: string;
                 /** @enum {string} */
-                indexStatus?: 'pending' | 'indexing' | 'completed' | 'failed';
+                indexStatus?: 'pending' | 'indexing' | 'completed' | 'failed' | 'stale';
               };
             };
           };
@@ -888,322 +1130,6 @@ export interface paths {
     };
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/projects/{id}/generate': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Generate content
-     * @description Generate content using RAG with SSE support
-     */
-    post: {
-      parameters: {
-        query?: never;
-        header?: never;
-        path: {
-          id: string;
-        };
-        cookie?: never;
-      };
-      requestBody: {
-        content: {
-          'application/json': {
-            /** @description User prompt for generation */
-            prompt: string;
-            /** @description Additional context for generation */
-            context?: Record<string, never>;
-            /**
-             * @description Use Server-Sent Events for streaming
-             * @default true
-             */
-            useSSE?: boolean;
-            /**
-             * @description 可选；覆盖项目设置中的 generationTemperature（本次请求）
-             * @minimum 0
-             * @maximum 2
-             */
-            temperature?: number;
-          };
-        };
-      };
-      responses: {
-        /** @description Generation started */
-        200: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Envelope'] & {
-              data?: {
-                /** @description Unique trace ID for this generation */
-                traceId?: string;
-                /** @enum {string} */
-                status?: 'pending' | 'generating' | 'completed' | 'failed';
-              };
-            };
-          };
-        };
-        /** @description Invalid request */
-        400: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-        /** @description Unauthorized */
-        401: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-        /** @description Project not found */
-        404: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-      };
-    };
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/projects/{id}/generation-traces': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * List generation traces
-     * @description Get all generation traces for a project
-     */
-    get: {
-      parameters: {
-        query?: {
-          limit?: number;
-          offset?: number;
-        };
-        header?: never;
-        path: {
-          id: string;
-        };
-        cookie?: never;
-      };
-      requestBody?: never;
-      responses: {
-        /** @description Traces retrieved */
-        200: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Envelope'] & {
-              data?: components['schemas']['GenerationTrace'][];
-            };
-          };
-        };
-        /** @description Unauthorized */
-        401: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-        /** @description Project not found */
-        404: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-      };
-    };
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/drafts/{id}/accept': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Accept draft
-     * @description Accept a generated draft
-     */
-    post: {
-      parameters: {
-        query?: never;
-        header?: never;
-        path: {
-          id: string;
-        };
-        cookie?: never;
-      };
-      requestBody?: {
-        content: {
-          'application/json': {
-            /** @description Optional edits before accepting */
-            edits?: string;
-          };
-        };
-      };
-      responses: {
-        /** @description Draft accepted */
-        200: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Envelope'] & {
-              data?: {
-                /** Format: uuid */
-                draftId?: string;
-                /** @enum {string} */
-                status?: 'accepted';
-              };
-            };
-          };
-        };
-        /** @description Unauthorized */
-        401: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-        /** @description Draft not found */
-        404: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-      };
-    };
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/drafts/{id}/rewrite': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Rewrite draft
-     * @description Rewrite a generated draft with new instructions
-     */
-    post: {
-      parameters: {
-        query?: never;
-        header?: never;
-        path: {
-          id: string;
-        };
-        cookie?: never;
-      };
-      requestBody: {
-        content: {
-          'application/json': {
-            /** @description Instructions for rewriting */
-            instructions: string;
-          };
-        };
-      };
-      responses: {
-        /** @description Rewrite started */
-        200: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Envelope'] & {
-              data?: {
-                /** Format: uuid */
-                draftId?: string;
-                /** @description New trace ID for rewrite */
-                traceId?: string;
-                /** @enum {string} */
-                status?: 'rewriting';
-              };
-            };
-          };
-        };
-        /** @description Invalid request */
-        400: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-        /** @description Unauthorized */
-        401: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-        /** @description Draft not found */
-        404: {
-          headers: {
-            [name: string]: unknown;
-          };
-          content: {
-            'application/json': components['schemas']['Error'];
-          };
-        };
-      };
-    };
     delete?: never;
     options?: never;
     head?: never;
@@ -1972,6 +1898,24 @@ export interface components {
       /** Format: date-time */
       createdAt?: string;
     };
+    LlmChatProviderId: 'deepseek' | 'siliconflow';
+    UserGenerationTierPreferences: {
+      provider: components['schemas']['LlmChatProviderId'];
+      /** null 表示使用该档位环境默认模型 */
+      model: string | null;
+      /**
+       * writing：null 表示 env 写作温度；utility：应为 0–2 数值（默认 0.7）
+       */
+      temperature: number | null;
+    };
+    UserGenerationPreferences: {
+      writing: components['schemas']['UserGenerationTierPreferences'];
+      utility: components['schemas']['UserGenerationTierPreferences'];
+    };
+    UserGenerationPreferencesUpdate: {
+      writing?: components['schemas']['UserGenerationTierPreferences'];
+      utility?: components['schemas']['UserGenerationTierPreferences'];
+    };
     Project: {
       /** Format: uuid */
       id: string;
@@ -1984,6 +1928,7 @@ export interface components {
       /** Format: date-time */
       updatedAt?: string;
     };
+    GenerationTier: 'writing' | 'utility';
     ProjectSettings: {
       /** @description 项目级系统提示词 */
       systemPromptText: string;
@@ -1996,12 +1941,26 @@ export interface components {
       priorChapterTailChars: number;
       /** @description 无摘要章节降级 excerpt 最大长度 */
       contextExcerptMaxChars: number;
-      /** @description 主生成链路采样温度 */
+      /** @description 叙事上下文【大纲总结】最大字符；0 不注入 */
+      outlineMaxChars: number;
+      /** @description 出场人物静态卡 / 回退简介最大字符 */
+      personaProfileMaxChars: number;
+      /** @description 关系备忘合计最大字符；0 不注入 */
+      relationMemoMaxChars: number;
+      /** @description 工具级采样温度 */
       generationTemperature: number;
+      /** @description 写作模型覆盖；null 表示使用环境默认 */
+      generationWritingModel?: string | null;
+      /** @description 工具模型覆盖；null 表示使用环境默认 */
+      generationUtilityModel?: string | null;
+      /** @description 写作级温度覆盖；null 表示使用环境默认 */
+      writingGenerationTemperature?: number | null;
       /** @description 保存章节时自动更新人物出场状态 */
       updatePersonaOnSave: boolean;
       /** @description 保存章节时自动生成关系事件 */
       generateRelationEventsOnSave: boolean;
+      /** @description 保存章节时自动解析结构化信息 */
+      parseStructuredInfoOnSave: boolean;
       /** @description 章节优化方案分段字数；0 表示不按字数分段 */
       chapterOptimizeSegmentCharSize: number;
       /** @description 是否启用内容安全硬规则扫描 */
@@ -2018,9 +1977,16 @@ export interface components {
       chapterSummaryMemoryCount?: number;
       priorChapterTailChars?: number;
       contextExcerptMaxChars?: number;
+      outlineMaxChars?: number;
+      personaProfileMaxChars?: number;
+      relationMemoMaxChars?: number;
       generationTemperature?: number;
+      generationWritingModel?: string | null;
+      generationUtilityModel?: string | null;
+      writingGenerationTemperature?: number | null;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
       contentSafetyCustomRules?: components['schemas']['ProjectContentSafetyRule'][];
@@ -2183,8 +2149,10 @@ export interface components {
       title: string;
       content?: string;
       docType?: components['schemas']['DocType'];
+      /** 关联人物 ID；仅 docType=persona_card 有语义，null=孤儿卡 */
+      personaId?: string | null;
       /** @enum {string} */
-      indexStatus: 'pending' | 'indexing' | 'completed' | 'failed';
+      indexStatus: 'pending' | 'indexing' | 'completed' | 'failed' | 'stale';
       /** Format: date-time */
       createdAt?: string;
       /** Format: date-time */
@@ -2205,6 +2173,20 @@ export interface components {
       reason: string;
       docScore: number;
       hitChunkIds: string[];
+      /**
+       * @description AQ-360 混合检索来源标签：title_match/paragraph_crop_by_title/full_document_by_title
+       *     来自章节 `structuredMatchingText` 标题匹配（A 路径）；vector/vector_full_document 来自 Qdrant
+       *     向量检索补充（B 路径）。未设置时表示该文档产自尚未接入混合合并的旧路径。
+       * @enum {string}
+       */
+      evidenceSource?:
+        | 'title_match'
+        | 'paragraph_crop_by_title'
+        | 'full_document_by_title'
+        | 'vector'
+        | 'vector_full_document';
+      /** @description 该文档同时被标题匹配与向量检索命中（A/B 双路径命中） */
+      dualHit?: boolean;
     };
     KnowledgeRetrievalEvidence: {
       chunks?: components['schemas']['Chunk'][];
@@ -2232,6 +2214,12 @@ export interface components {
       createdAt?: string;
       /** Format: date-time */
       completedAt?: string;
+      /**
+       * @description 自由格式上下文（rag-orchestrator 写入）。AQ-359/360 相关字段：retrieval_mode、
+       *     title_matched_document_ids、vector_document_ids、evidence_document_ids、dual_hit_document_ids。
+       *     详见 openapi.yaml GenerationTrace.context 描述。
+       */
+      context?: Record<string, never>;
     };
     ChapterSummary: {
       chapterNo: number;

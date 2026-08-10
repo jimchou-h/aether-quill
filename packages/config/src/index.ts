@@ -19,3 +19,5 @@ export {
   type ResolvedRagInfrastructureEnv,
 } from './rag-infrastructure-env';
 export * from './content-safety';
+export * from './writing-style-samples';
+export * from './generation-profile';

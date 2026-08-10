@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, shallowRef, watch } from 'vue';
 import { apiClient, type ProjectContentSafetyRule, type ProjectSettings } from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
 
@@ -16,22 +16,26 @@ const props = defineProps<{
   projectId: string;
 }>();
 
-const summaryCount = ref(3);
-const memoryCount = ref(3);
-const priorTailChars = ref(800);
-const excerptMaxChars = ref(400);
-const temperature = ref(0.7);
-const updatePersonaOnSave = ref(true);
-const generateRelationEventsOnSave = ref(true);
-const contentSafetyScanEnabled = ref(true);
-const contentSafetyCustomRules = ref<ProjectContentSafetyRule[]>([]);
-const chapterOptimizeSegmentCharSize = ref(3000);
-const saved = ref<{
+const summaryCount = shallowRef(3);
+const memoryCount = shallowRef(3);
+const priorTailChars = shallowRef(800);
+const excerptMaxChars = shallowRef(400);
+const outlineMaxChars = shallowRef(4000);
+const personaProfileMaxChars = shallowRef(2000);
+const relationMemoMaxChars = shallowRef(2000);
+const updatePersonaOnSave = shallowRef(true);
+const generateRelationEventsOnSave = shallowRef(true);
+const contentSafetyScanEnabled = shallowRef(true);
+const contentSafetyCustomRules = shallowRef<ProjectContentSafetyRule[]>([]);
+const chapterOptimizeSegmentCharSize = shallowRef(3000);
+const saved = shallowRef<{
   summaryCount: number;
   memoryCount: number;
   priorTailChars: number;
   excerptMaxChars: number;
-  temperature: number;
+  outlineMaxChars: number;
+  personaProfileMaxChars: number;
+  relationMemoMaxChars: number;
   updatePersonaOnSave: boolean;
   generateRelationEventsOnSave: boolean;
   contentSafetyScanEnabled: boolean;
@@ -39,14 +43,14 @@ const saved = ref<{
   chapterOptimizeSegmentCharSize: number;
 } | null>(null);
 
-const loading = ref(false);
-const saving = ref(false);
-const rebuildingMemory = ref(false);
-const errorMessage = ref('');
-const message = ref('');
-const batchImportText = ref('');
-const batchImportSeverity = ref<ProjectContentSafetyRule['severity']>('low');
-const batchImportMessage = ref('');
+const loading = shallowRef(false);
+const saving = shallowRef(false);
+const rebuildingMemory = shallowRef(false);
+const errorMessage = shallowRef('');
+const message = shallowRef('');
+const batchImportText = shallowRef('');
+const batchImportSeverity = shallowRef<ProjectContentSafetyRule['severity']>('low');
+const batchImportMessage = shallowRef('');
 
 function createRuleId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -226,7 +230,9 @@ const isDirty = computed(() => {
     memoryCount.value !== saved.value.memoryCount ||
     priorTailChars.value !== saved.value.priorTailChars ||
     excerptMaxChars.value !== saved.value.excerptMaxChars ||
-    temperature.value !== saved.value.temperature ||
+    outlineMaxChars.value !== saved.value.outlineMaxChars ||
+    personaProfileMaxChars.value !== saved.value.personaProfileMaxChars ||
+    relationMemoMaxChars.value !== saved.value.relationMemoMaxChars ||
     updatePersonaOnSave.value !== saved.value.updatePersonaOnSave ||
     generateRelationEventsOnSave.value !== saved.value.generateRelationEventsOnSave ||
     contentSafetyScanEnabled.value !== saved.value.contentSafetyScanEnabled ||
@@ -250,7 +256,11 @@ function applyFromSettings(s: ProjectSettings, rulesFallback: ProjectContentSafe
     (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3;
   priorTailChars.value = (s as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800;
   excerptMaxChars.value = (s as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400;
-  temperature.value = s.generationTemperature;
+  outlineMaxChars.value = (s as { outlineMaxChars?: number }).outlineMaxChars ?? 4000;
+  personaProfileMaxChars.value =
+    (s as { personaProfileMaxChars?: number }).personaProfileMaxChars ?? 2000;
+  relationMemoMaxChars.value =
+    (s as { relationMemoMaxChars?: number }).relationMemoMaxChars ?? 2000;
   updatePersonaOnSave.value = s.updatePersonaOnSave ?? true;
   generateRelationEventsOnSave.value = s.generateRelationEventsOnSave ?? true;
   contentSafetyScanEnabled.value = s.contentSafetyScanEnabled ?? true;
@@ -263,7 +273,10 @@ function applyFromSettings(s: ProjectSettings, rulesFallback: ProjectContentSafe
       (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3,
     priorTailChars: (s as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800,
     excerptMaxChars: (s as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400,
-    temperature: s.generationTemperature,
+    outlineMaxChars: (s as { outlineMaxChars?: number }).outlineMaxChars ?? 4000,
+    personaProfileMaxChars:
+      (s as { personaProfileMaxChars?: number }).personaProfileMaxChars ?? 2000,
+    relationMemoMaxChars: (s as { relationMemoMaxChars?: number }).relationMemoMaxChars ?? 2000,
     updatePersonaOnSave: s.updatePersonaOnSave ?? true,
     generateRelationEventsOnSave: s.generateRelationEventsOnSave ?? true,
     contentSafetyScanEnabled: s.contentSafetyScanEnabled ?? true,
@@ -346,7 +359,9 @@ async function handleSave() {
       chapterSummaryMemoryCount: memoryCount.value,
       priorChapterTailChars: priorTailChars.value,
       contextExcerptMaxChars: excerptMaxChars.value,
-      generationTemperature: temperature.value,
+      outlineMaxChars: outlineMaxChars.value,
+      personaProfileMaxChars: personaProfileMaxChars.value,
+      relationMemoMaxChars: relationMemoMaxChars.value,
       updatePersonaOnSave: updatePersonaOnSave.value,
       generateRelationEventsOnSave: generateRelationEventsOnSave.value,
       contentSafetyScanEnabled: contentSafetyScanEnabled.value,
@@ -385,7 +400,7 @@ onMounted(() => {
     <h3 class="panel-title">生成偏好</h3>
     <p class="field-hint">
       「摘要数」决定叙事上下文中注入多少条<strong>当前章节之前</strong>的章节摘要（按章号从新到旧）；设为
-      0 则不注入摘要段。「温度」作用于章节流式生成等主链路（也可在单次请求中覆盖）。
+      0 则不注入摘要段。模型厂商、模型与温度请到顶栏「设置」中的全局模型设置配置。
     </p>
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
@@ -461,6 +476,52 @@ onMounted(() => {
       </p>
 
       <div class="row">
+        <label class="field-label" for="aq-outline-max">大纲注入预算（字）</label>
+        <input
+          id="aq-outline-max"
+          v-model.number="outlineMaxChars"
+          class="field-input"
+          type="number"
+          min="0"
+          max="8000"
+          step="100"
+        />
+      </div>
+      <p class="field-hint inline-hint">
+        【大纲总结】最大字符；0 不注入。超预算时按本章匹配文本做区段裁剪，默认 4000。
+      </p>
+
+      <div class="row">
+        <label class="field-label" for="aq-persona-max">人物静态卡预算（字）</label>
+        <input
+          id="aq-persona-max"
+          v-model.number="personaProfileMaxChars"
+          class="field-input"
+          type="number"
+          min="0"
+          max="8000"
+          step="100"
+        />
+      </div>
+      <p class="field-hint inline-hint">
+        出场人物每人静态设定卡（或简介回退）上限；默认 2000。0 表示不注入静态正文。
+      </p>
+
+      <div class="row">
+        <label class="field-label" for="aq-relation-max">关系备忘预算（字）</label>
+        <input
+          id="aq-relation-max"
+          v-model.number="relationMemoMaxChars"
+          class="field-input"
+          type="number"
+          min="0"
+          max="8000"
+          step="100"
+        />
+      </div>
+      <p class="field-hint inline-hint">身份关系 + 已选关系事件合计上限；默认 2000。0 表示不注入。</p>
+
+      <div class="row">
         <label class="field-label" for="aq-excerpt-max">无摘要摘录字数</label>
         <input
           id="aq-excerpt-max"
@@ -475,20 +536,6 @@ onMounted(() => {
       <p class="field-hint inline-hint">
         前序章节无摘要时，从正文尾部截取的 excerpt 长度；范围 200~800，默认 400。
       </p>
-
-      <div class="row">
-        <label class="field-label" for="aq-temperature">生成温度（temperature）</label>
-        <input
-          id="aq-temperature"
-          v-model.number="temperature"
-          class="field-input"
-          type="number"
-          min="0"
-          max="2"
-          step="0.05"
-        />
-      </div>
-      <p class="field-hint inline-hint">范围 0~2；默认 0.7。数值越高，模型输出越发散。</p>
 
       <div class="row">
         <label class="field-label" for="aq-optimize-segment">章节优化分段字数</label>
@@ -509,16 +556,19 @@ onMounted(() => {
       <div class="toggle-row">
         <label class="toggle-label">
           <input v-model="updatePersonaOnSave" type="checkbox" class="toggle-checkbox" />
-          <span class="toggle-text">保存章节时自动更新人物出场状态</span>
+          <span class="toggle-text">手动保存章节后，提示更新人物出场状态</span>
         </label>
       </div>
 
       <div class="toggle-row">
         <label class="toggle-label">
           <input v-model="generateRelationEventsOnSave" type="checkbox" class="toggle-checkbox" />
-          <span class="toggle-text">保存章节时自动生成关系事件</span>
+          <span class="toggle-text">手动保存章节后，提示生成本章关系事件</span>
         </label>
       </div>
+      <p class="field-hint inline-hint">
+        以上开关仅控制「手动编辑保存」是否弹出后处理确认；创作精修 / 一键终稿 / 合规应用会静默更新人物状态，不会重复弹窗。
+      </p>
 
       <div class="toggle-row">
         <label class="toggle-label">
@@ -705,6 +755,11 @@ onMounted(() => {
   border: 1px solid #d1d5db;
   border-radius: 6px;
   font-size: 0.95rem;
+}
+
+.field-input-wide {
+  width: min(24rem, 100%);
+  flex: 1 1 12rem;
 }
 
 .meta-bar {

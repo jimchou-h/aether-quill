@@ -1,6 +1,21 @@
-import { Controller, Post, Get, Body, Headers, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Post,
+  Put,
+  Request,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
+import type { Request as ExpressRequest } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
+
+interface AuthenticatedRequest extends ExpressRequest {
+  user?: { userId: string; email: string; name: string };
+}
 
 @Controller('api/auth')
 export class AuthController {
@@ -26,5 +41,28 @@ export class AuthController {
   me(@Headers('authorization') auth: string) {
     const token = auth?.replace('Bearer ', '');
     return this.authService.validateToken(token);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('generation-preferences')
+  getGenerationPreferences(@Request() req: AuthenticatedRequest) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.authService.getGenerationPreferences(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('generation-preferences')
+  updateGenerationPreferences(
+    @Request() req: AuthenticatedRequest,
+    @Body() body: unknown
+  ) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('Unauthorized');
+    }
+    return this.authService.updateGenerationPreferences(userId, body);
   }
 }

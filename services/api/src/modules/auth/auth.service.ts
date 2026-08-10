@@ -1,8 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  OnModuleInit,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import {
+  normalizeUserGenerationPreferences,
+  type UserGenerationPreferences,
+} from '@aether-quill/config';
 import { usePostgresPersistence } from '../../persistence/use-postgres';
 import { PrismaService } from '../../prisma/prisma.service';
 import { User, Session, LoginResponse, RefreshResponse } from './auth.entity';
@@ -12,6 +21,11 @@ export class AuthService implements OnModuleInit {
   private users: Map<string, User> = new Map();
   private sessions: Map<string, Session> = new Map();
   private readonly storagePath = join(resolve(process.cwd()), 'data', 'auth-sessions.json');
+  private readonly preferencesStoragePath = join(
+    resolve(process.cwd()),
+    'data',
+    'user-generation-preferences.json'
+  );
 
   constructor(
     private readonly jwtService: JwtService,
@@ -51,6 +65,9 @@ export class AuthService implements OnModuleInit {
           name: u.name,
           createdAt: u.createdAt.toISOString(),
           updatedAt: u.updatedAt.toISOString(),
+          generationPreferences: this.parseStoredPreferences(
+            (u as { generationPreferencesJson?: unknown }).generationPreferencesJson
+          ),
         });
       }
 
@@ -120,6 +137,110 @@ export class AuthService implements OnModuleInit {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    this.restorePreferencesFromDisk();
+  }
+
+  private parseStoredPreferences(raw: unknown): UserGenerationPreferences | undefined {
+    if (raw === null || raw === undefined) {
+      return undefined;
+    }
+    try {
+      return normalizeUserGenerationPreferences(raw);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private restorePreferencesFromDisk() {
+    if (!existsSync(this.preferencesStoragePath)) {
+      return;
+    }
+    try {
+      const raw = readFileSync(this.preferencesStoragePath, 'utf8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const [userId, prefs] of Object.entries(parsed)) {
+        const user = this.users.get(userId);
+        if (!user) {
+          continue;
+        }
+        user.generationPreferences = this.parseStoredPreferences(prefs);
+      }
+    } catch (err) {
+      console.error('[persistence] user generation preferences JSON 加载失败', err);
+    }
+  }
+
+  private persistPreferencesToDisk() {
+    const targetDir = dirname(this.preferencesStoragePath);
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+    const payload: Record<string, UserGenerationPreferences> = {};
+    for (const user of this.users.values()) {
+      if (user.generationPreferences) {
+        payload[user.id] = user.generationPreferences;
+      }
+    }
+    writeFileSync(this.preferencesStoragePath, JSON.stringify(payload, null, 2), 'utf8');
+  }
+
+  getGenerationPreferences(userId: string): UserGenerationPreferences {
+    const user = this.users.get(userId);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    return user.generationPreferences
+      ? normalizeUserGenerationPreferences(user.generationPreferences)
+      : normalizeUserGenerationPreferences({});
+  }
+
+  async updateGenerationPreferences(
+    userId: string,
+    input: unknown
+  ): Promise<UserGenerationPreferences> {
+    const user = this.users.get(userId);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    let prefs: UserGenerationPreferences;
+    try {
+      const current = user.generationPreferences
+        ? normalizeUserGenerationPreferences(user.generationPreferences)
+        : normalizeUserGenerationPreferences({});
+      const source =
+        input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+      prefs = normalizeUserGenerationPreferences({
+        writing: source.writing !== undefined ? source.writing : current.writing,
+        utility: source.utility !== undefined ? source.utility : current.utility,
+      });
+    } catch (err) {
+      throw new BadRequestException(
+        err instanceof Error ? err.message : 'Invalid generation preferences'
+      );
+    }
+
+    user.generationPreferences = prefs;
+    user.updatedAt = new Date().toISOString();
+
+    if (usePostgresPersistence()) {
+      try {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: {
+            generationPreferencesJson: prefs as object,
+            updatedAt: new Date(),
+          } as never,
+        });
+      } catch (err) {
+        console.error('[persistence] user generation preferences PG 写入失败', err);
+        throw err;
+      }
+    } else {
+      this.persistPreferencesToDisk();
+    }
+
+    return prefs;
   }
 
   private findUserByEmail(email: string): User | undefined {

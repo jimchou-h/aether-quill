@@ -79,6 +79,9 @@ export const GenerationErrorCodes = {
   ChapterPipelineRewriteReviseInvalid: 1336,
   ChapterPipelineCoverageVerifyInvalid: 1337,
   ChapterPipelineRewriteFixItemsInvalid: 1338,
+  ChapterOptimizationDeprecated: 1339,
+  /** 所选 LLM 厂商未配置 API Key */
+  LlmProviderKeyMissing: 1340,
 } as const;
 
 /**
@@ -152,8 +155,10 @@ export function getHttpStatusCode(errorCode: ErrorCode): number {
     )
       return 400;
     if (errorCode === 1332) return 404;
+    if (errorCode === 1339) return 410;
     if (errorCode === 1329) return 502;
-    if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312) return 502;
+    if (errorCode === 1309 || errorCode === 1310 || errorCode === 1312 || errorCode === 1340)
+      return 502;
     if (errorCode === 1311) return 504;
     if (errorCode === 1313) return 500;
     if (errorCode === 1317) return 413;
@@ -232,6 +237,8 @@ export function getErrorMessage(errorCode: ErrorCode): string {
     1336: 'Chapter pipeline rewrite revise invalid',
     1337: 'Chapter pipeline coverage verify invalid',
     1338: 'Chapter pipeline rewrite fix-items invalid',
+    1339: 'Chapter optimization deprecated',
+    1340: 'LLM provider API key missing',
     // Config errors
     1400: 'Prompt config not found',
     1401: 'System prompt text required',

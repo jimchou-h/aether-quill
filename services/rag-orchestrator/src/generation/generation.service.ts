@@ -3,7 +3,7 @@
  *
  * 默认消息结构（`buildLlmMessages`）：
  *   system ← 全局默认 + 项目 systemPromptText + 任务 taskSystemPrompt
- *   user   ←【叙事上下文】→【检索证据】→【用户需求】
+ *   user   ←【叙事上下文】→【检索证据】→【文风参照】（如有）→【用户需求】
  *
  * `LLM_PROMPT_LEGACY_SINGLE_USER=1` 时回退为单条 user（含【系统指令】段）。
  *
@@ -14,6 +14,11 @@
  */
 
 import axios from 'axios';
+import {
+  resolveGenerationCallProfile,
+  resolveLlmChatProviderEndpoint,
+  type LlmChatProviderId,
+} from '@aether-quill/config';
 import { TraceRecord, GenerateRequest } from './types';
 import { consumeProviderSseStreamChunk, flushProviderSseStreamBuffer } from './provider-sse-stream';
 import { TraceStore, TraceQuery, TraceStats } from './trace-store';
@@ -42,6 +47,18 @@ interface ProviderRuntimeConfig {
   temperature: number;
 }
 
+interface ProviderCallOptions {
+  maxTokens?: number;
+  temperature?: number;
+  model?: string;
+  frequencyPenalty?: number;
+  provider?: LlmChatProviderId;
+}
+
+function isLlmChatProviderId(value: unknown): value is LlmChatProviderId {
+  return value === 'deepseek' || value === 'siliconflow';
+}
+
 export class GenerationService {
   private readonly traceStore = new TraceStore();
 
@@ -63,12 +80,24 @@ export class GenerationService {
   }
 
   async createTrace(request: GenerateRequest): Promise<TraceRecord> {
+    const context: Record<string, unknown> = { ...(request.context || {}) };
+    const providerFromContext = isLlmChatProviderId(context.generation_provider)
+      ? context.generation_provider
+      : undefined;
+    const providerFromRequest = isLlmChatProviderId(request.provider)
+      ? request.provider
+      : undefined;
+    const generationProvider = providerFromContext ?? providerFromRequest;
+    if (generationProvider && context.generation_provider === undefined) {
+      context.generation_provider = generationProvider;
+    }
+
     const trace: TraceRecord = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       projectId: request.projectId,
       prompt: request.prompt,
-      context: request.context || {},
-      providerType: request.provider || 'deepseek',
+      context,
+      providerType: generationProvider || request.provider || 'deepseek',
       model: request.model || 'deepseek-chat',
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -127,17 +156,10 @@ export class GenerationService {
     this.recordAssembledPrompt(trace, systemMessage, userMessage);
     this.updateTrace(trace.id, { status: 'generating' });
 
-    const provider = this.resolveProviderConfig();
-    const temperature =
-      typeof trace.temperature === 'number' && Number.isFinite(trace.temperature)
-        ? Math.min(2, Math.max(0, trace.temperature))
-        : provider.temperature;
+    const callOptions = this.resolveCallOptionsForTrace(trace);
 
     try {
-      const response = await this.callProviderApi(messages, {
-        maxTokens: provider.maxTokens,
-        temperature,
-      });
+      const response = await this.callProviderApi(messages, callOptions);
       this.updateTrace(trace.id, {
         status: 'completed',
         result: response.content,
@@ -191,9 +213,68 @@ export class GenerationService {
     }
   }
 
+  private resolveUtilityCallProfile() {
+    return resolveGenerationCallProfile({ templateKey: '' });
+  }
+
+  private resolveCallOptionsForTrace(trace: TraceRecord): ProviderCallOptions {
+    const providerId = isLlmChatProviderId(trace.context?.generation_provider)
+      ? trace.context.generation_provider
+      : undefined;
+    const provider = this.resolveProviderConfig(providerId);
+    const penaltyRaw = trace.context?.generation_frequency_penalty;
+    const frequencyPenalty =
+      typeof penaltyRaw === 'number' && Number.isFinite(penaltyRaw) ? penaltyRaw : undefined;
+    const temperature =
+      typeof trace.temperature === 'number' && Number.isFinite(trace.temperature)
+        ? Math.min(2, Math.max(0, trace.temperature))
+        : provider.temperature;
+    return {
+      model: trace.model?.trim() || provider.model,
+      maxTokens: provider.maxTokens,
+      temperature,
+      frequencyPenalty,
+      provider: providerId,
+    };
+  }
+
+  private buildProviderRequestBody(
+    messages: LlmChatMessage[],
+    provider: ProviderRuntimeConfig,
+    options?: ProviderCallOptions
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      model: options?.model ?? provider.model,
+      messages,
+      max_tokens: options?.maxTokens ?? provider.maxTokens,
+      temperature: options?.temperature ?? provider.temperature,
+      stream: false,
+    };
+    if (typeof options?.frequencyPenalty === 'number' && Number.isFinite(options.frequencyPenalty)) {
+      body.frequency_penalty = options.frequencyPenalty;
+    }
+    return body;
+  }
+
   // ─── Provider 适配（DeepSeek / SiliconFlow，OpenAI 兼容 chat/completions）──
 
-  private resolveProviderConfig(): ProviderRuntimeConfig {
+  private resolveProviderConfig(provider?: LlmChatProviderId): ProviderRuntimeConfig {
+    const maxTokens = Number(process.env.PROVIDER_MAX_TOKENS || 4096);
+    const temperature = Number(process.env.PROVIDER_TEMPERATURE || 0.7);
+
+    if (provider) {
+      const endpoint = resolveLlmChatProviderEndpoint(provider);
+      const defaultModel =
+        provider === 'siliconflow' ? 'Qwen/Qwen2.5-7B-Instruct' : 'deepseek-chat';
+      return {
+        providerUrl: endpoint.providerUrl,
+        apiKey: endpoint.apiKey,
+        model: process.env.PROVIDER_MODEL || defaultModel,
+        maxTokens,
+        temperature,
+      };
+    }
+
     const apiKey =
       process.env.PROVIDER_API_KEY ||
       process.env.DEEPSEEK_API_KEY ||
@@ -218,8 +299,8 @@ export class GenerationService {
       providerUrl: process.env.PROVIDER_API_URL || defaultUrl,
       apiKey,
       model: process.env.PROVIDER_MODEL || defaultModel,
-      maxTokens: Number(process.env.PROVIDER_MAX_TOKENS || 4096),
-      temperature: Number(process.env.PROVIDER_TEMPERATURE || 0.7),
+      maxTokens,
+      temperature,
     };
   }
 
@@ -248,9 +329,12 @@ export class GenerationService {
     content: string;
   }): Promise<string> {
     const prompt = this.buildChapterSummaryPrompt(input);
+    const profile = this.resolveUtilityCallProfile();
     const result = await this.callProviderApi(prompt, {
       maxTokens: 1536,
-      temperature: 0.3,
+      temperature: profile.temperature,
+      model: profile.model,
+      provider: profile.provider,
     });
     return result.content.trim();
   }
@@ -525,9 +609,12 @@ export class GenerationService {
     }
 
     const prompt = this.buildChapterPersonaStatesExtractPrompt(input);
+    const profile = this.resolveUtilityCallProfile();
     const result = await this.callProviderApi(prompt, {
       maxTokens: 2048,
-      temperature: 0.2,
+      temperature: profile.temperature,
+      model: profile.model,
+      provider: profile.provider,
     });
     return this.parseChapterPersonaStatesFromModelContent(result.content);
   }
@@ -546,9 +633,12 @@ export class GenerationService {
     }>
   > {
     const prompt = buildChapterIdentityRelationExtractPrompt(input);
+    const profile = this.resolveUtilityCallProfile();
     const result = await this.callProviderApi(prompt, {
       maxTokens: 1536,
-      temperature: 0.2,
+      temperature: profile.temperature,
+      model: profile.model,
+      provider: profile.provider,
     });
     return parseIdentityRelationsFromModelContent(result.content);
   }
@@ -568,9 +658,12 @@ export class GenerationService {
     }>
   > {
     const prompt = this.buildChapterRelationEventExtractPrompt(input);
+    const profile = this.resolveUtilityCallProfile();
     const result = await this.callProviderApi(prompt, {
       maxTokens: 2048,
-      temperature: 0.2,
+      temperature: profile.temperature,
+      model: profile.model,
+      provider: profile.provider,
     });
     return this.parseRelationEventsFromModelContent(result.content);
   }
@@ -673,9 +766,12 @@ export class GenerationService {
     }
 
     const prompt = this.buildStructuredInfoExtractPrompt(input);
+    const profile = this.resolveUtilityCallProfile();
     const result = await this.callProviderApi(prompt, {
       maxTokens: 1024,
-      temperature: 0.2,
+      temperature: profile.temperature,
+      model: profile.model,
+      provider: profile.provider,
     });
     const parsed = this.parseStructuredInfoFromModelContent(result.content);
     if (!parsed.matchingText.trim() && parsed.keywords.length === 0) {
@@ -692,12 +788,12 @@ export class GenerationService {
 
   private async callProviderApi(
     promptOrMessages: string | LlmChatMessage[],
-    options?: { maxTokens?: number; temperature?: number }
+    options?: ProviderCallOptions
   ): Promise<{
     content: string;
     usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
   }> {
-    const provider = this.resolveProviderConfig();
+    const provider = this.resolveProviderConfig(options?.provider);
     const messages =
       typeof promptOrMessages === 'string'
         ? [{ role: 'user' as const, content: promptOrMessages }]
@@ -705,13 +801,7 @@ export class GenerationService {
 
     const response = await axios.post(
       provider.providerUrl,
-      {
-        model: provider.model,
-        messages,
-        max_tokens: options?.maxTokens ?? provider.maxTokens,
-        temperature: options?.temperature ?? provider.temperature,
-        stream: false,
-      },
+      this.buildProviderRequestBody(messages, provider, options),
       {
         headers: {
           Authorization: `Bearer ${provider.apiKey}`,
@@ -734,44 +824,45 @@ export class GenerationService {
     };
   }
 
-  private streamParamsForTrace(trace: TraceRecord): { maxTokens: number; temperature: number } {
-    const provider = this.resolveProviderConfig();
-    const t =
-      typeof trace.temperature === 'number' && Number.isFinite(trace.temperature)
-        ? trace.temperature
-        : provider.temperature;
-    return {
-      maxTokens: provider.maxTokens,
-      temperature: Math.min(2, Math.max(0, t)),
-    };
+  private streamParamsForTrace(trace: TraceRecord): ProviderCallOptions {
+    return this.resolveCallOptionsForTrace(trace);
   }
 
   private async *callProviderStream(
     messages: LlmChatMessage[],
     trace: TraceRecord
   ): AsyncGenerator<string, void, unknown> {
-    const provider = this.resolveProviderConfig();
-    const { maxTokens, temperature } = this.streamParamsForTrace(trace);
+    const callOptions = this.streamParamsForTrace(trace);
+    const providerId =
+      callOptions.provider ??
+      (isLlmChatProviderId(trace.context?.generation_provider)
+        ? trace.context.generation_provider
+        : undefined);
+    const provider = this.resolveProviderConfig(providerId);
 
-    const response = await axios.post(
-      provider.providerUrl,
-      {
-        model: provider.model,
-        messages,
-        max_tokens: maxTokens,
-        temperature,
-        stream: true,
+    const streamBody: Record<string, unknown> = {
+      model: callOptions.model ?? provider.model,
+      messages,
+      max_tokens: callOptions.maxTokens ?? provider.maxTokens,
+      temperature: callOptions.temperature ?? provider.temperature,
+      stream: true,
+    };
+    if (
+      typeof callOptions.frequencyPenalty === 'number' &&
+      Number.isFinite(callOptions.frequencyPenalty)
+    ) {
+      streamBody.frequency_penalty = callOptions.frequencyPenalty;
+    }
+
+    const response = await axios.post(provider.providerUrl, streamBody, {
+      headers: {
+        Authorization: `Bearer ${provider.apiKey}`,
+        'Content-Type': 'application/json',
       },
-      {
-        headers: {
-          Authorization: `Bearer ${provider.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        responseType: 'stream',
-        // 长章节流式生成可能远超 120s；首包慢时不应被总时长误杀（各环境对 stream+timeout 语义不一致）
-        timeout: 0,
-      }
-    );
+      responseType: 'stream',
+      // 长章节流式生成可能远超 120s；首包慢时不应被总时长误杀（各环境对 stream+timeout 语义不一致）
+      timeout: 0,
+    });
 
     const stream = response.data as NodeJS.ReadableStream;
     let lineBuffer = '';
