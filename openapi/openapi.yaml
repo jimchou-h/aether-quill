@@ -25,6 +25,8 @@ tags:
     description: Prompt configuration and templates
   - name: Consistency
     description: Consistency checking for generated content
+  - name: Retrieval
+    description: Knowledge retrieval preview (title-match + vector hybrid merge diagnostics)
   - name: Observability
     description: Service observability, metrics, and tracing
 
@@ -33,6 +35,8 @@ paths:
     $ref: './paths/auth/login.yaml'
   /api/auth/me:
     $ref: './paths/auth/me.yaml'
+  /api/auth/generation-preferences:
+    $ref: './paths/auth/generation-preferences.yaml'
   /api/projects:
     $ref: './paths/projects/index.yaml'
   /api/projects/{id}:
@@ -45,20 +49,14 @@ paths:
     $ref: './paths/projects/project-stats.yaml'
   /api/projects/{id}/documents:
     $ref: './paths/projects/documents.yaml'
+  /api/documents/{id}:
+    $ref: './paths/documents/by-id.yaml'
   /api/documents/{id}/reindex:
     $ref: './paths/documents/reindex.yaml'
   /api/documents/{id}/chunks:
     $ref: './paths/documents/chunks.yaml'
   /api/documents/batch-get:
     $ref: './paths/documents/batch-get.yaml'
-  /api/projects/{id}/generate:
-    $ref: './paths/projects/generate.yaml'
-  /api/projects/{id}/generation-traces:
-    $ref: './paths/projects/generation-traces.yaml'
-  /api/drafts/{id}/accept:
-    $ref: './paths/drafts/accept.yaml'
-  /api/drafts/{id}/rewrite:
-    $ref: './paths/drafts/rewrite.yaml'
   /api/projects/{id}/prompt-config:
     $ref: './paths/projects/prompt-config.yaml'
   /api/projects/{id}/prompt-config/publish:
@@ -83,8 +81,10 @@ paths:
     $ref: './paths/projects/relation-events.yaml'
   /api/projects/{id}/relation-events/{eventId}:
     $ref: './paths/projects/relation-event-by-id.yaml'
-  /api/projects/{id}/write:
-    $ref: './paths/projects/write.yaml'
+  /api/projects/{id}/writing-style-samples:
+    $ref: './paths/projects/writing-style-samples.yaml'
+  /api/projects/{id}/writing-style-samples/{sampleId}:
+    $ref: './paths/projects/writing-style-sample-by-id.yaml'
   /api/projects/{id}/write/outline:
     $ref: './paths/projects/write-outline.yaml'
   /api/projects/{id}/write-context-readiness:
@@ -127,6 +127,10 @@ paths:
     $ref: './paths/projects/chapter-pipeline-rewrite-fix-items.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/coverage-verify:
     $ref: './paths/projects/chapter-pipeline-outline-coverage-verify.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/brief/synthesize:
+    $ref: './paths/projects/chapter-pipeline-outline-brief-synthesize.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/brief:
+    $ref: './paths/projects/chapter-pipeline-outline-brief.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/coverage:
     $ref: './paths/projects/chapter-pipeline-outline-coverage.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/version:
@@ -163,6 +167,8 @@ paths:
     $ref: './paths/projects/chapters-export.yaml'
   /api/projects/{id}/knowledge/summarize/{jobId}:
     $ref: './paths/projects/chapter-summarize-job.yaml'
+  /api/preview-retrieval:
+    $ref: './paths/rag/preview-retrieval.yaml'
   /api/consistency/check:
     $ref: './paths/consistency/check.yaml'
   /api/observability/metrics:
@@ -232,6 +238,10 @@ components:
           nullable: true
           description: Always null for error responses
           example: null
+    GenerationTier:
+      type: string
+      enum: [writing, utility]
+      description: 生成任务分级；writing=产出直接进正文，utility=结构化/扫描/摘要等工具任务
     User:
       type: object
       required:
@@ -250,6 +260,49 @@ components:
         createdAt:
           type: string
           format: date-time
+    LlmChatProviderId:
+      type: string
+      enum: [deepseek, siliconflow]
+      description: 聊天补全厂商（密钥仍来自环境变量）
+    UserGenerationTierPreferences:
+      type: object
+      required:
+        - provider
+        - model
+        - temperature
+      properties:
+        provider:
+          $ref: '#/components/schemas/LlmChatProviderId'
+        model:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: null 表示使用该档位环境默认模型
+        temperature:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 2
+          description: |
+            writing：null 表示 env 写作温度；utility：应为 0–2 数值（默认 0.7）
+    UserGenerationPreferences:
+      type: object
+      required:
+        - writing
+        - utility
+      properties:
+        writing:
+          $ref: '#/components/schemas/UserGenerationTierPreferences'
+        utility:
+          $ref: '#/components/schemas/UserGenerationTierPreferences'
+    UserGenerationPreferencesUpdate:
+      type: object
+      properties:
+        writing:
+          $ref: '#/components/schemas/UserGenerationTierPreferences'
+        utility:
+          $ref: '#/components/schemas/UserGenerationTierPreferences'
     Project:
       type: object
       required:
@@ -299,9 +352,18 @@ components:
           type: string
         docType:
           $ref: '#/components/schemas/DocType'
+        personaId:
+          type: string
+          nullable: true
+          description: |
+            关联人物 ID（仅 persona_card 有意义）。空表示孤儿卡；
+            须属于同一 project。存量可用标题预匹配脚本补全。
         indexStatus:
           type: string
-          enum: [pending, indexing, completed, failed]
+          enum: [pending, indexing, completed, failed, stale]
+          description: |
+            索引生命周期：pending 待索引；indexing 进行中；completed 已索引；
+            failed 失败；stale 正文已变更待重新索引（保存后自动排队）。
         createdAt:
           type: string
           format: date-time
@@ -357,6 +419,20 @@ components:
           type: array
           items:
             type: string
+        evidenceSource:
+          type: string
+          enum:
+            [
+              title_match,
+              paragraph_crop_by_title,
+              full_document_by_title,
+              vector,
+              vector_full_document,
+            ]
+          description: 证据来源通道（标题匹配 / 段落裁剪 / 向量）
+        dualHit:
+          type: boolean
+          description: 标题匹配与向量通道均命中同一 documentId
     KnowledgeRetrievalEvidence:
       type: object
       properties:
@@ -370,6 +446,131 @@ components:
             $ref: '#/components/schemas/RetrievalFullDocument'
         evidenceText:
           type: string
+    RetrievalModeParam:
+      type: string
+      enum: [auto, structured_only, vector_only, hybrid]
+      default: auto
+      description: |
+        AQ-360 请求侧检索策略：
+        - `auto`（默认）：有章节锚定时，标题匹配（A）保留全部命中，向量检索（B）按剩余配额补足；
+          无 `structuredMatchingText` 时自动退化为纯向量检索，不再返回空证据。
+        - `structured_only`：仅执行标题匹配（A），不调用向量检索，用于离线回归对比。
+        - `vector_only`：跳过标题匹配，仅执行向量检索（B）。
+        - `hybrid`：强制同时执行 A、B 两路径并合并（章节缺锚定时自动退化为 vector_only）。
+    RetrievalMode:
+      type: string
+      enum: [structured, vector, hybrid, skipped]
+      description: |
+        本次实际生效的检索模式（`mergeTitleAndVectorEvidence` 输出）：
+        structured 仅标题匹配命中；vector 仅向量补充命中；hybrid 两路径均有命中；
+        skipped 两路径均未命中任何文档。
+    PreviewRetrievalRequest:
+      type: object
+      required:
+        - projectId
+        - projectCtx
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        prompt:
+          type: string
+        chapterNo:
+          type: integer
+          minimum: 1
+        useStructuredKb:
+          type: boolean
+          default: true
+          description: 显式关闭后等价于 retrievalMode=vector_only
+        retrievalMode:
+          $ref: '#/components/schemas/RetrievalModeParam'
+        projectCtx:
+          type: object
+          description: 项目上下文快照（大纲摘要、人物设定、章节列表、知识库文档等），字段与 rag-orchestrator 内存上下文一致
+        extraContext:
+          type: object
+    PreviewRetrievalItem:
+      type: object
+      required:
+        - id
+        - pool
+        - title
+        - preview
+        - selected
+      properties:
+        id:
+          type: string
+          description: documentId 或伪 id（如 `prior_tail:3`、`recent:5`、`memory:7`）
+        pool:
+          type: string
+          enum:
+            [
+              prior_chapter_tail,
+              persona_snapshots,
+              persona_card,
+              other_docs,
+              recent_chapters,
+              memory_chapters,
+            ]
+        title:
+          type: string
+        preview:
+          type: string
+        score:
+          type: number
+        selected:
+          type: boolean
+          description: 是否在 token 预算内被实际注入
+        meta:
+          type: object
+          description: |
+            附加诊断信息，知识库类文档（persona_card/other_docs）额外含
+            `evidenceSource`（见 `RetrievalFullDocument.evidenceSource`）与 `dualHit`（boolean）
+    PreviewRetrievalResult:
+      type: object
+      required:
+        - items
+        - tokenBudget
+        - tokenUsed
+        - query
+        - retrievalMode
+        - titleMatchedDocumentIds
+        - vectorDocumentIds
+        - mergedDocumentIds
+        - dualHitDocumentIds
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewRetrievalItem'
+        tokenBudget:
+          type: integer
+        tokenUsed:
+          type: integer
+        query:
+          type: string
+        retrievalMode:
+          $ref: '#/components/schemas/RetrievalMode'
+        titleMatchedDocumentIds:
+          type: array
+          items:
+            type: string
+          description: A 路径（标题匹配）命中的文档 id
+        vectorDocumentIds:
+          type: array
+          items:
+            type: string
+          description: B 路径（向量检索）命中的文档 id
+        mergedDocumentIds:
+          type: array
+          items:
+            type: string
+          description: A、B 合并去重后最终参与证据拼装的文档 id（冲突时 A 优先）
+        dualHitDocumentIds:
+          type: array
+          items:
+            type: string
+          description: 同一 documentId 被 A、B 两路径同时命中
     Chunk:
       type: object
       required:
@@ -453,6 +654,21 @@ components:
         completedAt:
           type: string
           format: date-time
+        context:
+          type: object
+          description: |
+            自由格式上下文，记录本次生成实际使用的检索与生成参数（rag-orchestrator 侧写入，字段随任务类型有增减）。
+            AQ-359/360 混合检索相关字段：
+            - `retrieval_mode`（string）：本次实际生效的检索模式，取值 `structured`/`vector`/`hybrid`/`skipped`，
+              对应 `mergeTitleAndVectorEvidence` 的输出（章节锚定场景不再只有纯标题匹配一种路径）。
+            - `title_matched_document_ids`（string[]）：A 路径（`structuredMatchingText` 标题匹配）命中的文档 id。
+            - `vector_document_ids`（string[]）：B 路径（Qdrant 向量检索补充）命中的文档 id。
+            - `evidence_document_ids`（string[]）：经 token 预算裁剪后实际写入 `retrievedEvidence` 的文档 id
+              （A ∪ B 合并去重后的子集，冲突时 A 优先）。
+            - `dual_hit_document_ids`（string[]）：同一 documentId 被 A、B 两路径同时命中。
+            - `retrieval_skipped_no_structured`（boolean）：章节缺少 `structuredMatchingText` 且向量补充也未命中任何文档。
+            其余常见字段：`retrieval_query`、`retrieved_chunk_ids`、`full_documents`
+            （`RetrievalFullDocument[]`，含 `evidenceSource`/`dualHit`）、`generation_tier`、`generation_temperature`。
     ChapterSummary:
       type: object
       required:
@@ -595,9 +811,13 @@ components:
         - chapterSummaryMemoryCount
         - priorChapterTailChars
         - contextExcerptMaxChars
+        - outlineMaxChars
+        - personaProfileMaxChars
+        - relationMemoMaxChars
         - generationTemperature
         - updatePersonaOnSave
         - generateRelationEventsOnSave
+        - parseStructuredInfoOnSave
         - chapterOptimizeSegmentCharSize
         - contentSafetyScanEnabled
         - contentSafetyCustomRules
@@ -634,13 +854,51 @@ components:
           maximum: 800
           default: 400
           description: 前序章节无摘要时，降级 excerpt 最大长度（取正文尾部）
+        outlineMaxChars:
+          type: integer
+          minimum: 0
+          maximum: 8000
+          default: 4000
+          description: |
+            叙事上下文【大纲总结】最大字符；0 表示不注入。
+            超预算时按本章匹配文本做检索式区段注入，否则头部截断。
+        personaProfileMaxChars:
+          type: integer
+          minimum: 0
+          maximum: 8000
+          default: 2000
+          description: |
+            出场人物静态设定卡（或回退简介）每块最大字符；0 表示不注入静态卡正文。
+        relationMemoMaxChars:
+          type: integer
+          minimum: 0
+          maximum: 8000
+          default: 2000
+          description: 关系备忘（身份关系 + 已选关系事件）合计最大字符；0 表示不注入
         generationTemperature:
           type: number
           format: float
           minimum: 0
           maximum: 2
           default: 0.7
-          description: 章节生成等主链路的采样温度（项目级）
+          description: 工具级采样温度（大纲、验收、摘要等）；未配置写作温度时亦作全局回退，与 PROVIDER_TEMPERATURE_UTILITY / PROVIDER_TEMPERATURE 对齐
+        generationWritingModel:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: 项目级写作模型覆盖；null 表示使用环境变量 PROVIDER_MODEL_WRITING 或回退 PROVIDER_MODEL
+        generationUtilityModel:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: 项目级工具模型覆盖；null 表示使用环境变量 PROVIDER_MODEL_UTILITY 或回退 PROVIDER_MODEL
+        writingGenerationTemperature:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 2
+          description: 写作级采样温度覆盖；null 表示使用环境变量 PROVIDER_TEMPERATURE_WRITING（默认约 0.9）
         updatePersonaOnSave:
           type: boolean
           default: true
@@ -649,6 +907,10 @@ components:
           type: boolean
           default: true
           description: 保存章节时自动生成关系事件
+        parseStructuredInfoOnSave:
+          type: boolean
+          default: true
+          description: 保存章节时自动解析结构化信息（matchingText，供检索标题匹配）
         chapterOptimizeSegmentCharSize:
           type: integer
           minimum: 0
@@ -667,8 +929,8 @@ components:
         pipelinePreset:
           type: string
           enum: [creative_refine, full, character_rules, sensory_only]
-          default: creative_refine
-          description: 创作精修预设；full 含规则模块旧版
+          deprecated: true
+          description: 已废弃（AQ-356）；请使用 pipelineEnabledModules 与模块开关
         pipelineSkipSensoryOutlineReview:
           type: boolean
           default: false
@@ -676,8 +938,8 @@ components:
         pipelineRulesFixMode:
           type: string
           enum: [auto, semi, manual]
-          default: semi
-          description: 规则修复模式
+          deprecated: true
+          description: 已废弃；请使用 complianceRulesFixMode
         pipelineHomogenizationEnabled:
           type: boolean
           default: false
@@ -695,15 +957,15 @@ components:
             minimum: 1
             maximum: 4
           default: [1, 2]
-          description: 创作精修模块开关（顺序固定；3=规则旧版）
+          description: 创作精修模块开关（顺序固定；3 已废弃）
         pipelineCharacterAdjustmentEnabled:
           type: boolean
           default: false
           description: 是否启用角色对白调整（character-outline → character）
         pipelineRulesModuleEnabled:
           type: boolean
-          default: false
-          description: 在 creative_refine 预设下额外启用规则模块（旧版）
+          deprecated: true
+          description: 已废弃；创作精修内规则模块已下线
         complianceRulesFixMode:
           type: string
           enum: [auto, semi, manual]
@@ -741,17 +1003,50 @@ components:
           type: integer
           minimum: 200
           maximum: 800
+        outlineMaxChars:
+          type: integer
+          minimum: 0
+          maximum: 8000
+        personaProfileMaxChars:
+          type: integer
+          minimum: 0
+          maximum: 8000
+        relationMemoMaxChars:
+          type: integer
+          minimum: 0
+          maximum: 8000
         generationTemperature:
           type: number
           format: float
           minimum: 0
           maximum: 2
+          description: 工具级采样温度
+        generationWritingModel:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: 写作模型覆盖；传 null 清除
+        generationUtilityModel:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: 工具模型覆盖；传 null 清除
+        writingGenerationTemperature:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 2
+          description: 写作级温度覆盖；传 null 清除
         updatePersonaOnSave:
           type: boolean
           description: 保存章节时自动更新人物出场状态
         generateRelationEventsOnSave:
           type: boolean
           description: 保存章节时自动生成关系事件
+        parseStructuredInfoOnSave:
+          type: boolean
+          description: 保存章节时自动解析结构化信息（matchingText）
         chapterOptimizeSegmentCharSize:
           type: integer
           minimum: 0
@@ -767,6 +1062,8 @@ components:
         pipelinePreset:
           type: string
           enum: [creative_refine, full, character_rules, sensory_only]
+          deprecated: true
+          description: 已废弃（AQ-356）；请使用 pipelineEnabledModules
         pipelineCharacterAdjustmentEnabled:
           type: boolean
         pipelineRulesModuleEnabled:
@@ -1200,6 +1497,77 @@ components:
         chapterNo:
           type: integer
           nullable: true
+    WritingStyleSampleSceneType:
+      type: string
+      enum: [dialogue, action, intimate, atmosphere]
+      description: |
+        场景类型：dialogue=对白戏，action=动作戏，intimate=亲密戏，atmosphere=心理氛围
+    WritingStyleSample:
+      type: object
+      required:
+        - id
+        - text
+        - sceneType
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+          minLength: 50
+          maxLength: 800
+          description: 建议 200~500 字的文风正样本
+        sceneType:
+          $ref: '#/components/schemas/WritingStyleSampleSceneType'
+        sourceChapterNo:
+          type: integer
+          minimum: 1
+          description: 来源章节号（可选）
+        label:
+          type: string
+          maxLength: 80
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    WritingStyleSampleInput:
+      type: object
+      required:
+        - text
+        - sceneType
+      properties:
+        text:
+          type: string
+          minLength: 50
+          maxLength: 800
+        sceneType:
+          $ref: '#/components/schemas/WritingStyleSampleSceneType'
+        sourceChapterNo:
+          type: integer
+          minimum: 1
+          nullable: true
+        label:
+          type: string
+          maxLength: 80
+    WritingStyleSamplePatch:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 50
+          maxLength: 800
+        sceneType:
+          $ref: '#/components/schemas/WritingStyleSampleSceneType'
+        sourceChapterNo:
+          type: integer
+          minimum: 1
+          nullable: true
+        label:
+          type: string
+          maxLength: 80
     PersonaIdentityRelation:
       type: object
       required:
@@ -1707,6 +2075,16 @@ components:
           minLength: 1
           maxLength: 2000
           description: User-provided optimization request for the chapter.
+        currentPlanText:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: 当前可编辑优化方案；与 revisionFeedback 同时提供时，AI 基于该版本调整方案。
+        revisionFeedback:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: 本轮方案修改意见；与 currentPlanText 同时提供，支持重复多轮调整。
         appearingCharacters:
           type: array
           items:
@@ -1974,13 +2352,11 @@ components:
     ChapterPipelineConfig:
       type: object
       required:
-        - pipelinePreset
         - pipelineSkipSensoryOutlineReview
         - pipelineSkipCharacterOutlineReview
         - pipelineSkipCharacterTraitsOutlineReview
         - pipelineCharacterAdjustmentEnabled
         - pipelineCharacterTraitsEnabled
-        - pipelineRulesFixMode
         - pipelineHomogenizationEnabled
         - pipelineHomogenizationPriorChapterCount
         - pipelineEnabledModules
@@ -1988,10 +2364,13 @@ components:
         pipelinePreset:
           type: string
           enum: [creative_refine, full, character_rules, sensory_only]
+          deprecated: true
+          description: 已废弃（AQ-356）；会话 config 以 pipelineEnabledModules 为准
         pipelineCharacterAdjustmentEnabled:
           type: boolean
         pipelineRulesModuleEnabled:
           type: boolean
+          deprecated: true
         complianceRulesFixMode:
           type: string
           enum: [auto, semi, manual]
@@ -2006,6 +2385,7 @@ components:
         pipelineRulesFixMode:
           type: string
           enum: [auto, semi, manual]
+          deprecated: true
         pipelineHomogenizationEnabled:
           type: boolean
         pipelineHomogenizationPriorChapterCount:
@@ -2024,6 +2404,8 @@ components:
         preset:
           type: string
           enum: [creative_refine, full, character_rules, sensory_only]
+          deprecated: true
+          description: 已废弃（AQ-356）；请使用 configOverrides.pipelineEnabledModules
         mode:
           type: string
           enum: [pipeline, final-polish]
@@ -2036,6 +2418,10 @@ components:
           items:
             type: string
           description: 检索预览确认后注入的角色名；省略则使用全部已发布人物
+        optimizationIntent:
+          type: string
+          maxLength: 2000
+          description: 用户整体优化意图（可选；由原章节优化「优化要求」迁移，注入大纲生成与意向书合成）
     ChapterPipelineStartResult:
       type: object
       required:
@@ -2241,6 +2627,43 @@ components:
         revisionRound:
           type: integer
           minimum: 0
+        synthesizedBrief:
+          type: string
+          description: 由大纲条目合成的连贯编辑意向书；改写 prompt 优先使用
+        briefEditedByUser:
+          type: boolean
+          description: 用户是否手动编辑过意向书
+    ChapterPipelineOutlineBriefSynthesizeRequest:
+      type: object
+      required:
+        - outlineType
+      properties:
+        outlineType:
+          type: string
+          enum: [character, character-traits, sensory]
+    ChapterPipelineOutlineBriefSynthesizeResult:
+      type: object
+      required:
+        - synthesizedBrief
+        - briefEditedByUser
+      properties:
+        synthesizedBrief:
+          type: string
+        briefEditedByUser:
+          type: boolean
+    ChapterPipelineOutlineBriefPatch:
+      type: object
+      required:
+        - outlineType
+        - synthesizedBrief
+      properties:
+        outlineType:
+          type: string
+          enum: [character, character-traits, sensory]
+        synthesizedBrief:
+          type: string
+          minLength: 1
+          maxLength: 2000
     ChapterPipelineOutlinePatch:
       type: object
       required:
@@ -2467,7 +2890,8 @@ components:
       properties:
         issueId:
           type: string
-          description: For rules-fix module — fix a single issue
+          deprecated: true
+          description: 已废弃；原 rules-fix 单条修复参数
         forceRegenerate:
           type: boolean
           default: false
@@ -2490,6 +2914,7 @@ components:
         draftTextOverride:
           type: string
           description: 手动修订后的终稿正文；提供时优先于 session 内版本（用于质量门禁 blocked 时人工兜底）
+    ChapterPipelineSessionView:
       type: object
       required:
         - sessionId

@@ -12,7 +12,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import axios from 'axios';
 import {
+  GENERATION_MODEL_ID_MAX_LENGTH,
   mergeContentSafetyRules,
+  normalizeGenerationModelId,
+  resolveWritingGenerationTemperatureOverride,
   sanitizeProjectContentSafetyRules,
   validateProjectContentSafetyRulesInput,
   type ProjectContentSafetyRule,
@@ -105,6 +108,7 @@ import type { ChapterStructuredInfoPersisted } from './persisted-workspace.types
 import { DocumentsService } from '../documents/documents.service';
 import { PromptTemplatesService } from '../prompt-templates/prompt-templates.service';
 import { TaskPromptsService } from '../task-prompts/task-prompts.service';
+import { AuthService } from '../auth/auth.service';
 import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
 import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
@@ -118,6 +122,7 @@ import {
   assertInstruction,
   assertPlanText,
   buildDraftUserPrompt,
+  buildPlanRevisionInstruction,
   buildPlanUserPrompt,
   buildPlanSynthesisUserPrompt,
   buildSegmentDiagnosisUserPrompt,
@@ -144,13 +149,9 @@ import {
   type Segment,
 } from './chapter-optimize.util';
 import {
-  WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT,
-  WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
   WRITE_CHAPTER_OUTLINE_SYSTEM_PROMPT,
   WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY,
-  assertConfirmedOutlineForDraft,
   assertOutlineText,
-  buildWriteDraftUserPrompt,
   buildWriteOutlineUserPrompt,
   makeWriteOutlineId,
   type WriteChapterTaskInput,
@@ -158,6 +159,7 @@ import {
 } from './write-chapter.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { usePostgresPersistence } from '../../persistence/use-postgres';
+import { createAsyncSerialQueue } from '../../persistence/async-serial-queue';
 import {
   loadWorkspaceFromPostgres,
   syncProjectChaptersToPostgres,
@@ -172,12 +174,18 @@ import {
   clampChapterSummaryPromptCount,
   clampContextExcerptMaxChars,
   clampGenerationTemperature,
+  clampOutlineMaxChars,
+  clampPersonaProfileMaxChars,
   clampPriorChapterTailChars,
+  clampRelationMemoMaxChars,
   DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
   DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
   DEFAULT_GENERATION_TEMPERATURE,
+  DEFAULT_OUTLINE_MAX_CHARS,
+  DEFAULT_PERSONA_PROFILE_MAX_CHARS,
   DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
+  DEFAULT_RELATION_MEMO_MAX_CHARS,
   sliceContentTail,
 } from './project-settings.util';
 import {
@@ -186,6 +194,14 @@ import {
   PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS,
   serializeProjectSettingsForJsonMirror,
 } from './project-settings.extensions';
+import { migratePipelineSettingsFromPreset } from './chapter-pipeline.util';
+import {
+  createWritingStyleSampleRecord,
+  sanitizeWritingStyleSamples,
+  validateWritingStyleSampleInput,
+  WRITING_STYLE_SAMPLES_MAX_PER_PROJECT,
+  type WritingStyleSample,
+} from './writing-style-samples.util';
 import { buildWriteContextReadiness } from './write-context-readiness.util';
 
 function buildTargetWordsInstruction(targetWords?: number): string {
@@ -228,12 +244,20 @@ export interface ProjectSettings {
   priorChapterTailChars: number;
   /** 无摘要章节降级 excerpt 最大长度 */
   contextExcerptMaxChars: number;
+  /** 叙事上下文【大纲总结】最大字符；0 不注入 */
+  outlineMaxChars: number;
+  /** 出场人物静态卡 / 回退简介最大字符；0 不注入静态正文 */
+  personaProfileMaxChars: number;
+  /** 关系备忘合计最大字符；0 不注入 */
+  relationMemoMaxChars: number;
   /** 主生成链路采样温度（0~2） */
   generationTemperature: number;
   /** 保存章节时自动更新人物出场状态 */
   updatePersonaOnSave: boolean;
   /** 保存章节时自动生成关系事件 */
   generateRelationEventsOnSave: boolean;
+  /** 保存章节时自动解析结构化信息（matchingText） */
+  parseStructuredInfoOnSave: boolean;
   /** 章节优化方案分段字数；0 表示不按字数分段 */
   chapterOptimizeSegmentCharSize: number;
   /** 是否对 AI 正文执行内容安全硬规则扫描 */
@@ -259,6 +283,13 @@ export interface ProjectSettings {
     unlockAfterCondition?: string;
     descriptionForPrompt: string;
   }>;
+  writingStyleSamples?: WritingStyleSample[];
+  /** 项目级写作模型覆盖；null = 使用环境默认 */
+  generationWritingModel?: string | null;
+  /** 项目级工具模型覆盖；null = 使用环境默认 */
+  generationUtilityModel?: string | null;
+  /** 写作级温度覆盖；null = 使用环境默认 */
+  writingGenerationTemperature?: number | null;
   updatedAt: Date;
 }
 
@@ -280,7 +311,7 @@ export interface PersonaRecord {
 }
 
 export interface ChapterPendingAction {
-  type: 'persona' | 'relationEvents';
+  type: 'persona' | 'relationEvents' | 'structuredInfo';
   label: string;
   estimatedTokens: number;
 }
@@ -458,6 +489,10 @@ export class ProjectsService implements OnModuleInit {
   private readonly summarizeJobsStore = new Map<string, SummaryJobRecord[]>();
   private readonly relationEventsStore = new Map<string, RelationEventRecord[]>();
   private readonly identityRelationsStore = new Map<string, PersonaIdentityRelationRecord[]>();
+  /** workspace PG 同步串行队列：全量/局部写共享，避免旧快照覆盖 */
+  private readonly pgSyncQueue = createAsyncSerialQueue();
+  /** 最近访问项目的用户，供无 userId 的内部 sync（如内容安全改写）注入全局生成偏好 */
+  private readonly lastActingUserIdByProject = new Map<string, string>();
 
   private persistenceResolve!: () => void;
   readonly persistenceReady: Promise<void>;
@@ -469,7 +504,8 @@ export class ProjectsService implements OnModuleInit {
     @Inject(forwardRef(() => PromptTemplatesService))
     private readonly promptTemplatesService: PromptTemplatesService,
     @Inject(forwardRef(() => TaskPromptsService))
-    private readonly taskPromptsService: TaskPromptsService
+    private readonly taskPromptsService: TaskPromptsService,
+    private readonly authService: AuthService
   ) {
     this.persistenceReady = new Promise<void>((resolve) => {
       this.persistenceResolve = resolve;
@@ -691,9 +727,13 @@ export class ProjectsService implements OnModuleInit {
       chapterSummaryMemoryCount?: number;
       priorChapterTailChars?: number;
       contextExcerptMaxChars?: number;
+      outlineMaxChars?: number;
+      personaProfileMaxChars?: number;
+      relationMemoMaxChars?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
       contentSafetyCustomRules?: ProjectContentSafetyRule[];
@@ -710,6 +750,9 @@ export class ProjectsService implements OnModuleInit {
       pipelineHomogenizationPriorChapterCount?: number;
       pipelineEnabledModules?: number[];
       protagonistProgressRules?: ProjectSettings['protagonistProgressRules'];
+      generationWritingModel?: string | null;
+      generationUtilityModel?: string | null;
+      writingGenerationTemperature?: number | null;
     },
     userId?: string
   ) {
@@ -759,8 +802,58 @@ export class ProjectsService implements OnModuleInit {
       settings.contextExcerptMaxChars = clampContextExcerptMaxChars(payload.contextExcerptMaxChars);
     }
 
+    if (payload.outlineMaxChars !== undefined) {
+      settings.outlineMaxChars = clampOutlineMaxChars(payload.outlineMaxChars);
+    }
+
+    if (payload.personaProfileMaxChars !== undefined) {
+      settings.personaProfileMaxChars = clampPersonaProfileMaxChars(payload.personaProfileMaxChars);
+    }
+
+    if (payload.relationMemoMaxChars !== undefined) {
+      settings.relationMemoMaxChars = clampRelationMemoMaxChars(payload.relationMemoMaxChars);
+    }
+
     if (payload.generationTemperature !== undefined) {
       settings.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
+    }
+
+    if (payload.generationWritingModel !== undefined) {
+      if (payload.generationWritingModel === null) {
+        settings.generationWritingModel = null;
+      } else {
+        const normalized = normalizeGenerationModelId(payload.generationWritingModel);
+        if (!normalized) {
+          throw new BadRequestException(
+            `generationWritingModel 须为非空字符串且不超过 ${GENERATION_MODEL_ID_MAX_LENGTH} 字`
+          );
+        }
+        settings.generationWritingModel = normalized;
+      }
+    }
+
+    if (payload.generationUtilityModel !== undefined) {
+      if (payload.generationUtilityModel === null) {
+        settings.generationUtilityModel = null;
+      } else {
+        const normalized = normalizeGenerationModelId(payload.generationUtilityModel);
+        if (!normalized) {
+          throw new BadRequestException(
+            `generationUtilityModel 须为非空字符串且不超过 ${GENERATION_MODEL_ID_MAX_LENGTH} 字`
+          );
+        }
+        settings.generationUtilityModel = normalized;
+      }
+    }
+
+    if (payload.writingGenerationTemperature !== undefined) {
+      if (payload.writingGenerationTemperature === null) {
+        settings.writingGenerationTemperature = null;
+      } else {
+        settings.writingGenerationTemperature = resolveWritingGenerationTemperatureOverride(
+          payload.writingGenerationTemperature
+        );
+      }
     }
 
     if (payload.updatePersonaOnSave !== undefined) {
@@ -769,6 +862,10 @@ export class ProjectsService implements OnModuleInit {
 
     if (payload.generateRelationEventsOnSave !== undefined) {
       settings.generateRelationEventsOnSave = payload.generateRelationEventsOnSave;
+    }
+
+    if (payload.parseStructuredInfoOnSave !== undefined) {
+      settings.parseStructuredInfoOnSave = payload.parseStructuredInfoOnSave;
     }
 
     if (payload.chapterOptimizeSegmentCharSize !== undefined) {
@@ -820,7 +917,7 @@ export class ProjectsService implements OnModuleInit {
     return this.personasStore.get(projectId)!;
   }
 
-  createPersona(
+  async createPersona(
     projectId: string,
     payload: { name: string; profile: string; state?: string },
     userId?: string
@@ -850,11 +947,11 @@ export class ProjectsService implements OnModuleInit {
     };
 
     this.personasStore.get(projectId)!.push(persona);
-    this.persistState();
+    await this.persistStateAndAwaitPgSync();
     return persona;
   }
 
-  publishPersona(projectId: string, personaId: string, userId?: string) {
+  async publishPersona(projectId: string, personaId: string, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -876,11 +973,11 @@ export class ProjectsService implements OnModuleInit {
     settings.activePersonaId = personaId;
     settings.updatedAt = new Date();
 
-    this.persistState();
+    await this.persistStateAndAwaitPgSync();
     return persona;
   }
 
-  updatePersona(
+  async updatePersona(
     projectId: string,
     personaId: string,
     payload: { name?: string; profile?: string; state?: string },
@@ -916,11 +1013,11 @@ export class ProjectsService implements OnModuleInit {
     }
 
     persona.updatedAt = new Date();
-    this.persistState();
+    await this.persistStateAndAwaitPgSync();
     return persona;
   }
 
-  deletePersona(projectId: string, personaId: string, userId?: string) {
+  async deletePersona(projectId: string, personaId: string, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
     }
@@ -944,7 +1041,7 @@ export class ProjectsService implements OnModuleInit {
     );
     settings.updatedAt = new Date();
 
-    this.persistState();
+    await this.persistStateAndAwaitPgSync();
     return { id: personaId };
   }
 
@@ -1234,6 +1331,7 @@ export class ProjectsService implements OnModuleInit {
         payload.content,
         targetChapter.title,
         {
+          structuredInfo: settings.parseStructuredInfoOnSave !== false,
           persona: settings.updatePersonaOnSave !== false,
           relationEvents: settings.generateRelationEventsOnSave !== false,
         }
@@ -1257,6 +1355,13 @@ export class ProjectsService implements OnModuleInit {
 
   private buildChapterPendingActions(settings: ProjectSettings): ChapterPendingAction[] {
     const actions: ChapterPendingAction[] = [];
+    if (settings.parseStructuredInfoOnSave !== false) {
+      actions.push({
+        type: 'structuredInfo',
+        label: '解析本章结构化信息（检索匹配文本）',
+        estimatedTokens: 600,
+      });
+    }
     if (settings.updatePersonaOnSave !== false) {
       actions.push({
         type: 'persona',
@@ -1279,8 +1384,15 @@ export class ProjectsService implements OnModuleInit {
     chapterNo: number,
     content: string,
     title: string,
-    selected: { persona: boolean; relationEvents: boolean }
+    selected: { persona: boolean; relationEvents: boolean; structuredInfo: boolean }
   ) {
+    if (selected.structuredInfo) {
+      try {
+        await this.parseChapterStructuredInfo(projectId, chapterNo, { mode: 'chapter' });
+      } catch {
+        // 自动解析失败不影响章节保存
+      }
+    }
     if (selected.persona) {
       await this.syncPersonaGraphFromChapter(projectId, chapterNo, content, title);
     }
@@ -1296,7 +1408,7 @@ export class ProjectsService implements OnModuleInit {
   async executeChapterAfterSave(
     projectId: string,
     chapterNo: number,
-    payload: { actions: Array<'persona' | 'relationEvents'> },
+    payload: { actions: Array<'persona' | 'relationEvents' | 'structuredInfo'> },
     userId?: string,
     onProgress?: (event: { event: string; action: string; status: string }) => void
   ) {
@@ -1313,9 +1425,20 @@ export class ProjectsService implements OnModuleInit {
     }
 
     const selected = {
+      structuredInfo: payload.actions.includes('structuredInfo'),
       persona: payload.actions.includes('persona'),
       relationEvents: payload.actions.includes('relationEvents'),
     };
+
+    if (selected.structuredInfo) {
+      onProgress?.({ event: 'progress', action: 'structuredInfo', status: 'started' });
+      try {
+        await this.parseChapterStructuredInfo(projectId, chapterNo, { mode: 'chapter' }, userId);
+        onProgress?.({ event: 'progress', action: 'structuredInfo', status: 'completed' });
+      } catch {
+        onProgress?.({ event: 'progress', action: 'structuredInfo', status: 'failed' });
+      }
+    }
 
     if (selected.persona) {
       onProgress?.({ event: 'progress', action: 'persona', status: 'started' });
@@ -1369,6 +1492,7 @@ export class ProjectsService implements OnModuleInit {
       chapterNo,
       title: payload.title.trim(),
       content: payload.content,
+      contentHash: hashChapterContent(payload.content),
       summary: nextSummary,
       summarySource: 'fallback',
       summaryUpdatedAt: now,
@@ -1379,27 +1503,16 @@ export class ProjectsService implements OnModuleInit {
     knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
 
     await this.persistStateAndAwaitPgSync({ type: 'project-knowledge', projectId });
-    if (knowledge.chapters.length > 0) {
-      const settings = this.settingsStore.get(projectId)!;
-      if (settings.updatePersonaOnSave !== false) {
-        await this.syncPersonaGraphFromChapter(
-          projectId,
-          chapterNo,
-          payload.content,
-          targetChapter.title
-        );
-      }
-      if (settings.generateRelationEventsOnSave !== false) {
-        try {
-          await this.generateChapterRelationEvents(projectId, chapterNo);
-        } catch {
-          // 自动生成失败不影响章节保存
-        }
-      }
-    }
     this.relinkRelationEventsForProject(projectId);
     await this.persistStateAndAwaitPgSync({ type: 'project-knowledge', projectId });
-    return targetChapter;
+
+    const settings = this.settingsStore.get(projectId)!;
+    const pendingActions = this.buildChapterPendingActions(settings);
+    return {
+      ...targetChapter,
+      contentChanged: true,
+      pendingActions,
+    };
   }
 
   async importChapterPreview(projectId: string, content: string, userId?: string) {
@@ -1648,66 +1761,6 @@ export class ProjectsService implements OnModuleInit {
       const message = error instanceof Error ? error.message : '结构化信息解析失败';
       throw new BadGatewayException(message);
     }
-  }
-
-  createIndexJob(projectId: string, payload: { mode?: IndexMode }, userId?: string) {
-    if (userId) {
-      this.checkAccess(projectId, userId, ['owner', 'editor']);
-    }
-    this.getProjectOrThrow(projectId);
-    this.ensureProjectState(projectId);
-
-    const mode: IndexMode = payload.mode ?? 'full';
-    const knowledge = this.knowledgeStore.get(projectId)!;
-    const job: IndexJobRecord = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      projectId,
-      mode,
-      status: 'processing',
-      totalChapters: knowledge.chapters.length,
-      processedChapters: 0,
-      createdAt: new Date(),
-      completedAt: null,
-      errorMessage: null,
-    };
-
-    const jobs = this.indexJobsStore.get(projectId)!;
-    jobs.unshift(job);
-
-    try {
-      for (const chapter of knowledge.chapters) {
-        chapter.summary = buildFallbackChapterSummary(chapter.content);
-        chapter.summarySource = 'fallback';
-        chapter.summaryUpdatedAt = new Date();
-        job.processedChapters += 1;
-      }
-      knowledge.indexVersion += 1;
-      knowledge.lastIndexedAt = new Date();
-      job.status = 'completed';
-      job.completedAt = new Date();
-    } catch (error) {
-      job.status = 'failed';
-      job.errorMessage = error instanceof Error ? error.message : '索引失败';
-      job.completedAt = new Date();
-    }
-
-    this.persistState();
-    return job;
-  }
-
-  getIndexJob(projectId: string, jobId: string, userId?: string) {
-    if (userId) {
-      this.checkAccess(projectId, userId);
-    }
-    this.getProjectOrThrow(projectId);
-    this.ensureProjectState(projectId);
-
-    const jobs = this.indexJobsStore.get(projectId)!;
-    const job = jobs.find((item) => item.id === jobId);
-    if (!job) {
-      throw new NotFoundException(`未找到索引任务: ${jobId}`);
-    }
-    return job;
   }
 
   async createSingleChapterSummaryJob(projectId: string, chapterNo: number, userId?: string) {
@@ -2171,6 +2224,133 @@ export class ProjectsService implements OnModuleInit {
     return { id: event.id };
   }
 
+  listWritingStyleSamples(projectId: string, userId?: string): WritingStyleSample[] {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+    const settings = this.settingsStore.get(projectId)!;
+    return sanitizeWritingStyleSamples(settings.writingStyleSamples).map((item) => ({ ...item }));
+  }
+
+  createWritingStyleSample(
+    projectId: string,
+    payload: {
+      text: string;
+      sceneType: string;
+      sourceChapterNo?: number | null;
+      label?: string;
+    },
+    userId?: string
+  ): WritingStyleSample {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const validated = validateWritingStyleSampleInput(payload);
+    if (!validated.ok) {
+      throw new BadRequestException(validated.message);
+    }
+
+    if (validated.data.sourceChapterNo !== undefined) {
+      const chapter = this.getChapterRecordForPipeline(projectId, validated.data.sourceChapterNo);
+      if (!chapter) {
+        throw new BadRequestException(`未找到来源章节: ${validated.data.sourceChapterNo}`);
+      }
+    }
+
+    const settings = this.settingsStore.get(projectId)!;
+    const samples = sanitizeWritingStyleSamples(settings.writingStyleSamples);
+    if (samples.length >= WRITING_STYLE_SAMPLES_MAX_PER_PROJECT) {
+      throw new BadRequestException(
+        `文风样本库已满（最多 ${WRITING_STYLE_SAMPLES_MAX_PER_PROJECT} 条）`
+      );
+    }
+
+    const sample = createWritingStyleSampleRecord(validated.data);
+    settings.writingStyleSamples = [...samples, sample];
+    settings.updatedAt = new Date();
+    this.persistState();
+    return { ...sample };
+  }
+
+  updateWritingStyleSample(
+    projectId: string,
+    sampleId: string,
+    payload: {
+      text?: string;
+      sceneType?: string;
+      sourceChapterNo?: number | null;
+      label?: string;
+    },
+    userId?: string
+  ): WritingStyleSample {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const settings = this.settingsStore.get(projectId)!;
+    const samples = sanitizeWritingStyleSamples(settings.writingStyleSamples);
+    const index = samples.findIndex((item) => item.id === sampleId);
+    if (index < 0) {
+      throw new NotFoundException(`未找到文风样本: ${sampleId}`);
+    }
+
+    const current = samples[index]!;
+    const validated = validateWritingStyleSampleInput({
+      text: payload.text ?? current.text,
+      sceneType: payload.sceneType ?? current.sceneType,
+      sourceChapterNo:
+        payload.sourceChapterNo !== undefined ? payload.sourceChapterNo : current.sourceChapterNo,
+      label: payload.label !== undefined ? payload.label : current.label,
+    });
+    if (!validated.ok) {
+      throw new BadRequestException(validated.message);
+    }
+
+    if (validated.data.sourceChapterNo !== undefined) {
+      const chapter = this.getChapterRecordForPipeline(projectId, validated.data.sourceChapterNo);
+      if (!chapter) {
+        throw new BadRequestException(`未找到来源章节: ${validated.data.sourceChapterNo}`);
+      }
+    }
+
+    const next: WritingStyleSample = {
+      ...current,
+      ...validated.data,
+      updatedAt: new Date().toISOString(),
+    };
+    samples[index] = next;
+    settings.writingStyleSamples = samples;
+    settings.updatedAt = new Date();
+    this.persistState();
+    return { ...next };
+  }
+
+  deleteWritingStyleSample(projectId: string, sampleId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const settings = this.settingsStore.get(projectId)!;
+    const samples = sanitizeWritingStyleSamples(settings.writingStyleSamples);
+    const next = samples.filter((item) => item.id !== sampleId);
+    if (next.length === samples.length) {
+      throw new NotFoundException(`未找到文风样本: ${sampleId}`);
+    }
+    settings.writingStyleSamples = next;
+    settings.updatedAt = new Date();
+    this.persistState();
+    return { id: sampleId };
+  }
+
   async writeChapterOutlineStream(
     projectId: string,
     payload: Partial<WriteTaskInput>,
@@ -2222,7 +2402,8 @@ export class ProjectsService implements OnModuleInit {
       settings,
       personas,
       knowledge,
-      usedRelationEvents
+      usedRelationEvents,
+      userId
     );
 
     const userPrompt = buildWriteOutlineUserPrompt({
@@ -2386,120 +2567,6 @@ export class ProjectsService implements OnModuleInit {
     });
   }
 
-  async writeChapter(projectId: string, payload: Partial<WriteTaskInput>, userId?: string) {
-    if (userId) {
-      this.checkAccess(projectId, userId, ['owner', 'editor']);
-    }
-    this.getProjectOrThrow(projectId);
-    this.ensureProjectState(projectId);
-
-    const knowledge = this.knowledgeStore.get(projectId)!;
-    const settings = this.settingsStore.get(projectId)!;
-    const personas = this.personasStore.get(projectId)!;
-    const chapterNo = Number(payload.chapterNo || 0);
-
-    if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
-      throw new BadRequestException('chapterNo 必须为正整数');
-    }
-
-    const activePersona =
-      personas.find((item) => item.id === settings.activePersonaId) ||
-      personas.find((item) => item.status === 'published') ||
-      null;
-
-    const latestChapters = knowledge.chapters.slice(-3);
-
-    const citations = [
-      ...(knowledge.outlineSummary
-        ? [
-            {
-              sourceType: 'outline',
-              sourceId: 'outline-summary',
-              snippet: knowledge.outlineSummary.slice(0, 120),
-            },
-          ]
-        : []),
-      ...latestChapters.map((chapter) => ({
-        sourceType: 'chapter-summary',
-        sourceId: `chapter-${chapter.chapterNo}`,
-        snippet: chapter.summary,
-      })),
-    ];
-
-    const consistencyNotes: Array<{ level: 'info' | 'warning'; message: string }> = [];
-    if (!activePersona) {
-      consistencyNotes.push({
-        level: 'warning',
-        message: '当前项目未发布人物设定，将使用系统默认叙事风格。',
-      });
-    } else {
-      consistencyNotes.push({
-        level: 'info',
-        message: `已应用人物设定：${activePersona.name}。`,
-      });
-    }
-
-    if (!knowledge.outlineSummary) {
-      consistencyNotes.push({
-        level: 'warning',
-        message: '尚未填写大纲总结，连续性提示能力会受影响。',
-      });
-    }
-
-    consistencyNotes.push(...this.buildPersonaGraphConsistencyNotes(projectId, personas));
-
-    const usedRelationEvents = this.resolveSelectedRelationEvents(
-      projectId,
-      payload.selectedEventIds
-    );
-
-    let confirmedOutlineText: string;
-    try {
-      confirmedOutlineText = assertConfirmedOutlineForDraft(payload.confirmedOutlineText);
-    } catch {
-      throw new BadRequestException('生成正文前必须先确认章节大纲（confirmedOutlineText）');
-    }
-
-    const draftText = await this.generateDraftThroughOrchestrator(
-      projectId,
-      chapterNo,
-      payload,
-      settings,
-      personas,
-      knowledge,
-      usedRelationEvents,
-      confirmedOutlineText
-    );
-
-    const autoUpdates = await this.applyPostWriteUpdates(
-      projectId,
-      chapterNo,
-      payload.goal,
-      draftText
-    );
-
-    return {
-      draftText,
-      reasoningBrief:
-        '已由 RAG Orchestrator 注入【叙事上下文】；知识库证据在已解析「结构化信息」时按文档标题匹配注入 Top10 篇全文，否则跳过知识库匹配。',
-      citations,
-      consistencyNotes,
-      usedRelationEvents,
-      context: {
-        projectId,
-        chapterNo,
-        usedPersonaId: activePersona?.id || null,
-        outlineUsed: Boolean(knowledge.outlineSummary),
-        recentChapterCount: latestChapters.length,
-        targetWords:
-          Number.isFinite(Number(payload.targetWords)) && Number(payload.targetWords) > 0
-            ? Number(payload.targetWords)
-            : null,
-      },
-      autoUpdates,
-    };
-  }
-
   async optimizeChapterPlanStream(
     projectId: string,
     chapterNo: number,
@@ -2509,6 +2576,8 @@ export class ProjectsService implements OnModuleInit {
       selectedEventIds?: string[];
       existingSegmentDiagnoses?: string[];
       resumeFromSegmentIndex?: number;
+      currentPlanText?: string;
+      revisionFeedback?: string;
     },
     userId: string | undefined,
     callbacks: {
@@ -2575,8 +2644,21 @@ export class ProjectsService implements OnModuleInit {
       this.resolveChapterOptimizeConfig(projectId)
     );
 
-    const instruction = normalizeInstruction(payload.instruction);
+    let instruction = normalizeInstruction(payload.instruction);
     assertInstruction(instruction);
+    const currentPlanText =
+      typeof payload.currentPlanText === 'string' ? payload.currentPlanText.trim() : '';
+    const revisionFeedback = normalizeInstruction(payload.revisionFeedback);
+    if (currentPlanText || revisionFeedback) {
+      if (!currentPlanText || !revisionFeedback) {
+        throw new BadRequestException('currentPlanText 与 revisionFeedback 必须同时提供');
+      }
+      instruction = buildPlanRevisionInstruction({
+        instruction,
+        currentPlanText,
+        revisionFeedback,
+      });
+    }
 
     const settings = this.settingsStore.get(projectId)!;
     const personas = this.personasStore.get(projectId)!;
@@ -2590,7 +2672,8 @@ export class ProjectsService implements OnModuleInit {
       settings,
       personas,
       knowledge,
-      usedRelationEvents
+      usedRelationEvents,
+      userId
     );
 
     const chapterRef = {
@@ -2922,7 +3005,8 @@ export class ProjectsService implements OnModuleInit {
       settings,
       personas,
       knowledge,
-      usedRelationEvents
+      usedRelationEvents,
+      userId
     );
 
     const chapterRef = {
@@ -3175,7 +3259,14 @@ export class ProjectsService implements OnModuleInit {
 
     const settings = this.settingsStore.get(projectId)!;
     const personas = this.personasStore.get(projectId)!;
-    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      [],
+      userId
+    );
 
     const userPrompt = buildTypoCheckUserPrompt(draftText);
     const traceId = makeOptimizationId('typo-check');
@@ -3264,7 +3355,14 @@ export class ProjectsService implements OnModuleInit {
 
     const settings = this.settingsStore.get(projectId)!;
     const personas = this.personasStore.get(projectId)!;
-    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      [],
+      userId
+    );
 
     let response;
     try {
@@ -3492,6 +3590,7 @@ export class ProjectsService implements OnModuleInit {
       throw new NotFoundException(`用户权限不足，需要: ${allowedRoles.join('或')}`);
     }
 
+    this.lastActingUserIdByProject.set(projectId, userId);
     return member;
   }
 
@@ -3516,15 +3615,15 @@ export class ProjectsService implements OnModuleInit {
   private persistState() {
     const payload = this.buildPersistedPayload();
     if (usePostgresPersistence()) {
-      void syncWorkspaceToPostgres(this.prisma, payload).catch((err) =>
-        console.error('[persistence] workspace PG 同步失败', err)
-      );
+      void this.pgSyncQueue
+        .enqueue(() => syncWorkspaceToPostgres(this.prisma, payload))
+        .catch((err) => console.error('[persistence] workspace PG 同步失败', err));
       return;
     }
     this.writeJsonMirror(payload);
   }
 
-  /** 关键写操作：持久化完成后再返回（PG 或 JSON 二选一） */
+  /** 关键写操作：持久化完成后再返回（PG 或 JSON 二选一）；PG 经串行队列 */
   private async persistStateAndAwaitPgSync(
     scope: WorkspacePgSyncScope = { type: 'full' }
   ): Promise<void> {
@@ -3535,52 +3634,54 @@ export class ProjectsService implements OnModuleInit {
     }
 
     try {
-      switch (scope.type) {
-        case 'full':
-          await syncWorkspaceToPostgres(this.prisma, payload);
-          break;
-        case 'chapter': {
-          const knowledge = payload.knowledge[scope.projectId];
-          const chapter = knowledge?.chapters.find((item) => item.chapterNo === scope.chapterNo);
-          if (!chapter) {
-            throw new Error(
-              `[persistence] 无法同步章节：project=${scope.projectId} chapter=${scope.chapterNo}`
-            );
-          }
-          await upsertChapterInPostgres(this.prisma, scope.projectId, chapter, {
-            outlineSummary: knowledge?.outlineSummary,
-            indexVersion: knowledge?.indexVersion,
-            lastIndexedAt: knowledge?.lastIndexedAt ?? null,
-          });
-          break;
-        }
-        case 'project-knowledge': {
-          const knowledge = payload.knowledge[scope.projectId];
-          if (!knowledge) {
+      await this.pgSyncQueue.enqueue(async () => {
+        switch (scope.type) {
+          case 'full':
+            await syncWorkspaceToPostgres(this.prisma, payload);
+            break;
+          case 'chapter': {
+            const knowledge = payload.knowledge[scope.projectId];
+            const chapter = knowledge?.chapters.find((item) => item.chapterNo === scope.chapterNo);
+            if (!chapter) {
+              throw new Error(
+                `[persistence] 无法同步章节：project=${scope.projectId} chapter=${scope.chapterNo}`
+              );
+            }
+            await upsertChapterInPostgres(this.prisma, scope.projectId, chapter, {
+              outlineSummary: knowledge?.outlineSummary,
+              indexVersion: knowledge?.indexVersion,
+              lastIndexedAt: knowledge?.lastIndexedAt ?? null,
+            });
             break;
           }
-          await syncProjectChaptersToPostgres(
-            this.prisma,
-            scope.projectId,
-            knowledge.chapters,
-            {
-              outlineSummary: knowledge.outlineSummary,
-              indexVersion: knowledge.indexVersion,
-              lastIndexedAt: knowledge.lastIndexedAt ?? null,
+          case 'project-knowledge': {
+            const knowledge = payload.knowledge[scope.projectId];
+            if (!knowledge) {
+              break;
             }
-          );
-          break;
+            await syncProjectChaptersToPostgres(
+              this.prisma,
+              scope.projectId,
+              knowledge.chapters,
+              {
+                outlineSummary: knowledge.outlineSummary,
+                indexVersion: knowledge.indexVersion,
+                lastIndexedAt: knowledge.lastIndexedAt ?? null,
+              }
+            );
+            break;
+          }
+          case 'outline': {
+            const knowledge = payload.knowledge[scope.projectId];
+            await updateProjectOutlineInPostgres(
+              this.prisma,
+              scope.projectId,
+              knowledge?.outlineSummary ?? ''
+            );
+            break;
+          }
         }
-        case 'outline': {
-          const knowledge = payload.knowledge[scope.projectId];
-          await updateProjectOutlineInPostgres(
-            this.prisma,
-            scope.projectId,
-            knowledge?.outlineSummary ?? ''
-          );
-          break;
-        }
-      }
+      });
     } catch (err) {
       console.error('[persistence] workspace PG 同步失败', err);
       throw err;
@@ -3728,9 +3829,19 @@ export class ProjectsService implements OnModuleInit {
             contextExcerptMaxChars: clampContextExcerptMaxChars(
               value.contextExcerptMaxChars ?? DEFAULT_CONTEXT_EXCERPT_MAX_CHARS
             ),
+            outlineMaxChars: clampOutlineMaxChars(
+              value.outlineMaxChars ?? DEFAULT_OUTLINE_MAX_CHARS
+            ),
+            personaProfileMaxChars: clampPersonaProfileMaxChars(
+              value.personaProfileMaxChars ?? DEFAULT_PERSONA_PROFILE_MAX_CHARS
+            ),
+            relationMemoMaxChars: clampRelationMemoMaxChars(
+              value.relationMemoMaxChars ?? DEFAULT_RELATION_MEMO_MAX_CHARS
+            ),
             generationTemperature: clampGenerationTemperature(value.generationTemperature),
             updatePersonaOnSave: value.updatePersonaOnSave ?? true,
             generateRelationEventsOnSave: value.generateRelationEventsOnSave ?? true,
+            parseStructuredInfoOnSave: value.parseStructuredInfoOnSave ?? true,
             chapterOptimizeSegmentCharSize: clampChapterOptimizeSegmentCharSize(
               value.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
             ),
@@ -3738,6 +3849,25 @@ export class ProjectsService implements OnModuleInit {
             contentSafetyCustomRules: sanitizeProjectContentSafetyRules(
               value.contentSafetyCustomRules
             ),
+            writingStyleSamples: sanitizeWritingStyleSamples(value.writingStyleSamples),
+            generationWritingModel:
+              value.generationWritingModel === undefined
+                ? null
+                : value.generationWritingModel === null
+                  ? null
+                  : normalizeGenerationModelId(value.generationWritingModel),
+            generationUtilityModel:
+              value.generationUtilityModel === undefined
+                ? null
+                : value.generationUtilityModel === null
+                  ? null
+                  : normalizeGenerationModelId(value.generationUtilityModel),
+            writingGenerationTemperature:
+              value.writingGenerationTemperature === undefined
+                ? null
+                : value.writingGenerationTemperature === null
+                  ? null
+                  : resolveWritingGenerationTemperatureOverride(value.writingGenerationTemperature),
             updatedAt: new Date(value.updatedAt),
           },
         ])
@@ -4115,50 +4245,6 @@ export class ProjectsService implements OnModuleInit {
     }
   }
 
-  private async applyPostWriteUpdates(
-    projectId: string,
-    chapterNo: number,
-    goal: string | undefined,
-    draftText: string
-  ) {
-    const chapterTitle = goal?.trim()
-      ? `第${chapterNo}章：${goal.trim().slice(0, 24)}`
-      : `第${chapterNo}章：自动续写草稿`;
-
-    await this.upsertChapter(
-      projectId,
-      {
-        chapterNo,
-        title: chapterTitle,
-        content: draftText,
-      },
-      undefined,
-      { postWriteMode: 'auto' }
-    );
-
-    const knowledge = this.knowledgeStore.get(projectId)!;
-    const updateLine = `第${chapterNo}章进展：${goal?.trim() || '完成续写并写入章节草稿'}`;
-
-    let outlineUpdated = false;
-    if (!knowledge.outlineSummary.includes(updateLine)) {
-      knowledge.outlineSummary = knowledge.outlineSummary
-        ? `${knowledge.outlineSummary}\n${updateLine}`
-        : updateLine;
-      outlineUpdated = true;
-    }
-
-    if (outlineUpdated) {
-      this.persistState();
-    }
-
-    return {
-      chapterUpdated: true,
-      outlineUpdated,
-      personaUpdated: false,
-      updateLine,
-    };
-  }
-
   private createSummaryJobRecord(
     projectId: string,
     scope: SummaryJobScope,
@@ -4368,12 +4454,20 @@ export class ProjectsService implements OnModuleInit {
         chapterSummaryMemoryCount: DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
         priorChapterTailChars: DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
         contextExcerptMaxChars: DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
+        outlineMaxChars: DEFAULT_OUTLINE_MAX_CHARS,
+        personaProfileMaxChars: DEFAULT_PERSONA_PROFILE_MAX_CHARS,
+        relationMemoMaxChars: DEFAULT_RELATION_MEMO_MAX_CHARS,
         generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
         updatePersonaOnSave: true,
         generateRelationEventsOnSave: true,
+        parseStructuredInfoOnSave: true,
         chapterOptimizeSegmentCharSize: DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
         contentSafetyScanEnabled: true,
         contentSafetyCustomRules: [],
+        writingStyleSamples: [],
+        generationWritingModel: null,
+        generationUtilityModel: null,
+        writingGenerationTemperature: null,
         updatedAt: new Date(),
       });
     } else {
@@ -4426,12 +4520,24 @@ export class ProjectsService implements OnModuleInit {
     settings.contextExcerptMaxChars = clampContextExcerptMaxChars(
       settings.contextExcerptMaxChars ?? DEFAULT_CONTEXT_EXCERPT_MAX_CHARS
     );
+    settings.outlineMaxChars = clampOutlineMaxChars(
+      settings.outlineMaxChars ?? DEFAULT_OUTLINE_MAX_CHARS
+    );
+    settings.personaProfileMaxChars = clampPersonaProfileMaxChars(
+      settings.personaProfileMaxChars ?? DEFAULT_PERSONA_PROFILE_MAX_CHARS
+    );
+    settings.relationMemoMaxChars = clampRelationMemoMaxChars(
+      settings.relationMemoMaxChars ?? DEFAULT_RELATION_MEMO_MAX_CHARS
+    );
     settings.generationTemperature = clampGenerationTemperature(settings.generationTemperature);
     if (settings.updatePersonaOnSave === undefined) {
       settings.updatePersonaOnSave = true;
     }
     if (settings.generateRelationEventsOnSave === undefined) {
       settings.generateRelationEventsOnSave = true;
+    }
+    if (settings.parseStructuredInfoOnSave === undefined) {
+      settings.parseStructuredInfoOnSave = true;
     }
     settings.chapterOptimizeSegmentCharSize = clampChapterOptimizeSegmentCharSize(
       settings.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
@@ -4442,8 +4548,15 @@ export class ProjectsService implements OnModuleInit {
     settings.contentSafetyCustomRules = sanitizeProjectContentSafetyRules(
       settings.contentSafetyCustomRules
     );
-    if (settings.pipelinePreset === undefined) {
+    if (!settings.pipelineEnabledModules?.length && settings.pipelinePreset === undefined) {
       settings.pipelinePreset = PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelinePreset;
+    }
+    migratePipelineSettingsFromPreset(
+      settings as Parameters<typeof migratePipelineSettingsFromPreset>[0]
+    );
+    if (settings.pipelineCharacterAdjustmentEnabled === undefined) {
+      settings.pipelineCharacterAdjustmentEnabled =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineCharacterAdjustmentEnabled;
     }
     if (settings.pipelineSkipSensoryOutlineReview === undefined) {
       settings.pipelineSkipSensoryOutlineReview =
@@ -4461,8 +4574,13 @@ export class ProjectsService implements OnModuleInit {
       settings.pipelineCharacterTraitsEnabled =
         PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineCharacterTraitsEnabled;
     }
+    if (settings.complianceRulesFixMode === undefined) {
+      settings.complianceRulesFixMode =
+        settings.pipelineRulesFixMode ??
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.complianceRulesFixMode;
+    }
     if (settings.pipelineRulesFixMode === undefined) {
-      settings.pipelineRulesFixMode = PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineRulesFixMode;
+      settings.pipelineRulesFixMode = settings.complianceRulesFixMode;
     }
     if (settings.pipelineHomogenizationEnabled === undefined) {
       settings.pipelineHomogenizationEnabled =
@@ -4480,6 +4598,19 @@ export class ProjectsService implements OnModuleInit {
       settings.protagonistProgressRules =
         PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.protagonistProgressRules;
     }
+    settings.writingStyleSamples = sanitizeWritingStyleSamples(settings.writingStyleSamples);
+    if (settings.generationWritingModel === undefined) {
+      settings.generationWritingModel =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.generationWritingModel;
+    }
+    if (settings.generationUtilityModel === undefined) {
+      settings.generationUtilityModel =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.generationUtilityModel;
+    }
+    if (settings.writingGenerationTemperature === undefined) {
+      settings.writingGenerationTemperature =
+        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.writingGenerationTemperature;
+    }
   }
 
   private serializeProjectSettings(settings: ProjectSettings): ProjectSettings {
@@ -4491,9 +4622,13 @@ export class ProjectsService implements OnModuleInit {
       chapterSummaryMemoryCount: settings.chapterSummaryMemoryCount,
       priorChapterTailChars: settings.priorChapterTailChars,
       contextExcerptMaxChars: settings.contextExcerptMaxChars,
+      outlineMaxChars: settings.outlineMaxChars,
+      personaProfileMaxChars: settings.personaProfileMaxChars,
+      relationMemoMaxChars: settings.relationMemoMaxChars,
       generationTemperature: settings.generationTemperature,
       updatePersonaOnSave: settings.updatePersonaOnSave,
       generateRelationEventsOnSave: settings.generateRelationEventsOnSave,
+      parseStructuredInfoOnSave: settings.parseStructuredInfoOnSave,
       chapterOptimizeSegmentCharSize: settings.chapterOptimizeSegmentCharSize,
       contentSafetyScanEnabled: settings.contentSafetyScanEnabled,
       contentSafetyCustomRules: settings.contentSafetyCustomRules.map((rule) => ({ ...rule })),
@@ -4514,6 +4649,12 @@ export class ProjectsService implements OnModuleInit {
       protagonistProgressRules: settings.protagonistProgressRules
         ? settings.protagonistProgressRules.map((rule) => ({ ...rule }))
         : undefined,
+      writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map(
+        (item) => ({ ...item })
+      ),
+      generationWritingModel: settings.generationWritingModel ?? null,
+      generationUtilityModel: settings.generationUtilityModel ?? null,
+      writingGenerationTemperature: settings.writingGenerationTemperature ?? null,
       updatedAt: settings.updatedAt,
     };
   }
@@ -5128,12 +5269,21 @@ export class ProjectsService implements OnModuleInit {
     });
   }
 
+  private resolveActingUserIdForSync(projectId: string, actingUserId?: string): string | undefined {
+    if (actingUserId) {
+      this.lastActingUserIdByProject.set(projectId, actingUserId);
+      return actingUserId;
+    }
+    return this.lastActingUserIdByProject.get(projectId);
+  }
+
   private async syncProjectContextToOrchestrator(
     projectId: string,
     settings: ProjectSettings,
     personas: PersonaRecord[],
     knowledge: KnowledgeRecord,
-    usedRelationEvents: UsedRelationEventRecord[] = []
+    usedRelationEvents: UsedRelationEventRecord[] = [],
+    actingUserId?: string
   ) {
     const activePersona =
       personas.find((item) => item.id === settings.activePersonaId) ||
@@ -5146,6 +5296,16 @@ export class ProjectsService implements OnModuleInit {
     const identityRelations = this.identityRelationsStore.get(projectId) ?? [];
     const identityRelationMemory = buildIdentityRelationMemoryBlock(identityRelations, personas);
 
+    const userId = this.resolveActingUserIdForSync(projectId, actingUserId);
+    let userGenerationPreferences: ReturnType<AuthService['getGenerationPreferences']> | undefined;
+    if (userId) {
+      try {
+        userGenerationPreferences = this.authService.getGenerationPreferences(userId);
+      } catch {
+        // 用户偏好缺失时不阻断上下文同步
+      }
+    }
+
     await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
       systemPromptText: this.promptTemplatesService.resolveProjectSystemPromptText(projectId),
       taskPrompts: this.taskPromptsService.getEffectivePublishedTaskPromptsMap(projectId),
@@ -5157,21 +5317,30 @@ export class ProjectsService implements OnModuleInit {
       chapterSummaryMemoryCount: settings.chapterSummaryMemoryCount,
       priorChapterTailChars: settings.priorChapterTailChars,
       contextExcerptMaxChars: settings.contextExcerptMaxChars,
+      outlineMaxChars: settings.outlineMaxChars,
+      personaProfileMaxChars: settings.personaProfileMaxChars,
+      relationMemoMaxChars: settings.relationMemoMaxChars,
       generationTemperature: settings.generationTemperature,
       contentSafetyScanEnabled: settings.contentSafetyScanEnabled !== false,
       contentSafetyCustomRules: settings.contentSafetyCustomRules,
+      generationWritingModel: settings.generationWritingModel ?? null,
+      generationUtilityModel: settings.generationUtilityModel ?? null,
+      writingGenerationTemperature: settings.writingGenerationTemperature ?? null,
+      ...(userGenerationPreferences ? { userGenerationPreferences } : {}),
       chapters: this.buildOrchestratorChapterContexts(knowledge, settings),
       knowledgeDocuments: docs.map((doc) => ({
         id: doc.id,
         title: doc.title,
         content: doc.content,
         docType: doc.docType,
+        personaId: doc.personaId ?? null,
       })),
       selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
       identityRelationMemory,
       usedRelationEvents,
       personaConsistencyNotes,
       personas: personas.map((persona) => ({
+        id: persona.id,
         name: persona.name,
         profile: persona.profile,
         state: persona.state,
@@ -5183,6 +5352,9 @@ export class ProjectsService implements OnModuleInit {
           summaryLine: record.summaryLine,
           updatedAt: record.updatedAt,
         })),
+      })),
+      writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map((item) => ({
+        ...item,
       })),
     });
   }
@@ -5217,77 +5389,6 @@ export class ProjectsService implements OnModuleInit {
         ? payload.selectedEventIds.map((item) => String(item).trim()).filter(Boolean)
         : [],
     };
-  }
-
-  private async generateDraftThroughOrchestrator(
-    projectId: string,
-    chapterNo: number,
-    payload: Partial<WriteTaskInput>,
-    settings: ProjectSettings,
-    personas: PersonaRecord[],
-    knowledge: KnowledgeRecord,
-    usedRelationEvents: UsedRelationEventRecord[] = [],
-    confirmedOutlineText?: string
-  ) {
-    await this.syncProjectContextToOrchestrator(
-      projectId,
-      settings,
-      personas,
-      knowledge,
-      usedRelationEvents
-    );
-
-    const task = this.normalizeWriteTaskInput({ ...payload, chapterNo });
-    const outlineText =
-      confirmedOutlineText ?? assertConfirmedOutlineForDraft(payload.confirmedOutlineText);
-
-    const usedForPrompt = usedRelationEvents.map(
-      (event): WriteChapterUsedRelationEvent => ({
-        id: event.id,
-        protagonist: event.protagonist,
-        counterparty: event.counterparty,
-        summary: event.summary,
-        evidenceSnippet: event.evidenceSnippet,
-        chapterNo: event.chapterNo,
-      })
-    );
-
-    const prompt = buildWriteDraftUserPrompt({
-      task,
-      confirmedOutlineText: outlineText,
-      selectedRelationEvents: usedForPrompt,
-    });
-
-    try {
-      const { data } = await axios.post(`${this.getRagOrchestratorUrl()}/api/generate`, {
-        projectId,
-        prompt,
-        useSSE: false,
-        systemPromptOverride: WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT,
-        templateKey: WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
-        context: {
-          task: 'write.chapter.draft',
-          chapterNo,
-          outlineId: payload.outlineId || null,
-          outlineTraceId: payload.outlineTraceId || null,
-          confirmedOutlineText: outlineText,
-          writeTask: task,
-        },
-      });
-
-      if (!data?.content || typeof data.content !== 'string') {
-        throw new BadGatewayException('生成服务未返回章节正文');
-      }
-
-      return data.content;
-    } catch (error) {
-      if (error instanceof BadGatewayException) {
-        throw error;
-      }
-
-      const message = error instanceof Error ? error.message : '调用生成服务失败';
-      throw new BadGatewayException(message);
-    }
   }
 
   private assertProjectId(projectId: string) {
@@ -5510,7 +5611,14 @@ export class ProjectsService implements OnModuleInit {
           )
         : allPersonas;
     const knowledge = this.knowledgeStore.get(projectId)!;
-    await this.syncProjectContextToOrchestrator(projectId, settings, personas, knowledge);
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      [],
+      userId
+    );
   }
 
   getRagOrchestratorUrlForPipeline(): string {

@@ -1,0 +1,64 @@
+get:
+  tags:
+    - Auth
+  summary: Get user global generation preferences
+  description: |
+    返回当前登录用户的全局生成偏好（写作/常规厂商与模型、写作温度与常规温度）。
+    未设置字段表示使用环境变量默认。
+  security:
+    - BearerAuth: []
+  responses:
+    '200':
+      description: Preferences retrieved
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/UserGenerationPreferences'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+put:
+  tags:
+    - Auth
+  summary: Update user global generation preferences
+  description: 更新当前登录用户的全局生成偏好。
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/UserGenerationPreferencesUpdate'
+  responses:
+    '200':
+      description: Preferences updated
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/UserGenerationPreferences'
+    '400':
+      description: Invalid preferences payload
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

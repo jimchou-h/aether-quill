@@ -55,6 +55,13 @@ const router = createRouter({
       component: () => import('../pages/Projects.vue'),
       meta: { requiresAuth: true },
     },
+    // 账户全局设置（需要认证）
+    {
+      path: '/account/settings',
+      name: 'account-settings',
+      component: () => import('../pages/AccountSettings.vue'),
+      meta: { requiresAuth: true },
+    },
     // 项目详情页面（需要认证）
     {
       path: '/projects/:id',

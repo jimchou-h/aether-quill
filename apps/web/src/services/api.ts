@@ -400,7 +400,7 @@ export const apiClient = {
   async chapterAfterSaveSSE(
     projectId: string,
     chapterNo: number,
-    actions: Array<'persona' | 'relationEvents'>,
+    actions: Array<'persona' | 'relationEvents' | 'structuredInfo'>,
     callbacks: {
       onProgress?: (event: { event: string; action: string; status: string }) => void;
       onDone?: () => void;
@@ -464,11 +464,15 @@ export const apiClient = {
           title: string;
           content: string;
           docType?: string;
+          personaId?: string | null;
         }>;
         chapterSummaryPromptCount?: number;
         chapterSummaryMemoryCount?: number;
         priorChapterTailChars?: number;
         contextExcerptMaxChars?: number;
+        outlineMaxChars?: number;
+        personaProfileMaxChars?: number;
+        relationMemoMaxChars?: number;
         personas?: ReturnType<typeof buildPersonasContextPayload>;
       };
       extraContext?: Record<string, unknown>;
@@ -486,7 +490,7 @@ export const apiClient = {
       `/api/projects/${projectId}/knowledge/chapters/insert`,
       payload
     );
-    return this.unwrapPayload<ChapterItem>(response.data);
+    return this.unwrapPayload<ChapterUpsertResult>(response.data);
   },
 
   async deleteChapter(projectId: string, chapterNo: number) {
@@ -517,16 +521,6 @@ export const apiClient = {
       payload
     );
     return this.unwrapPayload<StructuredInfoParseResult>(response.data);
-  },
-
-  async createReindexJob(projectId: string, payload: { mode?: 'full' | 'incremental' } = {}) {
-    const response = await http.post(`/api/projects/${projectId}/knowledge/reindex`, payload);
-    return this.unwrapPayload<IndexJob>(response.data);
-  },
-
-  async getReindexJob(projectId: string, jobId: string) {
-    const response = await http.get(`/api/projects/${projectId}/knowledge/reindex/${jobId}`);
-    return this.unwrapPayload<IndexJob>(response.data);
   },
 
   async createChapterSummaryJob(projectId: string, chapterNo: number) {
@@ -567,23 +561,6 @@ export const apiClient = {
     return this.unwrapPayload<ChapterRelationEventGenerateResult>(response.data);
   },
 
-  async writeChapter(
-    projectId: string,
-    payload: {
-      chapterNo: number;
-      goal: string;
-      pov: string;
-      mustInclude: string[];
-      avoid: string[];
-      targetWords?: number;
-      appearingCharacters?: string[];
-      selectedEventIds?: string[];
-    }
-  ) {
-    const response = await http.post(`/api/projects/${projectId}/write`, payload);
-    return this.unwrapPayload<WriteResult>(response.data);
-  },
-
   async getRelationEvents(
     projectId: string,
     params: {
@@ -620,6 +597,35 @@ export const apiClient = {
     return this.unwrapPayload<{ id: string }>(response.data);
   },
 
+  async listWritingStyleSamples(projectId: string) {
+    const response = await http.get(`/api/projects/${projectId}/writing-style-samples`);
+    return this.unwrapPayload<WritingStyleSample[]>(response.data);
+  },
+
+  async createWritingStyleSample(projectId: string, payload: WritingStyleSampleInput) {
+    const response = await http.post(`/api/projects/${projectId}/writing-style-samples`, payload);
+    return this.unwrapPayload<WritingStyleSample>(response.data);
+  },
+
+  async updateWritingStyleSample(
+    projectId: string,
+    sampleId: string,
+    payload: WritingStyleSamplePatch
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/writing-style-samples/${sampleId}`,
+      payload
+    );
+    return this.unwrapPayload<WritingStyleSample>(response.data);
+  },
+
+  async deleteWritingStyleSample(projectId: string, sampleId: string) {
+    const response = await http.delete(
+      `/api/projects/${projectId}/writing-style-samples/${sampleId}`
+    );
+    return this.unwrapPayload<{ id: string }>(response.data);
+  },
+
   // Auth API
   auth: {
     async login(
@@ -641,6 +647,18 @@ export const apiClient = {
       const response = await http.post('/api/auth/refresh', payload);
       return response.data;
     },
+  },
+
+  async getGenerationPreferences(): Promise<components['schemas']['UserGenerationPreferences']> {
+    const response = await http.get('/api/auth/generation-preferences');
+    return this.unwrapPayload<components['schemas']['UserGenerationPreferences']>(response.data);
+  },
+
+  async updateGenerationPreferences(
+    payload: components['schemas']['UserGenerationPreferencesUpdate']
+  ): Promise<components['schemas']['UserGenerationPreferences']> {
+    const response = await http.put('/api/auth/generation-preferences', payload);
+    return this.unwrapPayload<components['schemas']['UserGenerationPreferences']>(response.data);
   },
 
   // Projects API
@@ -706,44 +724,6 @@ export const apiClient = {
       documentIds: string[]
     ): Promise<ResponseData<'/api/documents/batch-get', 'post'>> {
       const response = await http.post('/api/documents/batch-get', { projectId, documentIds });
-      return response.data;
-    },
-  },
-
-  // Generation API
-  generation: {
-    async generate(
-      projectId: string,
-      payload: RequestBody<'/api/projects/{id}/generate', 'post'>
-    ): Promise<ResponseData<'/api/projects/{id}/generate', 'post'>> {
-      const response = await http.post(`/api/projects/${projectId}/generate`, payload);
-      return response.data;
-    },
-
-    async listTraces(
-      projectId: string,
-      params?: { limit?: number; offset?: number }
-    ): Promise<ResponseData<'/api/projects/{id}/generation-traces', 'get'>> {
-      const response = await http.get(`/api/projects/${projectId}/generation-traces`, { params });
-      return response.data;
-    },
-  },
-
-  // Drafts API
-  drafts: {
-    async accept(
-      id: string,
-      payload?: RequestBody<'/api/drafts/{id}/accept', 'post'>
-    ): Promise<ResponseData<'/api/drafts/{id}/accept', 'post'>> {
-      const response = await http.post(`/api/drafts/${id}/accept`, payload);
-      return response.data;
-    },
-
-    async rewrite(
-      id: string,
-      payload: RequestBody<'/api/drafts/{id}/rewrite', 'post'>
-    ): Promise<ResponseData<'/api/drafts/{id}/rewrite', 'post'>> {
-      const response = await http.post(`/api/drafts/${id}/rewrite`, payload);
       return response.data;
     },
   },
@@ -930,12 +910,26 @@ export const apiClient = {
           id: doc.id,
           title: doc.title,
           content: doc.content,
+          personaId: doc.personaId ?? null,
         })),
         chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
         chapterSummaryMemoryCount:
           (workspace.settings as { chapterSummaryMemoryCount?: number })
             .chapterSummaryMemoryCount ?? 3,
+        priorChapterTailChars:
+          (workspace.settings as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800,
+        contextExcerptMaxChars:
+          (workspace.settings as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400,
+        outlineMaxChars: (workspace.settings as { outlineMaxChars?: number }).outlineMaxChars ?? 4000,
+        personaProfileMaxChars:
+          (workspace.settings as { personaProfileMaxChars?: number }).personaProfileMaxChars ??
+          2000,
+        relationMemoMaxChars:
+          (workspace.settings as { relationMemoMaxChars?: number }).relationMemoMaxChars ?? 2000,
         generationTemperature: workspace.settings.generationTemperature,
+        generationWritingModel: workspace.settings.generationWritingModel ?? null,
+        generationUtilityModel: workspace.settings.generationUtilityModel ?? null,
+        writingGenerationTemperature: workspace.settings.writingGenerationTemperature ?? null,
         contentSafetyScanEnabled: workspace.settings.contentSafetyScanEnabled !== false,
         contentSafetyCustomRules: Array.isArray(workspace.settings.contentSafetyCustomRules)
           ? workspace.settings.contentSafetyCustomRules
@@ -1173,19 +1167,11 @@ export const apiClient = {
   async optimizeChapterPlanSSE(
     projectId: string,
     chapterNo: number,
-    payload: {
-      instruction: string;
-      appearingCharacters?: string[];
-      selectedEventIds?: string[];
-      existingSegmentDiagnoses?: string[];
-      resumeFromSegmentIndex?: number;
-    },
+    payload: ChapterOptimizationPlanRequest,
     callbacks: ChapterOptimizePlanCallbacks,
     options?: SseStreamOptions
   ): Promise<void> {
-    const baseURL = getApiBaseURL();
-    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/plan`;
-
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/plan`;
     await requestAuthorizedSse(
       url,
       {
@@ -1196,42 +1182,10 @@ export const apiClient = {
       'segments',
       (dataPart) => {
         try {
-          const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
-            data?: string;
-            traceId?: string;
-            chapterNo?: number;
-            planId?: string;
-            planText?: string;
-            basis?: ChapterOptimizationBasis;
-            optimizationMode?: 'single' | 'segmented';
-            segmentTotal?: number;
-            strategyLabel?: string;
-            inputChapterChars?: number;
-            segmentDiagnoses?: string[];
-            stage?: ChapterOptimizeStage;
-            segmentIndex?: number;
-            retryCount?: number;
-            failedSegmentIndex?: number;
-            retryable?: boolean;
-          };
+          const event = JSON.parse(dataPart) as ChapterOptimizePlanSseEvent;
           switch (event.event) {
             case 'start':
-              callbacks.onStart?.({
-                traceId: event.traceId || '',
-                chapterNo: event.chapterNo ?? chapterNo,
-                planId: event.planId || '',
-                basis: event.basis ?? {
-                  usedPersonaId: null,
-                  outlineUsed: false,
-                  chapterSummaryCount: 0,
-                  usedRelationEvents: [],
-                },
-                optimizationMode: event.optimizationMode,
-                segmentTotal: event.segmentTotal,
-                strategyLabel: event.strategyLabel,
-                inputChapterChars: event.inputChapterChars,
-              });
+              callbacks.onStart?.(event);
               break;
             case 'stage':
               if (event.stage) {
@@ -1244,40 +1198,26 @@ export const apiClient = {
               }
               break;
             case 'content':
-              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
+              callbacks.onContent?.((event.data ?? '').replace(/\\n/g, '\n'));
               break;
-            case 'end': {
-              const result: ChapterOptimizationPlanResult = {
-                traceId: event.traceId || '',
-                planText: (event.planText || '').trim(),
-                planId: event.planId || '',
-                basis:
-                  event.basis ??
-                  ({
-                    usedPersonaId: null,
-                    outlineUsed: false,
-                    chapterSummaryCount: 0,
-                    usedRelationEvents: [],
-                  } as ChapterOptimizationBasis),
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId ?? '',
+                planText: event.planText?.trim() ?? '',
+                planId: event.planId ?? '',
+                basis: event.basis ?? EMPTY_OPTIMIZATION_BASIS,
                 optimizationMode: event.optimizationMode,
                 segmentTotal: event.segmentTotal,
                 strategyLabel: event.strategyLabel,
                 segmentDiagnoses: event.segmentDiagnoses,
-              };
-              callbacks.onEnd?.(result);
-              break;
-            }
-            case 'error':
-              callbacks.onError?.(event.data || '生成优化方案失败', {
-                failedSegmentIndex: event.failedSegmentIndex,
-                segmentTotal: event.segmentTotal,
-                segmentDiagnoses: event.segmentDiagnoses,
-                retryable: event.retryable,
               });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data ?? '生成文笔优化方案失败');
               break;
           }
         } catch {
-          // skip malformed SSE lines
+          // 忽略不完整 SSE 分片
         }
       }
     );
@@ -1286,20 +1226,11 @@ export const apiClient = {
   async optimizeChapterDraftSSE(
     projectId: string,
     chapterNo: number,
-    payload: {
-      instruction: string;
-      planText: string;
-      planId?: string;
-      appearingCharacters?: string[];
-      selectedEventIds?: string[];
-      segmentDiagnoses?: string[];
-    },
+    payload: ChapterOptimizationDraftRequest,
     callbacks: ChapterOptimizeDraftCallbacks,
     options?: SseStreamOptions
   ): Promise<void> {
-    const baseURL = getApiBaseURL();
-    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/draft`;
-
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/draft`;
     await requestAuthorizedSse(
       url,
       {
@@ -1310,36 +1241,12 @@ export const apiClient = {
       'segments',
       (dataPart) => {
         try {
-          const event = JSON.parse(dataPart) as {
-            event?:
-              | 'start'
-              | 'content'
-              | 'content_replace'
-              | 'end'
-              | 'error'
-              | 'segment_start'
-              | 'stage'
-              | 'progress';
-            data?: string;
-            traceId?: string;
-            chapterNo?: number;
-            optimizationMode?: 'single' | 'segmented';
-            segmentTotal?: number;
-            strategyLabel?: string;
-            stage?: ChapterOptimizeStage;
-            segmentIndex?: number;
-            taskKey?: string;
-            message?: string;
-            currentStep?: number;
-            totalSteps?: number;
-            finalDraftText?: string;
-            contentSafety?: ContentSafetyScanResult;
-          };
+          const event = JSON.parse(dataPart) as ChapterOptimizeDraftSseEvent;
           switch (event.event) {
             case 'start':
-              callbacks.onStart?.(event.traceId || '', event.chapterNo ?? chapterNo, {
-                optimizationMode: event.optimizationMode,
-                segmentTotal: event.segmentTotal,
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
                 strategyLabel: event.strategyLabel,
               });
               break;
@@ -1352,49 +1259,35 @@ export const apiClient = {
                 });
               }
               break;
-            case 'content':
-              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
-              break;
-            case 'content_replace':
-              callbacks.onContentReplace?.((event.data || '').replace(/\\n/g, '\n'));
-              break;
             case 'progress':
-              if (event.traceId && event.taskKey && event.stage && event.message) {
+              if (event.taskKey && event.stage && event.message) {
                 callbacks.onProgress?.({
-                  traceId: event.traceId,
+                  traceId: event.traceId ?? '',
                   taskKey: event.taskKey,
                   stage: event.stage,
                   message: event.message,
-                  currentStep: event.currentStep,
-                  totalSteps: event.totalSteps,
                 });
               }
               break;
+            case 'content':
+              callbacks.onContent?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'content_replace':
+              callbacks.onContentReplace?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
             case 'end':
               callbacks.onEnd?.({
-                traceId: event.traceId || '',
+                traceId: event.traceId ?? '',
                 finalDraftText: event.finalDraftText,
                 contentSafety: event.contentSafety,
               });
               break;
             case 'error':
-              callbacks.onError?.(event.data || '优化正文生成失败');
+              callbacks.onError?.(event.data ?? '生成文笔优化正文失败');
               break;
-            case 'segment_start': {
-              let segData: { segmentIndex: number; totalSegments: number } | null = null;
-              try {
-                segData = JSON.parse(event.data || '{}');
-              } catch {
-                // skip malformed
-              }
-              if (segData) {
-                callbacks.onSegmentStart?.(segData.segmentIndex, segData.totalSegments);
-              }
-              break;
-            }
           }
         } catch {
-          // skip malformed SSE events
+          // 忽略不完整 SSE 分片
         }
       }
     );
@@ -1403,12 +1296,7 @@ export const apiClient = {
   async applyChapterOptimization(
     projectId: string,
     chapterNo: number,
-    payload: {
-      draftText: string;
-      expectedChapterUpdatedAt: string;
-      planId?: string;
-      preserveSummary?: boolean;
-    }
+    payload: ChapterOptimizationApplyRequest
   ) {
     const response = await http.post(
       `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/apply`,
@@ -1421,10 +1309,10 @@ export const apiClient = {
     projectId: string,
     chapterNo: number,
     payload?: {
-      preset?: 'full' | 'character_rules' | 'sensory_only';
       mode?: 'pipeline' | 'final-polish';
       configOverrides?: Partial<ChapterPipelineConfig>;
       selectedPersonaNames?: string[];
+      optimizationIntent?: string;
     }
   ) {
     const response = await http.post(
@@ -1478,6 +1366,32 @@ export const apiClient = {
       payload
     );
     return this.unwrapPayload<ChapterPipelineOutlineReviseResult>(response.data);
+  },
+
+  async synthesizeChapterPipelineOutlineBrief(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineOutlineBriefSynthesizeRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/outline/brief/synthesize`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineOutlineBriefSynthesizeResult>(response.data);
+  },
+
+  async patchChapterPipelineOutlineBrief(
+    projectId: string,
+    chapterNo: number,
+    sessionId: string,
+    payload: ChapterPipelineOutlineBriefPatch
+  ) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/pipeline/${sessionId}/outline/brief`,
+      payload
+    );
+    return this.unwrapPayload<ChapterPipelineSessionView>(response.data);
   },
 
   async reviseChapterPipelineRewriteSSE(
@@ -1976,94 +1890,6 @@ export const apiClient = {
     );
   },
 
-  async checkChapterOptimizationTypos(
-    projectId: string,
-    chapterNo: number,
-    payload: { draftText: string }
-  ) {
-    const response = await http.post(
-      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/typo-check`,
-      payload
-    );
-    return this.unwrapPayload<ChapterOptimizationTypoCheckResult>(response.data);
-  },
-
-  async fixChapterOptimizationTyposSSE(
-    projectId: string,
-    chapterNo: number,
-    payload: { draftText: string; issues?: ChapterTypoIssue[] },
-    callbacks: ChapterOptimizeTypoFixCallbacks,
-    options?: SseStreamOptions
-  ): Promise<void> {
-    const baseURL = getApiBaseURL();
-    const url = `${baseURL}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/typo-fix`;
-
-    await requestAuthorizedSse(
-      url,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-        signal: options?.signal,
-      },
-      'segments',
-      (dataPart) => {
-        try {
-          const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'content_replace' | 'end' | 'error' | 'progress';
-            data?: string;
-            traceId?: string;
-            appliedIssueCount?: number;
-            autoCorrected?: boolean;
-            taskKey?: string;
-            stage?: string;
-            message?: string;
-            currentStep?: number;
-            totalSteps?: number;
-            finalDraftText?: string;
-            contentSafety?: ContentSafetyScanResult;
-          };
-          switch (event.event) {
-            case 'start':
-              callbacks.onStart?.(event.traceId || '');
-              break;
-            case 'content':
-              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
-              break;
-            case 'content_replace':
-              callbacks.onContentReplace?.((event.data || '').replace(/\\n/g, '\n'));
-              break;
-            case 'progress':
-              if (event.traceId && event.taskKey && event.stage && event.message) {
-                callbacks.onProgress?.({
-                  traceId: event.traceId,
-                  taskKey: event.taskKey,
-                  stage: event.stage,
-                  message: event.message,
-                  currentStep: event.currentStep,
-                  totalSteps: event.totalSteps,
-                });
-              }
-              break;
-            case 'end':
-              callbacks.onEnd?.({
-                traceId: event.traceId || '',
-                appliedIssueCount: event.appliedIssueCount ?? 0,
-                autoCorrected: event.autoCorrected ?? true,
-                finalDraftText: event.finalDraftText,
-                contentSafety: event.contentSafety,
-              });
-              break;
-            case 'error':
-              callbacks.onError?.(event.data || '错字自动修正失败');
-              break;
-          }
-        } catch {
-          // skip malformed SSE events
-        }
-      }
-    );
-  },
-
   async exportProjectChaptersTxt(projectId: string): Promise<Blob> {
     const { useAuthStore } = await import('../stores/auth');
     await useAuthStore().ensureFreshSession();
@@ -2135,7 +1961,7 @@ export const apiClient = {
 
   async updateDocument(
     id: string,
-    payload: { title?: string; content?: string; docType?: DocType }
+    payload: { title?: string; content?: string; docType?: DocType; personaId?: string | null }
   ) {
     const response = await http.put(`/api/documents/${id}`, payload);
     return response.data;
@@ -2180,14 +2006,15 @@ export interface DocumentItem {
   title: string;
   content: string;
   docType?: DocType;
-  indexStatus: 'pending' | 'indexing' | 'completed' | 'failed';
+  personaId?: string | null;
+  indexStatus: 'pending' | 'indexing' | 'completed' | 'failed' | 'stale';
   version: number;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ChapterPendingAction {
-  type: 'persona' | 'relationEvents';
+  type: 'persona' | 'relationEvents' | 'structuredInfo';
   label: string;
   estimatedTokens: number;
 }
@@ -2277,6 +2104,7 @@ export interface PersonaItem {
 
 export function buildPersonasContextPayload(personas: PersonaItem[]) {
   return personas.map((persona) => ({
+    id: persona.id,
     name: persona.name,
     profile: persona.profile,
     state: persona.state,
@@ -2330,6 +2158,8 @@ export type ChapterPipelineStage =
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
+  | 'pipeline_typo_check'
+  | 'pipeline_typo_fix'
   | 'pipeline_final_polish_done'
   | 'compliance_pre_scan'
   | 'compliance_outline'
@@ -2375,6 +2205,10 @@ export interface FinalPolishResult {
   traceIds: Record<string, string>;
   createdAt: string;
   cached?: boolean;
+  typoPolish?: {
+    issueCount: number;
+    corrected: boolean;
+  };
 }
 
 export type ChapterPipelineRunModule =
@@ -2384,8 +2218,6 @@ export type ChapterPipelineRunModule =
   | 'character-traits'
   | 'sensory-outline'
   | 'sensory-rewrite'
-  | 'rules-scan'
-  | 'rules-fix'
   | 'homogenization'
   | 'homogenization-scan'
   | 'homogenization-rewrite'
@@ -2393,13 +2225,13 @@ export type ChapterPipelineRunModule =
   | 'final-polish';
 
 export interface ChapterPipelineConfig {
-  pipelinePreset: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
+  /** @deprecated AQ-356：请使用 pipelineEnabledModules */
+  pipelinePreset?: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
   pipelineSkipSensoryOutlineReview: boolean;
   pipelineSkipCharacterOutlineReview: boolean;
   pipelineSkipCharacterTraitsOutlineReview: boolean;
   pipelineCharacterAdjustmentEnabled: boolean;
   pipelineCharacterTraitsEnabled: boolean;
-  pipelineRulesFixMode: 'auto' | 'semi' | 'manual';
   pipelineHomogenizationEnabled: boolean;
   pipelineHomogenizationPriorChapterCount: number;
   pipelineEnabledModules: number[];
@@ -2501,6 +2333,8 @@ export interface PipelineOutlineState {
   suggested: PipelineOutlineItem[];
   userConfirmed: boolean;
   revisionRound: number;
+  synthesizedBrief?: string;
+  briefEditedByUser?: boolean;
 }
 
 export interface PipelineRuleIssue {
@@ -2542,6 +2376,20 @@ export interface ChapterPipelineSensoryOutlinePatch {
 
 export interface ChapterPipelineOutlinePatch extends ChapterPipelineSensoryOutlinePatch {
   outlineType: ChapterPipelineOutlineType;
+}
+
+export interface ChapterPipelineOutlineBriefSynthesizeRequest {
+  outlineType: ChapterPipelineOutlineType;
+}
+
+export interface ChapterPipelineOutlineBriefSynthesizeResult {
+  synthesizedBrief: string;
+  briefEditedByUser: boolean;
+}
+
+export interface ChapterPipelineOutlineBriefPatch {
+  outlineType: ChapterPipelineOutlineType;
+  synthesizedBrief: string;
 }
 
 export type ChapterPipelineOutlineReviseMode = 'recheck' | 'revise';
@@ -2603,6 +2451,7 @@ export interface ChapterPipelineSessionView {
   characterTraitsOutline?: PipelineOutlineState;
   sensoryOutline?: PipelineOutlineState;
   selectedPersonaNames?: string[];
+  optimizationIntent?: string;
   ruleIssues?: PipelineRuleIssue[];
   homogenizationReport?: PipelineHomogenizationIssue[];
   sourceUpdatedAt: string;
@@ -2671,6 +2520,10 @@ export function formatPipelineStageLabel(
       return '同质化检测中…';
     case 'pipeline_homogenization_rewrite':
       return '同质化改写中…';
+    case 'pipeline_typo_check':
+      return '错字检查中…';
+    case 'pipeline_typo_fix':
+      return '错字修正中…';
     case 'pipeline_final_polish_done':
       return '终稿已生成，等待审核';
     case 'compliance_pre_scan':
@@ -2700,11 +2553,46 @@ export function formatPipelineStageLabel(
   }
 }
 
+export const DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE = 3000;
+
 export interface ChapterOptimizationBasis {
   usedPersonaId: string | null;
   outlineUsed: boolean;
   chapterSummaryCount: number;
   usedRelationEvents: UsedRelationEventItem[];
+}
+
+const EMPTY_OPTIMIZATION_BASIS: ChapterOptimizationBasis = {
+  usedPersonaId: null,
+  outlineUsed: false,
+  chapterSummaryCount: 0,
+  usedRelationEvents: [],
+};
+
+export interface ChapterOptimizationPlanRequest {
+  instruction: string;
+  currentPlanText?: string;
+  revisionFeedback?: string;
+  appearingCharacters?: string[];
+  selectedEventIds?: string[];
+  existingSegmentDiagnoses?: string[];
+  resumeFromSegmentIndex?: number;
+}
+
+export interface ChapterOptimizationDraftRequest {
+  instruction: string;
+  planText: string;
+  planId?: string;
+  appearingCharacters?: string[];
+  selectedEventIds?: string[];
+  segmentDiagnoses?: string[];
+}
+
+export interface ChapterOptimizationApplyRequest {
+  draftText: string;
+  expectedChapterUpdatedAt: string;
+  planId?: string;
+  preserveSummary?: boolean;
 }
 
 export interface ChapterOptimizationPlanResult {
@@ -2726,20 +2614,68 @@ export type ChapterOptimizeStage =
   | 'content_safety_scan'
   | 'content_safety_rewrite';
 
-export const DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE = 3000;
+interface ChapterOptimizePlanSseEvent {
+  event?: 'start' | 'stage' | 'content' | 'end' | 'error';
+  data?: string;
+  traceId?: string;
+  chapterNo?: number;
+  planId?: string;
+  planText?: string;
+  basis?: ChapterOptimizationBasis;
+  optimizationMode?: 'single' | 'segmented';
+  segmentTotal?: number;
+  strategyLabel?: string;
+  inputChapterChars?: number;
+  segmentDiagnoses?: string[];
+  stage?: ChapterOptimizeStage;
+  segmentIndex?: number;
+  retryCount?: number;
+}
 
-export function resolveChapterOptimizeStrategyLabel(
-  contentLength: number,
-  segmentCharSize = DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
-): string {
-  if (segmentCharSize === 0) {
-    return contentLength > 2800 ? '整章优化（未按字数分段）' : '整章优化';
-  }
-  if (contentLength <= 2800) {
-    return '整章优化';
-  }
-  const count = Math.ceil(contentLength / segmentCharSize);
-  return `${count} 段优化（约 ${segmentCharSize} 字/段）`;
+interface ChapterOptimizeDraftSseEvent {
+  event?: 'start' | 'stage' | 'progress' | 'content' | 'content_replace' | 'end' | 'error';
+  data?: string;
+  traceId?: string;
+  chapterNo?: number;
+  strategyLabel?: string;
+  stage?: ChapterOptimizeStage;
+  segmentIndex?: number;
+  segmentTotal?: number;
+  taskKey?: string;
+  message?: string;
+  finalDraftText?: string;
+  contentSafety?: ContentSafetyScanResult;
+}
+
+export interface ChapterOptimizePlanCallbacks {
+  onStart?: (event: ChapterOptimizePlanSseEvent) => void;
+  onStage?: (event: {
+    stage: ChapterOptimizeStage;
+    segmentIndex?: number;
+    segmentTotal?: number;
+    retryCount?: number;
+  }) => void;
+  onContent?: (text: string) => void;
+  onEnd?: (result: ChapterOptimizationPlanResult) => void;
+  onError?: (message: string) => void;
+}
+
+export interface ChapterOptimizeDraftCallbacks {
+  onStart?: (event: { traceId: string; chapterNo: number; strategyLabel?: string }) => void;
+  onStage?: (event: {
+    stage: ChapterOptimizeStage;
+    segmentIndex?: number;
+    segmentTotal?: number;
+  }) => void;
+  onProgress?: (event: AiTaskProgressEvent) => void;
+  onContent?: (text: string) => void;
+  onContentReplace?: (text: string) => void;
+  onEnd?: (event: {
+    traceId: string;
+    finalDraftText?: string;
+    contentSafety?: ContentSafetyScanResult;
+  }) => void;
+  onError?: (message: string) => void;
 }
 
 export function formatChapterOptimizeStageLabel(
@@ -2748,27 +2684,24 @@ export function formatChapterOptimizeStageLabel(
   segmentTotal?: number,
   retryCount?: number
 ): string {
-  const retrySuffix =
-    typeof retryCount === 'number' && retryCount > 0 ? `（重试 ${retryCount}）` : '';
+  const retry = retryCount ? `（重试 ${retryCount}）` : '';
   switch (stage) {
     case 'segment_diagnosis':
       return segmentIndex && segmentTotal
-        ? `分段诊断 ${segmentIndex}/${segmentTotal}${retrySuffix}`
-        : `分段诊断${retrySuffix}`;
+        ? `分段诊断 ${segmentIndex}/${segmentTotal}${retry}`
+        : `分段诊断${retry}`;
     case 'plan_synthesis':
-      return retrySuffix ? `方案汇总${retrySuffix}` : '方案汇总';
+      return `方案汇总${retry}`;
     case 'draft_segment':
       return segmentIndex && segmentTotal
-        ? `正文第 ${segmentIndex}/${segmentTotal} 段`
-        : '正文分段生成';
+        ? `正文生成 ${segmentIndex}/${segmentTotal}`
+        : '正文生成中';
     case 'merge_validation':
-      return '合并校验';
+      return '正文完整性校验';
     case 'content_safety_scan':
-      return '正在执行内容安全扫描…';
+      return '内容安全扫描';
     case 'content_safety_rewrite':
-      return retrySuffix ? `正在批量重写命中句子${retrySuffix}` : '正在批量重写命中句子…';
-    default:
-      return '处理中';
+      return '命中内容修复';
   }
 }
 
@@ -2791,91 +2724,6 @@ export interface WriteChapterOutlineStartEvent {
   chapterNo: number;
   outlineId: string;
   basis: WriteChapterOutlineBasis;
-}
-
-export interface ChapterOptimizeSegmentRecovery {
-  failedSegmentIndex?: number;
-  segmentTotal?: number;
-  segmentDiagnoses?: string[];
-  retryable?: boolean;
-}
-
-export interface ChapterOptimizePlanCallbacks {
-  onStart?: (payload: {
-    traceId: string;
-    chapterNo: number;
-    planId: string;
-    basis: ChapterOptimizationBasis;
-    optimizationMode?: 'single' | 'segmented';
-    segmentTotal?: number;
-    strategyLabel?: string;
-    inputChapterChars?: number;
-  }) => void;
-  onStage?: (payload: {
-    stage: ChapterOptimizeStage;
-    segmentIndex?: number;
-    segmentTotal?: number;
-    retryCount?: number;
-  }) => void;
-  onContent?: (text: string) => void;
-  onEnd?: (result: ChapterOptimizationPlanResult) => void;
-  onError?: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
-}
-
-export interface ChapterOptimizeDraftCallbacks {
-  onStart?: (
-    traceId: string,
-    chapterNo: number,
-    meta?: {
-      optimizationMode?: 'single' | 'segmented';
-      segmentTotal?: number;
-      strategyLabel?: string;
-    }
-  ) => void;
-  onStage?: (payload: {
-    stage: ChapterOptimizeStage;
-    segmentIndex?: number;
-    segmentTotal?: number;
-  }) => void;
-  onContent?: (text: string) => void;
-  onContentReplace?: (text: string) => void;
-  onProgress?: (event: AiTaskProgressEvent) => void;
-  onEnd?: (payload: {
-    traceId: string;
-    finalDraftText?: string;
-    contentSafety?: ContentSafetyScanResult;
-  }) => void;
-  onError?: (message: string) => void;
-  onSegmentStart?: (segmentIndex: number, totalSegments: number) => void;
-}
-
-export interface ChapterTypoIssue {
-  id: string;
-  original: string;
-  suggestion: string;
-  context?: string;
-  reason?: string;
-}
-
-export interface ChapterOptimizationTypoCheckResult {
-  issues: ChapterTypoIssue[];
-  traceId: string;
-  issueCount: number;
-}
-
-export interface ChapterOptimizeTypoFixCallbacks {
-  onStart?: (traceId: string) => void;
-  onContent?: (text: string) => void;
-  onContentReplace?: (text: string) => void;
-  onProgress?: (event: AiTaskProgressEvent) => void;
-  onEnd?: (payload: {
-    traceId: string;
-    appliedIssueCount: number;
-    autoCorrected: boolean;
-    finalDraftText?: string;
-    contentSafety?: ContentSafetyScanResult;
-  }) => void;
-  onError?: (message: string) => void;
 }
 
 export interface KnowledgeItem {
@@ -2938,28 +2786,6 @@ export interface ChapterRelationEventGenerateResult {
   createdCount: number;
   skippedCount: number;
   events: RelationEventItem[];
-}
-
-export interface WriteResult {
-  draftText: string;
-  reasoningBrief: string;
-  citations: Array<{ sourceType: string; sourceId: string; snippet: string }>;
-  consistencyNotes: Array<{ level: 'info' | 'warning'; message: string }>;
-  usedRelationEvents?: UsedRelationEventItem[];
-  autoUpdates: {
-    chapterUpdated: boolean;
-    outlineUpdated: boolean;
-    personaUpdated: boolean;
-    updateLine: string;
-  };
-  context: {
-    projectId: string;
-    chapterNo: number;
-    usedPersonaId: string | null;
-    outlineUsed: boolean;
-    recentChapterCount: number;
-    targetWords: number | null;
-  };
 }
 
 export interface ProjectExportBundle {
@@ -3053,6 +2879,32 @@ export interface RelationEventInput {
   summary: string;
   evidenceSnippet?: string;
   chapterNo?: number | null;
+}
+
+export type WritingStyleSampleSceneType = 'dialogue' | 'action' | 'intimate' | 'atmosphere';
+
+export interface WritingStyleSample {
+  id: string;
+  text: string;
+  sceneType: WritingStyleSampleSceneType;
+  sourceChapterNo?: number;
+  label?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WritingStyleSampleInput {
+  text: string;
+  sceneType: WritingStyleSampleSceneType;
+  sourceChapterNo?: number | null;
+  label?: string;
+}
+
+export interface WritingStyleSamplePatch {
+  text?: string;
+  sceneType?: WritingStyleSampleSceneType;
+  sourceChapterNo?: number | null;
+  label?: string;
 }
 
 export interface UsedRelationEventItem {

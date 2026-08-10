@@ -50,3 +50,45 @@ test('auth sessions persist to disk and survive service recreation', async () =>
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('generation preferences round-trip on auth service (memory + disk)', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'aq-auth-prefs-'));
+  const prefsPath = join(tempDir, 'user-generation-preferences.json');
+  try {
+    const jwtService = createJwtServiceMock();
+    const prisma = {} as never;
+    const service = new AuthService(jwtService as never, prisma);
+    (service as unknown as { preferencesStoragePath: string }).preferencesStoragePath = prefsPath;
+
+    const defaults = service.getGenerationPreferences('1');
+    assert.equal(defaults.writing.provider, 'deepseek');
+    assert.equal(defaults.writing.temperature, null);
+    assert.equal(defaults.utility.temperature, 0.7);
+
+    const saved = await service.updateGenerationPreferences('1', {
+      writing: {
+        provider: 'siliconflow',
+        model: 'Qwen/Qwen2.5-72B-Instruct',
+        temperature: 0.88,
+      },
+      utility: {
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        temperature: 0.35,
+      },
+    });
+    assert.equal(saved.writing.provider, 'siliconflow');
+    assert.equal(saved.utility.model, 'deepseek-chat');
+    assert.ok(existsSync(prefsPath));
+
+    const again = new AuthService(jwtService as never, prisma);
+    (again as unknown as { preferencesStoragePath: string }).preferencesStoragePath = prefsPath;
+    (again as unknown as { restorePreferencesFromDisk: () => void }).restorePreferencesFromDisk();
+    const loaded = again.getGenerationPreferences('1');
+    assert.equal(loaded.writing.provider, 'siliconflow');
+    assert.equal(loaded.writing.temperature, 0.88);
+    assert.equal(loaded.utility.temperature, 0.35);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});

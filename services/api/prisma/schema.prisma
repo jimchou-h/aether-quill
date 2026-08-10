@@ -9,14 +9,15 @@ datasource db {
 }
 
 model User {
-  id        String          @id @map("id")
-  email     String          @unique
-  password  String          @map("password")
-  name      String          @map("name")
-  createdAt DateTime        @map("created_at")
-  updatedAt DateTime        @map("updated_at")
-  members   ProjectMember[]
-  sessions  Session[]
+  id                          String          @id @map("id")
+  email                       String          @unique
+  password                    String          @map("password")
+  name                        String          @map("name")
+  createdAt                   DateTime        @map("created_at")
+  updatedAt                   DateTime        @map("updated_at")
+  generationPreferencesJson   Json?           @map("generation_preferences_json")
+  members                     ProjectMember[]
+  sessions                    Session[]
 
   @@map("users")
 }
@@ -171,6 +172,7 @@ model Document {
   title       String             @map("title")
   content     String             @map("content") @db.Text
   docType     String             @default("other") @map("doc_type")
+  personaId   String?            @map("persona_id")
   indexStatus String             @map("index_status")
   version     Int                @map("version")
   createdAt   DateTime           @map("created_at")
@@ -179,6 +181,7 @@ model Document {
   chunks      DocChunk[]
 
   @@index([projectId], map: "documents_project_id_idx")
+  @@index([personaId], map: "documents_persona_id_idx")
   @@map("documents")
 }
 

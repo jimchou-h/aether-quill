@@ -9,6 +9,13 @@
           </router-link>
         </div>
         <div class="header-right">
+          <router-link
+            to="/account/settings"
+            class="aq-btn aq-btn-ghost settings-button"
+            aria-label="账户设置"
+          >
+            设置
+          </router-link>
           <span class="user-name">{{ authStore.userName }}</span>
           <button class="aq-btn aq-btn-ghost logout-button" type="button" @click="handleLogout">
             退出登录
@@ -150,6 +157,11 @@ function handleLogout() {
 .user-name {
   font-size: 0.875rem;
   color: var(--aq-text-secondary);
+}
+
+.settings-button {
+  font-size: 0.85rem;
+  text-decoration: none;
 }
 
 .logout-button {

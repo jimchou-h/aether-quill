@@ -9,10 +9,10 @@
  * ## 两条主生成链路
  *
  * 1. **POST /api/generate** — 通用生成（续写、章节优化 plan/draft、大纲等）
- *    - 有 `chapterNo` 锚定 → 走「结构化知识库」：用章节的 `structuredMatchingText` 与知识库文档标题匹配，整文/段落裁剪注入
+ *    - 有 `chapterNo` 锚定 → 标题匹配 + 向量补足合并（AQ-360）；无 structuredMatchingText 时向量兜底
  *    - 无章节锚定 → 走向量检索：embedding → Qdrant topK → Reranker topN → 证据块
  * 2. **POST /api/generate/draft** — 写作工作台正文（须先有 `confirmedOutlineText`）
- *    - 仅走结构化知识库路径；无 `structuredMatchingText` 时跳过 KB 证据并告警
+ *    - 同样走融合检索；无匹配文本时向量兜底
  *
  * ## 上下文 vs 证据（写入 LLM prompt 的两段）
  *
@@ -29,18 +29,29 @@
 
 import { loadEnv } from './config/load-env';
 import {
+  assertGenerationProfileEnv,
   assertRagInfrastructureEnv,
   formatContentSafetyBlockMessage,
   getResolvedRagInfrastructureEnv,
   mergeContentSafetyRules,
   processContentSafety,
   sanitizeProjectContentSafetyRules,
+  sanitizeWritingStyleSamples,
+  buildStyleSamplePromptBlock,
+  isWritingStyleInjectionTemplateKey,
+  selectWritingStyleSamplesForTask,
+  normalizeGenerationModelId,
+  resolveGenerationCallProfile,
+  resolveWritingGenerationTemperatureOverride,
+  normalizeUserGenerationPreferences,
   type ProjectContentSafetyRule,
+  type ResolvedGenerationCallProfile,
+  type UserGenerationPreferences,
+  type WritingStyleSample,
 } from '@aether-quill/config';
 import express from 'express';
 import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
-import { ChunkWithEmbedding } from './retrieval/types';
 import {
   buildChapterOptimizeRetrievalQuery,
   buildEmbeddingRetrievalQuery,
@@ -56,6 +67,7 @@ import {
   resolveChapterScopedEmbeddingQuery,
   retrieveKnowledgeForDraft,
 } from './retrieval/knowledge-retrieval';
+import { mergeTitleAndVectorEvidence } from './retrieval/hybrid-knowledge-merge';
 import { GenerationService, GenerationContext } from './generation/generation.service';
 import { assembleSystemMessageContent } from './generation/system-prompt.util';
 import { resolveTaskSystemPromptFromContext } from './generation/task-prompt-defaults';
@@ -78,11 +90,17 @@ import {
   clampChapterSummaryPromptCount,
   clampContextExcerptMaxChars,
   clampGenerationTemperature,
+  clampOutlineMaxChars,
+  clampPersonaProfileMaxChars,
   clampPriorChapterTailChars,
+  clampRelationMemoMaxChars,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
   DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
   DEFAULT_GENERATION_TEMPERATURE,
+  DEFAULT_OUTLINE_MAX_CHARS,
+  DEFAULT_PERSONA_PROFILE_MAX_CHARS,
   DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
+  DEFAULT_RELATION_MEMO_MAX_CHARS,
 } from './context/generation-preferences';
 import { ConsistencyChecker } from './consistency';
 import {
@@ -99,6 +117,7 @@ import {
 
 loadEnv();
 assertRagInfrastructureEnv('rag-orchestrator');
+assertGenerationProfileEnv('rag-orchestrator');
 const app = express();
 app.use(express.json({ limit: '25mb' }));
 app.use(observabilityMiddleware);
@@ -144,6 +163,7 @@ interface KnowledgeDocumentPayload {
   title: string;
   content: string;
   docType?: string;
+  personaId?: string | null;
 }
 
 interface ProjectContext {
@@ -159,8 +179,19 @@ interface ProjectContext {
   chapterSummaryMemoryCount: number;
   priorChapterTailChars: number;
   contextExcerptMaxChars: number;
+  outlineMaxChars: number;
+  personaProfileMaxChars: number;
+  relationMemoMaxChars: number;
   /** 主生成链路采样温度 */
   generationTemperature: number;
+  /** 项目级写作模型覆盖 */
+  generationWritingModel?: string | null;
+  /** 项目级工具模型覆盖 */
+  generationUtilityModel?: string | null;
+  /** 写作级温度覆盖 */
+  writingGenerationTemperature?: number | null;
+  /** 用户全局生成偏好（厂商/模型/温度，按 writing/utility 档） */
+  userGenerationPreferences?: UserGenerationPreferences;
   /** 是否对 AI 正文执行内容安全硬规则扫描 */
   contentSafetyScanEnabled?: boolean;
   /** 项目自定义禁用词 */
@@ -178,6 +209,8 @@ interface ProjectContext {
     chapterNo?: number | null;
   }>;
   personas?: PersonaContextPayload[];
+  /** 项目文风样本库（写作类任务注入 few-shot 参照） */
+  writingStyleSamples?: WritingStyleSample[];
   updatedAt: string;
 }
 
@@ -193,6 +226,13 @@ function patchProjectContextDefaults(ctx: ProjectContext) {
   ctx.contextExcerptMaxChars = clampContextExcerptMaxChars(
     ctx.contextExcerptMaxChars ?? DEFAULT_CONTEXT_EXCERPT_MAX_CHARS
   );
+  ctx.outlineMaxChars = clampOutlineMaxChars(ctx.outlineMaxChars ?? DEFAULT_OUTLINE_MAX_CHARS);
+  ctx.personaProfileMaxChars = clampPersonaProfileMaxChars(
+    ctx.personaProfileMaxChars ?? DEFAULT_PERSONA_PROFILE_MAX_CHARS
+  );
+  ctx.relationMemoMaxChars = clampRelationMemoMaxChars(
+    ctx.relationMemoMaxChars ?? DEFAULT_RELATION_MEMO_MAX_CHARS
+  );
   ctx.generationTemperature = clampGenerationTemperature(ctx.generationTemperature);
 }
 
@@ -207,6 +247,9 @@ function getOrCreateContext(projectId: string) {
       chapterSummaryMemoryCount: 3,
       priorChapterTailChars: DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
       contextExcerptMaxChars: DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
+      outlineMaxChars: DEFAULT_OUTLINE_MAX_CHARS,
+      personaProfileMaxChars: DEFAULT_PERSONA_PROFILE_MAX_CHARS,
+      relationMemoMaxChars: DEFAULT_RELATION_MEMO_MAX_CHARS,
       generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
       contentSafetyScanEnabled: true,
       contentSafetyCustomRules: [],
@@ -218,23 +261,64 @@ function getOrCreateContext(projectId: string) {
   return ctx;
 }
 
-function resolveGenerationTemperature(bodyTemp: unknown, ctx: ProjectContext): number {
-  if (typeof bodyTemp === 'number' && Number.isFinite(bodyTemp)) {
-    return clampGenerationTemperature(bodyTemp);
+function resolveGenerationCallProfileForProject(
+  templateKey: string,
+  projectCtx: ProjectContext,
+  requestTemperature?: unknown
+): ResolvedGenerationCallProfile {
+  return resolveGenerationCallProfile({
+    templateKey,
+    projectOverrides: {
+      generationWritingModel: projectCtx.generationWritingModel,
+      generationUtilityModel: projectCtx.generationUtilityModel,
+      generationTemperature: projectCtx.generationTemperature,
+      writingGenerationTemperature: projectCtx.writingGenerationTemperature,
+    },
+    userPreferences: projectCtx.userGenerationPreferences,
+    requestTemperature:
+      typeof requestTemperature === 'number' && Number.isFinite(requestTemperature)
+        ? requestTemperature
+        : undefined,
+  });
+}
+
+function applyWritingStyleSamplesToContext(
+  generationContext: GenerationContext,
+  projectCtx: ProjectContext,
+  templateKey: string,
+  chapterNo?: number
+): string[] {
+  if (!isWritingStyleInjectionTemplateKey(templateKey)) {
+    return [];
   }
-  const env = Number(process.env.PROVIDER_TEMPERATURE || 0.7);
-  if (typeof ctx.generationTemperature === 'number' && Number.isFinite(ctx.generationTemperature)) {
-    return clampGenerationTemperature(ctx.generationTemperature);
+  const selected = selectWritingStyleSamplesForTask({
+    samples: projectCtx.writingStyleSamples ?? [],
+    templateKey,
+    chapterNo,
+  });
+  if (selected.length === 0) {
+    return [];
   }
-  return clampGenerationTemperature(env);
+  const styleSampleBlock = buildStyleSamplePromptBlock(selected).trim();
+  if (styleSampleBlock) {
+    generationContext.styleSampleBlock = styleSampleBlock;
+  }
+  return selected.map((sample) => sample.id);
 }
 
 async function getGenerationContext(
   projectId: string,
   currentChapterNo?: number,
-  options?: { includeNextChapterHead?: boolean }
+  options?: {
+    includeNextChapterHead?: boolean;
+    appearingCharacters?: string[];
+  }
 ): Promise<GenerationContext & { narrativeMeta?: NarrativeContextMeta }> {
   const ctx = getOrCreateContext(projectId);
+  const chapter =
+    currentChapterNo && currentChapterNo > 0
+      ? ctx.chapters.find((c) => c.chapterNo === currentChapterNo)
+      : undefined;
   const built = await buildNarrativeContextText({
     projectId,
     personaProfile: ctx.personaProfile,
@@ -244,10 +328,16 @@ async function getGenerationContext(
     chapterSummaryMemoryCount: ctx.chapterSummaryMemoryCount,
     priorChapterTailChars: ctx.priorChapterTailChars,
     contextExcerptMaxChars: ctx.contextExcerptMaxChars,
+    outlineMaxChars: ctx.outlineMaxChars,
+    personaProfileMaxChars: ctx.personaProfileMaxChars,
+    relationMemoMaxChars: ctx.relationMemoMaxChars,
     selectedRelationMemory: ctx.selectedRelationMemory,
     identityRelationMemory: ctx.identityRelationMemory,
     currentChapterNo,
     personas: ctx.personas,
+    knowledgeDocuments: ctx.knowledgeDocuments,
+    appearingCharacters: options?.appearingCharacters,
+    outlineMatchingQuery: chapter?.structuredMatchingText,
     includeNextChapterHead: options?.includeNextChapterHead,
   });
   return {
@@ -255,20 +345,6 @@ async function getGenerationContext(
     narrativeContext: built.text,
     narrativeMeta: built.meta,
   };
-}
-
-function keywordScore(query: string, text: string) {
-  const words = query
-    .trim()
-    .split(/\s+/)
-    .map((item) => item.toLowerCase())
-    .filter(Boolean);
-  if (words.length === 0) {
-    return 0;
-  }
-
-  const loweredText = text.toLowerCase();
-  return words.reduce((score, word) => score + (loweredText.includes(word) ? 1 : 0), 0);
 }
 
 // ─── 健康检查 & 可观测性 ─────────────────────────────────────────────
@@ -551,7 +627,14 @@ app.post('/api/projects/:projectId/context', (req, res) => {
         continue;
       }
       const docType = typeof r.docType === 'string' ? r.docType : undefined;
-      docs.push({ id, title, content, docType });
+      const personaIdRaw = r.personaId;
+      const personaId =
+        typeof personaIdRaw === 'string' && personaIdRaw.trim()
+          ? personaIdRaw.trim()
+          : personaIdRaw === null
+            ? null
+            : undefined;
+      docs.push({ id, title, content, docType, personaId });
     }
     context.knowledgeDocuments = docs;
   }
@@ -569,6 +652,36 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   if (payload.generationTemperature !== undefined) {
     context.generationTemperature = clampGenerationTemperature(payload.generationTemperature);
   }
+  if (payload.generationWritingModel !== undefined) {
+    context.generationWritingModel =
+      payload.generationWritingModel === null
+        ? null
+        : normalizeGenerationModelId(payload.generationWritingModel);
+  }
+  if (payload.generationUtilityModel !== undefined) {
+    context.generationUtilityModel =
+      payload.generationUtilityModel === null
+        ? null
+        : normalizeGenerationModelId(payload.generationUtilityModel);
+  }
+  if (payload.writingGenerationTemperature !== undefined) {
+    context.writingGenerationTemperature =
+      payload.writingGenerationTemperature === null
+        ? null
+        : resolveWritingGenerationTemperatureOverride(payload.writingGenerationTemperature);
+  }
+  if (payload.userGenerationPreferences !== undefined) {
+    try {
+      context.userGenerationPreferences = normalizeUserGenerationPreferences(
+        payload.userGenerationPreferences
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Invalid userGenerationPreferences';
+      res.status(400).json({ error: message });
+      return;
+    }
+  }
   if (payload.contentSafetyScanEnabled !== undefined) {
     context.contentSafetyScanEnabled = Boolean(payload.contentSafetyScanEnabled);
   }
@@ -583,6 +696,15 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   if (payload.contextExcerptMaxChars !== undefined) {
     context.contextExcerptMaxChars = clampContextExcerptMaxChars(payload.contextExcerptMaxChars);
   }
+  if (payload.outlineMaxChars !== undefined) {
+    context.outlineMaxChars = clampOutlineMaxChars(payload.outlineMaxChars);
+  }
+  if (payload.personaProfileMaxChars !== undefined) {
+    context.personaProfileMaxChars = clampPersonaProfileMaxChars(payload.personaProfileMaxChars);
+  }
+  if (payload.relationMemoMaxChars !== undefined) {
+    context.relationMemoMaxChars = clampRelationMemoMaxChars(payload.relationMemoMaxChars);
+  }
   if (Array.isArray(payload.personas)) {
     context.personas = payload.personas
       .map((row: unknown): PersonaContextPayload | null => {
@@ -594,6 +716,7 @@ app.post('/api/projects/:projectId/context', (req, res) => {
         if (!name) {
           return null;
         }
+        const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : undefined;
         const profile = typeof record.profile === 'string' ? record.profile : '';
         const state = typeof record.state === 'string' ? record.state : '';
         const status = record.status === 'published' ? 'published' : 'draft';
@@ -637,9 +760,12 @@ app.post('/api/projects/:projectId/context', (req, res) => {
               ];
             })
           : undefined;
-        return { name, profile, state, status, chapterStates };
+        return { id, name, profile, state, status, chapterStates };
       })
       .filter((item): item is PersonaContextPayload => Boolean(item));
+  }
+  if (payload.writingStyleSamples !== undefined) {
+    context.writingStyleSamples = sanitizeWritingStyleSamples(payload.writingStyleSamples);
   }
 
   context.updatedAt = new Date().toISOString();
@@ -654,6 +780,7 @@ app.post('/api/preview-retrieval', async (req, res) => {
     prompt?: string;
     chapterNo?: number;
     useStructuredKb?: boolean;
+    retrievalMode?: PreviewRetrievalRequest['retrievalMode'];
     projectCtx?: PreviewRetrievalRequest['projectCtx'];
     extraContext?: Record<string, unknown>;
   };
@@ -668,6 +795,7 @@ app.post('/api/preview-retrieval', async (req, res) => {
       prompt: body.prompt,
       chapterNo: body.chapterNo,
       useStructuredKb: body.useStructuredKb,
+      retrievalMode: body.retrievalMode,
       projectCtx: body.projectCtx,
       extraContext: body.extraContext,
     });
@@ -701,118 +829,6 @@ app.post('/api/projects/:projectId/chapters/:chapterNo/index-summary', async (re
   } catch (error) {
     console.error('Index chapter summary failed:', error);
     res.status(500).json({ error: 'Index chapter summary failed' });
-  }
-});
-
-// ─── 底层检索 API（调试 / 独立调用；生产主链路在 /api/generate 内联）────────
-
-app.post('/api/retrieve', async (req, res) => {
-  const { query, projectId, topK = 30, minScore = 0 } = req.body;
-
-  if (!query || !projectId) {
-    return res.status(400).json({ error: 'query and projectId are required' });
-  }
-
-  try {
-    const chunks = await vectorStore.retrieve({ query, projectId, topK, minScore });
-
-    res.json({
-      chunks,
-      query,
-      projectId,
-      topK,
-      totalRetrieved: chunks.length,
-    });
-  } catch (error) {
-    console.error('Retrieval failed:', error);
-    const context = getOrCreateContext(projectId);
-    const ranked = context.chapters
-      .map((chapter) => ({
-        ...chapter,
-        score: keywordScore(query, `${chapter.title} ${chapter.summary}`),
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK);
-
-    res.json({
-      chunks: ranked,
-      query,
-      projectId,
-      topK,
-      totalRetrieved: ranked.length,
-      fallback: true,
-    });
-  }
-});
-
-app.post('/api/rerank', async (req, res) => {
-  const { query, chunks, topN = 10 } = req.body;
-
-  if (!query || !chunks) {
-    return res.status(400).json({ error: 'query and chunks are required' });
-  }
-
-  const typedChunks: ChunkWithEmbedding[] = chunks.map((c: Partial<ChunkWithEmbedding>) => ({
-    id: c.id || '',
-    documentId: c.documentId || '',
-    content: c.content || '',
-    embedding: c.embedding || [],
-    metadata: c.metadata || {},
-    score: c.score,
-  }));
-
-  const rerankedChunks = reranker.rerank(query, typedChunks, topN);
-
-  res.json({
-    rerankedChunks,
-    query,
-    topN,
-  });
-});
-
-app.post('/api/search', async (req, res) => {
-  const { query, projectId, topK = 30, topN = 10, minScore = 0 } = req.body;
-
-  if (!query || !projectId) {
-    return res.status(400).json({ error: 'query and projectId are required' });
-  }
-
-  try {
-    const retrieved = await vectorStore.retrieve({ query, projectId, topK, minScore });
-    const reranked = reranker.rerank(query, retrieved, topN);
-
-    res.json({
-      results: reranked,
-      query,
-      projectId,
-      topK,
-      topN,
-      totalRetrieved: retrieved.length,
-    });
-  } catch (error) {
-    console.error('Search failed:', error);
-    const context = getOrCreateContext(projectId);
-    const ranked = context.chapters
-      .map((chapter) => ({
-        id: `chapter-${chapter.chapterNo}`,
-        documentId: projectId,
-        content: `${chapter.title}\n${chapter.summary}`,
-        embedding: [] as number[],
-        metadata: { chapterNo: chapter.chapterNo, title: chapter.title },
-        score: keywordScore(query, `${chapter.title} ${chapter.summary}`),
-      }))
-      .sort((a, b) => (b.score || 0) - (a.score || 0))
-      .slice(0, topN);
-
-    res.json({
-      results: ranked,
-      query,
-      projectId,
-      topK,
-      topN,
-      totalRetrieved: ranked.length,
-      fallback: true,
-    });
   }
 });
 
@@ -892,7 +908,7 @@ app.post('/api/generate', async (req, res) => {
       ? draftChapterFromTask
       : extraChapterNo;
   const narrativeCurrentChapter = structuredChapterNo > 0 ? structuredChapterNo : undefined;
-  /** 有章节号时优先走标题匹配知识库，不走 Qdrant chunk 检索 */
+  /** 有章节号时走标题匹配 + 向量补足融合 */
   const useStructuredChapterKb = structuredChapterNo > 0;
   const chapterScopedEmbeddingQuery = resolveChapterScopedEmbeddingQuery(
     projectCtx,
@@ -903,6 +919,9 @@ app.post('/api/generate', async (req, res) => {
   let structuredKbTrace: {
     titleMatchedDocumentIds: string[];
     evidenceDocumentIds: string[];
+    vectorDocumentIds?: string[];
+    dualHitDocumentIds?: string[];
+    retrievalMode?: string;
     retrievalSkippedNoStructured?: boolean;
   } | null = null;
 
@@ -944,19 +963,48 @@ app.post('/api/generate', async (req, res) => {
         ),
         knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
       });
+
+      let vectorPart: Awaited<ReturnType<typeof retrieveKnowledgeForDraft>> | null = null;
+      try {
+        const vectorQuery =
+          chapterScopedEmbeddingQuery !== undefined
+            ? chapterScopedEmbeddingQuery
+            : buildEmbeddingRetrievalQuery(String(prompt), projectCtx, extra);
+        vectorPart = await retrieveKnowledgeForDraft(
+          vectorStore,
+          reranker,
+          projectId,
+          retrievalQuery,
+          {
+            topK: ragEnv.retrievalTopK,
+            topN: ragEnv.rerankTopN,
+            minScore: ragEnv.retrievalMinScore,
+            apiBaseUrl: API_BASE_URL,
+            enrichFullDocuments: true,
+            embeddingQuery: vectorQuery,
+          }
+        );
+      } catch (vectorError) {
+        console.error('Generate vector supplement failed:', vectorError);
+      }
+
+      const merged = mergeTitleAndVectorEvidence(sr, vectorPart);
       structuredKbTrace = {
-        titleMatchedDocumentIds: sr.titleMatchedDocumentIds,
-        evidenceDocumentIds: sr.evidenceDocumentIds,
-        retrievalSkippedNoStructured: sr.retrievalSkippedNoStructured,
+        titleMatchedDocumentIds: merged.titleMatchedDocumentIds,
+        evidenceDocumentIds: merged.evidenceDocumentIds,
+        vectorDocumentIds: merged.vectorDocumentIds,
+        dualHitDocumentIds: merged.dualHitDocumentIds,
+        retrievalMode: merged.retrievalMode,
+        retrievalSkippedNoStructured: merged.retrievalSkippedNoStructured,
       };
-      retrievalQuery = sr.query.trim() ? sr.query : retrievalQuery;
-      retrievedEvidence = sr.evidenceText;
-      retrievedChunkIds = sr.chunks
-        .filter((c) => sr.evidenceDocumentIds.includes(c.documentId))
+      retrievalQuery = merged.query.trim() ? merged.query : retrievalQuery;
+      retrievedEvidence = merged.evidenceText;
+      retrievedChunkIds = merged.chunks
+        .filter((c) => merged.evidenceDocumentIds.includes(c.documentId))
         .map((c) => c.id)
         .filter((id) => Boolean(id?.trim()));
-      const evidenceDocSet = new Set(sr.evidenceDocumentIds);
-      retrievedFullDocuments = (sr.fullDocuments ?? [])
+      const evidenceDocSet = new Set(merged.evidenceDocumentIds);
+      retrievedFullDocuments = (merged.fullDocuments ?? [])
         .filter((d) => evidenceDocSet.has(d.documentId))
         .map((d) => ({ ...d }));
     } else {
@@ -981,6 +1029,16 @@ app.post('/api/generate', async (req, res) => {
       retrievedEvidence = retrieval.evidenceText;
       retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
       retrievedFullDocuments = (retrieval.fullDocuments ?? []).map((d) => ({ ...d }));
+      structuredKbTrace = {
+        titleMatchedDocumentIds: [],
+        evidenceDocumentIds: retrievedFullDocuments
+          .map((d) => String(d.documentId ?? ''))
+          .filter(Boolean),
+        vectorDocumentIds: retrievedFullDocuments
+          .map((d) => String(d.documentId ?? ''))
+          .filter(Boolean),
+        retrievalMode: 'vector',
+      };
     }
     } catch (error) {
       console.error('Generate retrieval failed:', error);
@@ -998,6 +1056,7 @@ app.post('/api/generate', async (req, res) => {
   } else {
     generationContext = await getGenerationContext(projectId, narrativeCurrentChapter, {
       includeNextChapterHead: isChapterOptimizeTemplateKey(tk),
+      appearingCharacters: parseAppearingCharactersFromExtra(extra),
     });
   }
   const narrativeMeta = generationContext.narrativeMeta;
@@ -1019,23 +1078,41 @@ app.post('/api/generate', async (req, res) => {
     ? undefined
     : retrievedEvidence.trim() || undefined;
 
-  const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, projectCtx);
+  const injectedStyleSampleIds = applyWritingStyleSamplesToContext(
+    generationContext,
+    projectCtx,
+    tk,
+    narrativeCurrentChapter
+  );
+
+  const resolvedProfile = resolveGenerationCallProfileForProject(tk, projectCtx, req.body?.temperature);
   const resolvedSystemPrompt = generationService.buildSystemMessage(generationContext);
 
   const traceContext: Record<string, unknown> = {
     retrieval_query: retrievalQuery,
     retrieved_chunk_ids: retrievedChunkIds,
     full_documents: retrievedFullDocuments,
-    generation_temperature: resolvedTemperature,
+    generation_tier: resolvedProfile.tier,
+    generation_provider: resolvedProfile.provider,
+    generation_temperature: resolvedProfile.temperature,
+    ...(resolvedProfile.frequencyPenalty !== undefined
+      ? { generation_frequency_penalty: resolvedProfile.frequencyPenalty }
+      : {}),
     ...(structuredKbTrace
       ? {
+          retrieval_mode: structuredKbTrace.retrievalMode ?? 'structured',
           title_matched_document_ids: structuredKbTrace.titleMatchedDocumentIds,
+          vector_document_ids: structuredKbTrace.vectorDocumentIds ?? [],
           evidence_document_ids: structuredKbTrace.evidenceDocumentIds,
+          dual_hit_document_ids: structuredKbTrace.dualHitDocumentIds ?? [],
           retrieval_skipped_no_structured: structuredKbTrace.retrievalSkippedNoStructured === true,
         }
       : {}),
     ...(extra || {}),
     ...(templateKey ? { templateKey } : {}),
+    ...(injectedStyleSampleIds.length > 0
+      ? { writing_style_sample_ids: injectedStyleSampleIds }
+      : {}),
     ...(narrativeMeta || {}),
   };
 
@@ -1045,7 +1122,8 @@ app.post('/api/generate', async (req, res) => {
     systemPrompt: resolvedSystemPrompt,
     context: traceContext,
     useSSE,
-    temperature: resolvedTemperature,
+    model: resolvedProfile.model,
+    temperature: resolvedProfile.temperature,
   });
 
   if (useSSE) {
@@ -1089,33 +1167,6 @@ app.post('/api/generate', async (req, res) => {
       res.status(500).json({ error: errorMsg, traceId: trace.id, status: 'failed' });
     }
   }
-});
-
-app.get('/api/projects/:projectId/generation-traces', (req, res) => {
-  const projectId = req.params.projectId;
-  const limit = Number(req.query.limit) || 20;
-  const offset = Number(req.query.offset) || 0;
-  const status = req.query.status as string | undefined;
-
-  const { data, total } = generationService.queryTraces({ projectId, status, limit, offset });
-  res.json({ data, total });
-});
-
-app.get('/api/traces/:traceId', (req, res) => {
-  const trace = generationService.getTrace(req.params.traceId);
-  if (!trace) {
-    return res.status(404).json({ error: 'Trace not found' });
-  }
-  res.json(trace);
-});
-
-app.get('/api/traces', (req, res) => {
-  const limit = Number(req.query.limit) || 20;
-  const offset = Number(req.query.offset) || 0;
-  const status = req.query.status as string | undefined;
-
-  const { data, total } = generationService.queryTraces({ status, limit, offset });
-  res.json({ data, total });
 });
 
 app.get('/api/projects/:projectId/generation-stats', (req, res) => {
@@ -1204,19 +1255,43 @@ app.post('/api/generate/draft', async (req, res) => {
   let retrievedEvidence = '';
   let retrievedChunkIds: string[] = [];
   let retrievedFullDocuments: Array<Record<string, unknown>> = [];
+  let draftRetrievalMode = 'structured';
+  let draftVectorIds: string[] = [];
+  let draftDualHits: string[] = [];
+  let draftEvidenceIds = structuredRetrieval.evidenceDocumentIds;
 
   try {
-    retrievedEvidence = structuredRetrieval.evidenceText;
-    retrievedChunkIds = structuredRetrieval.chunks
-      .filter((c) => structuredRetrieval.evidenceDocumentIds.includes(c.documentId))
+    let vectorPart: Awaited<ReturnType<typeof retrieveKnowledgeForDraft>> | null = null;
+    try {
+      const ragEnv = getResolvedRagInfrastructureEnv();
+      vectorPart = await retrieveKnowledgeForDraft(vectorStore, reranker, projectId, retrievalQuery, {
+        topK: ragEnv.retrievalTopK,
+        topN: ragEnv.rerankTopN,
+        minScore: ragEnv.retrievalMinScore,
+        apiBaseUrl: API_BASE_URL,
+        enrichFullDocuments: true,
+        embeddingQuery: buildEmbeddingRetrievalQuery(fallbackQuery, context, { task: taskRecord }),
+      });
+    } catch (vectorError) {
+      console.error('Draft vector supplement failed:', vectorError);
+    }
+
+    const merged = mergeTitleAndVectorEvidence(structuredRetrieval, vectorPart);
+    draftRetrievalMode = merged.retrievalMode;
+    draftVectorIds = merged.vectorDocumentIds;
+    draftDualHits = merged.dualHitDocumentIds;
+    draftEvidenceIds = merged.evidenceDocumentIds;
+    retrievedEvidence = merged.evidenceText;
+    retrievedChunkIds = merged.chunks
+      .filter((c) => merged.evidenceDocumentIds.includes(c.documentId))
       .map((c) => c.id)
       .filter((id) => Boolean(id?.trim()));
-    const evidenceDocSet = new Set(structuredRetrieval.evidenceDocumentIds);
-    retrievedFullDocuments = (structuredRetrieval.fullDocuments ?? [])
+    const evidenceDocSet = new Set(merged.evidenceDocumentIds);
+    retrievedFullDocuments = (merged.fullDocuments ?? [])
       .filter((d) => evidenceDocSet.has(d.documentId))
       .map((d) => ({ ...d }));
     if (resolvedCitations.length === 0) {
-      resolvedCitations = structuredRetrieval.citations;
+      resolvedCitations = merged.citations;
     }
   } catch (error) {
     console.error('Knowledge retrieval assembly failed:', error);
@@ -1224,14 +1299,30 @@ app.post('/api/generate/draft', async (req, res) => {
 
   writeSse({ event: 'building_prompt' });
 
-  const resolvedTemperature = resolveGenerationTemperature(req.body?.temperature, context);
+  const resolvedProfile = resolveGenerationCallProfileForProject(
+    WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
+    context,
+    req.body?.temperature
+  );
   const generationContext = await getGenerationContext(
     projectId,
-    chapterNo > 0 ? chapterNo : undefined
+    chapterNo > 0 ? chapterNo : undefined,
+    {
+      appearingCharacters: Array.isArray(task.appearingCharacters)
+        ? task.appearingCharacters.map(String).filter((n: string) => n.trim().length >= 2)
+        : undefined,
+    }
   );
   const draftNarrativeMeta = generationContext.narrativeMeta;
   generationContext.retrievedEvidence = retrievedEvidence.trim() || undefined;
   generationContext.taskSystemPrompt = WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT;
+
+  const injectedStyleSampleIds = applyWritingStyleSamplesToContext(
+    generationContext,
+    context,
+    WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
+    chapterNo > 0 ? chapterNo : undefined
+  );
 
   const prompt = buildWorkbenchDraftUserPrompt(
     {
@@ -1272,14 +1363,27 @@ app.post('/api/generate/draft', async (req, res) => {
       retrieval_query: retrievalQuery,
       retrieved_chunk_ids: retrievedChunkIds,
       full_documents: retrievedFullDocuments,
+      retrieval_mode: draftRetrievalMode,
       title_matched_document_ids: structuredRetrieval.titleMatchedDocumentIds,
-      evidence_document_ids: structuredRetrieval.evidenceDocumentIds,
-      retrieval_skipped_no_structured: structuredRetrieval.retrievalSkippedNoStructured === true,
-      generation_temperature: resolvedTemperature,
+      vector_document_ids: draftVectorIds,
+      evidence_document_ids: draftEvidenceIds,
+      dual_hit_document_ids: draftDualHits,
+      retrieval_skipped_no_structured:
+        structuredRetrieval.retrievalSkippedNoStructured === true && draftVectorIds.length === 0,
+      generation_tier: resolvedProfile.tier,
+      generation_provider: resolvedProfile.provider,
+      generation_temperature: resolvedProfile.temperature,
+      ...(resolvedProfile.frequencyPenalty !== undefined
+        ? { generation_frequency_penalty: resolvedProfile.frequencyPenalty }
+        : {}),
+      ...(injectedStyleSampleIds.length > 0
+        ? { writing_style_sample_ids: injectedStyleSampleIds }
+        : {}),
       ...(draftNarrativeMeta || {}),
     },
     useSSE: true,
-    temperature: resolvedTemperature,
+    model: resolvedProfile.model,
+    temperature: resolvedProfile.temperature,
   });
 
   let fullDraftText = '';
