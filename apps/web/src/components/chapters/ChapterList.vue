@@ -9,7 +9,7 @@ const props = defineProps<{
   selectedChapterNo: number | null;
   summarizingChapterNo: number | null;
   generatingRelationChapterNo: number | null;
-  optimizingChapterNo: number | null;
+  optimizingChapterNo?: number | null;
   finalPolishingChapterNo: number | null;
   complianceCheckingChapterNo: number | null;
   savingChapterNo: number | null;
@@ -20,7 +20,7 @@ const emit = defineEmits<{
   select: [chapterNo: number];
   summarize: [chapterNo: number];
   generateRelationEvents: [chapterNo: number];
-  optimize: [chapter: ChapterItem];
+  writingOptimize: [chapter: ChapterItem];
   finalPolish: [chapter: ChapterItem];
   complianceCheck: [chapter: ChapterItem];
   pipelineOptimize: [chapter: ChapterItem];
@@ -463,7 +463,7 @@ defineExpose({ clearEditing, clearBatchSelection });
               <button
                 class="secondary-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('optimize', selectedChapter)"
+                @click="emit('writingOptimize', selectedChapter)"
               >
                 {{
                   props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '章节优化'
