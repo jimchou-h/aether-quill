@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import {
   apiClient,
   type ChapterItem,
+  type ChapterPendingAction,
   type ChapterSummarySource,
   type SummaryJob,
 } from '../services/api';
@@ -11,7 +12,6 @@ import ChapterImportForm from '../components/chapters/ChapterImportForm.vue';
 import ChapterImportDialog from '../components/chapters/ChapterImportDialog.vue';
 import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
-import ChapterBatchOptimizeDialog from '../components/chapters/ChapterBatchOptimizeDialog.vue';
 import ChapterPipelineOptimizeDialog from '../components/chapters/ChapterPipelineOptimizeDialog.vue';
 import ChapterFinalPolishDialog from '../components/chapters/ChapterFinalPolishDialog.vue';
 import ChapterComplianceCheckDialog from '../components/chapters/ChapterComplianceCheckDialog.vue';
@@ -22,8 +22,10 @@ import {
   completeAiTaskProgress,
   createAiTaskProgressState,
   failAiTaskProgress,
+  formatAiActivityBusyMessage,
   resetAiTaskProgress,
   startAiTaskProgress,
+  tryStartAiTaskProgress,
 } from '../composables/useAiTaskProgress';
 import {
   presentError,
@@ -33,6 +35,7 @@ import {
 } from '../utils/pageFeedback';
 import { useAbortableSse } from '../composables/useAbortableSse';
 import { isSseAbortError } from '../utils/sseStream';
+import { confirmChapterAfterSaveActions } from '../utils/chapterAfterSave';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -44,7 +47,6 @@ const savingChapterNo = ref<number | null>(null);
 const batchSummarizing = ref(false);
 const summarizingChapterNo = ref<number | null>(null);
 const generatingRelationChapterNo = ref<number | null>(null);
-const optimizingChapterNo = ref<number | null>(null);
 const finalPolishingChapterNo = ref<number | null>(null);
 const complianceCheckingChapterNo = ref<number | null>(null);
 const latestSummaryJob = ref<SummaryJob | null>(null);
@@ -54,25 +56,58 @@ const selectedChapterNo = ref<number | null>(null);
 const parsingStructuredChapterNo = ref<number | null>(null);
 const showImportModal = ref(false);
 const showImportNovelModal = ref(false);
-const showOptimizeModal = ref(false);
-const showBatchOptimizeModal = ref(false);
+const showWritingOptimizeModal = ref(false);
 const showPipelineOptimizeModal = ref(false);
 const showFinalPolishModal = ref(false);
 const showComplianceCheckModal = ref(false);
 const showBatchPipelineOptimizeModal = ref(false);
-const optimizingChapter = ref<ChapterItem | null>(null);
+const writingOptimizingChapter = ref<ChapterItem | null>(null);
 const pipelineOptimizingChapter = ref<ChapterItem | null>(null);
 const finalPolishingChapter = ref<ChapterItem | null>(null);
 const complianceCheckingChapter = ref<ChapterItem | null>(null);
-const batchOptimizeChapters = ref<ChapterItem[]>([]);
 const batchPipelineChapters = ref<ChapterItem[]>([]);
 const afterSaveSse = useAbortableSse();
+
+async function runChapterAfterSaveIfConfirmed(
+  chapterNo: number,
+  pendingActions: ChapterPendingAction[]
+): Promise<'ran' | 'skipped' | 'declined'> {
+  if (pendingActions.length === 0) {
+    return 'skipped';
+  }
+  if (!confirmChapterAfterSaveActions(pendingActions)) {
+    return 'declined';
+  }
+
+  const selected = pendingActions.map((action) => action.type);
+  const signal = afterSaveSse.begin();
+  try {
+    await apiClient.chapterAfterSaveSSE(projectId.value, chapterNo, selected, {
+      onProgress: (event) => {
+        message.value = `正在执行：${event.action} (${event.status})`;
+      },
+    }, { signal });
+    return 'ran';
+  } catch (error) {
+    if (isSseAbortError(error)) {
+      message.value = presentInfo(`第${chapterNo}章后处理已中断`);
+      return 'declined';
+    }
+    throw error;
+  } finally {
+    afterSaveSse.abort();
+  }
+}
 const exportingChapters = ref(false);
 const renumbering = ref(false);
 const showHint = ref(true);
 const showMoreMenu = ref(false);
 const moreMenuRef = ref<HTMLElement | null>(null);
 const aiTaskProgress = createAiTaskProgressState();
+
+function dismissAiTaskProgress() {
+  resetAiTaskProgress(aiTaskProgress);
+}
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
 const chapterListRef = ref<InstanceType<typeof ChapterList> | null>(null);
@@ -168,8 +203,19 @@ async function handleImportChapter(payload: { chapterNo: number; title: string; 
   errorMessage.value = '';
   message.value = '';
   try {
-    await apiClient.insertChapter(projectId.value, payload);
-    message.value = presentSuccess(`第${payload.chapterNo}章已插入`);
+    const result = await apiClient.insertChapter(projectId.value, payload);
+    if (result.pendingActions && result.pendingActions.length > 0) {
+      const outcome = await runChapterAfterSaveIfConfirmed(payload.chapterNo, result.pendingActions);
+      if (outcome === 'ran') {
+        message.value = presentSuccess(`第${payload.chapterNo}章已插入，后处理已完成`);
+      } else if (outcome === 'declined') {
+        message.value = presentSuccess(`第${payload.chapterNo}章已插入（未执行后处理）`);
+      } else {
+        message.value = presentSuccess(`第${payload.chapterNo}章已插入`);
+      }
+    } else {
+      message.value = presentSuccess(`第${payload.chapterNo}章已插入`);
+    }
     importFormRef.value?.resetForm();
     selectedChapterNo.value = payload.chapterNo;
     closeImportModal();
@@ -190,31 +236,13 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
     if (result.contentChanged === false) {
       message.value = presentSuccess(`第${payload.chapterNo}章无内容变更，已跳过自动处理`);
     } else if (result.pendingActions && result.pendingActions.length > 0) {
-      const selected = result.pendingActions.map((a) => a.type);
-      const summary = result.pendingActions
-        .map((a) => `${a.label}（约 ${a.estimatedTokens} tokens）`)
-        .join('\n');
-      const ok = confirm(`内容已保存。是否执行以下后处理？\n\n${summary}`);
-      if (ok) {
-        const signal = afterSaveSse.begin();
-        try {
-          await apiClient.chapterAfterSaveSSE(projectId.value, payload.chapterNo, selected, {
-            onProgress: (event) => {
-              message.value = `正在执行：${event.action} (${event.status})`;
-            },
-          }, { signal });
-          message.value = presentSuccess(`第${payload.chapterNo}章后处理已完成`);
-        } catch (error) {
-          if (isSseAbortError(error)) {
-            message.value = presentInfo(`第${payload.chapterNo}章后处理已中断`);
-          } else {
-            throw error;
-          }
-        } finally {
-          afterSaveSse.abort();
-        }
-      } else {
+      const outcome = await runChapterAfterSaveIfConfirmed(payload.chapterNo, result.pendingActions);
+      if (outcome === 'ran') {
+        message.value = presentSuccess(`第${payload.chapterNo}章后处理已完成`);
+      } else if (outcome === 'declined') {
         message.value = presentSuccess(`第${payload.chapterNo}章已保存（未执行后处理）`);
+      } else {
+        message.value = presentSuccess(`第${payload.chapterNo}章已更新`);
       }
     } else {
       message.value = presentSuccess(`第${payload.chapterNo}章已更新`);
@@ -268,6 +296,13 @@ async function pollSummaryJob(jobId: string) {
       currentStep: job.processedChapters,
       totalSteps: job.totalChapters,
     });
+    if (aiTaskProgress.value.chapterNo == null && summarizingChapterNo.value != null) {
+      aiTaskProgress.value = {
+        ...aiTaskProgress.value,
+        chapterNo: summarizingChapterNo.value,
+        source: aiTaskProgress.value.source ?? 'page',
+      };
+    }
     if (job.status === 'completed' || job.status === 'failed') {
       return job;
     }
@@ -302,18 +337,31 @@ function jobStatusText(job: SummaryJob | null) {
 }
 
 async function handleSummarizeChapter(chapterNo: number) {
-  summarizingChapterNo.value = chapterNo;
   errorMessage.value = '';
-  message.value = '';
-  resetAiTaskProgress(aiTaskProgress);
-  startAiTaskProgress(aiTaskProgress, {
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
     taskKey: 'chapter.summarize',
     message: `正在生成第 ${chapterNo} 章摘要…`,
+    source: 'page',
+    chapterNo,
+    interruptible: false,
   });
+  if (!started.ok) {
+    errorMessage.value = presentError(formatAiActivityBusyMessage(started.current));
+    return;
+  }
+
+  summarizingChapterNo.value = chapterNo;
   try {
     const created = await apiClient.createChapterSummaryJob(projectId.value, chapterNo);
     latestSummaryJob.value = created;
-    message.value = presentInfo(`第${chapterNo}章摘要任务已提交，正在处理...`);
+    applyAiTaskProgressEvent(aiTaskProgress, {
+      traceId: created.id,
+      taskKey: 'chapter.summarize',
+      stage: created.status,
+      message: `正在生成第 ${chapterNo} 章摘要…`,
+      currentStep: created.processedChapters,
+      totalSteps: created.totalChapters,
+    });
 
     const finalJob =
       created.status === 'completed' || created.status === 'failed'
@@ -323,20 +371,24 @@ async function handleSummarizeChapter(chapterNo: number) {
     await loadWorkspace();
 
     if (!finalJob) {
+      completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章摘要任务已提交，请稍后刷新查看`);
       message.value = presentInfo(`第${chapterNo}章摘要任务已提交，请稍后刷新查看结果`);
-      completeAiTaskProgress(aiTaskProgress, '摘要任务已提交');
       return;
     }
 
     if (finalJob.status === 'completed') {
       const latest = finalJob.summaries.find((item) => item.chapterNo === chapterNo);
+      completeAiTaskProgress(
+        aiTaskProgress,
+        `第 ${chapterNo} 章摘要已完成（${summarySourceText(latest?.summarySource)}）`
+      );
       message.value = presentSuccess(
         `第${chapterNo}章摘要已更新（${summarySourceText(latest?.summarySource)}）`
       );
-      completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章摘要已完成`);
     } else if (finalJob.status === 'failed') {
-      errorMessage.value = presentError(finalJob.errorMessage || `第${chapterNo}章摘要生成失败`);
-      failAiTaskProgress(aiTaskProgress, finalJob.errorMessage || `第${chapterNo}章摘要生成失败`);
+      const failText = finalJob.errorMessage || `第${chapterNo}章摘要生成失败`;
+      failAiTaskProgress(aiTaskProgress, failText);
+      errorMessage.value = presentError(failText);
     }
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '触发章节摘要失败');
@@ -390,20 +442,19 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
   }
 }
 
-function handleOpenOptimizeDialog(chapter: ChapterItem) {
-  optimizingChapter.value = chapter;
-  optimizingChapterNo.value = chapter.chapterNo;
-  showOptimizeModal.value = true;
-}
-
-function handleOpenBatchOptimizeDialog(chapters: ChapterItem[]) {
-  batchOptimizeChapters.value = chapters;
-  showBatchOptimizeModal.value = true;
-}
-
 function handleOpenPipelineOptimizeDialog(chapter: ChapterItem) {
   pipelineOptimizingChapter.value = chapter;
   showPipelineOptimizeModal.value = true;
+}
+
+function handleOpenWritingOptimizeDialog(chapter: ChapterItem) {
+  writingOptimizingChapter.value = chapter;
+  showWritingOptimizeModal.value = true;
+}
+
+function handleCloseWritingOptimizeDialog() {
+  showWritingOptimizeModal.value = false;
+  writingOptimizingChapter.value = null;
 }
 
 function handleOpenFinalPolishDialog(chapter: ChapterItem) {
@@ -446,28 +497,16 @@ function handleCloseBatchPipelineOptimizeDialog() {
   chapterListRef.value?.clearBatchSelection();
 }
 
-function handleCloseBatchOptimizeDialog() {
-  showBatchOptimizeModal.value = false;
-  batchOptimizeChapters.value = [];
-  chapterListRef.value?.clearBatchSelection();
-}
-
-function handleCloseOptimizeDialog() {
-  showOptimizeModal.value = false;
-  optimizingChapter.value = null;
-  optimizingChapterNo.value = null;
-}
-
-async function handleOptimizeApplied(updated: ChapterItem) {
-  message.value = presentSuccess(`第${updated.chapterNo}章已更新为优化后的正文`);
+async function handleChapterContentApplied(updated: ChapterItem) {
+  message.value = presentSuccess(`第${updated.chapterNo}章正文已更新`);
   await loadWorkspace();
   selectedChapterNo.value = updated.chapterNo;
 }
 
-async function handleBatchOptimizeApplied() {
-  message.value = presentSuccess('批量优化正文已应用');
+async function handleBatchPipelineApplied() {
+  message.value = presentSuccess('批量创作精修正文已应用');
   await loadWorkspace();
-  handleCloseBatchOptimizeDialog();
+  handleCloseBatchPipelineOptimizeDialog();
 }
 
 async function handleDeleteChapter(chapterNo: number) {
@@ -644,16 +683,20 @@ onUnmounted(() => {
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
     <p v-if="message" class="message message-ok">{{ message }}</p>
-    <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
+    <AiTaskProgressPanel
+      :progress="aiTaskProgress"
+      show-trace-on-error
+      @dismiss="dismissAiTaskProgress"
+    />
 
     <ChapterList
       ref="chapterListRef"
+      :project-id="projectId"
       :chapters="chapters"
       :loading="loading"
       :selected-chapter-no="selectedChapterNo"
       :summarizing-chapter-no="summarizingChapterNo"
       :generating-relation-chapter-no="generatingRelationChapterNo"
-      :optimizing-chapter-no="optimizingChapterNo"
       :final-polishing-chapter-no="finalPolishingChapterNo"
       :compliance-checking-chapter-no="complianceCheckingChapterNo"
       :saving-chapter-no="savingChapterNo"
@@ -661,11 +704,10 @@ onUnmounted(() => {
       @select="selectedChapterNo = $event"
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
-      @optimize="handleOpenOptimizeDialog"
+      @writing-optimize="handleOpenWritingOptimizeDialog"
       @final-polish="handleOpenFinalPolishDialog"
       @compliance-check="handleOpenComplianceCheckDialog"
       @pipeline-optimize="handleOpenPipelineOptimizeDialog"
-      @batch-optimize="handleOpenBatchOptimizeDialog"
       @batch-pipeline-optimize="handleOpenBatchPipelineOptimizeDialog"
       @save="handleSaveChapter"
       @parse-structured="handleParseStructuredChapter"
@@ -679,28 +721,20 @@ onUnmounted(() => {
       @close="closeImportNovelModal"
     />
 
-    <ChapterOptimizeDialog
-      :visible="showOptimizeModal"
-      :project-id="projectId"
-      :chapter="optimizingChapter"
-      @close="handleCloseOptimizeDialog"
-      @applied="handleOptimizeApplied"
-    />
-
-    <ChapterBatchOptimizeDialog
-      :visible="showBatchOptimizeModal"
-      :project-id="projectId"
-      :chapters="batchOptimizeChapters"
-      @close="handleCloseBatchOptimizeDialog"
-      @applied="handleBatchOptimizeApplied"
-    />
-
     <ChapterFinalPolishDialog
       :visible="showFinalPolishModal"
       :project-id="projectId"
       :chapter="finalPolishingChapter"
       @close="handleCloseFinalPolishDialog"
-      @applied="handleOptimizeApplied"
+      @applied="handleChapterContentApplied"
+    />
+
+    <ChapterOptimizeDialog
+      :visible="showWritingOptimizeModal"
+      :project-id="projectId"
+      :chapter="writingOptimizingChapter"
+      @close="handleCloseWritingOptimizeDialog"
+      @applied="handleChapterContentApplied"
     />
 
     <ChapterComplianceCheckDialog
@@ -708,7 +742,7 @@ onUnmounted(() => {
       :project-id="projectId"
       :chapter="complianceCheckingChapter"
       @close="handleCloseComplianceCheckDialog"
-      @applied="handleOptimizeApplied"
+      @applied="handleChapterContentApplied"
     />
 
     <ChapterPipelineOptimizeDialog
@@ -716,7 +750,7 @@ onUnmounted(() => {
       :project-id="projectId"
       :chapter="pipelineOptimizingChapter"
       @close="handleClosePipelineOptimizeDialog"
-      @applied="handleOptimizeApplied"
+      @applied="handleChapterContentApplied"
     />
 
     <ChapterBatchPipelineOptimizeDialog
@@ -724,7 +758,7 @@ onUnmounted(() => {
       :project-id="projectId"
       :chapters="batchPipelineChapters"
       @close="handleCloseBatchPipelineOptimizeDialog"
-      @applied="handleBatchOptimizeApplied"
+      @applied="handleBatchPipelineApplied"
     />
 
     <div

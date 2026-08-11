@@ -3,20 +3,49 @@ import type { components } from '@aether-quill/shared-types';
 
 export type AiTaskProgressEvent = components['schemas']['AiTaskProgressEvent'];
 
+export type AiActivitySource = 'page' | 'after-save' | `dialog:${string}`;
+
+export type AiActivityStage =
+  | 'idle'
+  | 'queued'
+  | 'running'
+  | 'awaiting-user'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | string;
+
 export interface AiTaskProgressState {
   traceId: string | null;
   taskKey: string | null;
-  stage: string | null;
+  stage: AiActivityStage | null;
   message: string | null;
   currentStep: number | null;
   totalSteps: number | null;
   active: boolean;
   cancelled: boolean;
   error: string | null;
+  source: AiActivitySource | null;
+  chapterNo: number | null;
+  interruptible: boolean;
 }
 
-export function createAiTaskProgressState(): Ref<AiTaskProgressState> {
-  return ref({
+export type TryStartAiTaskResult =
+  | { ok: true }
+  | { ok: false; reason: 'busy'; current: AiTaskProgressState };
+
+export interface StartAiTaskPayload {
+  traceId?: string;
+  taskKey: string;
+  message: string;
+  source?: AiActivitySource;
+  chapterNo?: number | null;
+  interruptible?: boolean;
+  force?: boolean;
+}
+
+export function emptyAiTaskProgressState(): AiTaskProgressState {
+  return {
     traceId: null,
     taskKey: null,
     stage: null,
@@ -26,24 +55,47 @@ export function createAiTaskProgressState(): Ref<AiTaskProgressState> {
     active: false,
     cancelled: false,
     error: null,
-  });
+    source: null,
+    chapterNo: null,
+    interruptible: false,
+  };
 }
 
-export function startAiTaskProgress(
+export function createAiTaskProgressState(): Ref<AiTaskProgressState> {
+  return ref(emptyAiTaskProgressState());
+}
+
+export function tryStartAiTaskProgress(
   state: Ref<AiTaskProgressState>,
-  payload: { traceId?: string; taskKey: string; message: string }
-) {
+  payload: StartAiTaskPayload
+): TryStartAiTaskResult {
+  if (state.value.active && !payload.force) {
+    return { ok: false, reason: 'busy', current: { ...state.value } };
+  }
+
   state.value = {
     traceId: payload.traceId ?? null,
     taskKey: payload.taskKey,
-    stage: 'start',
+    stage: 'running',
     message: payload.message,
     currentStep: null,
     totalSteps: null,
     active: true,
     cancelled: false,
     error: null,
+    source: payload.source ?? 'page',
+    chapterNo: payload.chapterNo ?? null,
+    interruptible: payload.interruptible === true,
   };
+  return { ok: true };
+}
+
+/** @deprecated Prefer tryStartAiTaskProgress — this forces overwrite for legacy call sites. */
+export function startAiTaskProgress(
+  state: Ref<AiTaskProgressState>,
+  payload: { traceId?: string; taskKey: string; message: string } & Partial<StartAiTaskPayload>
+) {
+  tryStartAiTaskProgress(state, { ...payload, force: true });
 }
 
 export function applyAiTaskProgressEvent(
@@ -73,9 +125,11 @@ export function completeAiTaskProgress(
   state.value = {
     ...state.value,
     message,
+    stage: 'completed',
     active: false,
     cancelled: false,
     error: null,
+    interruptible: false,
   };
 }
 
@@ -87,9 +141,11 @@ export function failAiTaskProgress(
   state.value = {
     ...state.value,
     traceId: traceId ?? state.value.traceId,
+    stage: 'failed',
     active: false,
     cancelled: false,
     error,
+    interruptible: false,
   };
 }
 
@@ -101,21 +157,12 @@ export function cancelAiTaskProgress(state: Ref<AiTaskProgressState>, message = 
     active: false,
     cancelled: true,
     error: null,
+    interruptible: false,
   };
 }
 
 export function resetAiTaskProgress(state: Ref<AiTaskProgressState>) {
-  state.value = {
-    traceId: null,
-    taskKey: null,
-    stage: null,
-    message: null,
-    currentStep: null,
-    totalSteps: null,
-    active: false,
-    cancelled: false,
-    error: null,
-  };
+  state.value = emptyAiTaskProgressState();
 }
 
 const TASK_PROGRESS_MESSAGES: Record<string, string> = {
@@ -143,4 +190,11 @@ const TASK_PROGRESS_MESSAGES: Record<string, string> = {
 
 export function resolveAiTaskProgressMessage(taskKey: string, fallback?: string): string {
   return TASK_PROGRESS_MESSAGES[taskKey] || fallback || '正在处理…';
+}
+
+export function formatAiActivityBusyMessage(current: AiTaskProgressState): string {
+  const chapter =
+    typeof current.chapterNo === 'number' ? `第 ${current.chapterNo} 章` : '当前';
+  const detail = current.message?.trim() || '有任务进行中';
+  return `${chapter} AI 任务进行中：${detail}。请先等待完成或中断后再试。`;
 }
