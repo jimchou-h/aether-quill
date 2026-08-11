@@ -14,11 +14,14 @@ import {
   applyAiTaskProgressEvent,
   cancelAiTaskProgress,
   completeAiTaskProgress,
-  createAiTaskProgressState,
   failAiTaskProgress,
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
+import {
+  useChapterAiActivityInterrupt,
+  useChapterPageAiActivity,
+} from '../../composables/chapterAiActivityContext';
 import { useAbortableSse } from '../../composables/useAbortableSse';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import MarkdownContent from '../common/MarkdownContent.vue';
@@ -48,7 +51,8 @@ const errorMessage = ref('');
 const streamingText = ref('');
 const progressLabel = ref('');
 const cachedHint = ref('');
-const aiTaskProgress = createAiTaskProgressState();
+const aiTaskProgress = useChapterPageAiActivity();
+const activityInterruptHandler = useChapterAiActivityInterrupt();
 const sseControl = useAbortableSse();
 const chapterUpdatedAtSnapshot = ref('');
 const previewMode = ref<'final' | 'diff'>('diff');
@@ -113,6 +117,16 @@ const qualityStatusLabel = computed(() => {
   }
 });
 
+const typoPolishHint = computed(() => {
+  const typo = session.value?.finalPolishResult?.typoPolish;
+  if (!typo || typo.issueCount === 0) {
+    return '';
+  }
+  return typo.corrected
+    ? `已自动修正 ${typo.issueCount} 处疑似错字`
+    : `检测到 ${typo.issueCount} 处疑似错字（未改动正文）`;
+});
+
 function resetState() {
   sessionId.value = '';
   session.value = null;
@@ -155,6 +169,9 @@ function interruptStream() {
   sseControl.abort();
   cancelAiTaskProgress(aiTaskProgress);
   running.value = false;
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = null;
+  }
 }
 
 function close() {
@@ -193,7 +210,13 @@ async function runFinalPolishPipeline(forceRegenerate = false) {
     step.value = 'running';
   }
   resetAiTaskProgress(aiTaskProgress);
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = () => interruptStream();
+  }
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:final-polish',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: 'chapter.pipeline.final-polish',
     message: forceRegenerate ? '正在换一版终稿…' : '一键终稿执行中…',
   });
@@ -376,6 +399,7 @@ async function doApply(text: string, useOverride: boolean) {
           {{ qualityStatusLabel }}
         </span>
       </div>
+      <p v-if="typoPolishHint" class="meta-line">{{ typoPolishHint }}</p>
 
       <section v-if="residualIssues.length && applyBlocked" class="issue-section">
         <h5 class="section-title">需修订项</h5>

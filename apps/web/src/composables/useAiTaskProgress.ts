@@ -90,12 +90,12 @@ export function tryStartAiTaskProgress(
   return { ok: true };
 }
 
-/** @deprecated Prefer tryStartAiTaskProgress — this forces overwrite for legacy call sites. */
+/** Legacy helper — does not force-overwrite; prefer tryStartAiTaskProgress. */
 export function startAiTaskProgress(
   state: Ref<AiTaskProgressState>,
   payload: { traceId?: string; taskKey: string; message: string } & Partial<StartAiTaskPayload>
-) {
-  tryStartAiTaskProgress(state, { ...payload, force: true });
+): TryStartAiTaskResult {
+  return tryStartAiTaskProgress(state, { ...payload, force: payload.force === true });
 }
 
 export function applyAiTaskProgressEvent(

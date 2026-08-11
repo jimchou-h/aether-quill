@@ -13,7 +13,6 @@ import {
   type ChapterPipelineVersionKey,
   type PipelineOutlineItem,
   type PipelineOutlineState,
-  type PipelineRuleIssue,
   type PreviewRetrievalResult,
 } from '../../services/api';
 import RetrievalPreviewDialog from '../workbench/RetrievalPreviewDialog.vue';
@@ -26,11 +25,14 @@ import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback
 import {
   applyAiTaskProgressEvent,
   completeAiTaskProgress,
-  createAiTaskProgressState,
   failAiTaskProgress,
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
+import {
+  useChapterAiActivityInterrupt,
+  useChapterPageAiActivity,
+} from '../../composables/chapterAiActivityContext';
 import { useChapterSseTask } from '../../composables/useChapterSseTask';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import MarkdownContent from '../common/MarkdownContent.vue';
@@ -38,6 +40,7 @@ import SseInterruptButton from '../common/SseInterruptButton.vue';
 import PipelineOutlineEditor from './PipelineOutlineEditor.vue';
 import OutlineReviewLayout from './OutlineReviewLayout.vue';
 import OutlineCoverageChecklist from './OutlineCoverageChecklist.vue';
+import PipelineBriefPanel from './PipelineBriefPanel.vue';
 import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
 import { confirmAction } from '../../composables/useAppConfirm';
 import {
@@ -51,6 +54,12 @@ import {
   resolvePipelineBootstrapAction,
   type PipelineDialogStep,
 } from '../../utils/chapterPipelineOptimizeFlow';
+import {
+  configOverridesFromSelection,
+  isPipelineModuleSelectionValid,
+  selectionFromProjectSettings,
+  type PipelineModuleSelection,
+} from '../../utils/pipelineModuleSelection';
 import type {
   ChapterPipelineRewriteFixItemsModule,
   ChapterPipelineRewriteReviseModule,
@@ -84,21 +93,42 @@ const applying = ref(false);
 const errorMessage = ref('');
 const streamingText = ref('');
 const progressLabel = ref('');
-const aiTaskProgress = createAiTaskProgressState();
+const aiTaskProgress = useChapterPageAiActivity();
+const activityInterruptHandler = useChapterAiActivityInterrupt();
 const { interruptStream, beginStream, handleStreamError, endStream } =
   useChapterSseTask(aiTaskProgress);
+
+function bindActivityInterrupt() {
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = () => interruptStream();
+    clearActivityInterrupt();
+  }
+}
+
+function clearActivityInterrupt() {
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = null;
+  }
+}
 const chapterUpdatedAtSnapshot = ref('');
 const outlineRevisionRound = ref(0);
 const activeOutlineType = ref<ChapterPipelineOutlineType>('sensory');
 const outlineRequired = ref<PipelineOutlineItem[]>([]);
 const outlineSuggested = ref<PipelineOutlineItem[]>([]);
-const ruleIssues = ref<PipelineRuleIssue[]>([]);
 const previewVisible = ref(false);
 const previewLoading = ref(false);
 const previewResult = ref<PreviewRetrievalResult | null>(null);
 const previewError = ref('');
 const pendingRunAll = ref(false);
 const selectedPersonaNames = ref<string[]>([]);
+const optimizationIntent = ref('');
+const runModuleSelection = ref<PipelineModuleSelection>({
+  characterAdjustment: false,
+  characterTraits: true,
+  sensory: true,
+  homogenization: false,
+});
+const moduleSelectionValid = computed(() => isPipelineModuleSelectionValid(runModuleSelection.value));
 
 const isBusy = computed(() => running.value || applying.value);
 
@@ -225,6 +255,51 @@ const showCoverageChecklist = computed(() => {
 const coverageRequired = computed(() => coverageOutlineState.value?.required ?? []);
 const coverageSuggested = computed(() => coverageOutlineState.value?.suggested ?? []);
 
+const briefContext = computed(() => {
+  if (!session.value) {
+    return null;
+  }
+  switch (step.value) {
+    case 'character':
+      return { outlineType: 'character' as const, outline: session.value.characterOutline };
+    case 'character-traits':
+      return {
+        outlineType: 'character-traits' as const,
+        outline: session.value.characterTraitsOutline,
+      };
+    case 'sensory-rewrite':
+      return { outlineType: 'sensory' as const, outline: session.value.sensoryOutline };
+    default:
+      return null;
+  }
+});
+
+const showBriefPanel = computed(() => {
+  if (running.value || step.value === 'ready' || isOutlineStep.value) {
+    return false;
+  }
+  const ctx = briefContext.value;
+  if (!ctx?.outline?.userConfirmed) {
+    return false;
+  }
+  return !isPipelineOutlineEmpty(ctx.outline.required, ctx.outline.suggested);
+});
+
+const briefDraft = ref('');
+const briefSynthesizing = ref(false);
+
+watch(
+  () => briefContext.value?.outline?.synthesizedBrief ?? '',
+  (value) => {
+    briefDraft.value = value;
+  },
+  { immediate: true }
+);
+
+const briefEditedByUser = computed(
+  () => briefContext.value?.outline?.briefEditedByUser === true
+);
+
 function resolveStepVersionKey(currentStep: PipelineStep): ChapterPipelineVersionKey | null {
   switch (currentStep) {
     case 'character':
@@ -233,8 +308,6 @@ function resolveStepVersionKey(currentStep: PipelineStep): ChapterPipelineVersio
       return 'afterCharacterTraits';
     case 'sensory-rewrite':
       return 'afterSensory';
-    case 'rules':
-      return 'afterRules';
     case 'homogenization':
     case 'done':
       return 'final';
@@ -384,11 +457,6 @@ const pipelineIncomplete = computed(() => {
       return true;
     }
   }
-  if (modules.includes(3)) {
-    if (!versions.afterRules?.trim()) {
-      return true;
-    }
-  }
   if (modules.includes(2)) {
     if (!versions.afterSensory?.trim()) {
       return true;
@@ -405,10 +473,6 @@ const pipelineIncomplete = computed(() => {
   return false;
 });
 
-const rulesModuleEnabled = computed(() =>
-  (config.value?.pipelineEnabledModules ?? [1, 2]).includes(3)
-);
-
 const pipelineSteps = computed<PipelineStepItem[]>(() => {
   const modules = config.value?.pipelineEnabledModules ?? [1, 2];
   const adjustmentEnabled = config.value?.pipelineCharacterAdjustmentEnabled === true;
@@ -423,9 +487,6 @@ const pipelineSteps = computed<PipelineStepItem[]>(() => {
   }
   if (modules.includes(2)) {
     steps.push({ key: 'sensory', label: '感官优化' });
-  }
-  if (modules.includes(3)) {
-    steps.push({ key: 'rules', label: '规则检查' });
   }
   if (modules.includes(4) && config.value?.pipelineHomogenizationEnabled) {
     steps.push({ key: 'homogenization', label: '同质化' });
@@ -444,9 +505,6 @@ const activeStepIndex = computed(() => {
     }
     if (step.value === 'sensory-outline' || step.value === 'sensory-rewrite') {
       return item.key === 'sensory';
-    }
-    if (step.value === 'rules') {
-      return item.key === 'rules';
     }
     if (step.value === 'homogenization') {
       return item.key === 'homogenization';
@@ -487,14 +545,28 @@ function resetState() {
   previewError.value = '';
   pendingRunAll.value = false;
   selectedPersonaNames.value = [];
-  ruleIssues.value = [];
   previewMode.value = 'diff';
   stepPreviewText.value = '';
   rewriteReviseFeedback.value = '';
   coverageSummary.value = null;
   coverageVerifying.value = false;
   activeCoverageModule.value = null;
+  runModuleSelection.value = {
+    characterAdjustment: false,
+    characterTraits: true,
+    sensory: true,
+    homogenization: false,
+  };
   resetAiTaskProgress(aiTaskProgress);
+}
+
+async function loadProjectPipelineDefaults() {
+  try {
+    const settings = await apiClient.getSettings(props.projectId);
+    runModuleSelection.value = selectionFromProjectSettings(settings);
+  } catch {
+    // 使用 resetState 中的默认值
+  }
 }
 
 type PipelineEndEvent = {
@@ -504,7 +576,6 @@ type PipelineEndEvent = {
   characterOutline?: ChapterPipelineSessionView['characterOutline'];
   characterTraitsOutline?: ChapterPipelineSessionView['characterTraitsOutline'];
   sensoryOutline?: ChapterPipelineSessionView['sensoryOutline'];
-  ruleIssues?: PipelineRuleIssue[];
   versionKey?: string;
   versionText?: string;
   homogenizationReport?: ChapterPipelineSessionView['homogenizationReport'];
@@ -554,6 +625,7 @@ watch(
     if (visible && props.chapter) {
       resetState();
       chapterUpdatedAtSnapshot.value = props.chapter.updatedAt;
+      void loadProjectPipelineDefaults();
     }
     if (!visible) {
       resetState();
@@ -564,6 +636,7 @@ watch(
 function close() {
   if (running.value) {
     interruptStream();
+    clearActivityInterrupt();
     running.value = false;
   }
   if (applying.value) {
@@ -642,9 +715,6 @@ async function refreshSession() {
   } else if (session.value.sensoryOutline) {
     loadOutlineFromSession('sensory');
   }
-  if (session.value.ruleIssues) {
-    ruleIssues.value = [...session.value.ruleIssues];
-  }
   syncStepPreviewFromSession(true);
 }
 
@@ -675,6 +745,7 @@ async function openPersonaPreview() {
       title: string;
       content: string;
       docType?: string;
+      personaId?: string | null;
     }>;
 
     const activePersona =
@@ -702,11 +773,22 @@ async function openPersonaPreview() {
           title: doc.title,
           content: doc.content,
           docType: doc.docType ?? 'other',
+          personaId: doc.personaId ?? null,
         })),
         chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
         chapterSummaryMemoryCount:
           (workspace.settings as { chapterSummaryMemoryCount?: number })
             .chapterSummaryMemoryCount ?? 3,
+        priorChapterTailChars:
+          (workspace.settings as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800,
+        contextExcerptMaxChars:
+          (workspace.settings as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400,
+        outlineMaxChars: (workspace.settings as { outlineMaxChars?: number }).outlineMaxChars ?? 4000,
+        personaProfileMaxChars:
+          (workspace.settings as { personaProfileMaxChars?: number }).personaProfileMaxChars ??
+          2000,
+        relationMemoMaxChars:
+          (workspace.settings as { relationMemoMaxChars?: number }).relationMemoMaxChars ?? 2000,
         personas: buildPersonasContextPayload(workspace.personas),
       },
       extraContext: {
@@ -760,7 +842,11 @@ async function runCoverageVerify(showToastOnComplete = true) {
 
   coverageVerifying.value = true;
   errorMessage.value = '';
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:pipeline',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: 'chapter.pipeline.coverage.verify',
     message: '对照大纲验收落实中…',
   });
@@ -781,7 +867,7 @@ async function runCoverageVerify(showToastOnComplete = true) {
     if (showToastOnComplete) {
       const missed = result.summary.requiredMissed;
       if (missed > 0) {
-        presentSuccess(`验收完成：${missed} 条必需项待补修`);
+        presentSuccess(`验收完成：${missed} 条必需项未落实，请勾选后手动补修`);
       } else {
         presentSuccess('必需大纲项均已落实');
       }
@@ -808,7 +894,11 @@ async function handleFixCoverageItems(itemIds: string[]) {
   running.value = true;
   streamingText.value = '';
   errorMessage.value = '';
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:pipeline',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: 'chapter.pipeline.rewrite.fix-items',
     message: '按清单补修正文中…',
   });
@@ -874,6 +964,52 @@ async function handleFixCoverageItems(itemIds: string[]) {
   }
 }
 
+async function handleResynthesizeBrief() {
+  const ctx = briefContext.value;
+  if (!ctx || !props.chapter || !sessionId.value || briefSynthesizing.value) {
+    return;
+  }
+  briefSynthesizing.value = true;
+  try {
+    const result = await apiClient.synthesizeChapterPipelineOutlineBrief(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      { outlineType: ctx.outlineType }
+    );
+    briefDraft.value = result.synthesizedBrief;
+    await refreshSession();
+    presentSuccess('编辑意向书已重新合成');
+  } catch (error) {
+    presentErrorFromCaught(error, '意向书合成失败');
+  } finally {
+    briefSynthesizing.value = false;
+  }
+}
+
+async function handleSaveBrief() {
+  const ctx = briefContext.value;
+  if (!ctx || !props.chapter || !sessionId.value || running.value) {
+    return;
+  }
+  const text = briefDraft.value.trim();
+  if (!text) {
+    presentErrorFromCaught(new Error('意向书不能为空'), '保存失败');
+    return;
+  }
+  try {
+    session.value = await apiClient.patchChapterPipelineOutlineBrief(
+      props.projectId,
+      props.chapter.chapterNo,
+      sessionId.value,
+      { outlineType: ctx.outlineType, synthesizedBrief: text }
+    );
+    presentSuccess('编辑意向书已保存');
+  } catch (error) {
+    presentErrorFromCaught(error, '保存意向书失败');
+  }
+}
+
 async function handlePatchCoverage(
   updates: Array<{
     id: string;
@@ -915,11 +1051,17 @@ async function startPipelineSession(runAll = false) {
     errorMessage.value = '章节正文为空';
     return;
   }
+  if (!moduleSelectionValid.value) {
+    errorMessage.value = '请至少勾选一个精修模块';
+    return;
+  }
   running.value = true;
   errorMessage.value = '';
   try {
     const result = await apiClient.startChapterPipeline(props.projectId, props.chapter.chapterNo, {
       selectedPersonaNames: selectedPersonaNames.value,
+      optimizationIntent: optimizationIntent.value.trim() || undefined,
+      configOverrides: configOverridesFromSelection(runModuleSelection.value),
     });
     sessionId.value = result.sessionId;
     config.value = result.config;
@@ -1002,7 +1144,11 @@ async function runModule(
   streamingText.value = '';
   errorMessage.value = '';
   const isRunAll = module === 'run-all';
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:pipeline',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: isRunAll ? 'chapter.pipeline.run-all' : 'chapter.pipeline.run',
     message: isRunAll ? '全自动精修执行中…' : '创作精修执行中…',
   });
@@ -1320,8 +1466,6 @@ function resolveRetryModule(currentStep: PipelineStep): ChapterPipelineRunModule
       return 'character-traits';
     case 'sensory-rewrite':
       return 'sensory-rewrite';
-    case 'rules':
-      return ruleIssues.value.length > 0 ? 'rules-fix' : 'rules-scan';
     case 'homogenization':
       return 'homogenization-rewrite';
     default:
@@ -1484,7 +1628,11 @@ async function reviseRewriteWithFeedback() {
     module === 'character'
       ? 'chapter.pipeline.character.revise'
       : 'chapter.pipeline.sensory-rewrite.revise';
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:pipeline',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey,
     message: module === 'character' ? '角色正文按意见修订中…' : '感官正文按意见修订中…',
   });
@@ -1581,17 +1729,6 @@ async function handleApply() {
   }
 }
 
-function ruleFixStrategyLabel(strategy: PipelineRuleIssue['fixStrategy']) {
-  switch (strategy) {
-    case 'auto':
-      return '自动';
-    case 'ai_segment':
-      return 'AI 修段';
-    default:
-      return '人工';
-  }
-}
-
 function applyPipelineStepFromEnd(event: PipelineEndEvent) {
   if (event.characterOutline && !event.characterOutline.userConfirmed) {
     applyOutlineToEditor('character', event.characterOutline);
@@ -1608,9 +1745,6 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     step.value = 'sensory-outline';
     return;
   }
-  if (event.ruleIssues) {
-    ruleIssues.value = [...event.ruleIssues];
-  }
   if (event.currentModule === 'done' || event.versionKey === 'final') {
     step.value = 'done';
     return;
@@ -1625,9 +1759,6 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     case 'afterSensory':
       step.value = 'sensory-rewrite';
       return;
-    case 'afterRules':
-      step.value = 'rules';
-      return;
     default:
       break;
   }
@@ -1635,17 +1766,9 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
     step.value = 'homogenization';
     return;
   }
-  if (event.ruleIssues?.length) {
-    step.value = 'rules';
-    return;
-  }
   if (typeof event.currentModule === 'number') {
     if (event.currentModule >= 4) {
       step.value = 'homogenization';
-      return;
-    }
-    if (event.currentModule >= 3) {
-      step.value = 'rules';
       return;
     }
     if (event.currentModule >= 2) {
@@ -1689,6 +1812,7 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
         @interrupt="
           () => {
             interruptStream();
+    clearActivityInterrupt();
             running = false;
           }
         "
@@ -1700,9 +1824,45 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
 
     <section v-if="step === 'ready'" class="step-section">
       <p class="intro-text">
-        将按项目预设依次执行创作精修模块。启动前会弹出检索预览，请确认要注入的角色卡；特征/感官大纲支持人工
-        gate 与 AI 修订。发布前硬规则请使用章节「更多 → 终稿合规检验」。
+        勾选本次要执行的精修模块（默认取自项目设置，可按章覆盖）。启动前会弹出检索预览确认角色卡；感官/角色大纲支持人工
+        gate。发布前硬规则请使用「终稿合规检验」。
       </p>
+      <div class="module-run-selection">
+        <h4 class="section-title">本次精修模块</h4>
+        <label class="module-check">
+          <input
+            v-model="runModuleSelection.characterAdjustment"
+            type="checkbox"
+            :disabled="isBusy"
+          />
+          角色对白调整
+        </label>
+        <label class="module-check">
+          <input v-model="runModuleSelection.characterTraits" type="checkbox" :disabled="isBusy" />
+          角色特征润色
+        </label>
+        <label class="module-check">
+          <input v-model="runModuleSelection.sensory" type="checkbox" :disabled="isBusy" />
+          感官优化
+        </label>
+        <label class="module-check">
+          <input v-model="runModuleSelection.homogenization" type="checkbox" :disabled="isBusy" />
+          同质化检测
+        </label>
+      </div>
+      <p v-if="!moduleSelectionValid" class="message message-error">
+        请至少勾选一个精修模块
+      </p>
+      <label class="field-label" for="pipeline-optimization-intent">整体优化意图（可选）</label>
+      <textarea
+        id="pipeline-optimization-intent"
+        v-model="optimizationIntent"
+        class="intent-textarea"
+        rows="4"
+        maxlength="2000"
+        placeholder="例如：加强心理描写、收紧节奏、突出两人张力……将注入各模块大纲与意向书合成"
+        :disabled="isBusy"
+      />
       <p v-if="selectedPersonaNames.length" class="meta-line">
         已选角色：{{ selectedPersonaNames.join('、') }}
       </p>
@@ -1713,13 +1873,18 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
         <button
           class="secondary-button"
           type="button"
-          :disabled="isBusy"
-          title="按项目设置跳过 gate，自动跑完当前预设链"
+          :disabled="isBusy || !moduleSelectionValid"
+          title="按项目设置跳过 gate，自动跑完当前勾选链"
           @click="handleStart(true)"
         >
           {{ running ? '执行中…' : '全自动精修' }}
         </button>
-        <button class="primary-button" type="button" :disabled="isBusy" @click="handleStart()">
+        <button
+          class="primary-button"
+          type="button"
+          :disabled="isBusy || !moduleSelectionValid"
+          @click="handleStart()"
+        >
           {{ running ? '启动中…' : '开始创作精修' }}
         </button>
       </div>
@@ -1747,35 +1912,22 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
       />
     </OutlineReviewLayout>
 
-    <section
-      v-else-if="rulesModuleEnabled && step === 'rules' && ruleIssues.length"
-      class="step-section"
-    >
-      <h4 class="section-title">规则模块扫描（旧版）</h4>
-      <p class="field-hint">默认创作精修不含此步；推荐改用「终稿合规检验」处理硬规则。</p>
-      <ul class="issue-list">
-        <li
-          v-for="issue in ruleIssues"
-          :key="issue.id"
-          class="issue-item"
-          :class="[issue.fixStrategy, issue.fixed ? 'is-fixed' : '']"
-        >
-          <div class="issue-head">
-            <span class="issue-category">{{ issue.category }}</span>
-            <span class="issue-strategy">{{ ruleFixStrategyLabel(issue.fixStrategy) }}</span>
-            <span v-if="issue.fixed" class="issue-fixed-badge">已修复</span>
-          </div>
-          <p class="issue-text">{{ issue.text }}</p>
-          <p v-if="issue.context" class="issue-context">{{ issue.context }}</p>
-        </li>
-      </ul>
-    </section>
-
     <section v-if="streamingText && running" class="step-section">
       <h4 class="section-title">生成预览</h4>
       <div class="stream-preview markdown-pane">
         <MarkdownContent :source="streamingText" :throttle-ms="200" />
       </div>
+    </section>
+
+    <section v-if="showBriefPanel && !running" class="step-section brief-section">
+      <PipelineBriefPanel
+        v-model="briefDraft"
+        :brief-edited-by-user="briefEditedByUser"
+        :busy="isBusy"
+        :synthesizing="briefSynthesizing"
+        @save="handleSaveBrief"
+        @resynthesize="handleResynthesizeBrief"
+      />
     </section>
 
     <section v-if="showCoverageChecklist && !running" class="step-section coverage-section">
@@ -2013,6 +2165,38 @@ function applyPipelineStepFromEnd(event: PipelineEndEvent) {
   font-size: 0.9rem;
   color: #4b5563;
   line-height: 1.55;
+}
+
+.module-run-selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.module-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+
+.intent-textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .field-hint {
