@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, provide, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   apiClient,
@@ -19,14 +19,18 @@ import ChapterBatchPipelineOptimizeDialog from '../components/chapters/ChapterBa
 import AiTaskProgressPanel from '../components/common/AiTaskProgressPanel.vue';
 import {
   applyAiTaskProgressEvent,
+  cancelAiTaskProgress,
   completeAiTaskProgress,
   createAiTaskProgressState,
   failAiTaskProgress,
   formatAiActivityBusyMessage,
   resetAiTaskProgress,
-  startAiTaskProgress,
   tryStartAiTaskProgress,
 } from '../composables/useAiTaskProgress';
+import {
+  CHAPTER_AI_ACTIVITY_INTERRUPT_KEY,
+  CHAPTER_AI_ACTIVITY_KEY,
+} from '../composables/chapterAiActivityContext';
 import {
   presentError,
   presentErrorFromCaught,
@@ -35,7 +39,10 @@ import {
 } from '../utils/pageFeedback';
 import { useAbortableSse } from '../composables/useAbortableSse';
 import { isSseAbortError } from '../utils/sseStream';
-import { confirmChapterAfterSaveActions } from '../utils/chapterAfterSave';
+import {
+  confirmChapterAfterSaveActions,
+  formatChapterAfterSaveProgressMessage,
+} from '../utils/chapterAfterSave';
 
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
@@ -67,6 +74,11 @@ const finalPolishingChapter = ref<ChapterItem | null>(null);
 const complianceCheckingChapter = ref<ChapterItem | null>(null);
 const batchPipelineChapters = ref<ChapterItem[]>([]);
 const afterSaveSse = useAbortableSse();
+const aiTaskProgress = createAiTaskProgressState();
+const activityInterruptHandler = ref<(() => void) | null>(null);
+
+provide(CHAPTER_AI_ACTIVITY_KEY, aiTaskProgress);
+provide(CHAPTER_AI_ACTIVITY_INTERRUPT_KEY, activityInterruptHandler);
 
 async function runChapterAfterSaveIfConfirmed(
   chapterNo: number,
@@ -79,34 +91,93 @@ async function runChapterAfterSaveIfConfirmed(
     return 'declined';
   }
 
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.after-save',
+    message: `第 ${chapterNo} 章：正在执行保存后处理…`,
+    source: 'after-save',
+    chapterNo,
+    interruptible: true,
+  });
+  if (!started.ok) {
+    errorMessage.value = presentError(formatAiActivityBusyMessage(started.current));
+    return 'declined';
+  }
+
   const selected = pendingActions.map((action) => action.type);
   const signal = afterSaveSse.begin();
+  activityInterruptHandler.value = () => {
+    afterSaveSse.abort();
+  };
+
   try {
-    await apiClient.chapterAfterSaveSSE(projectId.value, chapterNo, selected, {
-      onProgress: (event) => {
-        message.value = `正在执行：${event.action} (${event.status})`;
+    let lastError: string | null = null;
+    await apiClient.chapterAfterSaveSSE(
+      projectId.value,
+      chapterNo,
+      selected,
+      {
+        onProgress: (event) => {
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: `chapter.after-save.${event.action}`,
+            stage: event.status,
+            message: formatChapterAfterSaveProgressMessage(
+              event.action,
+              event.status,
+              chapterNo
+            ),
+          });
+          aiTaskProgress.value = {
+            ...aiTaskProgress.value,
+            chapterNo,
+            source: 'after-save',
+            interruptible: true,
+          };
+        },
+        onError: (errMessage) => {
+          lastError = errMessage;
+        },
       },
-    }, { signal });
+      { signal }
+    );
+    if (lastError) {
+      failAiTaskProgress(aiTaskProgress, lastError);
+      errorMessage.value = presentError(lastError);
+      return 'declined';
+    }
+    completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章后处理已完成`);
     return 'ran';
   } catch (error) {
     if (isSseAbortError(error)) {
-      message.value = presentInfo(`第${chapterNo}章后处理已中断`);
+      cancelAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章后处理已中断`);
       return 'declined';
     }
+    const failText = presentErrorFromCaught(error, '章节后处理失败');
+    failAiTaskProgress(aiTaskProgress, failText);
+    errorMessage.value = failText;
     throw error;
   } finally {
+    activityInterruptHandler.value = null;
     afterSaveSse.abort();
   }
 }
+
 const exportingChapters = ref(false);
 const renumbering = ref(false);
 const showHint = ref(true);
 const showMoreMenu = ref(false);
 const moreMenuRef = ref<HTMLElement | null>(null);
-const aiTaskProgress = createAiTaskProgressState();
 
 function dismissAiTaskProgress() {
   resetAiTaskProgress(aiTaskProgress);
+}
+
+function interruptPageAiActivity() {
+  const handler = activityInterruptHandler.value;
+  if (handler) {
+    handler();
+    return;
+  }
+  cancelAiTaskProgress(aiTaskProgress);
 }
 
 const importFormRef = ref<InstanceType<typeof ChapterImportForm> | null>(null);
@@ -257,18 +328,23 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
 }
 
 async function handleParseStructuredChapter(chapterNo: number) {
-  parsingStructuredChapterNo.value = chapterNo;
   errorMessage.value = '';
-  message.value = '';
-  resetAiTaskProgress(aiTaskProgress);
-  startAiTaskProgress(aiTaskProgress, {
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
     taskKey: 'chapter.structured-parse',
     message: `正在解析第 ${chapterNo} 章结构化信息…`,
+    source: 'page',
+    chapterNo,
+    interruptible: false,
   });
+  if (!started.ok) {
+    errorMessage.value = presentError(formatAiActivityBusyMessage(started.current));
+    return;
+  }
+  parsingStructuredChapterNo.value = chapterNo;
   try {
     await apiClient.parseChapterStructuredInfo(projectId.value, chapterNo, { mode: 'chapter' });
-    message.value = presentSuccess(`第${chapterNo}章结构化信息已解析`);
     completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章结构化解析完成`);
+    message.value = presentSuccess(`第${chapterNo}章结构化信息已解析`);
     await loadWorkspace();
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '解析结构化信息失败');
@@ -399,14 +475,19 @@ async function handleSummarizeChapter(chapterNo: number) {
 }
 
 async function handleGenerateChapterRelationEvents(chapterNo: number) {
-  generatingRelationChapterNo.value = chapterNo;
   errorMessage.value = '';
-  message.value = '';
-  resetAiTaskProgress(aiTaskProgress);
-  startAiTaskProgress(aiTaskProgress, {
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
     taskKey: 'chapter.relation-events',
     message: `正在抽取第 ${chapterNo} 章关系事件…`,
+    source: 'page',
+    chapterNo,
+    interruptible: false,
   });
+  if (!started.ok) {
+    errorMessage.value = presentError(formatAiActivityBusyMessage(started.current));
+    return;
+  }
+  generatingRelationChapterNo.value = chapterNo;
   try {
     const result = await apiClient.generateChapterRelationEvents(projectId.value, chapterNo);
 
@@ -414,26 +495,26 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
       result.removedCount > 0 ? `，已清除该章旧事件 ${result.removedCount} 条` : '';
 
     if (result.createdCount > 0) {
+      completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章关系事件抽取完成`);
       message.value = presentSuccess(
         `第${chapterNo}章已写入 ${result.createdCount} 条关系事件${removedHint}` +
           (result.skippedCount > 0 ? `，跳过 ${result.skippedCount} 条重复` : '')
       );
-      completeAiTaskProgress(aiTaskProgress, `第 ${chapterNo} 章关系事件抽取完成`);
       return;
     }
 
     if (result.skippedCount > 0) {
+      completeAiTaskProgress(aiTaskProgress, '关系事件抽取完成（无新增）');
       message.value = presentInfo(
         `第${chapterNo}章未写入新关系事件${removedHint}，跳过 ${result.skippedCount} 条重复`
       );
-      completeAiTaskProgress(aiTaskProgress, '关系事件抽取完成（无新增）');
       return;
     }
 
+    completeAiTaskProgress(aiTaskProgress, '关系事件抽取完成（无新增）');
     message.value = presentInfo(
       `第${chapterNo}章未识别到可写入的关系事件${removedHint}`
     );
-    completeAiTaskProgress(aiTaskProgress, '关系事件抽取完成（无新增）');
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '生成关系事件失败');
     failAiTaskProgress(aiTaskProgress, '生成关系事件失败');
@@ -442,12 +523,26 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
   }
 }
 
+function ensureAiActivityIdle(): boolean {
+  if (!aiTaskProgress.value.active) {
+    return true;
+  }
+  errorMessage.value = presentError(formatAiActivityBusyMessage(aiTaskProgress.value));
+  return false;
+}
+
 function handleOpenPipelineOptimizeDialog(chapter: ChapterItem) {
+  if (!ensureAiActivityIdle()) {
+    return;
+  }
   pipelineOptimizingChapter.value = chapter;
   showPipelineOptimizeModal.value = true;
 }
 
 function handleOpenWritingOptimizeDialog(chapter: ChapterItem) {
+  if (!ensureAiActivityIdle()) {
+    return;
+  }
   writingOptimizingChapter.value = chapter;
   showWritingOptimizeModal.value = true;
 }
@@ -458,12 +553,18 @@ function handleCloseWritingOptimizeDialog() {
 }
 
 function handleOpenFinalPolishDialog(chapter: ChapterItem) {
+  if (!ensureAiActivityIdle()) {
+    return;
+  }
   finalPolishingChapter.value = chapter;
   finalPolishingChapterNo.value = chapter.chapterNo;
   showFinalPolishModal.value = true;
 }
 
 function handleOpenComplianceCheckDialog(chapter: ChapterItem) {
+  if (!ensureAiActivityIdle()) {
+    return;
+  }
   complianceCheckingChapter.value = chapter;
   complianceCheckingChapterNo.value = chapter.chapterNo;
   showComplianceCheckModal.value = true;
@@ -487,6 +588,9 @@ function handleClosePipelineOptimizeDialog() {
 }
 
 function handleOpenBatchPipelineOptimizeDialog(chapters: ChapterItem[]) {
+  if (!ensureAiActivityIdle()) {
+    return;
+  }
   batchPipelineChapters.value = chapters;
   showBatchPipelineOptimizeModal.value = true;
 }
@@ -558,13 +662,29 @@ async function handleExportChapters() {
 }
 
 async function handleGenerateSummaries() {
-  batchSummarizing.value = true;
   errorMessage.value = '';
-  message.value = '';
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.summarize.batch',
+    message: '正在批量生成章节摘要…',
+    source: 'page',
+    interruptible: false,
+  });
+  if (!started.ok) {
+    errorMessage.value = presentError(formatAiActivityBusyMessage(started.current));
+    return;
+  }
+  batchSummarizing.value = true;
   try {
     const created = await apiClient.createBatchSummaryJob(projectId.value);
     latestSummaryJob.value = created;
-    message.value = presentInfo('批量摘要任务已提交，正在处理...');
+    applyAiTaskProgressEvent(aiTaskProgress, {
+      traceId: created.id,
+      taskKey: 'chapter.summarize.batch',
+      stage: created.status,
+      message: '正在批量生成章节摘要…',
+      currentStep: created.processedChapters,
+      totalSteps: created.totalChapters,
+    });
 
     const finalJob =
       created.status === 'completed' || created.status === 'failed'
@@ -574,19 +694,27 @@ async function handleGenerateSummaries() {
     await loadWorkspace();
 
     if (!finalJob) {
+      completeAiTaskProgress(aiTaskProgress, '批量摘要任务已提交，请稍后刷新查看');
       message.value = presentInfo('批量摘要任务已提交，请稍后刷新查看结果');
       return;
     }
 
     if (finalJob.status === 'completed') {
+      completeAiTaskProgress(
+        aiTaskProgress,
+        `批量摘要完成（${finalJob.processedChapters}/${finalJob.totalChapters}）`
+      );
       message.value = presentSuccess(
         `批量摘要完成（${finalJob.processedChapters}/${finalJob.totalChapters}）`
       );
     } else if (finalJob.status === 'failed') {
-      errorMessage.value = presentError(finalJob.errorMessage || '批量摘要生成失败');
+      const failText = finalJob.errorMessage || '批量摘要生成失败';
+      failAiTaskProgress(aiTaskProgress, failText);
+      errorMessage.value = presentError(failText);
     }
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '触发批量摘要失败');
+    failAiTaskProgress(aiTaskProgress, '触发批量摘要失败');
   } finally {
     batchSummarizing.value = false;
   }
@@ -687,6 +815,7 @@ onUnmounted(() => {
       :progress="aiTaskProgress"
       show-trace-on-error
       @dismiss="dismissAiTaskProgress"
+      @interrupt="interruptPageAiActivity"
     />
 
     <ChapterList

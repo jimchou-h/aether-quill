@@ -1,43 +1,34 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, shallowRef, watch } from 'vue';
 import {
   apiClient,
-  buildPersonasContextPayload,
-  DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   formatChapterOptimizeStageLabel,
-  resolveChapterOptimizeStrategyLabel,
   type ChapterItem,
   type ChapterOptimizationPlanResult,
-  type ChapterOptimizeSegmentRecovery,
-  type ChapterTypoIssue,
-  type PreviewRetrievalResult,
 } from '../../services/api';
-import RetrievalPreviewDialog from '../workbench/RetrievalPreviewDialog.vue';
-import {
-  presentError,
-  presentErrorFromCaught,
-  presentInfo,
-  presentSuccess,
-} from '../../utils/pageFeedback';
-import { resolveEffectiveStructuredMatchingText } from '../../utils/structured-matching';
+import { useAbortableSse } from '../../composables/useAbortableSse';
+import { confirmAction } from '../../composables/useAppConfirm';
 import {
   applyAiTaskProgressEvent,
+  cancelAiTaskProgress,
   completeAiTaskProgress,
-  createAiTaskProgressState,
   failAiTaskProgress,
-  resetAiTaskProgress,
-  startAiTaskProgress,
+  tryStartAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
-import { useChapterSseTask } from '../../composables/useChapterSseTask';
-import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
-import MarkdownContent from '../common/MarkdownContent.vue';
-import SseInterruptButton from '../common/SseInterruptButton.vue';
 import {
-  buildChapterDiffLines,
-  type DiffLineResult,
-} from '../../utils/chapterOptimizeDiff';
+  useChapterAiActivityInterrupt,
+  useChapterPageAiActivity,
+} from '../../composables/chapterAiActivityContext';
+import { isSseAbortError } from '../../utils/sseStream';
+import { presentErrorFromCaught, presentInfo, presentSuccess } from '../../utils/pageFeedback';
+import {
+  resolveWritingOptimizeStepVisual,
+  type WritingOptimizeStep,
+} from '../../utils/writingOptimizeStepVisual';
+import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
+import SseInterruptButton from '../common/SseInterruptButton.vue';
 
-type Step = 'instruction' | 'plan' | 'draft';
+type OptimizeStep = WritingOptimizeStep;
 
 const props = defineProps<{
   visible: boolean;
@@ -50,471 +41,293 @@ const emit = defineEmits<{
   applied: [chapter: ChapterItem];
 }>();
 
-const step = ref<Step>('instruction');
-const instruction = ref('');
-const plan = ref<ChapterOptimizationPlanResult | null>(null);
-const draftText = ref('');
-const draftTraceId = ref('');
-const originalTextSnapshot = ref('');
+const step = shallowRef<OptimizeStep>('instruction');
+const instruction = shallowRef('');
+const plan = shallowRef<ChapterOptimizationPlanResult | null>(null);
+const editablePlanText = shallowRef('');
+const planRevisionFeedback = shallowRef('');
+const planRevisionRound = shallowRef(0);
+const streamedPlanText = shallowRef('');
+const draftText = shallowRef('');
+const originalText = shallowRef('');
+const expectedChapterUpdatedAt = shallowRef('');
+const statusText = shallowRef('');
+const errorMessage = shallowRef('');
+const generatingPlan = shallowRef(false);
+const generatingDraft = shallowRef(false);
+const applying = shallowRef(false);
+const planStream = useAbortableSse();
+const draftStream = useAbortableSse();
+const aiTaskProgress = useChapterPageAiActivity();
+const activityInterruptHandler = useChapterAiActivityInterrupt();
 
-const generatingPlan = ref(false);
-const generatingDraft = ref(false);
-
-const previewVisible = ref(false);
-const previewLoading = ref(false);
-const previewResult = ref<PreviewRetrievalResult | null>(null);
-const previewError = ref('');
-const applying = ref(false);
-const checkingTypos = ref(false);
-const fixingTypos = ref(false);
-const typoIssues = ref<ChapterTypoIssue[]>([]);
-const typoCheckTraceId = ref('');
-const typoAutoCorrected = ref(false);
-const errorMessage = ref('');
-const strategyLabel = ref('');
-const progressLabel = ref('');
-const aiTaskProgress = createAiTaskProgressState();
-const { interruptStream, beginStream, handleStreamError, endStream } =
-  useChapterSseTask(aiTaskProgress);
-const planSegmentRecovery = ref<ChapterOptimizeSegmentRecovery | null>(null);
-const chapterOptimizeSegmentCharSize = ref(DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
-
-const chapterUpdatedAtSnapshot = ref<string>('');
-
-const originalScrollRef = ref<HTMLDivElement | null>(null);
-const draftTextareaRef = ref<HTMLTextAreaElement | null>(null);
-const isScrolling = ref(false);
-const syncScrollEnabled = ref(true);
-
-const chapterStrategyLabel = computed(() => {
-  const length = props.chapter?.content?.length ?? 0;
-  return resolveChapterOptimizeStrategyLabel(length, chapterOptimizeSegmentCharSize.value);
-});
-
-const stepIndex = computed(() => {
-  switch (step.value) {
-    case 'instruction':
-      return 0;
-    case 'plan':
-      return 1;
-    case 'draft':
-      return 2;
-    default:
-      return 0;
-  }
-});
-
-const isBusy = computed(
+const isBusy = computed(() => generatingPlan.value || generatingDraft.value || applying.value);
+const canGeneratePlan = computed(() => Boolean(instruction.value.trim()) && !isBusy.value);
+const canRevisePlan = computed(
   () =>
-    generatingPlan.value ||
-    generatingDraft.value ||
-    applying.value ||
-    checkingTypos.value ||
-    fixingTypos.value
+    Boolean(editablePlanText.value.trim()) &&
+    Boolean(planRevisionFeedback.value.trim()) &&
+    !isBusy.value
+);
+const canGenerateDraft = computed(() => Boolean(editablePlanText.value.trim()) && !isBusy.value);
+const canApply = computed(() => Boolean(draftText.value.trim()) && !isBusy.value);
+
+const stepVisualInput = computed(() => ({
+  currentStep: step.value,
+  generatingPlan: generatingPlan.value,
+  generatingDraft: generatingDraft.value,
+  hasPlan: Boolean(editablePlanText.value.trim() || plan.value),
+  hasDraft: Boolean(draftText.value.trim()),
+  hasError: Boolean(errorMessage.value),
+}));
+
+const instructionStepVisual = computed(() =>
+  resolveWritingOptimizeStepVisual({ ...stepVisualInput.value, stepKey: 'instruction' })
+);
+const planStepVisual = computed(() =>
+  resolveWritingOptimizeStepVisual({ ...stepVisualInput.value, stepKey: 'plan' })
+);
+const draftStepVisual = computed(() =>
+  resolveWritingOptimizeStepVisual({ ...stepVisualInput.value, stepKey: 'draft' })
 );
 
-const isStreaming = computed(
-  () => generatingPlan.value || generatingDraft.value || fixingTypos.value
-);
-
-const hasDraftDiff = computed(() => originalTextSnapshot.value.trim() !== draftText.value.trim());
-
-const diffLines = computed<DiffLineResult[]>(() => {
-  if (
-    step.value !== 'draft' ||
-    generatingDraft.value ||
-    !originalTextSnapshot.value ||
-    !draftText.value
-  ) {
-    return [];
+function bindInterruptHandler() {
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = () => interruptGeneration();
   }
+}
 
-  return buildChapterDiffLines(originalTextSnapshot.value, draftText.value);
-});
+function clearInterruptHandler() {
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = null;
+  }
+}
 
-const addedCount = computed(() => diffLines.value.filter((r) => r.type === 'added').length);
-const removedCount = computed(() => diffLines.value.filter((r) => r.type === 'removed').length);
-const modifiedCount = computed(() => diffLines.value.filter((r) => r.type === 'modified').length);
+function resetState() {
+  step.value = 'instruction';
+  instruction.value = '';
+  plan.value = null;
+  editablePlanText.value = '';
+  planRevisionFeedback.value = '';
+  planRevisionRound.value = 0;
+  streamedPlanText.value = '';
+  draftText.value = '';
+  originalText.value = props.chapter?.content ?? '';
+  expectedChapterUpdatedAt.value = props.chapter?.updatedAt ?? '';
+  statusText.value = '';
+  errorMessage.value = '';
+  generatingPlan.value = false;
+  generatingDraft.value = false;
+  applying.value = false;
+  planStream.abort();
+  draftStream.abort();
+  clearInterruptHandler();
+}
 
 watch(
   () => props.visible,
-  (next) => {
-    if (next) {
-      void resetState();
+  (visible) => {
+    if (visible) {
+      resetState();
     }
   },
   { immediate: true }
 );
 
-async function loadOptimizeSegmentSettings() {
-  try {
-    const settings = await apiClient.getSettings(props.projectId);
-    chapterOptimizeSegmentCharSize.value =
-      settings.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
-  } catch {
-    chapterOptimizeSegmentCharSize.value = DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
-  }
-}
-
-async function resetState() {
-  step.value = 'instruction';
-  instruction.value = '';
-  plan.value = null;
-  draftText.value = '';
-  draftTraceId.value = '';
-  typoIssues.value = [];
-  typoCheckTraceId.value = '';
-  typoAutoCorrected.value = false;
-  errorMessage.value = '';
-  strategyLabel.value = '';
-  progressLabel.value = '';
-  planSegmentRecovery.value = null;
-  originalTextSnapshot.value = props.chapter?.content || '';
-  chapterUpdatedAtSnapshot.value = props.chapter?.updatedAt || '';
-  await loadOptimizeSegmentSettings();
-}
-
 function close() {
-  if (isStreaming.value) {
-    handleInterruptStream();
+  if (generatingPlan.value) {
+    planStream.abort();
   }
-  if (applying.value || checkingTypos.value) {
-    return;
+  if (generatingDraft.value) {
+    draftStream.abort();
   }
-  emit('close');
+  if (!applying.value) {
+    emit('close');
+  }
 }
 
-function handleInterruptStream() {
-  interruptStream();
+function interruptGeneration() {
+  planStream.abort();
+  draftStream.abort();
   generatingPlan.value = false;
   generatingDraft.value = false;
-  fixingTypos.value = false;
-  progressLabel.value = '';
+  cancelAiTaskProgress(aiTaskProgress, '已中断文笔优化生成');
+  statusText.value = presentInfo('已中断文笔优化生成');
+  clearInterruptHandler();
 }
 
-function onOriginalScroll() {
-  if (isScrolling.value || !syncScrollEnabled.value) return;
-  syncScroll('original');
-}
+async function runPlanGeneration(revision: boolean) {
+  const chapter = props.chapter;
+  const normalizedInstruction = instruction.value.trim();
+  if (!chapter || !normalizedInstruction) {
+    errorMessage.value = '请填写文笔优化要求';
+    return;
+  }
+  const currentPlanText = editablePlanText.value.trim();
+  const revisionFeedback = planRevisionFeedback.value.trim();
+  if (revision && (!currentPlanText || !revisionFeedback)) {
+    errorMessage.value = '请保留当前方案并填写本轮修改意见';
+    return;
+  }
 
-function onDraftScroll() {
-  if (isScrolling.value || !syncScrollEnabled.value) return;
-  syncScroll('draft');
-}
-
-function syncScroll(source: 'original' | 'draft') {
-  const sourceEl = source === 'original' ? originalScrollRef.value : draftTextareaRef.value;
-  const targetEl = source === 'original' ? draftTextareaRef.value : originalScrollRef.value;
-
-  if (!sourceEl || !targetEl) return;
-
-  const sourceScrollHeight = sourceEl.scrollHeight - sourceEl.clientHeight;
-  if (sourceScrollHeight <= 0) return;
-
-  const scrollRatio = sourceEl.scrollTop / sourceScrollHeight;
-  const targetScrollHeight = targetEl.scrollHeight - targetEl.clientHeight;
-
-  isScrolling.value = true;
-  targetEl.scrollTop = scrollRatio * targetScrollHeight;
-
-  setTimeout(() => {
-    isScrolling.value = false;
-  }, 50);
-}
-
-async function runOptimizePlanGeneration(options?: {
-  existingSegmentDiagnoses?: string[];
-  resumeFromSegmentIndex?: number;
-}) {
-  if (!props.chapter) return;
+  const message = revision ? '正在按意见调整当前方案…' : '正在分析原文并生成优化方案…';
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.optimize.plan',
+    message,
+    source: 'dialog:writing-optimize',
+    chapterNo: chapter.chapterNo,
+    interruptible: true,
+    force: false,
+  });
+  if (!started.ok) {
+    errorMessage.value = '当前有其他 AI 任务进行中，请先等待或中断';
+    return;
+  }
 
   generatingPlan.value = true;
   errorMessage.value = '';
-  if (!options?.resumeFromSegmentIndex) {
-    planSegmentRecovery.value = null;
+  statusText.value = message;
+  streamedPlanText.value = '';
+  if (!revision) {
+    plan.value = null;
+    editablePlanText.value = '';
+    planRevisionRound.value = 0;
   }
-  progressLabel.value = options?.resumeFromSegmentIndex
-    ? `从第 ${options.resumeFromSegmentIndex} 段重试…`
-    : '准备生成方案…';
-  strategyLabel.value = chapterStrategyLabel.value;
-  const signal = beginStream();
+  const signal = planStream.begin();
+  bindInterruptHandler();
+
   try {
     await apiClient.optimizeChapterPlanSSE(
       props.projectId,
-      props.chapter.chapterNo,
+      chapter.chapterNo,
       {
-        instruction: instruction.value.trim(),
-        existingSegmentDiagnoses: options?.existingSegmentDiagnoses,
-        resumeFromSegmentIndex: options?.resumeFromSegmentIndex,
+        instruction: normalizedInstruction,
+        ...(revision ? { currentPlanText, revisionFeedback } : {}),
       },
       {
-        onStart: (p) => {
-          strategyLabel.value = p.strategyLabel || chapterStrategyLabel.value;
-          progressLabel.value = '生成优化方案…';
-          plan.value = {
-            planText: options?.resumeFromSegmentIndex ? plan.value?.planText || '' : '',
-            planId: p.planId,
-            traceId: p.traceId,
-            basis: p.basis,
-            optimizationMode: p.optimizationMode,
-            segmentTotal: p.segmentTotal,
-            strategyLabel: p.strategyLabel,
-            segmentDiagnoses: options?.existingSegmentDiagnoses,
-          };
-          step.value = 'plan';
+        onStart: (event) => {
+          if (event.strategyLabel) {
+            statusText.value = event.strategyLabel;
+            applyAiTaskProgressEvent(aiTaskProgress, {
+              taskKey: 'chapter.optimize.plan',
+              stage: 'running',
+              message: event.strategyLabel,
+            });
+          }
         },
         onStage: ({ stage, segmentIndex, segmentTotal, retryCount }) => {
-          if (retryCount && retryCount > 0 && plan.value) {
-            plan.value = { ...plan.value, planText: '' };
-          }
-          progressLabel.value = formatChapterOptimizeStageLabel(
+          const label = formatChapterOptimizeStageLabel(
             stage,
             segmentIndex,
             segmentTotal,
             retryCount
           );
+          statusText.value = label;
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.optimize.plan',
+            stage,
+            message: label,
+            currentStep: segmentIndex,
+            totalSteps: segmentTotal,
+          });
         },
         onContent: (text) => {
-          if (plan.value) {
-            plan.value = { ...plan.value, planText: plan.value.planText + text };
-          }
+          streamedPlanText.value += text;
         },
         onEnd: (result) => {
           plan.value = result;
-          planSegmentRecovery.value = null;
-          progressLabel.value = '';
-          presentSuccess('优化方案已生成，可直接修改方案文本后再生成正文');
-        },
-        onError: (message, recovery) => {
-          errorMessage.value = presentError(message || '生成优化方案失败');
-          progressLabel.value = '';
-          if (recovery?.retryable) {
-            planSegmentRecovery.value = recovery;
-            if (plan.value) {
-              plan.value = {
-                ...plan.value,
-                segmentDiagnoses: recovery.segmentDiagnoses,
-                segmentTotal: recovery.segmentTotal,
-              };
-            } else {
-              plan.value = {
-                planText: '',
-                planId: '',
-                traceId: '',
-                basis: {
-                  usedPersonaId: null,
-                  outlineUsed: false,
-                  chapterSummaryCount: 0,
-                  usedRelationEvents: [],
-                },
-                segmentDiagnoses: recovery.segmentDiagnoses,
-                segmentTotal: recovery.segmentTotal,
-              };
-            }
-            step.value = 'plan';
-            return;
+          editablePlanText.value = result.planText;
+          if (revision) {
+            planRevisionRound.value += 1;
+            planRevisionFeedback.value = '';
           }
-          plan.value = null;
-          planSegmentRecovery.value = null;
-          step.value = 'instruction';
+          step.value = 'plan';
+          statusText.value = revision
+            ? `方案第 ${planRevisionRound.value} 轮调整已完成`
+            : '优化方案已生成，可直接编辑或继续让 AI 调整';
+          completeAiTaskProgress(aiTaskProgress, statusText.value);
+        },
+        onError: (messageText) => {
+          errorMessage.value = messageText;
+          failAiTaskProgress(aiTaskProgress, messageText);
         },
       },
       { signal }
     );
   } catch (error) {
-    if (handleStreamError(error)) {
-      progressLabel.value = '';
-      return;
+    if (isSseAbortError(error)) {
+      cancelAiTaskProgress(aiTaskProgress, '已中断文笔优化生成');
+    } else {
+      errorMessage.value = presentErrorFromCaught(error, '生成文笔优化方案失败');
+      failAiTaskProgress(aiTaskProgress, errorMessage.value);
     }
-    errorMessage.value = presentErrorFromCaught(error, '生成优化方案失败');
-    if (!planSegmentRecovery.value) {
-      plan.value = null;
-      step.value = 'instruction';
-    }
-    progressLabel.value = '';
   } finally {
+    planStream.abort();
     generatingPlan.value = false;
-    endStream();
+    streamedPlanText.value = '';
+    clearInterruptHandler();
   }
 }
 
-async function handleRetryFailedPlanSegment() {
-  const recovery = planSegmentRecovery.value;
-  if (recovery?.segmentDiagnoses?.length) {
-    const resumeFrom =
-      recovery.failedSegmentIndex ??
-      (recovery.segmentTotal && recovery.segmentDiagnoses.length >= recovery.segmentTotal
-        ? recovery.segmentTotal + 1
-        : undefined);
-    await runOptimizePlanGeneration({
-      existingSegmentDiagnoses: recovery.segmentDiagnoses,
-      resumeFromSegmentIndex: resumeFrom,
-    });
-    return;
-  }
-  await runOptimizePlanGeneration();
+async function generatePlan() {
+  await runPlanGeneration(false);
 }
 
-async function handleGeneratePlan() {
-  if (!props.chapter || !instruction.value.trim()) {
-    errorMessage.value = presentError('请填写优化要求');
+async function revisePlan() {
+  await runPlanGeneration(true);
+}
+
+async function generateDraft() {
+  const chapter = props.chapter;
+  const currentPlan = plan.value;
+  if (!chapter || !currentPlan) {
     return;
   }
 
-  previewVisible.value = true;
-  previewLoading.value = true;
-  previewResult.value = null;
-  previewError.value = '';
-
-  try {
-    const workspace = await apiClient.getWorkspace(props.projectId);
-    const docRes = await apiClient.documents.list(props.projectId);
-    const docList = apiClient.unwrapPayload(docRes) as Array<{
-      id: string;
-      title: string;
-      content: string;
-      docType?: string;
-    }>;
-
-    const activePersona =
-      workspace.personas.find((item) => item.id === workspace.settings.activePersonaId) ||
-      workspace.personas.find((item) => item.status === 'published') ||
-      null;
-
-    previewResult.value = await apiClient.previewRetrieval(props.projectId, {
-      prompt: instruction.value.trim(),
-      chapterNo: props.chapter.chapterNo,
-      useStructuredKb: true,
-      projectCtx: {
-        outlineSummary: workspace.knowledge.outlineSummary,
-        personaProfile: activePersona
-          ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
-          : '未配置人物设定',
-        chapters: workspace.knowledge.chapters.map((ch) => ({
-          chapterNo: ch.chapterNo,
-          title: ch.title,
-          summary: ch.summary || ch.content.slice(0, 160),
-          structuredMatchingText: resolveEffectiveStructuredMatchingText(ch.structuredInfo),
-        })),
-        knowledgeDocuments: docList.map((doc) => ({
-          id: doc.id,
-          title: doc.title,
-          content: doc.content,
-          docType: doc.docType ?? 'other',
-        })),
-        chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
-        chapterSummaryMemoryCount:
-          (workspace.settings as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ??
-          3,
-        personas: buildPersonasContextPayload(workspace.personas),
-      },
-      extraContext: {
-        retrievalInstruction: instruction.value.trim(),
-        retrievalChapterTitle: props.chapter.title,
-        retrievalChapterSummary: props.chapter.summary || props.chapter.content.slice(0, 500),
-      },
-    });
-  } catch (error) {
-    previewError.value = presentErrorFromCaught(error, '检索预览失败');
-  } finally {
-    previewLoading.value = false;
-  }
-}
-
-async function confirmPreviewAndGeneratePlan() {
-  previewVisible.value = false;
-  await runOptimizePlanGeneration();
-}
-
-async function handleRegeneratePlan() {
-  if (!props.chapter) return;
-  generatingPlan.value = true;
-  errorMessage.value = '';
-  try {
-    await apiClient.optimizeChapterPlanSSE(
-      props.projectId,
-      props.chapter.chapterNo,
-      { instruction: instruction.value.trim() },
-      {
-        onStart: (p) => {
-          plan.value = {
-            planText: '',
-            planId: p.planId,
-            traceId: p.traceId,
-            basis: p.basis,
-          };
-        },
-        onContent: (text) => {
-          if (plan.value) {
-            plan.value = { ...plan.value, planText: plan.value.planText + text };
-          }
-        },
-        onEnd: (result) => {
-          plan.value = result;
-          presentInfo('优化方案已重新生成，可按需编辑后再生成正文');
-        },
-        onError: (message) => {
-          errorMessage.value = presentError(message || '重新生成优化方案失败');
-        },
-      }
-    );
-  } catch (error) {
-    errorMessage.value = presentErrorFromCaught(error, '重新生成优化方案失败');
-  } finally {
-    generatingPlan.value = false;
-  }
-}
-
-async function handleGenerateDraft() {
-  if (!props.chapter || !plan.value) return;
-
-  const planBody = plan.value.planText.trim();
-  if (!planBody) {
-    errorMessage.value = presentError('方案内容不能为空，请填写或重新生成方案');
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.optimize.draft',
+    message: '正在按方案改写正文…',
+    source: 'dialog:writing-optimize',
+    chapterNo: chapter.chapterNo,
+    interruptible: true,
+    force: false,
+  });
+  if (!started.ok) {
+    errorMessage.value = '当前有其他 AI 任务进行中，请先等待或中断';
     return;
   }
 
-  draftText.value = '';
-  draftTraceId.value = '';
-  step.value = 'draft';
   generatingDraft.value = true;
   errorMessage.value = '';
-  progressLabel.value = '准备生成正文…';
-  resetAiTaskProgress(aiTaskProgress);
-  startAiTaskProgress(aiTaskProgress, {
-    taskKey: 'chapter.optimize.draft',
-    message: '准备生成优化正文…',
-  });
-  strategyLabel.value = plan.value.strategyLabel || chapterStrategyLabel.value;
-  const signal = beginStream();
+  statusText.value = '正在按方案改写正文…';
+  draftText.value = '';
+  step.value = 'draft';
+  const signal = draftStream.begin();
+  bindInterruptHandler();
 
   try {
     await apiClient.optimizeChapterDraftSSE(
       props.projectId,
-      props.chapter.chapterNo,
+      chapter.chapterNo,
       {
         instruction: instruction.value.trim(),
-        planText: planBody,
-        planId: plan.value.planId,
-        segmentDiagnoses: plan.value.segmentDiagnoses,
+        planText: editablePlanText.value.trim(),
+        planId: currentPlan.planId,
+        segmentDiagnoses: currentPlan.segmentDiagnoses,
       },
       {
-        onStart: (traceId, _chapterNo, meta) => {
-          draftTraceId.value = traceId;
-          strategyLabel.value = meta?.strategyLabel || strategyLabel.value;
-          progressLabel.value = '生成优化正文…';
+        onStart: (event) => {
+          statusText.value = event.strategyLabel ?? '正在生成优化正文…';
           applyAiTaskProgressEvent(aiTaskProgress, {
-            traceId,
             taskKey: 'chapter.optimize.draft',
-            stage: 'generating',
-            message: '正在生成优化正文…',
+            stage: 'running',
+            message: statusText.value,
           });
         },
         onStage: ({ stage, segmentIndex, segmentTotal }) => {
           const label = formatChapterOptimizeStageLabel(stage, segmentIndex, segmentTotal);
-          progressLabel.value = label;
+          statusText.value = label;
           applyAiTaskProgressEvent(aiTaskProgress, {
-            traceId: draftTraceId.value || undefined,
             taskKey: 'chapter.optimize.draft',
             stage,
             message: label,
@@ -523,192 +336,75 @@ async function handleGenerateDraft() {
           });
         },
         onProgress: (event) => {
-          progressLabel.value = event.message;
-          applyAiTaskProgressEvent(aiTaskProgress, event);
-        },
-        onContent: (text) => {
-          draftText.value += text;
-        },
-        onContentReplace: (text) => {
-          draftText.value = text;
-        },
-        onEnd: ({ finalDraftText }) => {
-          if (finalDraftText) {
-            draftText.value = finalDraftText;
-          }
-          generatingDraft.value = false;
-          progressLabel.value = '';
-          completeAiTaskProgress(aiTaskProgress, '优化正文已生成，请确认是否覆盖原章节');
-          presentSuccess('优化正文已生成，请确认是否覆盖原章节');
-        },
-        onError: (message) => {
-          generatingDraft.value = false;
-          progressLabel.value = '';
-          failAiTaskProgress(aiTaskProgress, message || '优化正文生成失败', draftTraceId.value || undefined);
-          errorMessage.value = presentError(message || '优化正文生成失败');
-        },
-      },
-      { signal }
-    );
-  } catch (error) {
-    if (handleStreamError(error)) {
-      progressLabel.value = '';
-      return;
-    }
-    generatingDraft.value = false;
-    progressLabel.value = '';
-    errorMessage.value = presentErrorFromCaught(error, '优化正文生成失败');
-  } finally {
-    endStream();
-  }
-}
-
-async function handleRegenerateDraft() {
-  await handleGenerateDraft();
-}
-
-function handleBackToInstruction() {
-  if (isBusy.value) return;
-  step.value = 'instruction';
-}
-
-function handleBackToPlan() {
-  if (isBusy.value) return;
-  step.value = 'plan';
-}
-
-async function handleCheckTypos() {
-  if (!props.chapter || !draftText.value.trim()) {
-    errorMessage.value = presentError('请先生成或填写待检查的正文');
-    return;
-  }
-
-  checkingTypos.value = true;
-  typoIssues.value = [];
-  typoAutoCorrected.value = false;
-  errorMessage.value = '';
-
-  try {
-    const result = await apiClient.checkChapterOptimizationTypos(
-      props.projectId,
-      props.chapter.chapterNo,
-      { draftText: draftText.value.trim() }
-    );
-    typoIssues.value = result.issues;
-    typoCheckTraceId.value = result.traceId;
-    if (result.issueCount === 0) {
-      presentInfo('未发现错字或明显语病');
-    } else {
-      presentInfo(`发现 ${result.issueCount} 处待修正问题`);
-    }
-  } catch (error) {
-    errorMessage.value = presentErrorFromCaught(error, '错字检查失败');
-  } finally {
-    checkingTypos.value = false;
-  }
-}
-
-async function handleAutoFixTypos() {
-  if (!props.chapter || !draftText.value.trim()) {
-    errorMessage.value = presentError('请先生成或填写待修正的正文');
-    return;
-  }
-
-  fixingTypos.value = true;
-  errorMessage.value = '';
-  const previousText = draftText.value;
-  draftText.value = '';
-  resetAiTaskProgress(aiTaskProgress);
-  startAiTaskProgress(aiTaskProgress, {
-    taskKey: 'chapter.optimize.typo-fix',
-    message: '正在自动修正错字…',
-  });
-  const signal = beginStream();
-
-  try {
-    await apiClient.fixChapterOptimizationTyposSSE(
-      props.projectId,
-      props.chapter.chapterNo,
-      {
-        draftText: previousText.trim(),
-        issues: typoIssues.value.length > 0 ? typoIssues.value : undefined,
-      },
-      {
-        onStart: (traceId) => {
-          draftTraceId.value = traceId;
+          statusText.value = event.message;
           applyAiTaskProgressEvent(aiTaskProgress, {
-            traceId,
-            taskKey: 'chapter.optimize.typo-fix',
-            stage: 'generating',
-            message: '正在自动修正错字…',
+            taskKey: 'chapter.optimize.draft',
+            stage: event.stage ?? 'running',
+            message: event.message,
           });
         },
-        onProgress: (event) => {
-          applyAiTaskProgressEvent(aiTaskProgress, event);
-        },
         onContent: (text) => {
           draftText.value += text;
         },
         onContentReplace: (text) => {
           draftText.value = text;
         },
-        onEnd: ({ appliedIssueCount, autoCorrected, finalDraftText }) => {
-          if (finalDraftText) {
-            draftText.value = finalDraftText;
+        onEnd: (event) => {
+          if (event.finalDraftText?.trim()) {
+            draftText.value = event.finalDraftText;
           }
-          typoAutoCorrected.value = autoCorrected;
-          completeAiTaskProgress(aiTaskProgress, '错字修正已完成');
-          presentSuccess(
-            appliedIssueCount > 0
-              ? `已自动修正 ${appliedIssueCount} 处问题并回填正文`
-              : '已完成自动修正，正文已回填'
-          );
+          statusText.value = '优化正文已生成，请对比确认';
+          completeAiTaskProgress(aiTaskProgress, statusText.value);
         },
-        onError: (message) => {
-          draftText.value = previousText;
-          failAiTaskProgress(aiTaskProgress, message || '自动修正重生成失败', draftTraceId.value || undefined);
-          errorMessage.value = presentError(message || '自动修正重生成失败');
+        onError: (messageText) => {
+          errorMessage.value = messageText;
+          failAiTaskProgress(aiTaskProgress, messageText);
         },
       },
       { signal }
     );
   } catch (error) {
-    if (handleStreamError(error)) {
-      draftText.value = previousText;
-      return;
+    if (isSseAbortError(error)) {
+      cancelAiTaskProgress(aiTaskProgress, '已中断文笔优化生成');
+    } else {
+      errorMessage.value = presentErrorFromCaught(error, '生成文笔优化正文失败');
+      failAiTaskProgress(aiTaskProgress, errorMessage.value);
     }
-    draftText.value = previousText;
-    errorMessage.value = presentErrorFromCaught(error, '自动修正重生成失败');
   } finally {
-    fixingTypos.value = false;
-    endStream();
+    draftStream.abort();
+    generatingDraft.value = false;
+    clearInterruptHandler();
   }
 }
 
-async function handleApply() {
-  if (!props.chapter || !draftText.value.trim()) {
-    errorMessage.value = presentError('暂无可应用的优化正文');
+async function applyDraft() {
+  const chapter = props.chapter;
+  if (!chapter || !draftText.value.trim()) {
+    return;
+  }
+  const confirmed = await confirmAction({
+    title: '应用文笔优化正文',
+    content: `将覆盖第 ${chapter.chapterNo} 章正文，并保留现有摘要。是否继续？`,
+    okText: '确认应用',
+  });
+  if (!confirmed) {
     return;
   }
 
   applying.value = true;
   errorMessage.value = '';
   try {
-    const result = await apiClient.applyChapterOptimization(
-      props.projectId,
-      props.chapter.chapterNo,
-      {
-        draftText: draftText.value.trim(),
-        expectedChapterUpdatedAt: chapterUpdatedAtSnapshot.value,
-        planId: plan.value?.planId,
-        preserveSummary: true,
-      }
-    );
-    presentSuccess(`第${props.chapter.chapterNo}章已更新为优化后的正文`);
+    const result = await apiClient.applyChapterOptimization(props.projectId, chapter.chapterNo, {
+      draftText: draftText.value,
+      expectedChapterUpdatedAt: expectedChapterUpdatedAt.value,
+      planId: plan.value?.planId,
+      preserveSummary: true,
+    });
+    presentSuccess('文笔优化正文已应用');
     emit('applied', result.chapter);
     emit('close');
   } catch (error) {
-    errorMessage.value = presentErrorFromCaught(error, '应用优化正文失败');
+    errorMessage.value = presentErrorFromCaught(error, '应用文笔优化正文失败');
   } finally {
     applying.value = false;
   }
@@ -718,722 +414,382 @@ async function handleApply() {
 <template>
   <a-modal
     :open="props.visible"
-    :width="step === 'draft' ? '100%' : 920"
-    :wrap-class-name="step === 'draft' ? 'optimize-modal-fullscreen' : undefined"
-    :title="`章节优化${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
+    :width="1080"
+    :title="`文笔优化${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
-    :mask-closable="!applying"
-    :closable="!applying"
     destroy-on-close
+    :mask-closable="!isBusy"
+    :closable="!applying"
     @cancel="close"
   >
-    <p class="modal-subtitle">三步流程：输入要求 → 确认或编辑方案 → 生成正文 → 覆盖原章节</p>
+    <p class="modal-subtitle">
+      根据自由要求先生成编辑方案，再改写整章正文；只有确认应用后才会覆盖原文。
+    </p>
 
-      <ol class="stepper" :data-step="stepIndex">
-        <li :class="{ active: step === 'instruction', done: stepIndex > 0 }">
-          <span class="stepper-no">1</span>
-          <span>输入要求</span>
-        </li>
-        <li :class="{ active: step === 'plan', done: stepIndex > 1 }">
-          <span class="stepper-no">2</span>
-          <span>确认方案</span>
-        </li>
-        <li :class="{ active: step === 'draft' }">
-          <span class="stepper-no">3</span>
-          <span>确认正文</span>
-        </li>
-      </ol>
-
-      <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
-
-    <div v-if="isStreaming" class="stream-actions">
-      <SseInterruptButton @interrupt="handleInterruptStream" />
-    </div>
-
-      <section v-if="step === 'instruction'" class="step-section">
-        <p v-if="props.chapter" class="meta-line strategy-line">
-          本章策略：{{ chapterStrategyLabel }}
-        </p>
-        <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
-        <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
-        <label class="field-label" for="optimize-instruction">优化要求</label>
-        <textarea
-          id="optimize-instruction"
-          v-model="instruction"
-          class="field-textarea"
-          placeholder="例如：增加主角心理描写、把战斗场景节奏放快、修正某段对话不自然的地方……"
-          :disabled="generatingPlan"
-        />
-        <div class="step-actions">
-          <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
-            取消
-          </button>
-          <button
-            class="primary-button"
-            type="button"
-            :disabled="!instruction.trim() || generatingPlan"
-            @click="handleGeneratePlan"
-          >
-            {{ generatingPlan ? '生成方案中...' : '生成优化方案' }}
-          </button>
-        </div>
-      </section>
-
-      <section v-else-if="step === 'plan'" class="step-section">
-        <h4 class="section-title">优化方案</h4>
-        <p v-if="strategyLabel" class="meta-line strategy-line">处理策略：{{ strategyLabel }}</p>
-        <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
-        <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
-        <div
-          v-if="generatingPlan && plan?.planText"
-          class="plan-stream-preview markdown-pane"
+    <ol class="stepper">
+      <li :class="[`step--${instructionStepVisual}`, { active: step === 'instruction' }]">
+        1. 优化要求
+        <span v-if="instructionStepVisual === 'running'" class="step-badge">生成中</span>
+      </li>
+      <li :class="[`step--${planStepVisual}`, { active: step === 'plan' }]">
+        2. 优化方案
+        <span v-if="planStepVisual === 'running'" class="step-badge">生成中</span>
+        <span v-else-if="planStepVisual === 'awaiting'" class="step-badge step-badge--await"
+          >待确认</span
         >
-          <MarkdownContent :source="plan.planText" :throttle-ms="200" />
-        </div>
-        <label class="field-label" for="optimize-plan-text">方案内容</label>
+      </li>
+      <li :class="[`step--${draftStepVisual}`, { active: step === 'draft' }]">
+        3. 正文对比
+        <span v-if="draftStepVisual === 'running'" class="step-badge">生成中</span>
+        <span v-else-if="draftStepVisual === 'awaiting'" class="step-badge step-badge--await"
+          >待确认</span
+        >
+      </li>
+    </ol>
+
+    <AiTaskProgressPanel
+      :progress="aiTaskProgress"
+      show-trace-on-error
+      @interrupt="interruptGeneration"
+    />
+
+    <div v-if="generatingPlan || generatingDraft" class="stream-actions">
+      <SseInterruptButton @interrupt="interruptGeneration" />
+    </div>
+    <p v-if="statusText && !aiTaskProgress.active" class="message message-info">{{ statusText }}</p>
+    <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
+    <pre v-if="generatingPlan && streamedPlanText" class="plan-stream-preview">{{
+      streamedPlanText
+    }}</pre>
+
+    <section v-if="step === 'instruction'" class="step-section">
+      <label class="field-label" for="writing-optimize-instruction">文笔优化要求</label>
+      <textarea
+        id="writing-optimize-instruction"
+        v-model="instruction"
+        class="instruction-input"
+        rows="6"
+        maxlength="2000"
+        :disabled="isBusy"
+        placeholder="例如：收紧节奏，减少解释性叙述，加强人物之间的张力，同时保持剧情和人物设定不变。"
+      />
+      <div class="actions">
+        <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
+          取消
+        </button>
+        <button
+          class="primary-button"
+          type="button"
+          :disabled="!canGeneratePlan"
+          @click="generatePlan"
+        >
+          {{ generatingPlan ? '生成中…' : '生成优化方案' }}
+        </button>
+      </div>
+    </section>
+
+    <section v-else-if="step === 'plan'" class="step-section">
+      <div class="plan-editor-head">
+        <label class="field-label" for="writing-optimize-plan">当前优化方案（可直接编辑）</label>
+        <span v-if="planRevisionRound > 0" class="revision-badge">
+          已完成 {{ planRevisionRound }} 轮 AI 调整
+        </span>
+      </div>
+      <textarea
+        id="writing-optimize-plan"
+        v-model="editablePlanText"
+        class="plan-input"
+        rows="14"
+        :disabled="isBusy"
+      />
+
+      <div class="revision-panel">
+        <label class="field-label" for="writing-optimize-plan-feedback">方案修改意见</label>
         <textarea
-          v-if="plan && !generatingPlan"
-          id="optimize-plan-text"
-          v-model="plan.planText"
-          class="field-textarea plan-text-editor"
-          :readonly="generatingPlan"
-          placeholder="生成完成后可在此修改要点，再点击「确认方案，生成正文」"
+          id="writing-optimize-plan-feedback"
+          v-model="planRevisionFeedback"
+          class="revision-feedback-input"
+          rows="4"
+          maxlength="2000"
+          :disabled="isBusy"
+          placeholder="例如：保留第二项不变；第三项不要删减对白，改为增加人物心理活动。"
         />
-        <p class="meta-line">
-          基于：人物 {{ plan?.basis.usedPersonaId ? '已应用' : '未配置' }} · 大纲
-          {{ plan?.basis.outlineUsed ? '已注入' : '未注入' }} · 章节摘要
-          {{ plan?.basis.chapterSummaryCount }} 条 · 关系事件
-          {{ plan?.basis.usedRelationEvents.length || 0 }} 条
-        </p>
-        <p v-if="planSegmentRecovery?.retryable" class="message message-info">
-          <template v-if="planSegmentRecovery.failedSegmentIndex">
-            第 {{ planSegmentRecovery.failedSegmentIndex }}/{{ planSegmentRecovery.segmentTotal }}
-            段失败，已完成 {{ planSegmentRecovery.segmentDiagnoses?.length ?? 0 }} 段诊断，可重试失败段。
-          </template>
-          <template v-else>
-            方案汇总失败，已完成全部分段诊断，可重试汇总。
-          </template>
-        </p>
-        <div class="step-actions">
-          <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
-            取消优化
-          </button>
-          <button
-            v-if="planSegmentRecovery?.retryable"
-            class="primary-button"
-            type="button"
-            :disabled="isBusy"
-            @click="handleRetryFailedPlanSegment"
-          >
-            {{ generatingPlan ? '重试中...' : '重试失败段' }}
-          </button>
+        <div class="revision-actions">
+          <span class="field-hint">AI 将基于上方当前方案调整；可反复提交多轮意见。</span>
           <button
             class="secondary-button"
             type="button"
-            :disabled="isBusy"
-            @click="handleBackToInstruction"
+            :disabled="!canRevisePlan"
+            @click="revisePlan"
           >
-            返回修改要求
-          </button>
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="isBusy"
-            @click="handleRegeneratePlan"
-          >
-            {{ generatingPlan ? '生成中...' : '重新生成方案' }}
-          </button>
-          <button
-            class="primary-button"
-            type="button"
-            :disabled="!plan?.planText?.trim() || isBusy"
-            @click="handleGenerateDraft"
-          >
-            确认方案，生成正文
+            {{ generatingPlan ? '调整中…' : 'AI 按意见修改方案' }}
           </button>
         </div>
-      </section>
+      </div>
 
-      <section v-else-if="step === 'draft'" class="step-section draft-section">
-        <h4 class="section-title">优化正文</h4>
-        <p v-if="strategyLabel" class="meta-line strategy-line">处理策略：{{ strategyLabel }}</p>
-        <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
-        <p v-if="progressLabel" class="meta-line progress-line">{{ progressLabel }}</p>
-        <p v-if="typoAutoCorrected" class="message message-info">
-          正文已自动修正错字，请确认后再覆盖原章节。
-        </p>
-        <div v-if="hasDraftDiff && !generatingDraft" class="diff-summary">
-          <span class="diff-badge diff-added">+{{ addedCount }} 行新增</span>
-          <span class="diff-badge diff-removed">-{{ removedCount }} 行删除</span>
-          <span class="diff-badge diff-modified">~{{ modifiedCount }} 行改动</span>
+      <div class="actions">
+        <button
+          class="secondary-button"
+          type="button"
+          :disabled="isBusy"
+          @click="step = 'instruction'"
+        >
+          修改要求
+        </button>
+        <button class="secondary-button" type="button" :disabled="isBusy" @click="generatePlan">
+          放弃当前方案并重生成
+        </button>
+        <button
+          class="primary-button"
+          type="button"
+          :disabled="!canGenerateDraft"
+          @click="generateDraft"
+        >
+          生成优化正文
+        </button>
+      </div>
+    </section>
+
+    <section v-else class="step-section">
+      <div class="compare-grid">
+        <div class="compare-panel">
+          <h4 class="panel-title">原文</h4>
+          <pre class="original-text">{{ originalText }}</pre>
         </div>
-        <div class="sync-scroll-toggle">
-          <label class="sync-scroll-label">
-            <input v-model="syncScrollEnabled" type="checkbox" class="sync-scroll-checkbox" />
-            <span class="sync-scroll-text">同步滚动</span>
-          </label>
+        <div class="compare-panel">
+          <h4 class="panel-title">优化正文（可编辑）</h4>
+          <textarea
+            v-model="draftText"
+            class="draft-input"
+            :disabled="generatingDraft || applying"
+          />
         </div>
-        <div class="draft-compare-grid">
-          <div class="compare-pane">
-            <label class="field-label">原文（快照，只读）</label>
-            <div ref="originalScrollRef" class="scroll-pane" @scroll="onOriginalScroll">
-              <div
-                v-for="(row, idx) in diffLines"
-                :key="'orig-' + idx"
-                class="diff-line"
-                :class="{
-                  'line-removed': row.type === 'removed',
-                  'line-modified-original':
-                    row.type === 'modified' && row.originalSegments.some((s) => s.removed),
-                }"
-              >
-                <span
-                  v-for="(seg, si) in row.originalSegments"
-                  :key="si"
-                  :class="{ 'diff-removed-text': seg.removed }"
-                  >{{ seg.text }}</span
-                >
-              </div>
-            </div>
-          </div>
-          <div class="compare-pane">
-            <label class="field-label" for="optimize-draft-text">优化正文（可直接编辑）</label>
-            <div v-if="generatingDraft" class="scroll-pane markdown-pane draft-stream-preview">
-              <MarkdownContent :source="draftText || '正在生成正文…'" :throttle-ms="200" />
-            </div>
-            <textarea
-              v-else
-              id="optimize-draft-text"
-              ref="draftTextareaRef"
-              v-model="draftText"
-              class="scroll-pane draft-textarea"
-              :readonly="fixingTypos"
-              placeholder="生成完成后可在此修改，再确认覆盖原章节"
-              @scroll="onDraftScroll"
-            />
-          </div>
-        </div>
-        <p v-if="draftTraceId" class="meta-line">trace: {{ draftTraceId }}</p>
-        <div v-if="typoIssues.length > 0" class="typo-panel">
-          <h5 class="typo-title">错字检查结果（{{ typoIssues.length }} 处）</h5>
-          <ul class="typo-list">
-            <li v-for="issue in typoIssues" :key="issue.id">
-              <span class="typo-original">「{{ issue.original }}」</span>
-              <span class="typo-arrow">→</span>
-              <span class="typo-suggestion">「{{ issue.suggestion }}」</span>
-              <span v-if="issue.reason" class="typo-reason">（{{ issue.reason }}）</span>
-            </li>
-          </ul>
-          <p v-if="typoCheckTraceId" class="meta-line">typo-check trace: {{ typoCheckTraceId }}</p>
-        </div>
-        <div class="step-actions typo-actions">
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="!draftText.trim() || isBusy"
-            @click="handleCheckTypos"
-          >
-            {{ checkingTypos ? '检查中...' : '检验错字' }}
-          </button>
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="!draftText.trim() || isBusy"
-            @click="handleAutoFixTypos"
-          >
-            {{ fixingTypos ? '修正中...' : '自动修正重生成' }}
-          </button>
-        </div>
-        <div class="step-actions">
-          <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
-            取消优化
-          </button>
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="isBusy"
-            @click="handleBackToPlan"
-          >
-            返回方案
-          </button>
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="generatingDraft || applying || fixingTypos"
-            @click="handleRegenerateDraft"
-          >
-            {{ generatingDraft ? '生成中...' : '重新生成正文' }}
-          </button>
-          <button
-            class="primary-button"
-            type="button"
-            :disabled="!draftText.trim() || isBusy"
-            @click="handleApply"
-          >
-            {{ applying ? '应用中...' : '确认覆盖原章节' }}
-          </button>
-        </div>
-      </section>
+      </div>
+      <div class="actions">
+        <button class="secondary-button" type="button" :disabled="isBusy" @click="step = 'plan'">
+          返回方案
+        </button>
+        <button class="secondary-button" type="button" :disabled="isBusy" @click="generateDraft">
+          重新生成正文
+        </button>
+        <button class="primary-button" type="button" :disabled="!canApply" @click="applyDraft">
+          {{ applying ? '应用中…' : '应用优化正文' }}
+        </button>
+      </div>
+    </section>
   </a-modal>
-
-  <RetrievalPreviewDialog
-    :visible="previewVisible"
-    :loading="previewLoading"
-    :result="previewResult"
-    :error-message="previewError"
-    @close="previewVisible = false"
-    @confirm="confirmPreviewAndGeneratePlan"
-  />
 </template>
 
 <style scoped>
 .modal-subtitle {
-  margin: 0 0 1rem;
-  color: rgba(0, 0, 0, 0.45);
-  font-size: 0.85rem;
-}
-
-:global(.optimize-modal-fullscreen .ant-modal) {
-  top: 0;
-  max-width: 100vw;
-  padding-bottom: 0;
-  margin: 0;
-}
-
-:global(.optimize-modal-fullscreen .ant-modal-content) {
-  min-height: 100vh;
-  border-radius: 0;
-}
-
-.modal-dialog-legacy {
-  width: min(820px, 100%);
-  max-height: calc(100vh - 3rem);
-  overflow: auto;
-  border-radius: 12px;
-  background: #fff;
-  padding: 1.25rem 1.4rem;
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
-}
-
-.modal-dialog.fullscreen-draft {
-  width: 100vw;
-  height: 100vh;
-  max-height: 100vh;
-  max-width: 100vw;
-  padding: 1rem 1.25rem;
-  border-radius: 0;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.modal-title {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-.modal-subtitle {
-  margin: 0.35rem 0 0;
+  margin: 0 0 0.8rem;
   color: #6b7280;
-  font-size: 0.85rem;
-}
-
-.modal-close {
-  border: none;
-  background: transparent;
-  color: #6b7280;
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.modal-close:hover:not(:disabled) {
-  color: #111827;
-}
-
-.modal-close:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  font-size: 0.88rem;
 }
 
 .stepper {
   display: flex;
-  gap: 1.5rem;
-  list-style: none;
+  gap: 0.5rem;
   margin: 0 0 1rem;
   padding: 0;
-  font-size: 0.85rem;
-  color: #9ca3af;
+  list-style: none;
 }
 
 .stepper li {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  background: #f3f4f6;
+  color: #6b7280;
+  text-align: center;
 }
 
 .stepper li.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.stepper li.step--running {
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: inset 0 0 0 1px #93c5fd;
+}
+
+.stepper li.step--awaiting {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.stepper li.step--failed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.step-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.step-badge--await {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.step-section {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.field-label,
+.panel-title {
+  margin: 0;
   color: #111827;
   font-weight: 600;
 }
 
-.stepper li.done {
-  color: #059669;
-}
-
-.stepper-no {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 50%;
-  background: #e5e7eb;
-  color: #4b5563;
-  font-size: 0.75rem;
-}
-
-.stepper li.active .stepper-no {
-  background: #111827;
-  color: #fff;
-}
-
-.stepper li.done .stepper-no {
-  background: #059669;
-  color: #fff;
-}
-
-.message {
-  margin: 0 0 0.8rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-}
-
-.message-error {
-  background: #fef2f2;
-  color: #991b1b;
-}
-
-.step-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-}
-
-.draft-section {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.section-title {
-  margin: 0;
-  font-size: 0.95rem;
-  color: #111827;
-}
-
-.field-label {
-  font-size: 0.8rem;
-  color: #6b7280;
-}
-
-.field-textarea {
+.instruction-input,
+.plan-input,
+.revision-feedback-input,
+.draft-input {
   width: 100%;
-  min-height: 160px;
+  padding: 0.7rem;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  padding: 0.55rem 0.65rem;
-  font-size: 0.9rem;
-  font-family: inherit;
+  font: inherit;
+  line-height: 1.65;
   resize: vertical;
 }
 
-.plan-text-editor {
-  min-height: 220px;
-  max-height: 420px;
-  line-height: 1.6;
+.plan-input {
+  min-height: 280px;
+}
+
+.plan-stream-preview {
+  max-height: 220px;
+  margin: 0.5rem 0;
+  padding: 0.9rem;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
   white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
 }
 
-.plan-text-editor:read-only {
-  background: #f9fafb;
-  cursor: wait;
-}
-
-.draft-compare-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.plan-editor-head,
+.revision-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
-  flex: 1;
-  min-height: 0;
 }
 
-.sync-scroll-toggle {
-  display: flex;
-  align-items: center;
-}
-
-.sync-scroll-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  cursor: pointer;
-  user-select: none;
+.revision-badge {
+  color: #2563eb;
   font-size: 0.82rem;
+}
+
+.revision-panel {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.field-hint {
   color: #6b7280;
+  font-size: 0.82rem;
 }
 
-.sync-scroll-label:hover {
-  color: #374151;
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
 }
 
-.sync-scroll-checkbox {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: #111827;
+.compare-panel {
+  display: grid;
+  grid-template-rows: auto minmax(420px, 60vh);
+  gap: 0.5rem;
+  min-width: 0;
 }
 
-.sync-scroll-text {
-  line-height: 1;
-}
-
-.compare-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  min-height: 0;
-}
-
-.scroll-pane {
-  flex: 1;
-  min-height: 200px;
-  max-height: calc(100vh - 380px);
-  overflow-y: auto;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: #f9fafb;
-  padding: 0.55rem 0.65rem;
-  font-size: 0.9rem;
-  line-height: 1.6;
+.original-text,
+.draft-input {
+  min-height: 420px;
+  margin: 0;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.draft-textarea {
+.original-text {
+  padding: 0.7rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f9fafb;
   font-family: inherit;
-  resize: none;
-  color: #111827;
-  caret-color: #111827;
+  line-height: 1.65;
 }
 
-.draft-textarea::placeholder {
-  color: #9ca3af;
-}
-
-.draft-textarea:focus {
-  outline: none;
-}
-
-.draft-textarea:read-only {
-  cursor: wait;
-}
-
-.diff-line {
-  min-height: 1.6em;
-}
-
-.line-added,
-.line-removed,
-.line-modified,
-.line-modified-original {
-  padding-left: 0.65rem;
-  border-left: 3px solid transparent;
-  margin-left: -3px;
-}
-
-.line-added {
-  background: #dcfce7;
-  border-left-color: #22c55e;
-}
-
-.line-removed {
-  background: #fee2e2;
-  border-left-color: #ef4444;
-}
-
-.line-modified {
-  background: #fef9c3;
-  border-left-color: #eab308;
-}
-
-.line-modified-original {
-  background: #fee2e2;
-  border-left-color: #ef4444;
-}
-
-.diff-removed-text {
-  text-decoration: line-through;
-  color: #dc2626;
-  opacity: 0.9;
-}
-
-.diff-summary {
+.actions,
+.stream-actions {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.diff-badge {
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.diff-added {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.diff-removed {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-.diff-modified {
-  background: #fef9c3;
-  color: #854d0e;
-}
-
-.message-info {
-  background: #eff6ff;
-  color: #1e40af;
-}
-
-.typo-panel {
-  padding: 0.65rem 0.75rem;
-  border-radius: 8px;
-  border: 1px solid #fde68a;
-  background: #fffbeb;
-}
-
-.typo-title {
-  margin: 0 0 0.45rem;
-  font-size: 0.85rem;
-  color: #92400e;
-}
-
-.typo-list {
-  margin: 0;
-  padding-left: 1.1rem;
-  font-size: 0.82rem;
-  color: #78350f;
-}
-
-.typo-list li {
-  margin-bottom: 0.25rem;
-}
-
-.typo-original {
-  text-decoration: line-through;
-  opacity: 0.85;
-}
-
-.typo-arrow {
-  margin: 0 0.2rem;
-}
-
-.typo-suggestion {
-  font-weight: 600;
-}
-
-.typo-reason {
-  color: #a16207;
-}
-
-.typo-actions {
-  justify-content: flex-start;
-}
-
-.meta-line {
-  margin: 0;
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.step-actions {
-  display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  gap: 0.6rem;
 }
 
 .primary-button,
 .secondary-button {
+  padding: 0.48rem 0.9rem;
   border-radius: 6px;
-  padding: 0.5rem 0.9rem;
   cursor: pointer;
-  font-size: 0.85rem;
-  white-space: nowrap;
 }
 
 .primary-button {
-  background: #111827;
-  color: #fff;
   border: none;
+  background: #2563eb;
+  color: #fff;
 }
 
 .secondary-button {
-  background: #fff;
-  color: #111827;
   border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
 }
 
 .primary-button:disabled,
 .secondary-button:disabled {
-  opacity: 0.6;
   cursor: not-allowed;
+  opacity: 0.55;
 }
 
-.stream-actions {
-  margin: 0.5rem 0 0.75rem;
+.message {
+  margin: 0.5rem 0;
+  font-size: 0.86rem;
 }
 
-.markdown-pane {
-  max-height: 360px;
-  overflow: auto;
-  padding: 0.75rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fafafa;
-  margin-bottom: 0.75rem;
+.message-info {
+  color: #2563eb;
 }
 
-.draft-stream-preview {
-  min-height: 280px;
+.message-error {
+  color: #dc2626;
 }
 
-@media (max-width: 900px) {
-  .draft-compare-grid {
+@media (max-width: 820px) {
+  .compare-grid {
     grid-template-columns: 1fr;
-  }
-
-  .modal-dialog.fullscreen-draft {
-    padding: 0.75rem;
-  }
-
-  .scroll-pane {
-    max-height: 300px;
   }
 }
 </style>

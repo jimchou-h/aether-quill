@@ -19,11 +19,14 @@ import type { PipelineOutlineCoverageSummary } from '../../services/api';
 import {
   applyAiTaskProgressEvent,
   completeAiTaskProgress,
-  createAiTaskProgressState,
   failAiTaskProgress,
   resetAiTaskProgress,
   startAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
+import {
+  useChapterAiActivityInterrupt,
+  useChapterPageAiActivity,
+} from '../../composables/chapterAiActivityContext';
 import { useChapterSseTask } from '../../composables/useChapterSseTask';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import MarkdownContent from '../common/MarkdownContent.vue';
@@ -53,9 +56,23 @@ const running = ref(false);
 const applying = ref(false);
 const errorMessage = ref('');
 const streamingText = ref('');
-const aiTaskProgress = createAiTaskProgressState();
+const aiTaskProgress = useChapterPageAiActivity();
+const activityInterruptHandler = useChapterAiActivityInterrupt();
 const { interruptStream, beginStream, handleStreamError, endStream } =
   useChapterSseTask(aiTaskProgress);
+
+function bindActivityInterrupt() {
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = () => interruptStream();
+    clearActivityInterrupt();
+  }
+}
+
+function clearActivityInterrupt() {
+  if (activityInterruptHandler) {
+    activityInterruptHandler.value = null;
+  }
+}
 const chapterUpdatedAtSnapshot = ref('');
 const outlineRequired = ref<PipelineOutlineItem[]>([]);
 const outlineSuggested = ref<PipelineOutlineItem[]>([]);
@@ -179,7 +196,11 @@ async function runComplianceCoverageVerify(showToastOnComplete = true) {
 
   coverageVerifying.value = true;
   errorMessage.value = '';
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:compliance',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: 'chapter.compliance.coverage.verify',
     message: '合规大纲落实验收中…',
   });
@@ -224,7 +245,11 @@ async function handleFixComplianceCoverageItems(itemIds: string[]) {
   running.value = true;
   streamingText.value = '';
   errorMessage.value = '';
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:compliance',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: 'chapter.compliance.rewrite.fix-items',
     message: '合规按项补修中…',
   });
@@ -336,7 +361,11 @@ async function runCompliancePhase(
   if (!props.chapter || !sessionId.value) {
     return;
   }
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:compliance',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: `compliance-check-${phase}`,
     message: progressMessage,
   });
@@ -450,7 +479,11 @@ async function runRewrite() {
   }
   step.value = 'rewriting';
   streamingText.value = '';
+  bindActivityInterrupt();
   startAiTaskProgress(aiTaskProgress, {
+    source: 'dialog:compliance',
+    chapterNo: props.chapter?.chapterNo ?? null,
+    interruptible: true,
     taskKey: 'compliance-rewrite',
     message: '合规改写中…',
   });
@@ -625,6 +658,7 @@ async function applyResult() {
 function handleClose() {
   if (running.value) {
     interruptStream();
+    clearActivityInterrupt();
     running.value = false;
   }
   if (applying.value) {
@@ -653,7 +687,8 @@ function handleClose() {
     </p>
 
     <div v-if="running" class="stream-actions">
-      <SseInterruptButton @interrupt="() => { interruptStream(); running = false; }" />
+      <SseInterruptButton @interrupt="() => { interruptStream();
+    clearActivityInterrupt(); running = false; }" />
     </div>
     <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
