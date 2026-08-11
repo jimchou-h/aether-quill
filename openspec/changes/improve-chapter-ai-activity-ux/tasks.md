@@ -1,7 +1,7 @@
 ## 1. Activity model & page bar
 
-- [ ] 1.1 定义章节页 AI 活动状态（字段：source / chapterNo / taskKey / title|message / stage / steps / interruptible / error），并提供 start / applyProgress / complete / fail / cancel / reset；单测覆盖状态转换与「禁止静默覆盖」
-- [ ] 1.2 章节页挂载统一活动条（基于现有 `AiTaskProgressPanel` 升级或包装）：展示可读文案、步骤、错误、可中断时的中断按钮；进行中不再靠顶栏 `message` 刷进度
+- [x] 1.1 定义章节页 AI 活动状态（字段：source / chapterNo / taskKey / title|message / stage / steps / interruptible / error），并提供 start / applyProgress / complete / fail / cancel / reset；单测覆盖状态转换与「禁止静默覆盖」
+- [x] 1.2 章节页挂载统一活动条（基于现有 `AiTaskProgressPanel` 升级或包装）：展示可读文案、步骤、错误、可中断时的中断按钮；进行中不再靠顶栏 `message` 刷进度
 
 ## 2. After-save readable progress
 
