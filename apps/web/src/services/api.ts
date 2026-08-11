@@ -2627,6 +2627,9 @@ export interface ChapterOptimizationPlanResult {
 }
 
 export type ChapterOptimizeStage =
+  | 'syncing_context'
+  | 'retrieving'
+  | 'waiting_llm'
   | 'segment_diagnosis'
   | 'plan_synthesis'
   | 'draft_segment'
@@ -2706,6 +2709,12 @@ export function formatChapterOptimizeStageLabel(
 ): string {
   const retry = retryCount ? `（重试 ${retryCount}）` : '';
   switch (stage) {
+    case 'syncing_context':
+      return '正在同步项目上下文…';
+    case 'retrieving':
+      return '正在检索相关知识…';
+    case 'waiting_llm':
+      return '正在等待模型开始生成…';
     case 'segment_diagnosis':
       return segmentIndex && segmentTotal
         ? `分段诊断 ${segmentIndex}/${segmentTotal}${retry}`

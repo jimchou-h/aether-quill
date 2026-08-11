@@ -29,6 +29,21 @@ const stepLabel = computed(() => {
   return '';
 });
 
+const progressPercent = computed(() => {
+  if (typeof props.progress.percent === 'number' && props.progress.percent >= 0) {
+    return Math.min(100, Math.max(0, props.progress.percent));
+  }
+  const { currentStep, totalSteps } = props.progress;
+  if (typeof currentStep === 'number' && typeof totalSteps === 'number' && totalSteps > 0) {
+    return Math.min(100, Math.round((currentStep / totalSteps) * 100));
+  }
+  return props.progress.active ? 8 : 0;
+});
+
+const showProgressBar = computed(
+  () => props.progress.active && (progressPercent.value > 0 || Boolean(props.progress.message))
+);
+
 const chapterLabel = computed(() => {
   if (typeof props.progress.chapterNo !== 'number') {
     return '';
@@ -67,6 +82,16 @@ const showDismiss = computed(
         <span v-if="stepLabel" class="ai-task-progress__step">{{ stepLabel }}</span>
         {{ progress.message }}
       </p>
+      <div
+        v-if="showProgressBar"
+        class="ai-task-progress__bar"
+        role="progressbar"
+        :aria-valuenow="progressPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div class="ai-task-progress__bar-fill" :style="{ width: `${progressPercent}%` }" />
+      </div>
       <p v-if="progress.cancelled && !progress.error" class="ai-task-progress__cancelled">
         任务已中断，可重新发起。
       </p>
@@ -135,6 +160,21 @@ const showDismiss = computed(
 .ai-task-progress__message {
   margin: 0;
   line-height: 1.5;
+}
+
+.ai-task-progress__bar {
+  margin-top: 0.45rem;
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.ai-task-progress__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  transition: width 0.25s ease;
 }
 
 .ai-task-progress__chapter,

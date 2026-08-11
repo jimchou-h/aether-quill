@@ -1,12 +1,15 @@
 post:
   tags:
     - Projects
-  summary: Stream chapter optimization plan (SSE)
+  summary: Stream writing optimization plan (SSE)
   description: |
     Stream the optimization plan via Server-Sent Events so long-running LLM calls keep the HTTP
     connection active (avoids proxy idle timeouts). Original chapter text is always injected into the prompt.
+    When `currentPlanText` and `revisionFeedback` are both provided, the model revises the current
+    editable plan instead of starting from the initial plan, allowing repeated adjustment rounds.
 
     SSE event sequence:
+      - `data: {"event":"stage","stage":"syncing_context|retrieving|waiting_llm"}` (prep before LLM stream; may arrive before `start`)
       - `data: {"event":"start","traceId":"...","chapterNo":N,"planId":"...","basis":{...},"optimizationMode":"single|segmented","segmentTotal":N,"strategyLabel":"...","inputChapterChars":N}`
       - `data: {"event":"stage","stage":"segment_diagnosis|plan_synthesis","segmentIndex":N,"segmentTotal":N}` (long chapters only)
       - `data: {"event":"content","data":"..."}` (multiple; newlines escaped as `\\n`)

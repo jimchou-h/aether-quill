@@ -22,3 +22,9 @@
 ## 5. Verify
 
 - [x] 5.1 相关 lint/typecheck/test；对照 spec 场景做手测清单（保存后处理、写作优化、创作精修、中断、冲突触发）
+
+## 6. Optimize prep progress bar
+
+- [x] 6.1 Contract：OpenAPI / `ChapterOptimizeStage` 增加 `syncing_context` | `retrieving` | `waiting_llm`；方案/正文 SSE 文档写明可先于 `start` 到达
+- [x] 6.2 API 在 sync 前发 `syncing_context`；orchestrator 在检索前发 `retrieving`、LLM 流前发 `waiting_llm`，API 转发 stage；单测或映射测覆盖文案/步进
+- [x] 6.3 前端活动条根据 prep stage 展示进度条与中文阶段文案（写作优化路径）

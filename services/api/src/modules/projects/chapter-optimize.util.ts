@@ -66,6 +66,9 @@ export const MAX_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE = 20000;
 export type ChapterOptimizeMode = 'single' | 'segmented';
 
 export type ChapterOptimizeStage =
+  | 'syncing_context'
+  | 'retrieving'
+  | 'waiting_llm'
   | 'segment_diagnosis'
   | 'plan_synthesis'
   | 'draft_segment'
@@ -219,6 +222,34 @@ export function assertPlanText(value: string): void {
   if (!value || !value.trim()) {
     throw new Error('优化方案 planText 不能为空');
   }
+}
+
+export function buildPlanRevisionInstruction(input: {
+  instruction: string;
+  currentPlanText: string;
+  revisionFeedback: string;
+}): string {
+  const instruction = normalizeInstruction(input.instruction);
+  const currentPlanText = input.currentPlanText.trim();
+  const revisionFeedback = normalizeInstruction(input.revisionFeedback);
+  assertInstruction(instruction);
+  assertPlanText(currentPlanText);
+  if (!revisionFeedback) {
+    throw new Error('方案修改意见 revisionFeedback 不能为空');
+  }
+  if (revisionFeedback.length > 2000) {
+    throw new Error('方案修改意见 revisionFeedback 长度不能超过 2000 字符');
+  }
+  if (currentPlanText.length > 20000) {
+    throw new Error('当前优化方案 currentPlanText 长度不能超过 20000 字符');
+  }
+
+  return [
+    `【原始优化要求】\n${instruction}`,
+    `<current-optimization-plan>\n${currentPlanText}\n</current-optimization-plan>`,
+    `【本轮方案修改意见】\n${revisionFeedback}`,
+    '请基于当前优化方案和本轮意见输出一份完整的新版优化方案。未要求修改的内容应保留；只输出调整后的完整方案，不要解释修改过程。',
+  ].join('\n\n');
 }
 
 export function assertDraftText(value: string): void {

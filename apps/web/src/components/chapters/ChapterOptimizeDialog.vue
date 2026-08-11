@@ -25,6 +25,7 @@ import {
   resolveWritingOptimizeStepVisual,
   type WritingOptimizeStep,
 } from '../../utils/writingOptimizeStepVisual';
+import { resolveChapterOptimizePrepProgress } from '../../utils/chapterOptimizePrepProgress';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
 
@@ -223,12 +224,14 @@ async function runPlanGeneration(revision: boolean) {
             retryCount
           );
           statusText.value = label;
+          const prep = resolveChapterOptimizePrepProgress(stage);
           applyAiTaskProgressEvent(aiTaskProgress, {
             taskKey: 'chapter.optimize.plan',
             stage,
             message: label,
-            currentStep: segmentIndex,
-            totalSteps: segmentTotal,
+            currentStep: segmentIndex ?? prep.currentStep,
+            totalSteps: segmentTotal ?? prep.totalSteps,
+            percent: prep.percent,
           });
         },
         onContent: (text) => {
@@ -327,12 +330,14 @@ async function generateDraft() {
         onStage: ({ stage, segmentIndex, segmentTotal }) => {
           const label = formatChapterOptimizeStageLabel(stage, segmentIndex, segmentTotal);
           statusText.value = label;
+          const prep = resolveChapterOptimizePrepProgress(stage);
           applyAiTaskProgressEvent(aiTaskProgress, {
             taskKey: 'chapter.optimize.draft',
             stage,
             message: label,
-            currentStep: segmentIndex,
-            totalSteps: segmentTotal,
+            currentStep: segmentIndex ?? prep.currentStep,
+            totalSteps: segmentTotal ?? prep.totalSteps,
+            percent: prep.percent,
           });
         },
         onProgress: (event) => {
