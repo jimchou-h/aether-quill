@@ -59,6 +59,49 @@ function isLlmChatProviderId(value: unknown): value is LlmChatProviderId {
   return value === 'deepseek' || value === 'siliconflow';
 }
 
+function formatProviderHttpError(
+  error: unknown,
+  meta: { providerUrl: string; model: string; provider?: LlmChatProviderId }
+): Error {
+  const axiosError = axios.isAxiosError(error) ? error : null;
+  const status =
+    axiosError?.response?.status ??
+    (error &&
+    typeof error === 'object' &&
+    'response' in error &&
+    (error as { response?: { status?: number } }).response?.status);
+  const data =
+    axiosError?.response?.data ??
+    (error &&
+    typeof error === 'object' &&
+    'response' in error &&
+    (error as { response?: { data?: unknown } }).response?.data);
+  let detail = '';
+  if (typeof data === 'string') {
+    detail = data.slice(0, 500);
+  } else if (data && typeof data === 'object') {
+    const record = data as Record<string, unknown>;
+    const message =
+      (typeof record.message === 'string' && record.message) ||
+      (typeof record.error === 'string' && record.error) ||
+      (record.error &&
+        typeof record.error === 'object' &&
+        typeof (record.error as { message?: unknown }).message === 'string' &&
+        (record.error as { message: string }).message) ||
+      '';
+    const code = record.code != null ? ` code=${String(record.code)}` : '';
+    detail = message ? `${message}${code}` : JSON.stringify(data).slice(0, 500);
+  }
+  const vendor = meta.provider ?? 'llm';
+  const statusPart = status != null ? ` HTTP ${status}` : '';
+  const fallbackMessage =
+    error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const detailPart = detail ? `: ${detail}` : fallbackMessage ? `: ${fallbackMessage}` : '';
+  return new Error(
+    `${vendor} 调用失败${statusPart} (model=${meta.model}, url=${meta.providerUrl})${detailPart}`
+  );
+}
+
 export class GenerationService {
   private readonly traceStore = new TraceStore();
 
@@ -798,30 +841,36 @@ export class GenerationService {
       typeof promptOrMessages === 'string'
         ? [{ role: 'user' as const, content: promptOrMessages }]
         : promptOrMessages;
+    const body = this.buildProviderRequestBody(messages, provider, options);
+    const model = String(body.model ?? provider.model);
 
-    const response = await axios.post(
-      provider.providerUrl,
-      this.buildProviderRequestBody(messages, provider, options),
-      {
+    try {
+      const response = await axios.post(provider.providerUrl, body, {
         headers: {
           Authorization: `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
         },
         timeout: 60000,
-      }
-    );
+      });
 
-    const choice = response.data?.choices?.[0];
-    return {
-      content: choice?.message?.content || '',
-      usage: response.data?.usage
-        ? {
-            promptTokens: response.data.usage.prompt_tokens || 0,
-            completionTokens: response.data.usage.completion_tokens || 0,
-            totalTokens: response.data.usage.total_tokens || 0,
-          }
-        : undefined,
-    };
+      const choice = response.data?.choices?.[0];
+      return {
+        content: choice?.message?.content || '',
+        usage: response.data?.usage
+          ? {
+              promptTokens: response.data.usage.prompt_tokens || 0,
+              completionTokens: response.data.usage.completion_tokens || 0,
+              totalTokens: response.data.usage.total_tokens || 0,
+            }
+          : undefined,
+      };
+    } catch (error) {
+      throw formatProviderHttpError(error, {
+        providerUrl: provider.providerUrl,
+        model,
+        provider: options?.provider,
+      });
+    }
   }
 
   private streamParamsForTrace(trace: TraceRecord): ProviderCallOptions {
@@ -862,7 +911,30 @@ export class GenerationService {
       responseType: 'stream',
       // 长章节流式生成可能远超 120s；首包慢时不应被总时长误杀（各环境对 stream+timeout 语义不一致）
       timeout: 0,
+      validateStatus: () => true,
     });
+
+    if (response.status >= 400) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of response.data as NodeJS.ReadableStream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      }
+      const raw = Buffer.concat(chunks).toString('utf-8');
+      let parsed: unknown = raw;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // keep raw text
+      }
+      throw formatProviderHttpError(
+        { response: { status: response.status, data: parsed } },
+        {
+          providerUrl: provider.providerUrl,
+          model: String(streamBody.model ?? provider.model),
+          provider: providerId,
+        }
+      );
+    }
 
     const stream = response.data as NodeJS.ReadableStream;
     let lineBuffer = '';

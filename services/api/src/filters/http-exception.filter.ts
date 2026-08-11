@@ -1,5 +1,6 @@
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { Response } from 'express';
+import { isMissingLlmProviderKeyMessage } from '../modules/projects/orchestrator-error.util';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -17,7 +18,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
       if (typeof exceptionResponse === 'string') {
         message = exceptionResponse;
       } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
-        message = ((exceptionResponse as Record<string, unknown>).message as string) || message;
+        const record = exceptionResponse as Record<string, unknown>;
+        message =
+          (typeof record.msg === 'string' && record.msg) ||
+          (typeof record.message === 'string' && record.message) ||
+          message;
+        if (Array.isArray(record.message)) {
+          message = record.message.map(String).join('; ');
+        }
       }
     } else if (exception instanceof Error) {
       const errorName = exception.name;
@@ -36,7 +44,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     }
 
-    const code = this.mapStatusToErrorCode(status);
+    let code = this.mapStatusToErrorCode(status);
+    if (isMissingLlmProviderKeyMessage(message)) {
+      code = 1340; // GenerationErrorCodes.LlmProviderKeyMissing
+      if (status >= 500) {
+        status = HttpStatus.BAD_REQUEST;
+      }
+    }
 
     response.status(status).json({
       code,
@@ -57,6 +71,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         return 1503; // ValidationError
       case HttpStatus.CONFLICT:
         return 1102; // ProjectAlreadyExists
+      case HttpStatus.BAD_GATEWAY:
       case HttpStatus.SERVICE_UNAVAILABLE:
         return 1502; // ServiceUnavailable
       default:
