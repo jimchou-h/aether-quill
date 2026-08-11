@@ -7,6 +7,7 @@ import type {
   UsedRelationEventItem,
 } from '../../services/api';
 import type { AiTaskProgressState } from '../../composables/useAiTaskProgress';
+import { emptyAiTaskProgressState } from '../../composables/useAiTaskProgress';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import MarkdownContent from '../common/MarkdownContent.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
@@ -56,17 +57,7 @@ const props = withDefaults(
     aiTaskProgress: AiTaskProgressState;
     embedded?: boolean;
   }>(),
-  { embedded: false, aiTaskProgress: () => ({
-    traceId: null,
-    taskKey: null,
-    stage: null,
-    message: null,
-    currentStep: null,
-    totalSteps: null,
-    active: false,
-    cancelled: false,
-    error: null,
-  }) }
+  { embedded: false, aiTaskProgress: () => emptyAiTaskProgressState() }
 );
 
 const emit = defineEmits<{
