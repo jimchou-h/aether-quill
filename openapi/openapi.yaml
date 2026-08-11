@@ -2169,10 +2169,15 @@ components:
         stage:
           type: string
           enum:
+            - syncing_context
+            - retrieving
+            - waiting_llm
             - segment_diagnosis
             - plan_synthesis
             - draft_segment
             - merge_validation
+            - content_safety_scan
+            - content_safety_rewrite
             - pipeline_character_outline
             - pipeline_character
             - pipeline_character_traits_outline

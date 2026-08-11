@@ -928,8 +928,29 @@ app.post('/api/generate', async (req, res) => {
   let retrievedChunkIds: string[] = [];
   let retrievedEvidence = '';
   let retrievedFullDocuments: Array<Record<string, unknown>> = [];
+
+  let sseHeadersOpened = false;
+  const ensureSseHeaders = () => {
+    if (!useSSE || sseHeadersOpened) {
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sseHeadersOpened = true;
+  };
+  const writeGenerateSse = (payload: Record<string, unknown>) => {
+    ensureSseHeaders();
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
   // Step 2: 检索证据 — 合规检验等任务跳过 RAG
   if (!isComplianceTask) {
+    ensureSseHeaders();
+    writeGenerateSse({ event: 'stage', stage: 'retrieving' });
     try {
       if (useStructuredChapterKb) {
       const optimizeInstruction =
@@ -1127,30 +1148,21 @@ app.post('/api/generate', async (req, res) => {
   });
 
   if (useSSE) {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-
-    res.write(`data: ${JSON.stringify({ event: 'start', traceId: trace.id })}\n\n`);
+    ensureSseHeaders();
+    writeGenerateSse({ event: 'start', traceId: trace.id });
+    writeGenerateSse({ event: 'stage', stage: 'waiting_llm' });
 
     try {
       for await (const chunk of generationService.generateStream(trace, generationContext)) {
         const escaped = chunk.replace(/\n/g, '\\n');
-        res.write(
-          `data: ${JSON.stringify({ event: 'content', data: escaped, traceId: trace.id })}\n\n`
-        );
+        writeGenerateSse({ event: 'content', data: escaped, traceId: trace.id });
       }
 
-      res.write(`data: ${JSON.stringify({ event: 'end', traceId: trace.id })}\n\n`);
+      writeGenerateSse({ event: 'end', traceId: trace.id });
       res.end();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Generation failed';
-      res.write(
-        `data: ${JSON.stringify({ event: 'error', data: errorMsg, traceId: trace.id })}\n\n`
-      );
+      writeGenerateSse({ event: 'error', data: errorMsg, traceId: trace.id });
       res.end();
     }
   } else {

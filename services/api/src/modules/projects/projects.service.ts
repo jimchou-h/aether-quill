@@ -2671,6 +2671,7 @@ export class ProjectsService implements OnModuleInit {
       payload.selectedEventIds
     );
 
+    callbacks.onStage?.({ stage: 'syncing_context' });
     await this.syncProjectContextToOrchestrator(
       projectId,
       settings,
@@ -2837,6 +2838,9 @@ export class ProjectsService implements OnModuleInit {
             onError: (message) => {
               lastSynthesisError = message;
             },
+            onStage: (stage) => {
+              callbacks.onStage?.({ stage });
+            },
           },
         });
         if (streamResult.ok) {
@@ -2912,6 +2916,9 @@ export class ProjectsService implements OnModuleInit {
         },
         onContent: callbacks.onContent,
         onError: callbacks.onError,
+        onStage: (stage) => {
+          callbacks.onStage?.({ stage });
+        },
       },
     });
 
@@ -3004,6 +3011,7 @@ export class ProjectsService implements OnModuleInit {
       payload.selectedEventIds
     );
 
+    callbacks.onStage?.({ stage: 'syncing_context' });
     await this.syncProjectContextToOrchestrator(
       projectId,
       settings,
@@ -3030,13 +3038,13 @@ export class ProjectsService implements OnModuleInit {
       })
     );
 
-    const chapterSummaryForRetrieval =
-      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
-
     const planStrategy = resolveChapterOptimizeLengthStrategy(
       chapter.content.length,
       this.resolveChapterOptimizeConfig(projectId)
     );
+    const chapterSummaryForRetrieval =
+      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+
     const traceId = makeOptimizationId('draft');
     callbacks.onStart({
       traceId,
@@ -3057,6 +3065,7 @@ export class ProjectsService implements OnModuleInit {
       selectedRelationEvents: relationEventRefs,
     });
 
+    callbacks.onStage?.({ stage: 'retrieving' });
     const draftResult = await this.generateOptimizeDraftSegment({
       projectId,
       prompt: userPrompt,
@@ -4927,8 +4936,10 @@ export class ProjectsService implements OnModuleInit {
       onStart: (traceId: string) => void;
       onContent: (text: string) => void;
       onError: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
+      onStage?: (stage: ChapterOptimizeStage) => void;
     };
   }): Promise<{ ok: boolean; planText: string }> {
+    input.callbacks.onStage?.('retrieving');
     let response;
     try {
       response = await axios.post(
@@ -4984,7 +4995,7 @@ export class ProjectsService implements OnModuleInit {
           if (!dataPart) {
             continue;
           }
-          let event: { event?: string; data?: string; traceId?: string };
+          let event: { event?: string; data?: string; traceId?: string; stage?: string };
           try {
             event = JSON.parse(dataPart);
           } catch {
@@ -4992,8 +5003,19 @@ export class ProjectsService implements OnModuleInit {
           }
 
           switch (event.event) {
+            case 'stage': {
+              if (
+                event.stage === 'retrieving' ||
+                event.stage === 'waiting_llm' ||
+                event.stage === 'syncing_context'
+              ) {
+                input.callbacks.onStage?.(event.stage);
+              }
+              break;
+            }
             case 'start': {
               traceId = typeof event.traceId === 'string' ? event.traceId : '';
+              input.callbacks.onStage?.('waiting_llm');
               input.callbacks.onStart(traceId);
               break;
             }

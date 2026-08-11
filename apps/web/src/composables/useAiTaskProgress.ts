@@ -22,6 +22,7 @@ export interface AiTaskProgressState {
   message: string | null;
   currentStep: number | null;
   totalSteps: number | null;
+  percent: number | null;
   active: boolean;
   cancelled: boolean;
   error: string | null;
@@ -52,6 +53,7 @@ export function emptyAiTaskProgressState(): AiTaskProgressState {
     message: null,
     currentStep: null,
     totalSteps: null,
+    percent: null,
     active: false,
     cancelled: false,
     error: null,
@@ -80,6 +82,7 @@ export function tryStartAiTaskProgress(
     message: payload.message,
     currentStep: null,
     totalSteps: null,
+    percent: null,
     active: true,
     cancelled: false,
     error: null,
@@ -112,6 +115,7 @@ export function applyAiTaskProgressEvent(
       typeof event.currentStep === 'number' ? event.currentStep : state.value.currentStep,
     totalSteps:
       typeof event.totalSteps === 'number' ? event.totalSteps : state.value.totalSteps,
+    percent: typeof event.percent === 'number' ? event.percent : state.value.percent,
     active: true,
     cancelled: false,
     error: null,
