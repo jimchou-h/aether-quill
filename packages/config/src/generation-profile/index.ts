@@ -1,5 +1,15 @@
 import { isWritingStyleInjectionTemplateKey } from '../writing-style-samples';
-import type { LlmChatProviderId, UserGenerationPreferences } from './user-generation-preferences';
+import {
+  DEFAULT_BUILTIN_CHAT_MODEL,
+  DEFAULT_GENERATION_TEMPERATURE,
+  DEFAULT_USER_GENERATION_PREFERENCES,
+  type LlmChatProviderId,
+  type UserGenerationPreferences,
+} from './user-generation-preferences';
+import {
+  DEFAULT_SILICONFLOW_CHAT_MODEL,
+  looksLikeSiliconFlowModelId,
+} from './llm-chat-provider-endpoint';
 
 export type GenerationTier = 'writing' | 'utility';
 
@@ -8,8 +18,8 @@ export const GENERATION_TIER_UTILITY: GenerationTier = 'utility';
 
 export const GENERATION_MODEL_ID_MAX_LENGTH = 128;
 
-export const DEFAULT_WRITING_GENERATION_TEMPERATURE = 0.9;
-export const DEFAULT_UTILITY_GENERATION_TEMPERATURE = 0.7;
+export const DEFAULT_WRITING_GENERATION_TEMPERATURE = DEFAULT_GENERATION_TEMPERATURE;
+export const DEFAULT_UTILITY_GENERATION_TEMPERATURE = DEFAULT_GENERATION_TEMPERATURE;
 export const DEFAULT_WRITING_FREQUENCY_PENALTY = 0.3;
 
 export type GenerationProfileServiceRole = 'rag-orchestrator' | 'api';
@@ -240,8 +250,10 @@ export function resolveGenerationTierForTemplateKey(templateKey: string): Genera
 }
 
 /**
- * 按 templateKey → tier 解析 model / temperature / frequency_penalty / provider；
- * 优先级：env → 用户全局偏好 → 项目覆盖 → 请求级。
+ * 按 templateKey → tier 解析 model / temperature / frequency_penalty / provider。
+ * 日常默认来自内置常量（deepseek + deepseek-v4-flash + 0.7），再叠加用户全局偏好与请求级覆盖。
+ * 项目级 model/temperature 仅在无用户偏好时作为遗留覆盖。
+ * 不再把 PROVIDER_MODEL* / PROVIDER_TEMPERATURE* 作为产品配置面。
  */
 export function resolveGenerationCallProfile(input: {
   templateKey?: string;
@@ -253,59 +265,68 @@ export function resolveGenerationCallProfile(input: {
 }): ResolvedGenerationCallProfile {
   const env = input.env ?? getResolvedGenerationProfileEnv();
   const tier = resolveGenerationTierForTemplateKey(input.templateKey ?? '');
+  const defaults =
+    tier === GENERATION_TIER_WRITING
+      ? DEFAULT_USER_GENERATION_PREFERENCES.writing
+      : DEFAULT_USER_GENERATION_PREFERENCES.utility;
   const userTier =
     tier === GENERATION_TIER_WRITING
       ? input.userPreferences?.writing
       : input.userPreferences?.utility;
 
-  let provider: LlmChatProviderId = userTier?.provider ?? 'deepseek';
-  let model =
-    tier === GENERATION_TIER_WRITING ? env.writingModel : env.utilityModel;
+  let provider: LlmChatProviderId = userTier?.provider ?? defaults.provider;
+  let model = defaults.model ?? DEFAULT_BUILTIN_CHAT_MODEL;
   let temperature =
-    tier === GENERATION_TIER_WRITING ? env.writingTemperature : env.utilityTemperature;
+    typeof defaults.temperature === 'number'
+      ? defaults.temperature
+      : DEFAULT_GENERATION_TEMPERATURE;
   let frequencyPenalty: number | undefined =
     tier === GENERATION_TIER_WRITING ? env.writingFrequencyPenalty : undefined;
 
   if (userTier) {
+    provider = userTier.provider;
     const userModel = normalizeGenerationModelId(userTier.model);
     if (userModel) {
       model = userModel;
     }
-    if (tier === GENERATION_TIER_WRITING) {
-      if (typeof userTier.temperature === 'number' && Number.isFinite(userTier.temperature)) {
-        temperature = clampWritingGenerationTemperature(userTier.temperature);
-      }
-    } else if (
-      typeof userTier.temperature === 'number' &&
-      Number.isFinite(userTier.temperature)
-    ) {
-      temperature = clampUtilityGenerationTemperature(userTier.temperature);
+    if (typeof userTier.temperature === 'number' && Number.isFinite(userTier.temperature)) {
+      temperature =
+        tier === GENERATION_TIER_WRITING
+          ? clampWritingGenerationTemperature(userTier.temperature)
+          : clampUtilityGenerationTemperature(userTier.temperature);
     }
   }
 
   const overrides = input.projectOverrides;
-  if (tier === GENERATION_TIER_WRITING) {
-    const projectModel = normalizeGenerationModelId(overrides?.generationWritingModel);
-    if (projectModel) {
-      model = projectModel;
+  const applyProjectModelOverrides = !input.userPreferences;
+  if (applyProjectModelOverrides && overrides) {
+    if (tier === GENERATION_TIER_WRITING) {
+      const projectModel = normalizeGenerationModelId(overrides.generationWritingModel);
+      if (projectModel) {
+        model = projectModel;
+      }
+      const projectTemp = resolveWritingGenerationTemperatureOverride(
+        overrides.writingGenerationTemperature
+      );
+      if (projectTemp !== null) {
+        temperature = projectTemp;
+      }
+    } else {
+      const projectModel = normalizeGenerationModelId(overrides.generationUtilityModel);
+      if (projectModel) {
+        model = projectModel;
+      }
+      if (
+        typeof overrides.generationTemperature === 'number' &&
+        Number.isFinite(overrides.generationTemperature)
+      ) {
+        temperature = clampUtilityGenerationTemperature(overrides.generationTemperature);
+      }
     }
-    const projectTemp = resolveWritingGenerationTemperatureOverride(
-      overrides?.writingGenerationTemperature
-    );
-    if (projectTemp !== null) {
-      temperature = projectTemp;
-    }
-  } else {
-    const projectModel = normalizeGenerationModelId(overrides?.generationUtilityModel);
-    if (projectModel) {
-      model = projectModel;
-    }
-    if (
-      typeof overrides?.generationTemperature === 'number' &&
-      Number.isFinite(overrides.generationTemperature)
-    ) {
-      temperature = clampUtilityGenerationTemperature(overrides.generationTemperature);
-    }
+  }
+
+  if (provider === 'siliconflow' && !looksLikeSiliconFlowModelId(model)) {
+    model = DEFAULT_SILICONFLOW_CHAT_MODEL;
   }
 
   const requestModel = normalizeGenerationModelId(input.requestModel);

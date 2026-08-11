@@ -1,14 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeUserGenerationPreferences } from './user-generation-preferences';
+import {
+  DEFAULT_BUILTIN_CHAT_MODEL,
+  normalizeUserGenerationPreferences,
+} from './user-generation-preferences';
 
-test('normalizeUserGenerationPreferences fills defaults for empty input', () => {
+test('normalizeUserGenerationPreferences fills built-in defaults for empty input', () => {
   const prefs = normalizeUserGenerationPreferences({});
   assert.equal(prefs.writing.provider, 'deepseek');
-  assert.equal(prefs.writing.model, null);
-  assert.equal(prefs.writing.temperature, null);
+  assert.equal(prefs.writing.model, DEFAULT_BUILTIN_CHAT_MODEL);
+  assert.equal(prefs.writing.temperature, 0.7);
   assert.equal(prefs.utility.provider, 'deepseek');
-  assert.equal(prefs.utility.model, null);
+  assert.equal(prefs.utility.model, DEFAULT_BUILTIN_CHAT_MODEL);
+  assert.equal(prefs.utility.temperature, 0.7);
+});
+
+test('normalizeUserGenerationPreferences materializes null model and temperature', () => {
+  const prefs = normalizeUserGenerationPreferences({
+    writing: { provider: 'deepseek', model: null, temperature: null },
+    utility: { provider: 'siliconflow', model: null, temperature: null },
+  });
+  assert.equal(prefs.writing.model, DEFAULT_BUILTIN_CHAT_MODEL);
+  assert.equal(prefs.writing.temperature, 0.7);
+  assert.equal(prefs.utility.provider, 'siliconflow');
+  assert.equal(prefs.utility.model, DEFAULT_BUILTIN_CHAT_MODEL);
   assert.equal(prefs.utility.temperature, 0.7);
 });
 

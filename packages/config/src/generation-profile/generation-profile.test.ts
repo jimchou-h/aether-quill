@@ -41,7 +41,7 @@ test('getResolvedGenerationProfileEnv falls back to PROVIDER_MODEL and legacy te
     assert.equal(resolved.writingModel, 'base-model');
     assert.equal(resolved.utilityModel, 'base-model');
     assert.equal(resolved.utilityTemperature, 0.65);
-    assert.equal(resolved.writingTemperature, 0.9);
+    assert.equal(resolved.writingTemperature, 0.7);
     assert.equal(resolved.writingFrequencyPenalty, undefined);
   } finally {
     if (prev.model === undefined) delete process.env.PROVIDER_MODEL;
@@ -99,7 +99,7 @@ test('resolveGenerationTierForTemplateKey maps writing vs utility tasks', () => 
   assert.equal(isWritingTierTemplateKey('chapter.optimize.plan'), false);
 });
 
-test('resolveGenerationCallProfile applies tier models and project overrides', () => {
+test('resolveGenerationCallProfile uses built-in defaults; project overrides when no user prefs', () => {
   const env = {
     fallbackModel: 'base',
     writingModel: 'writing-env',
@@ -113,8 +113,8 @@ test('resolveGenerationCallProfile applies tier models and project overrides', (
     env,
   });
   assert.equal(writing.tier, 'writing');
-  assert.equal(writing.model, 'writing-env');
-  assert.equal(writing.temperature, 0.9);
+  assert.equal(writing.model, 'deepseek-v4-flash');
+  assert.equal(writing.temperature, 0.7);
   assert.equal(writing.frequencyPenalty, 0.3);
 
   const utility = resolveGenerationCallProfile({

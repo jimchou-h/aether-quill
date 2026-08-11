@@ -40,26 +40,26 @@ function buildTraceContextFields(profile: ReturnType<typeof resolveGenerationCal
   };
 }
 
-test('writing templateKey resolves writing model and frequency_penalty for trace', () => {
+test('writing templateKey uses built-in defaults and env frequency_penalty', () => {
   const profile = resolveProfileForProject('chapter.pipeline.sensory.rewrite');
   const traceFields = buildTraceContextFields(profile);
 
   assert.equal(profile.tier, 'writing');
-  assert.equal(profile.model, 'writing-model-env');
-  assert.equal(profile.temperature, 0.92);
+  assert.equal(profile.model, 'deepseek-v4-flash');
+  assert.equal(profile.temperature, 0.7);
   assert.equal(profile.frequencyPenalty, 0.3);
   assert.equal(traceFields.generation_tier, 'writing');
-  assert.equal(traceFields.generation_temperature, 0.92);
+  assert.equal(traceFields.generation_temperature, 0.7);
   assert.equal(traceFields.generation_frequency_penalty, 0.3);
 });
 
-test('utility templateKey resolves utility model without frequency_penalty', () => {
+test('utility templateKey uses built-in defaults without frequency_penalty', () => {
   const profile = resolveProfileForProject('chapter.pipeline.sensory.outline');
   const traceFields = buildTraceContextFields(profile);
 
   assert.equal(profile.tier, 'utility');
-  assert.equal(profile.model, 'utility-model-env');
-  assert.equal(profile.temperature, 0.32);
+  assert.equal(profile.model, 'deepseek-v4-flash');
+  assert.equal(profile.temperature, 0.7);
   assert.equal(profile.frequencyPenalty, undefined);
   assert.equal(traceFields.generation_tier, 'utility');
   assert.equal(traceFields.generation_frequency_penalty, undefined);
@@ -85,7 +85,38 @@ test('project settings override env models per tier', () => {
   assert.equal(utility.temperature, 0.25);
 });
 
-test('unconfigured tier env falls back to PROVIDER_MODEL and legacy utility temperature', () => {
+test('user preferences win over project; siliconflow without model uses siliconflow default id', () => {
+  const profile = resolveGenerationCallProfile({
+    templateKey: 'write.chapter',
+    userPreferences: {
+      writing: {
+        provider: 'siliconflow',
+        model: 'Pro/deepseek-ai/DeepSeek-V3.2',
+        temperature: 0.7,
+      },
+      utility: { provider: 'deepseek', model: 'deepseek-v4-flash', temperature: 0.7 },
+    },
+    projectOverrides: {
+      generationWritingModel: 'project-should-not-win',
+    },
+    env: SPLIT_ENV,
+  });
+  assert.equal(profile.provider, 'siliconflow');
+  assert.equal(profile.model, 'Pro/deepseek-ai/DeepSeek-V3.2');
+
+  const fallback = resolveGenerationCallProfile({
+    templateKey: 'write.chapter',
+    userPreferences: {
+      writing: { provider: 'siliconflow', model: null, temperature: 0.7 },
+      utility: { provider: 'deepseek', model: null, temperature: 0.7 },
+    },
+    env: SPLIT_ENV,
+  });
+  assert.equal(fallback.provider, 'siliconflow');
+  assert.match(fallback.model, /\//);
+});
+
+test('without user prefs, built-in defaults ignore PROVIDER_MODEL env for call profile', () => {
   const prev = {
     model: process.env.PROVIDER_MODEL,
     writing: process.env.PROVIDER_MODEL_WRITING,
@@ -113,9 +144,10 @@ test('unconfigured tier env falls back to PROVIDER_MODEL and legacy utility temp
       templateKey: 'chapter.pipeline.sensory.outline',
     });
 
-    assert.equal(writing.model, 'legacy-base');
-    assert.equal(utility.model, 'legacy-base');
-    assert.equal(utility.temperature, 0.65);
+    assert.equal(writing.model, 'deepseek-v4-flash');
+    assert.equal(utility.model, 'deepseek-v4-flash');
+    assert.equal(writing.temperature, 0.7);
+    assert.equal(utility.temperature, 0.7);
     assert.equal(writing.frequencyPenalty, undefined);
   } finally {
     if (prev.model === undefined) delete process.env.PROVIDER_MODEL;
