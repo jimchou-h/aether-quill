@@ -3,6 +3,7 @@
  */
 
 import axios from 'axios';
+import { resolveUpstreamFailureMessage } from './orchestrator-error.util';
 
 export interface PipelineOrchestratorStreamCallbacks {
   onStart?: (traceId: string) => void;
@@ -35,7 +36,7 @@ export async function streamPipelineGeneration(input: {
       { responseType: 'stream', timeout: 300000 }
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : '调用生成服务失败';
+    const message = await resolveUpstreamFailureMessage(error, '调用生成服务失败');
     input.callbacks.onError?.(message);
     return { ok: false, text: '', traceId: '', errorMessage: message };
   }

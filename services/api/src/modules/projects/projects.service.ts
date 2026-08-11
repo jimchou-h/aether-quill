@@ -110,6 +110,10 @@ import { PromptTemplatesService } from '../prompt-templates/prompt-templates.ser
 import { TaskPromptsService } from '../task-prompts/task-prompts.service';
 import { AuthService } from '../auth/auth.service';
 import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
+import {
+  isMissingLlmProviderKeyMessage,
+  resolveUpstreamFailureMessage,
+} from './orchestrator-error.util';
 import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
@@ -1758,7 +1762,7 @@ export class ProjectsService implements OnModuleInit {
         structuredInfo,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : '结构化信息解析失败';
+      const message = await resolveUpstreamFailureMessage(error, '结构化信息解析失败');
       throw new BadGatewayException(message);
     }
   }
@@ -2007,7 +2011,7 @@ export class ProjectsService implements OnModuleInit {
       if (error instanceof BadGatewayException) {
         throw error;
       }
-      const message = error instanceof Error ? error.message : '调用关系事件抽取服务失败';
+      const message = await resolveUpstreamFailureMessage(error, '调用关系事件抽取服务失败');
       throw new BadGatewayException(message);
     }
 
@@ -2462,7 +2466,7 @@ export class ProjectsService implements OnModuleInit {
         { responseType: 'stream' }
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : '调用章节大纲生成失败';
+      const message = await resolveUpstreamFailureMessage(error, '调用章节大纲生成失败');
       throw new BadGatewayException(message);
     }
 
@@ -3295,7 +3299,7 @@ export class ProjectsService implements OnModuleInit {
         issueCount: issues.length,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : '错字检查失败';
+      const message = await resolveUpstreamFailureMessage(error, '错字检查失败');
       throw new BadGatewayException({
         code: 1314,
         msg: message,
@@ -3383,7 +3387,7 @@ export class ProjectsService implements OnModuleInit {
         { responseType: 'stream' }
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : '错字自动修正失败';
+      const message = await resolveUpstreamFailureMessage(error, '错字自动修正失败');
       throw new BadGatewayException({
         code: 1315,
         msg: message,
@@ -4953,7 +4957,7 @@ export class ProjectsService implements OnModuleInit {
         { responseType: 'stream' }
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : '调用优化方案生成失败';
+      const message = await resolveUpstreamFailureMessage(error, '调用优化方案生成失败');
       input.callbacks.onError(message);
       return { ok: false, planText: '' };
     }

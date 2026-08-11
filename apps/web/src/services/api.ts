@@ -252,12 +252,32 @@ http.interceptors.response.use(
     return response;
   },
   (error) => {
-    // 处理错误响应
+    // 处理错误响应：优先展示服务端可读 msg/message，避免裸「Request failed with status code 400」
     if (error.response?.data) {
       const data = error.response.data;
-      if (data && typeof data === 'object' && 'msg' in data) {
-        error.message = data.msg;
+      if (data && typeof data === 'object') {
+        const record = data as Record<string, unknown>;
+        const serverMessage =
+          (typeof record.msg === 'string' && record.msg.trim()) ||
+          (typeof record.message === 'string' && record.message.trim()) ||
+          (typeof record.error === 'string' && record.error.trim()) ||
+          '';
+        if (serverMessage) {
+          error.message = serverMessage;
+        }
+      } else if (typeof data === 'string' && data.trim()) {
+        error.message = data.trim();
       }
+    }
+    if (
+      typeof error.message === 'string' &&
+      /^Request failed with status code \d+$/i.test(error.message.trim())
+    ) {
+      const status = error.response?.status;
+      error.message =
+        status != null
+          ? `请求失败（HTTP ${status}），请查看服务端日志或稍后重试`
+          : '请求失败，请稍后重试';
     }
     if (error.response?.status === 401) {
       void import('../utils/pageFeedback').then(({ presentError }) => {
