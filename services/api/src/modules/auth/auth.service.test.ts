@@ -62,7 +62,9 @@ test('generation preferences round-trip on auth service (memory + disk)', async 
 
     const defaults = service.getGenerationPreferences('1');
     assert.equal(defaults.writing.provider, 'deepseek');
-    assert.equal(defaults.writing.temperature, null);
+    assert.equal(defaults.writing.model, 'deepseek-v4-flash');
+    assert.equal(defaults.writing.temperature, 0.7);
+    assert.equal(defaults.utility.model, 'deepseek-v4-flash');
     assert.equal(defaults.utility.temperature, 0.7);
 
     const saved = await service.updateGenerationPreferences('1', {

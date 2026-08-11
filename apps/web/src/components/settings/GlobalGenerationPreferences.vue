@@ -8,6 +8,8 @@ type LlmChatProviderId = components['schemas']['LlmChatProviderId'];
 type UserGenerationPreferences = components['schemas']['UserGenerationPreferences'];
 
 const GENERATION_MODEL_ID_MAX_LENGTH = 128;
+const DEFAULT_MODEL = 'deepseek-v4-flash';
+const DEFAULT_TEMPERATURE = 0.7;
 
 const PROVIDER_OPTIONS: Array<{ value: LlmChatProviderId; label: string }> = [
   { value: 'deepseek', label: 'DeepSeek' },
@@ -15,18 +17,22 @@ const PROVIDER_OPTIONS: Array<{ value: LlmChatProviderId; label: string }> = [
 ];
 
 const MODEL_SUGGESTIONS_BY_PROVIDER: Record<LlmChatProviderId, readonly string[]> = {
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  siliconflow: ['Qwen/Qwen2.5-7B-Instruct', 'Qwen/Qwen2.5-72B-Instruct'],
+  deepseek: ['deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
+  siliconflow: [
+    'Pro/deepseek-ai/DeepSeek-V3.2',
+    'deepseek-ai/DeepSeek-V3.2',
+    'Qwen/Qwen2.5-7B-Instruct',
+    'Qwen/Qwen2.5-72B-Instruct',
+  ],
 };
 
 const writingProvider = shallowRef<LlmChatProviderId>('deepseek');
-const writingModel = shallowRef('');
-const writingTemperature = shallowRef<number | null>(null);
-const useCustomWritingTemperature = shallowRef(false);
+const writingModel = shallowRef(DEFAULT_MODEL);
+const writingTemperature = shallowRef(DEFAULT_TEMPERATURE);
 
 const utilityProvider = shallowRef<LlmChatProviderId>('deepseek');
-const utilityModel = shallowRef('');
-const utilityTemperature = shallowRef(0.7);
+const utilityModel = shallowRef(DEFAULT_MODEL);
+const utilityTemperature = shallowRef(DEFAULT_TEMPERATURE);
 
 const saved = shallowRef<UserGenerationPreferences | null>(null);
 const loading = shallowRef(false);
@@ -41,22 +47,25 @@ function normalizeModelInput(value: string | null | undefined): string {
   return value.trim().slice(0, GENERATION_MODEL_ID_MAX_LENGTH);
 }
 
-function modelPayloadFromInput(value: string): string | null {
+function modelPayloadFromInput(value: string): string {
   const trimmed = normalizeModelInput(value);
-  return trimmed.length > 0 ? trimmed : null;
+  return trimmed.length > 0 ? trimmed : DEFAULT_MODEL;
 }
 
 function applyFromPreferences(prefs: UserGenerationPreferences) {
   writingProvider.value = prefs.writing.provider;
-  writingModel.value = normalizeModelInput(prefs.writing.model);
-  useCustomWritingTemperature.value = typeof prefs.writing.temperature === 'number';
+  writingModel.value = normalizeModelInput(prefs.writing.model) || DEFAULT_MODEL;
   writingTemperature.value =
-    typeof prefs.writing.temperature === 'number' ? prefs.writing.temperature : null;
+    typeof prefs.writing.temperature === 'number'
+      ? prefs.writing.temperature
+      : DEFAULT_TEMPERATURE;
 
   utilityProvider.value = prefs.utility.provider;
-  utilityModel.value = normalizeModelInput(prefs.utility.model);
+  utilityModel.value = normalizeModelInput(prefs.utility.model) || DEFAULT_MODEL;
   utilityTemperature.value =
-    typeof prefs.utility.temperature === 'number' ? prefs.utility.temperature : 0.7;
+    typeof prefs.utility.temperature === 'number'
+      ? prefs.utility.temperature
+      : DEFAULT_TEMPERATURE;
 
   saved.value = prefs;
 }
@@ -72,16 +81,13 @@ const isDirty = computed(() => {
   if (!saved.value) {
     return false;
   }
-  const writingTemp = useCustomWritingTemperature.value
-    ? (writingTemperature.value ?? 0.9)
-    : null;
   return (
     writingProvider.value !== saved.value.writing.provider ||
-    modelPayloadFromInput(writingModel.value) !== saved.value.writing.model ||
-    writingTemp !== saved.value.writing.temperature ||
+    modelPayloadFromInput(writingModel.value) !== (saved.value.writing.model || DEFAULT_MODEL) ||
+    writingTemperature.value !== (saved.value.writing.temperature ?? DEFAULT_TEMPERATURE) ||
     utilityProvider.value !== saved.value.utility.provider ||
-    modelPayloadFromInput(utilityModel.value) !== saved.value.utility.model ||
-    utilityTemperature.value !== saved.value.utility.temperature
+    modelPayloadFromInput(utilityModel.value) !== (saved.value.utility.model || DEFAULT_MODEL) ||
+    utilityTemperature.value !== (saved.value.utility.temperature ?? DEFAULT_TEMPERATURE)
   );
 });
 
@@ -108,9 +114,7 @@ async function handleSave() {
       writing: {
         provider: writingProvider.value,
         model: modelPayloadFromInput(writingModel.value),
-        temperature: useCustomWritingTemperature.value
-          ? (writingTemperature.value ?? 0.9)
-          : null,
+        temperature: writingTemperature.value,
       },
       utility: {
         provider: utilityProvider.value,
@@ -127,16 +131,6 @@ async function handleSave() {
   }
 }
 
-function onToggleWritingTemperature(enabled: boolean) {
-  useCustomWritingTemperature.value = enabled;
-  if (enabled && writingTemperature.value === null) {
-    writingTemperature.value = 0.9;
-  }
-  if (!enabled) {
-    writingTemperature.value = null;
-  }
-}
-
 onMounted(() => {
   void load();
 });
@@ -146,8 +140,8 @@ onMounted(() => {
   <section class="panel">
     <h2 class="panel-title">全局模型设置</h2>
     <p class="field-hint">
-      写作任务与常规（工具）任务可分别选择厂商与模型；密钥仍由服务端环境变量配置，此处不填写
-      API Key。未填模型时使用对应厂商的环境默认模型。
+      写作与常规任务可分别选择厂商、模型与温度。默认均为 DeepSeek /
+      deepseek-v4-flash / 0.7。API Key 仅在服务端 .env 配置，此处不填写。
     </p>
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
@@ -179,7 +173,7 @@ onMounted(() => {
           type="text"
           list="aq-global-writing-model-suggestions"
           maxlength="128"
-          placeholder="留空 = 环境默认"
+          :placeholder="DEFAULT_MODEL"
           :disabled="saving"
         />
       </div>
@@ -188,19 +182,7 @@ onMounted(() => {
       </datalist>
       <p class="field-hint inline-hint">用于续写、优化 draft、精修改写等进正文任务。</p>
 
-      <div class="toggle-row">
-        <label class="toggle-label">
-          <input
-            type="checkbox"
-            class="toggle-checkbox"
-            :checked="useCustomWritingTemperature"
-            :disabled="saving"
-            @change="onToggleWritingTemperature(($event.target as HTMLInputElement).checked)"
-          />
-          <span class="toggle-text">自定义写作温度</span>
-        </label>
-      </div>
-      <div v-if="useCustomWritingTemperature" class="row">
+      <div class="row">
         <label class="field-label" for="aq-global-writing-temperature">写作温度</label>
         <input
           id="aq-global-writing-temperature"
@@ -213,9 +195,7 @@ onMounted(() => {
           :disabled="saving"
         />
       </div>
-      <p class="field-hint inline-hint">
-        未勾选时使用环境变量 PROVIDER_TEMPERATURE_WRITING（默认约 0.9）。
-      </p>
+      <p class="field-hint inline-hint">范围 0~2；默认 0.7。</p>
 
       <h3 class="section-title">常规档</h3>
       <div class="row">
@@ -241,7 +221,7 @@ onMounted(() => {
           type="text"
           list="aq-global-utility-model-suggestions"
           maxlength="128"
-          placeholder="留空 = 环境默认"
+          :placeholder="DEFAULT_MODEL"
           :disabled="saving"
         />
       </div>
@@ -334,25 +314,6 @@ onMounted(() => {
 
 .field-input-wide {
   width: min(28rem, 100%);
-}
-
-.toggle-row {
-  margin: 0.5rem 0 0.75rem;
-}
-
-.toggle-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.toggle-checkbox {
-  margin: 0;
-}
-
-.toggle-text {
-  font-size: 0.875rem;
 }
 
 .actions {
