@@ -44,10 +44,23 @@ test('consumeProviderSseStreamChunk reassembles JSON split across chunks', () =>
   assert.equal(contents.join(''), '你好');
 });
 
-test('parseProviderSseLine handles DONE and empty deltas', () => {
+test('parseProviderSseLine ignores reasoning_content and only yields answer content', () => {
   assert.equal(parseProviderSseLine('data: [DONE]').type, 'done');
   assert.equal(parseProviderSseLine('data: {"choices":[{"delta":{}}]}').type, 'skip');
   assert.equal(parseProviderSseLine(': keep-alive').type, 'skip');
+  assert.equal(
+    parseProviderSseLine(
+      'data: {"choices":[{"delta":{"reasoning_content":"先分析方案再写正文"}}]}'
+    ).type,
+    'skip'
+  );
+  const contentLine = parseProviderSseLine(
+    'data: {"choices":[{"delta":{"content":"夜风很凉。"}}]}'
+  );
+  assert.equal(contentLine.type, 'content');
+  if (contentLine.type === 'content') {
+    assert.equal(contentLine.content, '夜风很凉。');
+  }
 });
 
 test('parseProviderSseLine reports malformed only for invalid complete lines', () => {

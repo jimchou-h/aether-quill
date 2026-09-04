@@ -7,6 +7,7 @@ import {
   NormalizedSseEvent,
   ProviderConfig,
 } from './types';
+import { withDeepSeekNonThinkingChatBody } from './deepseek-thinking';
 
 /**
  * DeepSeek 供应商配置
@@ -93,14 +94,17 @@ export class DeepSeekProvider implements ModelProvider {
 
     messages.push({ role: 'user', content: request.userPrompt });
 
-    const response = await this.client.post<DeepSeekChatCompletionResponse>('/chat/completions', {
-      model,
-      messages,
-      max_tokens: request.maxTokens || 4096,
-      temperature: request.temperature || 0.7,
-      top_p: request.topP || 0.95,
-      stream: false,
-    });
+    const response = await this.client.post<DeepSeekChatCompletionResponse>(
+      '/chat/completions',
+      withDeepSeekNonThinkingChatBody({
+        model,
+        messages,
+        max_tokens: request.maxTokens || 4096,
+        temperature: request.temperature || 0.7,
+        top_p: request.topP || 0.95,
+        stream: false,
+      })
+    );
 
     const choice = response.data.choices[0];
 
@@ -135,14 +139,14 @@ export class DeepSeekProvider implements ModelProvider {
     try {
       const response = await this.client.post(
         '/chat/completions',
-        {
+        withDeepSeekNonThinkingChatBody({
           model,
           messages,
           max_tokens: request.maxTokens || 4096,
           temperature: request.temperature || 0.7,
           top_p: request.topP || 0.95,
           stream: true,
-        },
+        }),
         {
           responseType: 'stream',
           headers: {

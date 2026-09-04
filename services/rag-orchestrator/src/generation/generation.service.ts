@@ -19,8 +19,10 @@ import {
   resolveLlmChatProviderEndpoint,
   type LlmChatProviderId,
 } from '@aether-quill/config';
+import { withDeepSeekNonThinkingChatBody } from '@aether-quill/model-providers';
 import { TraceRecord, GenerateRequest } from './types';
 import { consumeProviderSseStreamChunk, flushProviderSseStreamBuffer } from './provider-sse-stream';
+import { createUtf8StreamDecoder } from './utf8-stream-decoder';
 import { TraceStore, TraceQuery, TraceStats } from './trace-store';
 import {
   buildChapterIdentityRelationExtractPrompt,
@@ -237,6 +239,10 @@ export class GenerationService {
       for await (const chunk of this.callProviderStream(messages, trace)) {
         fullContent += chunk;
         yield chunk;
+      }
+
+      if (!fullContent.trim()) {
+        throw new Error('模型未返回正文');
       }
 
       this.updateTrace(trace.id, {
@@ -841,7 +847,9 @@ export class GenerationService {
       typeof promptOrMessages === 'string'
         ? [{ role: 'user' as const, content: promptOrMessages }]
         : promptOrMessages;
-    const body = this.buildProviderRequestBody(messages, provider, options);
+    const body = withDeepSeekNonThinkingChatBody(
+      this.buildProviderRequestBody(messages, provider, options)
+    );
     const model = String(body.model ?? provider.model);
 
     try {
@@ -889,13 +897,13 @@ export class GenerationService {
         : undefined);
     const provider = this.resolveProviderConfig(providerId);
 
-    const streamBody: Record<string, unknown> = {
+    const streamBody = withDeepSeekNonThinkingChatBody({
       model: callOptions.model ?? provider.model,
       messages,
       max_tokens: callOptions.maxTokens ?? provider.maxTokens,
       temperature: callOptions.temperature ?? provider.temperature,
       stream: true,
-    };
+    });
     if (
       typeof callOptions.frequencyPenalty === 'number' &&
       Number.isFinite(callOptions.frequencyPenalty)
@@ -937,10 +945,14 @@ export class GenerationService {
     }
 
     const stream = response.data as NodeJS.ReadableStream;
+    const utf8 = createUtf8StreamDecoder();
     let lineBuffer = '';
 
     for await (const chunk of stream) {
-      const consumed = consumeProviderSseStreamChunk(lineBuffer, chunk.toString('utf-8'));
+      const consumed = consumeProviderSseStreamChunk(
+        lineBuffer,
+        utf8.decode(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+      );
       lineBuffer = consumed.nextBuffer;
 
       for (const event of consumed.events) {
@@ -962,6 +974,7 @@ export class GenerationService {
       }
     }
 
+    lineBuffer += utf8.flush();
     const flushed = flushProviderSseStreamBuffer(lineBuffer);
     for (const event of flushed.events) {
       if (event.type === 'done') {

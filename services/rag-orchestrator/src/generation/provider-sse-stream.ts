@@ -36,7 +36,7 @@ export function parseProviderSseLine(line: string): ProviderSseLineResult {
 
   try {
     const parsed = JSON.parse(data) as {
-      choices?: Array<{ delta?: { content?: string } }>;
+      choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }>;
     };
     const content = parsed.choices?.[0]?.delta?.content ?? '';
     if (content) {
