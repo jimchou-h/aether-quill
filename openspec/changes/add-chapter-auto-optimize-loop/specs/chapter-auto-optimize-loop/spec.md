@@ -67,7 +67,7 @@
 
 ### Requirement: Convergence and early exit
 
-方案每一条目 MUST �?`severity`，取�?`high` / `medium` / `low`。当某轮复诊未产出任�?`high` 条目时，系统 MUST NOT 再进入下一轮，�?MUST 标记 `converged`。轮数上�?MUST 始终作为硬上界生效，即使仍有 `high` 条目�?MUST 停止�?
+方案每一条目 MUST �?`severity`，取�?`high` / `medium` / `low`；`severity` 解析 MUST 容忍常见中文档位与大小写差异。当某轮复诊未产出任�?`high` 条目**且该轮无任何条目被丢弃**时，系统 MUST NOT 再进入下一轮，�?MUST 标记 `converged`——收敛结论只在整份诊断被完整读懂时才成立。轮数上�?MUST 始终作为硬上界生效，即使仍有 `high` 条目�?MUST 停止�?
 #### Scenario: No high severity items ends the loop early
 
 - **WHEN** 轮数上限�?3，第 2 轮复诊只产出 `medium` �?`low` 条目
@@ -77,6 +77,16 @@
 
 - **WHEN** 轮数上限�?2，第 2 轮仍产出 `high` 条目
 - **THEN** 系统 MUST 在第 2 轮结束后停止，`converged` MUST �?false
+
+#### Scenario: Discarded items block a convergence claim
+
+- **WHEN** 某轮有条目因结构不合法被丢弃，且存活条目中没有 `high`
+- **THEN** 系统 MUST NOT 标记 `converged`，因为被丢弃的条目可能正是 `high`；循环 MUST 在轮数预算内继续
+
+#### Scenario: Every item discarded is a contract failure, not convergence
+
+- **WHEN** 某轮复诊输出可解析为 JSON，但其中每一条目都因缺少定位信息或严重度不可识别而被丢弃
+- **THEN** 系统 MUST 以 `plan_parse_failed` 终止并保留当前稿，MUST NOT 标记 `converged`，且 MUST NOT 向用户显示"未发现严重问题"
 
 ### Requirement: Live item visibility and stop-and-accept
 

@@ -100,6 +100,15 @@ describe('summarizeAutoLoopRound', () => {
     );
     assert.ok(summary.includes('未发现严重问题'));
   });
+
+  it('flags a discard-bearing round as an incomplete diagnosis, never as clean', () => {
+    const summary = summarizeAutoLoopRound(
+      makeRound({ items: [], appliedCount: 0, converged: false, discardedCount: 11 })
+    );
+    assert.ok(summary.includes('11 条格式不合法已丢弃'));
+    assert.ok(summary.includes('本轮诊断不完整'));
+    assert.ok(!summary.includes('可以收工'), '读不懂的诊断不能显示为可以收工');
+  });
 });
 
 describe('mergeAutoLoopItemStatus', () => {

@@ -528,6 +528,111 @@ test('task prompt key 使用 chapter.optimize 命名空间以复用现有分组'
   assert.equal(CHAPTER_AUTO_LOOP_DRAFT_TEMPLATE_KEY, 'chapter.optimize.loop.draft');
 });
 
+test('全部条目被丢弃时不得判定收敛——什么都没读懂不等于正文干净', () => {
+  const decision = shouldContinueAutoLoop({
+    roundIndex: 1,
+    roundBudget: 2,
+    items: [],
+    discardedCount: 11,
+  });
+  assert.equal(decision.converged, false, '11 条读不懂却报"未发现严重问题"是把失败当成功');
+  assert.equal(decision.diagnosisComplete, false);
+});
+
+test('有丢弃但仍有存活条目时也不判收敛：被丢的那条可能才是 high', () => {
+  const decision = shouldContinueAutoLoop({
+    roundIndex: 1,
+    roundBudget: 2,
+    items: [makeItem({ severity: 'low' })],
+    discardedCount: 3,
+  });
+  assert.equal(decision.converged, false);
+  assert.equal(decision.shouldContinue, true, '诊断不完整应继续用掉预算而非提前收工');
+});
+
+test('零丢弃且无 high 才是真收敛', () => {
+  const decision = shouldContinueAutoLoop({
+    roundIndex: 1,
+    roundBudget: 2,
+    items: [makeItem({ severity: 'medium' })],
+    discardedCount: 0,
+  });
+  assert.equal(decision.converged, true);
+  assert.equal(decision.diagnosisComplete, true);
+  assert.equal(decision.shouldContinue, false);
+});
+
+test('模型明说无问题（items 为空且零丢弃）仍算收敛', () => {
+  const decision = shouldContinueAutoLoop({
+    roundIndex: 1,
+    roundBudget: 3,
+    items: [],
+    discardedCount: 0,
+  });
+  assert.equal(decision.converged, true);
+  assert.equal(decision.shouldContinue, false);
+});
+
+test('诊断不完整但已到轮数上限时停止且不算收敛', () => {
+  const decision = shouldContinueAutoLoop({
+    roundIndex: 2,
+    roundBudget: 2,
+    items: [],
+    discardedCount: 5,
+  });
+  assert.equal(decision.shouldContinue, false);
+  assert.equal(decision.converged, false);
+});
+
+test('中文 severity 与常见字段别名被接纳而非丢弃', () => {
+  const parsed = parseAutoLoopPlanItems(
+    JSON.stringify({
+      items: [
+        { paragraphIndex: 2, anchorQuote: '他握紧了刀柄', severity: '严重', instruction: '写实' },
+        { paragraphIndex: 3, quote: '雨下了一整夜', severity: '中', suggestion: '收紧节奏' },
+        { paragraph: 4, anchorQuote: '门在身后合上', severity: 'LOW', instruction: '补足声音' },
+      ],
+    })
+  );
+  assert.equal(parsed.discardedCount, 0, '格式轻微跑偏不该让整轮诊断归零');
+  assert.deepEqual(
+    parsed.items.map((item) => [item.paragraphIndex, item.severity]),
+    [
+      [2, 'high'],
+      [3, 'medium'],
+      [4, 'low'],
+    ]
+  );
+  assert.equal(parsed.items[1].instruction, '收紧节奏');
+});
+
+test('真正缺失定位信息的条目仍然被丢弃并计数', () => {
+  const parsed = parseAutoLoopPlanItems(
+    JSON.stringify({
+      items: [
+        {
+          paragraphIndex: 2,
+          anchorQuote: '有效引文内容',
+          severity: 'high',
+          instruction: '有效指令',
+        },
+        { anchorQuote: '缺编号', severity: 'high', instruction: '指令' },
+        { paragraphIndex: 3, severity: 'high', instruction: '缺引文' },
+        { paragraphIndex: 4, anchorQuote: '缺指令', severity: 'high' },
+        {
+          paragraphIndex: 5,
+          anchorQuote: '无法识别的严重度',
+          severity: '很急',
+          instruction: '指令',
+        },
+      ],
+    })
+  );
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.discardedCount, 4);
+  assert.equal(parsed.parseFailed, false);
+});
+
 test('段级 max_tokens 按原段长度定预算并夹在带宽内', () => {
   // 短段落不至于连一句都写不完
   assert.equal(resolveAutoLoopSegmentMaxTokens('短。'), 400);

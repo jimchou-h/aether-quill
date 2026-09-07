@@ -34,7 +34,12 @@
 - **段级**：替换段字数须在原段 `50% ~ 250%`；含占位�?Markdown/说明性开头（如「以下是」「修改后」）即失败。失�?�?该段回滚为原文，状�?`rolled_back`�?- **章级**：本轮成稿总字数须�?*入库原文**�?`90% ~ 150%`（instruction 明确允许删减时下限放宽至 `60%`，复�?`planAllowsContentReduction` 判定思路）。越�?�?整轮回滚到上一轮成稿，`loop_round_end.rolledBack = true`，循环终止�?
 章级基准始终�?*入库原文**而非上一轮稿，避免每轮各�?20% 却轮�?合规"的累积漂移�?
 ### 6. 收敛提前退�?
-方案条目须带 `severity: high | medium | low`。本轮复诊无 `high` 条目 �?不再进入下一轮，`loop_round_end.converged = true`。轮数上限仍是硬上界�?�?，默�?2），因为模型自评严重度不完全可信�?
+方案条目须带 `severity: high | medium | low`。本轮复诊无 `high` 条目 **�?`discardedCount === 0`** �?不再进入下一轮，`loop_round_end.converged = true`。轮数上限仍是硬上界�?�?，默�?2），因为模型自评严重度不完全可信�?
+收敛判定必须搭上"诊断是否被完整读懂"这个前提。只�?`items` 里有没有 `high`�?严重的假阴性：条目因格式不合法被丢弃后 `items` 变空，"没有 high"就自动成立，于是一轮什么都没读懂的复诊会被报成"未发现严重问题，可以收工"，用户拿回一份未经改动的原文却以为章节已经干净。因此：
+
+- `discardedCount > 0` �?本轮诊断不完整 �?`converged = false`，继续用掉轮数预�?- `items.length === 0 && discardedCount > 0` �?整轮零信息量，等价于 JSON 解析失败 �?`stoppedReason = plan_parse_failed`，保留当前�?
+反过来，`{"items":[]}` �?`discardedCount === 0`（prompt 规则 6：模型明确表示无问题）才是真收敛�?
+为降低丢弃率，`severity` 与字段名解析对常见抖动做容忍：中文档位（严�?中等/轻微 等）归一化到三档，`quote` / `suggestion` 这类同义键名一并接纳。定位信息（编号 + 引文）与可执行指令仍是硬前提，缺失即丢弃——没有它们无法安全地做局部替换�?
 ### 7. 两个 task prompt key，首�?复诊共用
 
 `chapter.optimize.loop.plan` �?`chapter.optimize.loop.draft`。首诊与复诊共用 plan prompt，差异由 user prompt 的输入材料承载（有无 `<previous-items>` / 稿件来源）。不拆第三个 key：两个近乎相同的 prompt 会被改歪一个忘一个，且每�?key 都要三处同步�?

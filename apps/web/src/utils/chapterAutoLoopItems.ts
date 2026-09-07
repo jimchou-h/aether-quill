@@ -59,7 +59,8 @@ export function summarizeAutoLoopRound(round: ChapterAutoLoopRound): string {
     parts.push(`${round.deferredCount} 条留待下轮`);
   }
   if (round.discardedCount > 0) {
-    parts.push(`${round.discardedCount} 条格式不合法已丢弃`);
+    // 丢弃意味着这一轮诊断没被完整读懂，措辞必须让用户看出"还有没读到的问题"
+    parts.push(`${round.discardedCount} 条格式不合法已丢弃（本轮诊断不完整）`);
   }
   if (round.converged) {
     parts.push('未发现严重问题，可以收工');
@@ -157,7 +158,7 @@ const STOPPED_REASON_TEXT: Record<ChapterAutoLoopStoppedReason, string> = {
   budget: '已达轮数上限，按设定停止',
   aborted: '已按你的操作停止，保留最近完成轮的成稿',
   round_rolled_back: '最后一轮越过整章闸门已回滚，循环终止',
-  plan_parse_failed: '复诊输出无法解析，循环终止',
+  plan_parse_failed: '复诊输出无法解析（或全部条目格式不合法），循环终止，正文保持原样',
 };
 
 export function describeAutoLoopStoppedReason(reason: ChapterAutoLoopStoppedReason): string {

@@ -214,8 +214,55 @@ function extractJsonObject(raw: string): unknown {
   return undefined;
 }
 
-function isSeverity(value: unknown): value is ChapterAutoLoopSeverity {
-  return value === 'high' || value === 'medium' || value === 'low';
+/**
+ * severity 归一化。
+ *
+ * 模型在中文 prompt 下经常回中文档位或大写英文；严格比字符串会让整轮诊断
+ * 归零，而这类偏差与诊断质量无关，属于纯格式抖动，值得容忍。
+ */
+const SEVERITY_ALIASES: Record<string, ChapterAutoLoopSeverity> = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+  严重: 'high',
+  高: 'high',
+  重要: 'high',
+  中等: 'medium',
+  中: 'medium',
+  一般: 'medium',
+  轻微: 'low',
+  低: 'low',
+};
+
+function normalizeSeverity(value: unknown): ChapterAutoLoopSeverity | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  return SEVERITY_ALIASES[value.trim().toLowerCase()] ?? null;
+}
+
+/** 取第一个非空字符串字段，用于容忍 `quote` / `suggestion` 这类同义键名。 */
+function pickString(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+function pickParagraphIndex(record: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    if (record[key] === undefined || record[key] === null) {
+      continue;
+    }
+    const numeric = Number(record[key]);
+    if (Number.isInteger(numeric) && numeric >= 1) {
+      return numeric;
+    }
+  }
+  return Number.NaN;
 }
 
 /**
@@ -246,18 +293,18 @@ export function parseAutoLoopPlanItems(raw: string): ParsedAutoLoopPlanItems {
       return;
     }
     const record = entry as Record<string, unknown>;
-    const paragraphIndex = Number(record.paragraphIndex);
-    const anchorQuote = typeof record.anchorQuote === 'string' ? record.anchorQuote.trim() : '';
-    const instruction = typeof record.instruction === 'string' ? record.instruction.trim() : '';
-    const severity = record.severity;
+    const paragraphIndex = pickParagraphIndex(record, [
+      'paragraphIndex',
+      'paragraph_index',
+      'paragraph',
+      'index',
+    ]);
+    const anchorQuote = pickString(record, ['anchorQuote', 'anchor_quote', 'quote', 'anchor']);
+    const instruction = pickString(record, ['instruction', 'suggestion', 'fix', 'action']);
+    const severity = normalizeSeverity(record.severity);
 
-    if (
-      !Number.isInteger(paragraphIndex) ||
-      paragraphIndex < 1 ||
-      !anchorQuote ||
-      !instruction ||
-      !isSeverity(severity)
-    ) {
+    // 定位信息（编号 + 引文）与可执行指令是局部改写的硬前提，缺一条都无法安全落地
+    if (!Number.isInteger(paragraphIndex) || !anchorQuote || !instruction || !severity) {
       discardedCount += 1;
       return;
     }
@@ -268,7 +315,7 @@ export function parseAutoLoopPlanItems(raw: string): ParsedAutoLoopPlanItems {
       paragraphIndex,
       anchorQuote,
       severity,
-      issue: typeof record.issue === 'string' ? record.issue.trim() : '',
+      issue: pickString(record, ['issue', 'problem', 'reason']),
       instruction,
       status: 'pending',
     });
@@ -562,6 +609,8 @@ export function clampAutoLoopRoundBudget(value: unknown): number {
 export interface AutoLoopContinueDecision {
   shouldContinue: boolean;
   converged: boolean;
+  /** 本轮诊断是否被完整读懂（无条目因格式被丢弃） */
+  diagnosisComplete: boolean;
 }
 
 /**
@@ -574,11 +623,17 @@ export function shouldContinueAutoLoop(input: {
   roundIndex: number;
   roundBudget: number;
   items: Pick<ChapterAutoLoopItem, 'severity'>[];
+  discardedCount?: number;
 }): AutoLoopContinueDecision {
   const hasHigh = input.items.some((item) => item.severity === 'high');
+  // 只有把整份诊断都读懂了，"没有 high"才等于"正文干净"。
+  // 有条目被丢弃时，被丢的那条完全可能正是 high——此时报收敛就是把读不懂当成没问题。
+  const diagnosisComplete = (input.discardedCount ?? 0) === 0;
+  const converged = !hasHigh && diagnosisComplete;
   return {
-    shouldContinue: hasHigh && input.roundIndex < input.roundBudget,
-    converged: !hasHigh,
+    shouldContinue: (hasHigh || !diagnosisComplete) && input.roundIndex < input.roundBudget,
+    converged,
+    diagnosisComplete,
   };
 }
 

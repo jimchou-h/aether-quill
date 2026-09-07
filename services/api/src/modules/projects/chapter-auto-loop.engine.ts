@@ -155,7 +155,9 @@ export async function runChapterAutoLoop(input: {
     }
 
     const parsed = parseAutoLoopPlanItems(rawPlan);
-    if (parsed.parseFailed) {
+    // 整体解不开、或解开了但每一条都不合法，两者信息量相同：这一轮什么都没读懂。
+    // 后者尤其危险——空条目列表会被收敛判定读成"没有 high"，把失败伪装成收工。
+    if (parsed.parseFailed || (parsed.items.length === 0 && parsed.discardedCount > 0)) {
       return finish('plan_parse_failed', rawPlan.slice(0, 200));
     }
 
@@ -189,6 +191,7 @@ export async function runChapterAutoLoop(input: {
         roundIndex,
         roundBudget: input.roundBudget,
         items: parsed.items,
+        discardedCount: parsed.discardedCount,
       });
       const round: AutoLoopRoundResult = {
         roundIndex,
@@ -322,6 +325,7 @@ export async function runChapterAutoLoop(input: {
       roundIndex,
       roundBudget: input.roundBudget,
       items: parsed.items,
+      discardedCount: parsed.discardedCount,
     });
     const round: AutoLoopRoundResult = {
       roundIndex,

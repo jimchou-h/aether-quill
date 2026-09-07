@@ -170,6 +170,27 @@ test('复诊输出无法解析时终止并保留上一稿', async () => {
   assert.equal(result.stoppedReason, 'plan_parse_failed');
 });
 
+test('JSON 可解析但全部条目不合法时按契约失败终止，绝不冒充收敛', async () => {
+  const { result } = await runHarness({
+    roundBudget: 3,
+    diagnoses: [
+      JSON.stringify({
+        items: Array.from({ length: 11 }, (_, i) => ({
+          paragraphIndex: i + 1,
+          severity: 'high',
+          issue: '缺少 anchorQuote 与 instruction，无法安全定位改写',
+        })),
+      }),
+    ],
+  });
+  assert.equal(result.stoppedReason, 'plan_parse_failed');
+  assert.equal(result.finalDraft, STORED, '什么都没读懂时正文必须原样保留');
+  assert.ok(
+    !result.rounds.some((round) => round.converged),
+    '11 条读不懂却报收敛，会让用户以为章节已经干净'
+  );
+});
+
 // ---------------------------------------------------------------------------
 // 定位降级与同段合并（切片二 / 四）
 // ---------------------------------------------------------------------------
