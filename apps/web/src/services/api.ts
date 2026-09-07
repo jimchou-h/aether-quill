@@ -1325,6 +1325,115 @@ export const apiClient = {
     return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
   },
 
+  async autoLoopChapterSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterAutoLoopRequest,
+    callbacks: ChapterAutoLoopCallbacks,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/auto-loop`;
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as ChapterAutoLoopSseEvent;
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                roundBudget: event.roundBudget ?? 0,
+                baseUpdatedAt: event.baseUpdatedAt ?? '',
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  roundIndex: event.roundIndex,
+                  paragraphIndex: event.paragraphIndex,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
+              break;
+            case 'progress':
+              if (event.taskKey && event.stage && event.message) {
+                callbacks.onProgress?.({
+                  traceId: event.traceId ?? '',
+                  taskKey: event.taskKey,
+                  stage: event.stage,
+                  message: event.message,
+                });
+              }
+              break;
+            case 'loop_round_start':
+              callbacks.onRoundStart?.({
+                roundIndex: event.roundIndex ?? 1,
+                roundBudget: event.roundBudget ?? 0,
+                paragraphCount: event.paragraphCount ?? 0,
+              });
+              break;
+            case 'loop_plan_items':
+              callbacks.onPlanItems?.({
+                roundIndex: event.roundIndex ?? 1,
+                items: event.items ?? [],
+                targetCount: event.targetCount ?? 0,
+                unlocatableCount: event.unlocatableCount ?? 0,
+                deferredCount: event.deferredCount ?? 0,
+                discardedCount: event.discardedCount ?? 0,
+              });
+              break;
+            case 'loop_item_status':
+              if (event.item) {
+                callbacks.onItemStatus?.({
+                  roundIndex: event.roundIndex ?? 1,
+                  item: event.item,
+                });
+              }
+              break;
+            case 'loop_round_end':
+              if (event.round) {
+                callbacks.onRoundEnd?.({
+                  roundIndex: event.roundIndex ?? event.round.roundIndex,
+                  round: event.round,
+                });
+              }
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId ?? '',
+                finalDraftText: event.finalDraftText ?? '',
+                stoppedReason: event.stoppedReason ?? 'budget',
+                roundCount: event.roundCount ?? 0,
+                baseUpdatedAt: event.baseUpdatedAt ?? '',
+              });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data ?? '章节自动优化失败');
+              break;
+          }
+        } catch {
+          // 忽略不完整 SSE 分片
+        }
+      }
+    );
+  },
+
+  async getChapterAutoLoopSession(projectId: string, chapterNo: number) {
+    const response = await http.get(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/auto-loop/session`
+    );
+    return this.unwrapPayload<ChapterAutoLoopSession | null>(response.data);
+  },
+
   async startChapterPipeline(
     projectId: string,
     chapterNo: number,
@@ -2601,11 +2710,13 @@ export interface ChapterOptimizationPlanRequest {
 
 export interface ChapterOptimizationDraftRequest {
   instruction: string;
-  planText: string;
+  planText?: string;
+  rewriteMode?: 'from-plan' | 'direct';
   planId?: string;
   appearingCharacters?: string[];
   selectedEventIds?: string[];
   segmentDiagnoses?: string[];
+  sourceText?: string;
 }
 
 export interface ChapterOptimizationApplyRequest {
@@ -2697,6 +2808,153 @@ export interface ChapterOptimizeDraftCallbacks {
     traceId: string;
     finalDraftText?: string;
     contentSafety?: ContentSafetyScanResult;
+  }) => void;
+  onError?: (message: string) => void;
+}
+
+export type ChapterAutoLoopSeverity = 'high' | 'medium' | 'low';
+
+export type ChapterAutoLoopItemStatus =
+  | 'pending'
+  | 'applied'
+  | 'relocated'
+  | 'skipped_unlocatable'
+  | 'deferred'
+  | 'rolled_back'
+  | 'failed';
+
+export interface ChapterAutoLoopItem {
+  id: string;
+  paragraphIndex: number;
+  anchorQuote: string;
+  severity: ChapterAutoLoopSeverity;
+  issue: string;
+  instruction: string;
+  status: ChapterAutoLoopItemStatus;
+  resolvedParagraphIndex?: number;
+  note?: string;
+}
+
+export interface ChapterAutoLoopRound {
+  roundIndex: number;
+  draft: string;
+  items: ChapterAutoLoopItem[];
+  appliedCount: number;
+  rolledBackCount: number;
+  unlocatableCount: number;
+  deferredCount: number;
+  discardedCount: number;
+  converged: boolean;
+  rolledBack: boolean;
+  rollbackReason?: string;
+}
+
+export type ChapterAutoLoopStoppedReason =
+  | 'converged'
+  | 'budget'
+  | 'aborted'
+  | 'round_rolled_back'
+  | 'plan_parse_failed';
+
+export interface ChapterAutoLoopSession {
+  projectId: string;
+  chapterNo: number;
+  instruction: string;
+  roundBudget: number;
+  baseUpdatedAt: string;
+  storedContent: string;
+  rounds: ChapterAutoLoopRound[];
+  finalDraft: string;
+  stoppedReason: ChapterAutoLoopStoppedReason;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChapterAutoLoopRequest {
+  instruction: string;
+  roundBudget?: number;
+  appearingCharacters?: string[];
+}
+
+export type ChapterAutoLoopStage =
+  | 'syncing_context'
+  | 'loop_diagnose'
+  | 'loop_segment_rewrite'
+  | 'loop_round_gate';
+
+interface ChapterAutoLoopSseEvent {
+  event?:
+    | 'start'
+    | 'stage'
+    | 'progress'
+    | 'loop_round_start'
+    | 'loop_plan_items'
+    | 'loop_item_status'
+    | 'loop_round_end'
+    | 'end'
+    | 'error';
+  data?: string;
+  traceId?: string;
+  chapterNo?: number;
+  roundBudget?: number;
+  baseUpdatedAt?: string;
+  stage?: ChapterAutoLoopStage;
+  roundIndex?: number;
+  paragraphIndex?: number;
+  segmentIndex?: number;
+  segmentTotal?: number;
+  paragraphCount?: number;
+  taskKey?: string;
+  message?: string;
+  items?: ChapterAutoLoopItem[];
+  targetCount?: number;
+  unlocatableCount?: number;
+  deferredCount?: number;
+  discardedCount?: number;
+  item?: ChapterAutoLoopItem;
+  round?: ChapterAutoLoopRound;
+  finalDraftText?: string;
+  stoppedReason?: ChapterAutoLoopStoppedReason;
+  roundCount?: number;
+}
+
+export interface ChapterAutoLoopCallbacks {
+  onStart?: (event: {
+    traceId: string;
+    chapterNo: number;
+    roundBudget: number;
+    baseUpdatedAt: string;
+  }) => void;
+  onStage?: (event: {
+    stage: ChapterAutoLoopStage;
+    roundIndex?: number;
+    paragraphIndex?: number;
+    segmentIndex?: number;
+    segmentTotal?: number;
+  }) => void;
+  onProgress?: (event: AiTaskProgressEvent) => void;
+  onRoundStart?: (event: {
+    roundIndex: number;
+    roundBudget: number;
+    paragraphCount: number;
+  }) => void;
+  onPlanItems?: (event: {
+    roundIndex: number;
+    items: ChapterAutoLoopItem[];
+    targetCount: number;
+    unlocatableCount: number;
+    deferredCount: number;
+    discardedCount: number;
+  }) => void;
+  onItemStatus?: (event: { roundIndex: number; item: ChapterAutoLoopItem }) => void;
+  onRoundEnd?: (event: { roundIndex: number; round: ChapterAutoLoopRound }) => void;
+  onEnd?: (event: {
+    traceId: string;
+    finalDraftText: string;
+    stoppedReason: ChapterAutoLoopStoppedReason;
+    roundCount: number;
+    baseUpdatedAt: string;
   }) => void;
   onError?: (message: string) => void;
 }

@@ -13,11 +13,13 @@ import {
   UseGuards,
   Request,
   BadRequestException,
+  HttpException,
   forwardRef,
 } from '@nestjs/common';
 import { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { DocumentsService } from '../documents/documents.service';
 import { ProjectsService } from './projects.service';
+import { ChapterAutoLoopService } from './chapter-auto-loop.service';
 import { ChapterPipelineService } from './chapter-pipeline.service';
 import {
   ComplianceCheckOutlineNotConfirmedError,
@@ -49,12 +51,35 @@ interface AuthenticatedRequest extends ExpressRequest {
   user?: { userId: string; email: string; name: string };
 }
 
+/** 只有会真正耗时的两个阶段进活动条，同步上下文与整章校验一闪而过，报了反而抖。 */
+function resolveAutoLoopProgressMessage(stage: string, roundIndex?: number): string | null {
+  if (stage === 'loop_diagnose') {
+    return `正在复诊第 ${roundIndex ?? 1} 轮…`;
+  }
+  if (stage === 'loop_segment_rewrite') {
+    return '正在逐段改写…';
+  }
+  return null;
+}
+
+function throwChapterOptimizationTypoDeprecated(): never {
+  throw new HttpException(
+    {
+      code: 1339,
+      msg: '独立错字检查与修正已废弃，请使用一键终稿',
+      data: null,
+    },
+    410
+  );
+}
+
 @Controller('api/projects')
 export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly chapterPipelineService: ChapterPipelineService,
     private readonly complianceCheckService: ComplianceCheckService,
+    private readonly chapterAutoLoopService: ChapterAutoLoopService,
     @Inject(forwardRef(() => DocumentsService))
     private readonly documentsService: DocumentsService
   ) {}
@@ -80,7 +105,7 @@ export class ProjectsController {
     if (!userId) {
       throw new Error('User not authenticated');
     }
-    this.documentsService.removeByProjectId(id);
+    await this.documentsService.removeByProjectId(id);
     return this.projectsService.remove(id, userId);
   }
 
@@ -135,12 +160,19 @@ export class ProjectsController {
       chapterSummaryMemoryCount?: number;
       priorChapterTailChars?: number;
       contextExcerptMaxChars?: number;
+      outlineMaxChars?: number;
+      personaProfileMaxChars?: number;
+      relationMemoMaxChars?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
       contentSafetyCustomRules?: ProjectContentSafetyRule[];
+      generationWritingModel?: string | null;
+      generationUtilityModel?: string | null;
+      writingGenerationTemperature?: number | null;
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -314,12 +346,13 @@ export class ProjectsController {
       selectedEventIds?: string[];
       existingSegmentDiagnoses?: string[];
       resumeFromSegmentIndex?: number;
+      currentPlanText?: string;
+      revisionFeedback?: string;
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
   ) {
     const userId = req.user?.userId;
-
     const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
       if (sse.isAborted()) {
@@ -330,11 +363,20 @@ export class ProjectsController {
 
     try {
       await this.projectsService.optimizeChapterPlanStream(id, Number(chapterNo), data, userId, {
-        onStart: ({ traceId, chapterNo: cno, planId, basis, optimizationMode, segmentTotal, strategyLabel, inputChapterChars }) => {
+        onStart: ({
+          traceId,
+          chapterNo: currentChapterNo,
+          planId,
+          basis,
+          optimizationMode,
+          segmentTotal,
+          strategyLabel,
+          inputChapterChars,
+        }) => {
           writeEvent({
             event: 'start',
             traceId,
-            chapterNo: cno,
+            chapterNo: currentChapterNo,
             planId,
             basis,
             optimizationMode,
@@ -349,27 +391,8 @@ export class ProjectsController {
         onContent: (text) => {
           writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
         },
-        onEnd: ({
-          traceId,
-          planText,
-          planId,
-          basis,
-          optimizationMode,
-          segmentTotal,
-          strategyLabel,
-          segmentDiagnoses,
-        }) => {
-          writeEvent({
-            event: 'end',
-            traceId,
-            planText,
-            planId,
-            basis,
-            optimizationMode,
-            segmentTotal,
-            strategyLabel,
-            segmentDiagnoses,
-          });
+        onEnd: (event) => {
+          writeEvent({ event: 'end', ...event });
         },
         onError: (message, recovery) => {
           writeEvent({
@@ -383,7 +406,7 @@ export class ProjectsController {
         },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '生成优化方案失败';
+      const message = error instanceof Error ? error.message : '生成文笔优化方案失败';
       writeEvent({ event: 'error', data: message });
     } finally {
       res.end();
@@ -400,15 +423,16 @@ export class ProjectsController {
       instruction?: string;
       planText?: string;
       planId?: string;
+      rewriteMode?: string;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
       segmentDiagnoses?: string[];
+      sourceText?: string;
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
   ) {
     const userId = req.user?.userId;
-
     const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
       if (sse.isAborted()) {
@@ -419,11 +443,17 @@ export class ProjectsController {
 
     try {
       await this.projectsService.optimizeChapterDraftStream(id, Number(chapterNo), data, userId, {
-        onStart: ({ traceId, chapterNo: cno, optimizationMode, segmentTotal, strategyLabel }) => {
+        onStart: ({
+          traceId,
+          chapterNo: currentChapterNo,
+          optimizationMode,
+          segmentTotal,
+          strategyLabel,
+        }) => {
           writeEvent({
             event: 'start',
             traceId,
-            chapterNo: cno,
+            chapterNo: currentChapterNo,
             optimizationMode,
             segmentTotal,
             strategyLabel,
@@ -450,13 +480,8 @@ export class ProjectsController {
         onContentReplace: (text) => {
           writeEvent({ event: 'content_replace', data: text.replace(/\n/g, '\\n') });
         },
-        onEnd: ({ traceId, finalDraftText, contentSafety }) => {
-          writeEvent({
-            event: 'end',
-            traceId,
-            ...(finalDraftText ? { finalDraftText } : {}),
-            ...(contentSafety ? { contentSafety } : {}),
-          });
+        onEnd: (event) => {
+          writeEvent({ event: 'end', ...event });
         },
         onError: (message) => {
           writeEvent({ event: 'error', data: message });
@@ -469,7 +494,7 @@ export class ProjectsController {
         },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '优化正文生成失败';
+      const message = error instanceof Error ? error.message : '文笔优化正文生成失败';
       writeEvent({ event: 'error', data: message });
     } finally {
       res.end();
@@ -495,38 +520,31 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Post(':id/knowledge/chapters/:chapterNo/optimize/typo-check')
-  checkChapterOptimizationTypos(
+  @Get(':id/knowledge/chapters/:chapterNo/optimize/auto-loop/session')
+  getChapterAutoLoopSession(
     @Param('id') id: string,
     @Param('chapterNo') chapterNo: string,
-    @Body() data: { draftText?: string },
     @Request() req: AuthenticatedRequest
   ) {
     const userId = req.user?.userId;
-    return this.projectsService.checkChapterOptimizationTypos(id, Number(chapterNo), data, userId);
+    return this.chapterAutoLoopService.getSession(id, Number(chapterNo), userId);
   }
 
   @UseGuards(JwtAuthGuard)
-  @Post(':id/knowledge/chapters/:chapterNo/optimize/typo-fix')
-  async fixChapterOptimizationTypos(
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/auto-loop')
+  async runChapterAutoLoop(
     @Param('id') id: string,
     @Param('chapterNo') chapterNo: string,
     @Body()
     data: {
-      draftText?: string;
-      issues?: Array<{
-        id: string;
-        original: string;
-        suggestion: string;
-        context?: string;
-        reason?: string;
-      }>;
+      instruction?: string;
+      roundBudget?: number;
+      appearingCharacters?: string[];
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
   ) {
     const userId = req.user?.userId;
-
     const sse = createSseStreamContext(req, res);
     const writeEvent = (payload: Record<string, unknown>) => {
       if (sse.isAborted()) {
@@ -536,54 +554,101 @@ export class ProjectsController {
     };
 
     try {
-      await this.projectsService.fixChapterOptimizationTyposStream(
+      await this.chapterAutoLoopService.runStream(
         id,
         Number(chapterNo),
         data,
         userId,
         {
-          onStart: ({ traceId }) => {
-            writeEvent({ event: 'start', traceId });
+          onStart: (event) => {
+            writeEvent({ event: 'start', ...event });
           },
-          onContent: (text) => {
-            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          onStage: ({ stage, roundIndex }) => {
+            writeEvent({ event: 'stage', stage, roundIndex });
+            const progressMessage = resolveAutoLoopProgressMessage(stage, roundIndex);
+            if (progressMessage) {
+              writeEvent({
+                event: 'progress',
+                taskKey: 'chapter.optimize.auto-loop',
+                stage,
+                message: progressMessage,
+              });
+            }
           },
-          onStage: ({ stage, message }) => {
-            writeEvent({
-              event: 'progress',
-              taskKey: 'chapter.optimize.typo-fix',
-              stage,
-              message:
-                message ??
-                (stage === 'content_safety_rewrite'
-                  ? '正在批量重写命中句子…'
-                  : '正在执行内容安全扫描…'),
-            });
+          onEngineEvent: (event) => {
+            switch (event.type) {
+              case 'round_start':
+                writeEvent({
+                  event: 'loop_round_start',
+                  roundIndex: event.roundIndex,
+                  roundBudget: event.roundBudget,
+                  paragraphCount: event.paragraphCount,
+                });
+                break;
+              case 'plan_items':
+                writeEvent({
+                  event: 'loop_plan_items',
+                  roundIndex: event.roundIndex,
+                  items: event.items,
+                  targetCount: event.targetCount,
+                  unlocatableCount: event.unlocatableCount,
+                  deferredCount: event.deferredCount,
+                  discardedCount: event.discardedCount,
+                });
+                break;
+              case 'segment_start':
+                writeEvent({
+                  event: 'stage',
+                  stage: 'loop_segment_rewrite',
+                  roundIndex: event.roundIndex,
+                  paragraphIndex: event.paragraphIndex,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+                break;
+              case 'item_status':
+                writeEvent({
+                  event: 'loop_item_status',
+                  roundIndex: event.roundIndex,
+                  item: event.item,
+                });
+                break;
+              case 'round_end':
+                writeEvent({
+                  event: 'loop_round_end',
+                  roundIndex: event.roundIndex,
+                  round: event.round,
+                });
+                break;
+            }
           },
-          onContentReplace: (text) => {
-            writeEvent({ event: 'content_replace', data: text.replace(/\n/g, '\\n') });
-          },
-          onEnd: ({ traceId, appliedIssueCount, autoCorrected, finalDraftText, contentSafety }) => {
-            writeEvent({
-              event: 'end',
-              traceId,
-              appliedIssueCount,
-              autoCorrected,
-              ...(finalDraftText ? { finalDraftText } : {}),
-              ...(contentSafety ? { contentSafety } : {}),
-            });
+          onEnd: (event) => {
+            writeEvent({ event: 'end', ...event });
           },
           onError: (message) => {
             writeEvent({ event: 'error', data: message });
           },
-        }
+        },
+        () => sse.isAborted()
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : '错字自动修正失败';
+      const message = error instanceof Error ? error.message : '章节自动优化失败';
       writeEvent({ event: 'error', data: message });
     } finally {
       res.end();
     }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/typo-check')
+  checkChapterOptimizationTypos() {
+    throwChapterOptimizationTypoDeprecated();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/typo-fix')
+  fixChapterOptimizationTypos() {
+    throwChapterOptimizationTypoDeprecated();
   }
 
   @UseGuards(JwtAuthGuard)
@@ -597,6 +662,7 @@ export class ProjectsController {
       mode?: 'pipeline' | 'final-polish';
       configOverrides?: Record<string, unknown>;
       selectedPersonaNames?: string[];
+      optimizationIntent?: string;
     },
     @Request() req: AuthenticatedRequest
   ) {
@@ -715,6 +781,59 @@ export class ProjectsController {
         throw new BadRequestException({ code: error.code, msg: error.message });
       }
       if (error instanceof ChapterPipelineCoverageVerifyInvalidError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/outline/brief/synthesize')
+  async synthesizeChapterPipelineOutlineBrief(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      outlineType: ChapterPipelineOutlineType;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      return await this.chapterPipelineService.synthesizeOutlineBrief(
+        sessionId,
+        data,
+        req.user?.userId
+      );
+    } catch (error) {
+      if (error instanceof ChapterPipelineGateNotConfirmedError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      if (error instanceof ChapterPipelineModuleFailedError) {
+        throw new BadRequestException({ code: error.code, msg: error.message });
+      }
+      throw error;
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/pipeline/:sessionId/outline/brief')
+  patchChapterPipelineOutlineBrief(
+    @Param('sessionId') sessionId: string,
+    @Body()
+    data: {
+      outlineType: ChapterPipelineOutlineType;
+      synthesizedBrief: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      const session = this.chapterPipelineService.patchOutlineBrief(
+        sessionId,
+        data,
+        req.user?.userId
+      );
+      return serializePipelineSessionView(session);
+    } catch (error) {
+      if (error instanceof ChapterPipelineGateNotConfirmedError) {
         throw new BadRequestException({ code: error.code, msg: error.message });
       }
       throw error;
@@ -1346,6 +1465,55 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get(':id/writing-style-samples')
+  listWritingStyleSamples(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
+    return this.projectsService.listWritingStyleSamples(id, req.user?.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/writing-style-samples')
+  createWritingStyleSample(
+    @Param('id') id: string,
+    @Body()
+    data: {
+      text: string;
+      sceneType: string;
+      sourceChapterNo?: number | null;
+      label?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.projectsService.createWritingStyleSample(id, data, req.user?.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/writing-style-samples/:sampleId')
+  updateWritingStyleSample(
+    @Param('id') id: string,
+    @Param('sampleId') sampleId: string,
+    @Body()
+    data: {
+      text?: string;
+      sceneType?: string;
+      sourceChapterNo?: number | null;
+      label?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.projectsService.updateWritingStyleSample(id, sampleId, data, req.user?.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id/writing-style-samples/:sampleId')
+  deleteWritingStyleSample(
+    @Param('id') id: string,
+    @Param('sampleId') sampleId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.projectsService.deleteWritingStyleSample(id, sampleId, req.user?.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters')
   async upsertChapter(
     @Param('id') id: string,
@@ -1361,7 +1529,7 @@ export class ProjectsController {
   async chapterAfterSave(
     @Param('id') id: string,
     @Param('chapterNo') chapterNo: string,
-    @Body() body: { actions: Array<'persona' | 'relationEvents'> },
+    @Body() body: { actions: Array<'persona' | 'relationEvents' | 'structuredInfo'> },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
   ) {
@@ -1453,28 +1621,6 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Post(':id/knowledge/reindex')
-  createIndexJob(
-    @Param('id') id: string,
-    @Body() data: { mode?: 'full' | 'incremental' } = {},
-    @Request() req: AuthenticatedRequest
-  ) {
-    const userId = req.user?.userId;
-    return this.projectsService.createIndexJob(id, data, userId);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get(':id/knowledge/reindex/:jobId')
-  getIndexJob(
-    @Param('id') id: string,
-    @Param('jobId') jobId: string,
-    @Request() req: AuthenticatedRequest
-  ) {
-    const userId = req.user?.userId;
-    return this.projectsService.getIndexJob(id, jobId, userId);
-  }
-
-  @UseGuards(JwtAuthGuard)
   @Post(':id/write/outline')
   async writeChapterOutline(
     @Param('id') id: string,
@@ -1523,30 +1669,6 @@ export class ProjectsController {
     } finally {
       res.end();
     }
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Post(':id/write')
-  async writeChapter(
-    @Param('id') id: string,
-    @Body()
-    data: {
-      chapterNo: number;
-      goal: string;
-      pov: string;
-      mustInclude?: string[];
-      avoid?: string[];
-      targetWords?: number;
-      appearingCharacters?: string[];
-      selectedEventIds?: string[];
-      confirmedOutlineText?: string;
-      outlineId?: string;
-      outlineTraceId?: string;
-    },
-    @Request() req: AuthenticatedRequest
-  ) {
-    const userId = req.user?.userId;
-    return this.projectsService.writeChapter(id, data, userId);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -1606,6 +1728,7 @@ function serializePipelineSessionView(session: ChapterPipelineSession) {
     characterTraitsOutline: session.characterTraitsOutline,
     sensoryOutline: session.sensoryOutline,
     selectedPersonaNames: session.selectedPersonaNames,
+    optimizationIntent: session.optimizationIntent,
     ruleIssues: session.ruleIssues,
     homogenizationReport: session.homogenizationReport,
     sourceUpdatedAt: session.sourceUpdatedAt,

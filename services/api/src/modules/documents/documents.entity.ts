@@ -1,7 +1,7 @@
 import type { UserDocType } from './documents-type.util';
 import { DEFAULT_USER_DOC_TYPE } from './documents-type.util';
 
-export type IndexStatus = 'pending' | 'indexing' | 'completed' | 'failed';
+export type IndexStatus = 'pending' | 'indexing' | 'completed' | 'failed' | 'stale';
 
 export interface DocumentRecord {
   id: string;
@@ -9,6 +9,8 @@ export interface DocumentRecord {
   title: string;
   content: string;
   docType: UserDocType;
+  /** 关联人物（persona_card）；其它类型一般为 null */
+  personaId?: string | null;
   indexStatus: IndexStatus;
   version: number;
   createdAt: Date;

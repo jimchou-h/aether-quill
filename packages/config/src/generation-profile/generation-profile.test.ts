@@ -97,6 +97,7 @@ test('resolveGenerationTierForTemplateKey maps writing vs utility tasks', () => 
   assert.equal(resolveGenerationTierForTemplateKey('chapter.pipeline.brief.synthesize'), 'utility');
   assert.equal(resolveGenerationTierForTemplateKey(''), 'utility');
   assert.equal(isWritingTierTemplateKey('chapter.optimize.plan'), false);
+  assert.equal(isWritingTierTemplateKey('chapter.optimize.direct-draft'), true);
 });
 
 test('resolveGenerationCallProfile uses built-in defaults; project overrides when no user prefs', () => {

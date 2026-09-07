@@ -9,6 +9,7 @@ import {
 const CHAPTER_OPTIMIZE_TEMPLATE_KEYS = new Set([
   'chapter.optimize.plan',
   'chapter.optimize.draft',
+  'chapter.optimize.direct-draft',
   'chapter.optimize.typo-check',
   'chapter.optimize.typo-fix',
 ]);

@@ -85,15 +85,17 @@ export function buildGenerationRetrievalQuery(
 /** 与 API `chapter-optimize.util` 及 prompt-templates 模板 key 保持一致 */
 export const CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY = 'chapter.optimize.plan';
 export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
+export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY = 'chapter.optimize.direct-draft';
 export const CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY = 'chapter.optimize.typo-check';
 export const CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY = 'chapter.optimize.typo-fix';
 
-/** 章节优化全链路模板（plan / draft / typo），用于启用下章衔接等专用上下文 */
+/** 章节优化全链路模板（plan / draft / direct-draft / typo），用于启用下章衔接等专用上下文 */
 export function isChapterOptimizeTemplateKey(templateKey: string): boolean {
   const tk = templateKey.trim();
   return (
     tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY
   );
@@ -102,6 +104,47 @@ export function isChapterOptimizeTemplateKey(templateKey: string): boolean {
 /** 写作工作台两阶段：大纲 / 正文（AQ-217~AQ-219） */
 export const WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY = 'write.chapter.outline';
 export const WRITE_CHAPTER_DRAFT_TEMPLATE_KEY = 'write.chapter';
+
+/**
+ * 这些任务的 user prompt 含 `<chapter-original>` 全文。
+ * 检索必须改走短 query（要求 + 摘要），禁止把整章送进 embedding / 词法重排。
+ */
+export function shouldUseChapterOptimizeRetrievalQuery(templateKey: string): boolean {
+  const tk = templateKey.trim();
+  return (
+    tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY ||
+    tk === WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY
+  );
+}
+
+export function resolveGenerateRetrievalQuery(input: {
+  templateKey: string;
+  prompt: string;
+  projectCtx: { outlineSummary: string; personaProfile: string };
+  extra?: Record<string, unknown>;
+}): string {
+  const extra = input.extra;
+  const instruction =
+    typeof extra?.retrievalInstruction === 'string' ? extra.retrievalInstruction.trim() : '';
+  if (shouldUseChapterOptimizeRetrievalQuery(input.templateKey) && instruction) {
+    const chapterNoRaw = extra?.chapterNo;
+    const chapterNo =
+      typeof chapterNoRaw === 'number' && Number.isFinite(chapterNoRaw)
+        ? chapterNoRaw
+        : Number(chapterNoRaw);
+    return buildChapterOptimizeRetrievalQuery(input.projectCtx, {
+      chapterNo: Number.isFinite(chapterNo) && chapterNo > 0 ? chapterNo : 0,
+      title:
+        typeof extra?.retrievalChapterTitle === 'string' ? extra.retrievalChapterTitle.trim() : '',
+      instruction,
+      chapterSummary:
+        typeof extra?.retrievalChapterSummary === 'string' ? extra.retrievalChapterSummary : '',
+    });
+  }
+  return buildGenerationRetrievalQuery(input.prompt, input.projectCtx, extra);
+}
 
 export interface ChapterOptimizeRetrievalInput {
   chapterNo: number;

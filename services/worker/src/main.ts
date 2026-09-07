@@ -10,7 +10,8 @@ assertRagInfrastructureEnv('worker');
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3002;
+// 不要读通用 PORT：Cursor / pnpm 会注入随机端口，API 默认仍连 localhost:3002。
+const PORT = process.env.WORKER_PORT || 3002;
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
 

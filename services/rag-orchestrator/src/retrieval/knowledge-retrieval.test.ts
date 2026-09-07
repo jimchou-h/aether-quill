@@ -7,9 +7,12 @@ import {
   buildRetrievalQuery,
   buildStructuredKnowledgeEvidence,
   formatEvidence,
+  isChapterOptimizeTemplateKey,
   resolveChapterScopedEmbeddingQuery,
+  resolveGenerateRetrievalQuery,
   resolveMemoryChapterSummaryEmbeddingQuery,
   resolveRetrievalMinScore,
+  shouldUseChapterOptimizeRetrievalQuery,
   MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS,
   MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS,
 } from './knowledge-retrieval';
@@ -151,6 +154,37 @@ describe('buildChapterOptimizeRetrievalQuery', () => {
     assert.ok(q.includes('卷一'));
     assert.ok(q.includes('主角'));
     assert.ok(!q.includes('<chapter-original>'));
+  });
+});
+
+describe('resolveGenerateRetrievalQuery', () => {
+  const project = {
+    outlineSummary: '卷一',
+    personaProfile: '主角',
+  };
+
+  it('treats direct-draft as chapter optimize retrieval', () => {
+    assert.equal(isChapterOptimizeTemplateKey('chapter.optimize.direct-draft'), true);
+    assert.equal(shouldUseChapterOptimizeRetrievalQuery('chapter.optimize.direct-draft'), true);
+  });
+
+  it('direct-draft uses instruction and summary instead of chapter-original body', () => {
+    const chapterBody = `<chapter-original>\n${'很长的章节正文内容'.repeat(80)}\n</chapter-original>`;
+    const q = resolveGenerateRetrievalQuery({
+      templateKey: 'chapter.optimize.direct-draft',
+      prompt: `【用户优化要求】\n加强对话\n${chapterBody}`,
+      projectCtx: project,
+      extra: {
+        retrievalInstruction: '加强对话张力',
+        retrievalChapterTitle: '风起',
+        retrievalChapterSummary: '主角与反派首次对峙。',
+        chapterNo: 3,
+      },
+    });
+    assert.ok(q.includes('加强对话张力'));
+    assert.ok(q.includes('主角与反派首次对峙'));
+    assert.ok(!q.includes('<chapter-original>'));
+    assert.ok(!q.includes('很长的章节正文内容很长的章节正文内容'));
   });
 });
 

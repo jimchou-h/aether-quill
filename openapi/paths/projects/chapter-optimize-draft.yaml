@@ -3,8 +3,12 @@ post:
     - Projects
   summary: Stream writing-optimized chapter draft (SSE)
   description: |
-    Stream the optimized chapter draft via Server-Sent Events. The original chapter text and the
-    confirmed plan text from the previous step are always injected into the prompt.
+    Stream the optimized chapter draft via Server-Sent Events. The stored chapter text is the
+    quality-check baseline. When `rewriteMode` is `from-plan` (default), the confirmed plan text
+    from the previous step is injected as `<optimization-plan>`. Optional `sourceText` replaces
+    `<chapter-original>` (used for a follow-up pass over the previous draft); omit it to use the
+    stored chapter. When `rewriteMode` is `direct`, `planText` and `sourceText` may be omitted and
+    the user `instruction` is the rewrite brief (no `<optimization-plan>` block).
 
     SSE event sequence is identical to `/api/generate/draft`:
       - `data: {"event":"stage","stage":"syncing_context|retrieving|waiting_llm"}` (prep before/around LLM stream)
@@ -43,7 +47,7 @@ post:
             type: string
             description: Server-Sent Events stream of generation events
     '400':
-      description: Invalid request (empty instruction or planText)
+      description: Invalid request (empty instruction; or empty planText when rewriteMode is from-plan)
       content:
         application/json:
           schema:

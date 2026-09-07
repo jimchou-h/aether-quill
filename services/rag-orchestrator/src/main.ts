@@ -53,15 +53,10 @@ import express from 'express';
 import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import {
-  buildChapterOptimizeRetrievalQuery,
   buildEmbeddingRetrievalQuery,
-  buildGenerationRetrievalQuery,
-  buildRetrievalQuery,
-  CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
-  CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
   isChapterOptimizeTemplateKey,
+  resolveGenerateRetrievalQuery,
   WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
-  WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY,
   DraftCitation,
   buildStructuredKnowledgeEvidence,
   resolveChapterScopedEmbeddingQuery,
@@ -122,7 +117,8 @@ const app = express();
 app.use(express.json({ limit: '25mb' }));
 app.use(observabilityMiddleware);
 
-const PORT = process.env.PORT || 3001;
+// 不要读通用 PORT：Cursor / pnpm 会注入随机端口（如 18301），API 仍连 localhost:3001。
+const PORT = process.env.RAG_ORCHESTRATOR_PORT || 3001;
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
 
 const vectorStore = new VectorStore();
@@ -877,25 +873,12 @@ app.post('/api/generate', async (req, res) => {
       : Number(chapterNoRaw);
 
   // Step 1: 构造检索 query（章节优化用 instruction+摘要；其余用 prompt+任务字段）
-  let retrievalQuery: string;
-  if (
-    (tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
-      tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
-      tk === WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY) &&
-    typeof extra?.retrievalInstruction === 'string' &&
-    extra.retrievalInstruction.trim()
-  ) {
-    retrievalQuery = buildChapterOptimizeRetrievalQuery(projectCtx, {
-      chapterNo: Number.isFinite(chapterNo) && chapterNo > 0 ? chapterNo : 0,
-      title:
-        typeof extra.retrievalChapterTitle === 'string' ? extra.retrievalChapterTitle.trim() : '',
-      instruction: extra.retrievalInstruction.trim(),
-      chapterSummary:
-        typeof extra.retrievalChapterSummary === 'string' ? extra.retrievalChapterSummary : '',
-    });
-  } else {
-    retrievalQuery = buildGenerationRetrievalQuery(String(prompt), projectCtx, extra);
-  }
+  let retrievalQuery = resolveGenerateRetrievalQuery({
+    templateKey: tk,
+    prompt: String(prompt),
+    projectCtx,
+    extra,
+  });
 
   const taskRecord =
     extra && typeof extra.task === 'object' && extra.task !== null && !Array.isArray(extra.task)
@@ -945,6 +928,10 @@ app.post('/api/generate', async (req, res) => {
   const writeGenerateSse = (payload: Record<string, unknown>) => {
     ensureSseHeaders();
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    const flushable = res as typeof res & { flush?: () => void };
+    if (typeof flushable.flush === 'function') {
+      flushable.flush();
+    }
   };
 
   // Step 2: 检索证据 — 合规检验等任务跳过 RAG

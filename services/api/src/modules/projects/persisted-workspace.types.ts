@@ -37,9 +37,13 @@ export interface PersistedProjectState {
       chapterSummaryMemoryCount?: number;
       priorChapterTailChars?: number;
       contextExcerptMaxChars?: number;
+      outlineMaxChars?: number;
+      personaProfileMaxChars?: number;
+      relationMemoMaxChars?: number;
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
       contentSafetyCustomRules?: Array<{
@@ -55,6 +59,8 @@ export interface PersistedProjectState {
       pipelineCharacterAdjustmentEnabled?: boolean;
       pipelineCharacterTraitsEnabled?: boolean;
       pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
+      pipelineRulesModuleEnabled?: boolean;
+      complianceRulesFixMode?: 'auto' | 'semi' | 'manual';
       pipelineHomogenizationEnabled?: boolean;
       pipelineHomogenizationPriorChapterCount?: number;
       pipelineEnabledModules?: number[];
@@ -64,6 +70,18 @@ export interface PersistedProjectState {
         unlockAfterCondition?: string;
         descriptionForPrompt: string;
       }>;
+      writingStyleSamples?: Array<{
+        id: string;
+        text: string;
+        sceneType: 'dialogue' | 'action' | 'intimate' | 'atmosphere';
+        sourceChapterNo?: number;
+        label?: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      generationWritingModel?: string | null;
+      generationUtilityModel?: string | null;
+      writingGenerationTemperature?: number | null;
       updatedAt: string;
     }
   >;

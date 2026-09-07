@@ -60,6 +60,18 @@ test('resolveUpstreamFailureMessage uses Error.message for non-axios errors', as
   assert.equal(isMissingLlmProviderKeyMessage(message), true);
 });
 
+test('resolveUpstreamFailureMessage maps axios timeout to 请求超时', async () => {
+  const err = new AxiosError('timeout of 120000ms exceeded', 'ECONNABORTED');
+  const message = await resolveUpstreamFailureMessage(err, '同步项目上下文失败');
+  assert.equal(message, '同步项目上下文失败：请求超时');
+});
+
+test('resolveUpstreamFailureMessage maps connection refused', async () => {
+  const err = new AxiosError('connect ECONNREFUSED', 'ECONNREFUSED');
+  const message = await resolveUpstreamFailureMessage(err, '调用失败');
+  assert.match(message, /编排服务不可用/);
+});
+
 test('isMissingLlmProviderKeyMessage detects Chinese and English key hints', () => {
   assert.equal(
     isMissingLlmProviderKeyMessage('未配置 SiliconFlow API Key，请设置 SILICONFLOW_API_KEY'),

@@ -12,7 +12,9 @@
     "dev:stack": "pnpm --parallel --filter @aether-quill/web --filter @aether-quill/api --filter @aether-quill/rag-orchestrator --filter @aether-quill/worker dev",
     "dev:packages": "pnpm -r --filter \"./packages/**\" dev",
     "dev:all-recursive": "pnpm -r dev",
-    "clean": "pnpm -r clean"
+    "clean": "pnpm -r clean",
+    "eval:gs-r": "pnpm --filter @aether-quill/rag-orchestrator run eval:gs-r",
+    "eval:rag": "pnpm --filter @aether-quill/rag-orchestrator run eval:gs-r -- --fail-on-threshold && pnpm --filter @aether-quill/rag-orchestrator test"
   },
   "keywords": [
     "rag",

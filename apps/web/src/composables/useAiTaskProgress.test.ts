@@ -6,8 +6,25 @@ import {
   completeAiTaskProgress,
   createAiTaskProgressState,
   failAiTaskProgress,
+  resolveAiTaskProgressMessage,
   tryStartAiTaskProgress,
 } from '../composables/useAiTaskProgress';
+
+describe('resolveAiTaskProgressMessage', () => {
+  it('has activity-bar copy for the auto-loop task key', () => {
+    assert.equal(resolveAiTaskProgressMessage('chapter.optimize.auto-loop'), '自动优化循环执行中…');
+  });
+
+  it('keeps the existing optimize copy untouched', () => {
+    assert.equal(resolveAiTaskProgressMessage('chapter.optimize.plan'), '正在生成优化方案…');
+    assert.equal(resolveAiTaskProgressMessage('chapter.optimize.draft'), '正在生成优化正文…');
+  });
+
+  it('falls back for an unmapped key', () => {
+    assert.equal(resolveAiTaskProgressMessage('nope.unknown', '兜底文案'), '兜底文案');
+    assert.equal(resolveAiTaskProgressMessage('nope.unknown'), '正在处理…');
+  });
+});
 
 describe('tryStartAiTaskProgress', () => {
   it('starts an idle activity with chapter and source fields', () => {

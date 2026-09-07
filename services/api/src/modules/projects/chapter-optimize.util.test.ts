@@ -5,8 +5,12 @@ import {
   assertDraftText,
   assertInstruction,
   assertPlanText,
+  assertOptimizeDraftRequest,
   buildDraftUserPrompt,
+  buildDirectDraftUserPrompt,
+  buildPlanRevisionInstruction,
   buildPlanUserPrompt,
+  normalizeRewriteMode,
   ensureChapterVersionMatches,
   makeOptimizationId,
   normalizeInstruction,
@@ -29,6 +33,8 @@ import {
   resolveChapterOptimizeLengthStrategy,
   resolveChapterOptimizeConfig,
   resolveChapterOptimizeConfigWithProjectOverride,
+  resolveOptimizeDraftExecution,
+  listOptimizeDraftSseStages,
   clampChapterOptimizeSegmentCharSize,
   DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   MAX_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
@@ -56,6 +62,18 @@ test('normalizeInstruction trims whitespace and tolerates non-string', () => {
   assert.equal(normalizeInstruction(123), '');
 });
 
+test('buildPlanRevisionInstruction preserves current plan and revision feedback', () => {
+  const prompt = buildPlanRevisionInstruction({
+    instruction: '收紧节奏',
+    currentPlanText: '1. 精简环境描写\n2. 保留关键对白',
+    revisionFeedback: '第二点不要动，增加人物心理活动',
+  });
+  assert.match(prompt, /【原始优化要求】\n收紧节奏/);
+  assert.match(prompt, /<current-optimization-plan>[\s\S]*保留关键对白/);
+  assert.match(prompt, /【本轮方案修改意见】\n第二点不要动/);
+  assert.match(prompt, /完整的新版优化方案/);
+});
+
 test('assertInstruction rejects empty and overly long strings', () => {
   assert.throws(() => assertInstruction(''), /不能为空/);
   assert.throws(() => assertInstruction('x'.repeat(2001)), /2000/);
@@ -66,6 +84,52 @@ test('assertPlanText rejects empty plan', () => {
   assert.throws(() => assertPlanText(''), /planText/);
   assert.throws(() => assertPlanText('   '), /planText/);
   assert.doesNotThrow(() => assertPlanText('1. 改写第一段；2. 调整节奏'));
+});
+
+test('normalizeRewriteMode defaults omitted values to from-plan', () => {
+  assert.equal(normalizeRewriteMode(undefined), 'from-plan');
+  assert.equal(normalizeRewriteMode('from-plan'), 'from-plan');
+  assert.equal(normalizeRewriteMode('direct'), 'direct');
+  assert.equal(normalizeRewriteMode('other'), 'from-plan');
+});
+
+test('assertOptimizeDraftRequest requires planText for from-plan and allows omitting it for direct', () => {
+  assert.throws(
+    () => assertOptimizeDraftRequest({ instruction: '收紧节奏', planText: '' }),
+    /planText/
+  );
+  assert.throws(
+    () =>
+      assertOptimizeDraftRequest({
+        rewriteMode: 'from-plan',
+        instruction: '收紧节奏',
+      }),
+    /planText/
+  );
+  const direct = assertOptimizeDraftRequest({
+    rewriteMode: 'direct',
+    instruction: '  收紧节奏  ',
+  });
+  assert.equal(direct.rewriteMode, 'direct');
+  assert.equal(direct.instruction, '收紧节奏');
+  assert.equal(direct.planText, '');
+  assert.throws(
+    () => assertOptimizeDraftRequest({ rewriteMode: 'direct', instruction: '' }),
+    /instruction/
+  );
+  const withSource = assertOptimizeDraftRequest({
+    rewriteMode: 'direct',
+    instruction: '收紧节奏',
+    sourceText: '上一稿正文不应被 direct 使用',
+  });
+  assert.equal(withSource.sourceText, '');
+  const refine = assertOptimizeDraftRequest({
+    rewriteMode: 'from-plan',
+    instruction: '收紧节奏',
+    planText: '压缩旁白',
+    sourceText: '  上一轮优化正文  ',
+  });
+  assert.equal(refine.sourceText, '上一轮优化正文');
 });
 
 test('assertDraftText rejects empty draft', () => {
@@ -118,6 +182,34 @@ test('buildDraftUserPrompt enforces both <chapter-original> and <optimization-pl
   assert.match(prompt, /<chapter-original chapter-no="3">/);
   assert.match(prompt, /原章节正文内容/);
   assert.match(prompt, /请直接输出「优化后的章节正文」纯文本/);
+  assert.doesNotMatch(prompt, /不得另起优化方案或大纲/);
+});
+
+test('buildDraftUserPrompt uses sourceText as chapter-original and adds refine constraint', () => {
+  const prompt = buildDraftUserPrompt({
+    chapter: sampleChapter,
+    instruction: '让节奏更紧凑',
+    planText: '1. 落实方案每一条',
+    sourceText: '上一轮已经改过的正文，林默走进营地。',
+  });
+
+  assert.match(prompt, /上一轮已经改过的正文，林默走进营地。/);
+  assert.doesNotMatch(prompt, /原章节正文内容，主角在地下城遇袭/);
+  assert.match(prompt, /不得另起优化方案或大纲/);
+  assert.match(prompt, /<optimization-plan chapter-no="3">/);
+});
+
+test('buildDirectDraftUserPrompt injects instruction and original chapter without optimization-plan', () => {
+  const prompt = buildDirectDraftUserPrompt({
+    chapter: sampleChapter,
+    instruction: '让节奏更紧凑，减少解释性叙述',
+  });
+
+  assert.match(prompt, /【用户优化要求】[\s\S]*让节奏更紧凑，减少解释性叙述/);
+  assert.match(prompt, /<chapter-original chapter-no="3">/);
+  assert.match(prompt, /原章节正文内容/);
+  assert.match(prompt, /请直接输出「优化后的章节正文」纯文本/);
+  assert.doesNotMatch(prompt, /<optimization-plan/);
 });
 
 test('parseExpectedUpdatedAt validates ISO timestamps', () => {
@@ -237,6 +329,59 @@ test('buildSegmentPrompt includes segment index info and required sections', () 
   assert.match(prompt, /<segment-original>[\s\S]*第二段原文内容[\s\S]*<\/segment-original>/);
   assert.match(prompt, /【前段情节摘要】[\s\S]*第一段描写了主角进入地下城/);
   assert.match(prompt, /【SEG_SUMMARY】/);
+  assert.match(prompt, /<optimization-plan>/);
+});
+
+test('buildSegmentPrompt in direct mode omits optimization-plan and keeps instruction plus segment original', () => {
+  const segment: Segment = {
+    index: 0,
+    originalText: '第一段原文内容',
+    planExcerpt: '',
+    startParagraph: 0,
+    endParagraph: 2,
+  };
+  const chapter: ChapterOptimizeChapterRef = {
+    chapterNo: 3,
+    title: '试炼之夜',
+    content: '全文',
+    updatedAt: new Date(),
+  };
+  const prompt = buildSegmentPrompt({
+    segment,
+    chapter,
+    instruction: '收紧节奏，减少解释性叙述',
+    planText: '',
+    omitOptimizationPlan: true,
+    totalSegments: 2,
+  });
+
+  assert.match(prompt, /【用户优化要求】[\s\S]*收紧节奏，减少解释性叙述/);
+  assert.match(prompt, /<segment-original>[\s\S]*第一段原文内容/);
+  assert.doesNotMatch(prompt, /<optimization-plan/);
+  assert.doesNotMatch(prompt, /<segment-local-plan/);
+});
+
+test('resolveOptimizeDraftExecution segments long chapters in direct mode without plan diagnosis stages', () => {
+  const strategy = resolveChapterOptimizeLengthStrategy(15000);
+  const execution = resolveOptimizeDraftExecution({ rewriteMode: 'direct', strategy });
+  assert.equal(execution.optimizationMode, 'segmented');
+  assert.equal(execution.segmentTotal, strategy.segmentCount);
+  assert.equal(execution.skipPlanDiagnosis, true);
+  const stages = listOptimizeDraftSseStages(execution);
+  assert.ok(stages.includes('draft_segment'));
+  assert.ok(stages.includes('merge_validation'));
+  assert.equal(stages.includes('segment_diagnosis'), false);
+  assert.equal(stages.includes('plan_synthesis'), false);
+});
+
+test('resolveOptimizeDraftExecution keeps from-plan draft as a single pass', () => {
+  const strategy = resolveChapterOptimizeLengthStrategy(15000);
+  const execution = resolveOptimizeDraftExecution({ rewriteMode: 'from-plan', strategy });
+  assert.equal(execution.optimizationMode, 'single');
+  assert.equal(execution.segmentTotal, 1);
+  const stages = listOptimizeDraftSseStages(execution);
+  assert.equal(stages.includes('segment_diagnosis'), false);
+  assert.equal(stages.includes('plan_synthesis'), false);
 });
 
 test('buildSegmentPrompt omits previous summary for first segment', () => {
@@ -322,6 +467,13 @@ test('clampChapterOptimizeSegmentCharSize allows 0 and clamps upper bound', () =
 test('detectPlaceholderText flags common placeholder phrases', () => {
   assert.equal(detectPlaceholderText('正文（此处省略）后续'), '（此处省略）');
   assert.equal(detectPlaceholderText('正常正文内容'), null);
+  assert.equal(detectPlaceholderText('其余情节同上。'), '同上');
+  assert.equal(detectPlaceholderText('（同上）'), '同上');
+  assert.equal(
+    detectPlaceholderText('她重新将注意力放回合同上，但显然，这次的专注度更高了。'),
+    null
+  );
+  assert.equal(detectPlaceholderText('认同上述安排后她点了点头。'), null);
 });
 
 test('validateMergedChapterDraft enforces 95% length when plan does not allow reduction', () => {
@@ -345,6 +497,19 @@ test('validateMergedChapterDraft allows shorter output when plan requests reduct
     planText: '删减冗余描写，压缩篇幅',
   });
   assert.equal(planAllowsContentReduction('删减冗余描写，压缩篇幅'), true);
+  assert.equal(result.passed, true);
+});
+
+test('validateMergedChapterDraft in direct mode uses instruction to allow reduction', () => {
+  const original = '字'.repeat(100);
+  const merged = '字'.repeat(50);
+  const instruction = '请压缩篇幅，删减重复内心独白';
+  const result = validateMergedChapterDraft({
+    originalContent: original,
+    mergedDraft: merged,
+    planText: instruction,
+  });
+  assert.equal(planAllowsContentReduction(instruction), true);
   assert.equal(result.passed, true);
 });
 

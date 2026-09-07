@@ -17,10 +17,14 @@ export async function fetchDocumentsBatch(
     return [];
   }
 
-  const res = await axios.post(`${apiBaseUrl}/api/documents/batch-get`, {
-    projectId,
-    documentIds: ids,
-  });
+  const res = await axios.post(
+    `${apiBaseUrl}/api/documents/batch-get`,
+    {
+      projectId,
+      documentIds: ids,
+    },
+    { timeout: 15_000 }
+  );
   const envelope = res.data;
   const data = envelope?.data ?? envelope;
   const documents = data?.documents;

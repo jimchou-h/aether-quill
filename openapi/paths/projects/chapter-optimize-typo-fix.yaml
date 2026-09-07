@@ -1,8 +1,12 @@
 post:
+  deprecated: true
   tags:
     - Projects
   summary: Auto-fix typos and stream corrected draft (SSE)
   description: |
+    **已废弃（AQ-345）**：错字修正将迁入一键终稿链路（AQ-347）；暂勿在新功能中依赖本端点。
+    本端点将于 AQ-347 下线（预计 HTTP 410）。
+
     Apply all typo correction suggestions (from a prior check or an internal re-check)
     and stream the corrected chapter draft via Server-Sent Events.
 

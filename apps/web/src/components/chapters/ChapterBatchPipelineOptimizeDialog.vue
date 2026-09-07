@@ -6,6 +6,7 @@ import {
   type ChapterItem,
   type ChapterPipelineSessionView,
 } from '../../services/api';
+import { BATCH_PIPELINE_AUTO_CONFIG_OVERRIDES } from '../../utils/chapterPipelineBatch';
 import {
   presentErrorFromCaught,
   presentInfo,
@@ -115,7 +116,9 @@ function close() {
 async function processItem(item: BatchPipelineItem) {
   item.status = 'processing';
   try {
-    const start = await apiClient.startChapterPipeline(props.projectId, item.chapterNo);
+    const start = await apiClient.startChapterPipeline(props.projectId, item.chapterNo, {
+      configOverrides: BATCH_PIPELINE_AUTO_CONFIG_OVERRIDES,
+    });
     item.sessionId = start.sessionId;
 
     await new Promise<void>((resolve, reject) => {
@@ -181,7 +184,11 @@ async function runQueue() {
   }
   queueRunning.value = false;
   if (awaitingOutlineCount.value > 0) {
-    presentInfo(`${awaitingOutlineCount.value} 章待确认大纲，请逐章打开创作精修弹窗处理`);
+    presentInfo(
+      `${awaitingOutlineCount.value} 章因大纲 gate 中断，请单独打开「创作精修」分步处理`
+    );
+  } else if (readyCount.value > 0) {
+    presentInfo(`${readyCount.value} 章已就绪，请审阅后点击「应用已就绪」`);
   }
 }
 
@@ -236,7 +243,7 @@ async function applyReady() {
     @cancel="close"
   >
     <p class="modal-subtitle">
-      串行全自动创作精修（特征润色 → 感官优化，默认不含硬规则）；需确认大纲的章节请单独打开「创作精修（分步）」弹窗。
+      串行全自动创作精修（默认跳过大纲 gate，特征润色 → 感官优化）；全部跑完后在此统一审阅，再批量应用。硬规则请用「终稿合规」。
     </p>
 
     <div v-if="queueRunning" class="queue-progress">

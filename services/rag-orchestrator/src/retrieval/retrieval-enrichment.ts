@@ -27,6 +27,14 @@ export interface RetrievalFullDocument {
   reason: string;
   docScore: number;
   hitChunkIds: string[];
+  /** AQ-359/360：证据来源通道 */
+  evidenceSource?:
+    | 'title_match'
+    | 'paragraph_crop_by_title'
+    | 'full_document_by_title'
+    | 'vector'
+    | 'vector_full_document';
+  dualHit?: boolean;
 }
 
 export interface EnrichedKnowledgeRetrieval {

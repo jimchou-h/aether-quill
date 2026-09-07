@@ -163,14 +163,6 @@ export class QueueService {
       }
     }
 
-    if (data.targetType === 'project') {
-      return {
-        projectId: data.targetId,
-        status: 'completed',
-        note: 'project-level ingestion dispatched to document worker',
-      } as Record<string, unknown>;
-    }
-
     throw new Error(`Unsupported target type: ${data.targetType}`);
   }
 }

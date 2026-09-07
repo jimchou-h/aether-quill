@@ -1,0 +1,87 @@
+post:
+  tags:
+    - Projects
+  summary: Run chapter auto-optimize loop (SSE)
+  description: |
+    Run the chapter auto-optimize loop. One round is `diagnose -> local segment rewrite`:
+    the diagnosis reads the **latest draft** (stored chapter on round 1, previous round output
+    afterwards) and emits machine-locatable items; only the hit paragraphs are rewritten while
+    untouched paragraphs are reassembled byte-for-byte without passing through the model.
+
+    The whole loop runs inside a single SSE request (`runAllModules` sets the precedent for
+    multiple LLM calls per stream). Aborting the request stops the loop; the most recently
+    completed round already reached the client via `loop_round_end`, so the caller can apply it
+    through `optimize/apply` without re-running anything.
+
+    Rounds are capped by `roundBudget` (1-3, default 2) and exit early when a round produces no
+    `high` severity item. Per-round paragraph hits are capped at
+    `min(12, max(3, floor(paragraphCount * 0.35)))` so the loop cannot degenerate into a full
+    chapter rewrite.
+
+    SSE event sequence:
+      - `data: {"event":"stage","stage":"syncing_context"}`
+      - `data: {"event":"start","traceId":"...","chapterNo":N,"roundBudget":N,"baseUpdatedAt":"..."}`
+      - `data: {"event":"loop_round_start","roundIndex":N,"roundBudget":N,"paragraphCount":N}`
+      - `data: {"event":"stage","stage":"loop_diagnose","roundIndex":N}`
+      - `data: {"event":"loop_plan_items","roundIndex":N,"items":[...],"targetCount":N,"unlocatableCount":N,"deferredCount":N,"discardedCount":N}`
+      - `data: {"event":"stage","stage":"loop_segment_rewrite","roundIndex":N,"paragraphIndex":N,"segmentIndex":N,"segmentTotal":N}`
+      - `data: {"event":"loop_item_status","roundIndex":N,"item":{...}}` (one per item)
+      - `data: {"event":"stage","stage":"loop_round_gate","roundIndex":N}`
+      - `data: {"event":"loop_round_end","roundIndex":N,"round":{...}}`
+      - `data: {"event":"end","traceId":"...","finalDraftText":"...","stoppedReason":"...","roundCount":N,"baseUpdatedAt":"..."}`
+      - `data: {"event":"error","data":"..."}`
+
+    Items are always pushed before any rewrite of that round, and every item eventually receives a
+    terminal status: locating failures surface as `skipped_unlocatable` rather than being dropped.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterAutoLoopRequest'
+  responses:
+    '200':
+      description: SSE stream
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: Server-Sent Events stream of auto-loop events
+    '400':
+      description: Invalid request (empty instruction, or chapter content empty)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Diagnosis or segment rewrite generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

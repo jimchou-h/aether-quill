@@ -3,12 +3,15 @@ function isCjkChar(ch: string): boolean {
   return (code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3400 && code <= 0x4dbf);
 }
 
+/** 词法重排 query 上限：禁止把整章正文送进 bigram，否则会同步堵死事件循环 */
+export const RERANK_QUERY_MAX_CHARS = 800;
+
 /**
  * 重排用词法 token：CJK 连续段取相邻 bigram（单字段取单字），拉丁/数字按词。
  * 避免中文无空格时被标点切成整句导致 `includes` 无法命中。
  */
 export function tokenizeForRerank(text: string): string[] {
-  const lower = text.toLowerCase().trim();
+  const lower = text.toLowerCase().trim().slice(0, RERANK_QUERY_MAX_CHARS);
   if (!lower) {
     return [];
   }

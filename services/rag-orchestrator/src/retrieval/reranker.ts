@@ -15,7 +15,7 @@ import {
   resolveRerankMaxPerDocFromEnv,
   resolveRerankWeightsFromEnv,
 } from './reranker-env';
-import { tokenizeForRerank } from './reranker-tokenize';
+import { RERANK_QUERY_MAX_CHARS, tokenizeForRerank } from './reranker-tokenize';
 import { ChunkWithEmbedding } from './types';
 
 export interface RerankerOptions {
@@ -69,13 +69,16 @@ export class Reranker {
       return [];
     }
 
+    const cappedQuery =
+      query.length > RERANK_QUERY_MAX_CHARS ? query.slice(0, RERANK_QUERY_MAX_CHARS) : query;
+
     const useCrossEncoder = isCrossEncoderRerankEnabled() && this.crossEncoderScorer !== undefined;
     const crossEncoderScores = useCrossEncoder
-      ? this.crossEncoderScorer!.score(query, chunks)
+      ? this.crossEncoderScorer!.score(cappedQuery, chunks)
       : undefined;
 
     const scored = chunks.map((chunk, index) => {
-      const lexicalScore = this.computeLexicalRelevance(query, chunk);
+      const lexicalScore = this.computeLexicalRelevance(cappedQuery, chunk);
       const relevanceScore =
         crossEncoderScores !== undefined
           ? computeFusedRerankScore(

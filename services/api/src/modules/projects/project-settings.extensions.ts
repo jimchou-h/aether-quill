@@ -5,19 +5,37 @@ import {
   clampChapterOptimizeSegmentCharSize,
   DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
 } from './chapter-optimize.util';
-import type { ChapterPipelineConfig, ProtagonistUnlockRule } from './chapter-pipeline.util';
-import { DEFAULT_PIPELINE_CONFIG, DEFAULT_PROTAGONIST_PROGRESS_RULES } from './chapter-pipeline.util';
+import type { ChapterPipelineConfig, ChapterPipelineRulesFixMode, ProtagonistUnlockRule } from './chapter-pipeline.util';
+import {
+  DEFAULT_PIPELINE_CONFIG,
+  DEFAULT_PROTAGONIST_PROGRESS_RULES,
+} from './chapter-pipeline.util';
+import type { WritingStyleSample } from './writing-style-samples.util';
+import { sanitizeWritingStyleSamples } from './writing-style-samples.util';
 import {
   clampContextExcerptMaxChars,
+  clampOutlineMaxChars,
+  clampPersonaProfileMaxChars,
   clampPriorChapterTailChars,
+  clampRelationMemoMaxChars,
   DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
+  DEFAULT_OUTLINE_MAX_CHARS,
+  DEFAULT_PERSONA_PROFILE_MAX_CHARS,
   DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
+  DEFAULT_RELATION_MEMO_MAX_CHARS,
 } from './project-settings.util';
+import {
+  normalizeGenerationModelId,
+  resolveWritingGenerationTemperatureOverride,
+} from '@aether-quill/config';
 
 /** PG `project_settings.settings_extensions` 与 JSON 迁移脚本共用的扩展字段 */
 export type ProjectSettingsJsonExtensions = {
   priorChapterTailChars?: number;
   contextExcerptMaxChars?: number;
+  outlineMaxChars?: number;
+  personaProfileMaxChars?: number;
+  relationMemoMaxChars?: number;
   updatePersonaOnSave?: boolean;
   generateRelationEventsOnSave?: boolean;
   chapterOptimizeSegmentCharSize?: number;
@@ -29,13 +47,17 @@ export type ProjectSettingsJsonExtensions = {
   pipelineSkipCharacterTraitsOutlineReview?: boolean;
   pipelineCharacterAdjustmentEnabled?: boolean;
   pipelineCharacterTraitsEnabled?: boolean;
-  pipelineRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
+  pipelineRulesFixMode?: ChapterPipelineRulesFixMode;
   pipelineRulesModuleEnabled?: boolean;
-  complianceRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
+  complianceRulesFixMode?: ChapterPipelineRulesFixMode;
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
   pipelineEnabledModules?: number[];
   protagonistProgressRules?: ProtagonistUnlockRule[];
+  writingStyleSamples?: WritingStyleSample[];
+  generationWritingModel?: string | null;
+  generationUtilityModel?: string | null;
+  writingGenerationTemperature?: number | null;
 };
 
 export function pickProjectSettingsJsonExtensions(
@@ -47,6 +69,9 @@ export function pickProjectSettingsJsonExtensions(
   return {
     priorChapterTailChars: raw.priorChapterTailChars,
     contextExcerptMaxChars: raw.contextExcerptMaxChars,
+    outlineMaxChars: raw.outlineMaxChars,
+    personaProfileMaxChars: raw.personaProfileMaxChars,
+    relationMemoMaxChars: raw.relationMemoMaxChars,
     updatePersonaOnSave: raw.updatePersonaOnSave,
     generateRelationEventsOnSave: raw.generateRelationEventsOnSave,
     chapterOptimizeSegmentCharSize: raw.chapterOptimizeSegmentCharSize,
@@ -67,6 +92,18 @@ export function pickProjectSettingsJsonExtensions(
     pipelineHomogenizationPriorChapterCount: raw.pipelineHomogenizationPriorChapterCount,
     pipelineEnabledModules: raw.pipelineEnabledModules,
     protagonistProgressRules: raw.protagonistProgressRules,
+    ...(Array.isArray(raw.writingStyleSamples)
+      ? { writingStyleSamples: raw.writingStyleSamples }
+      : {}),
+    ...(raw.generationWritingModel !== undefined
+      ? { generationWritingModel: raw.generationWritingModel }
+      : {}),
+    ...(raw.generationUtilityModel !== undefined
+      ? { generationUtilityModel: raw.generationUtilityModel }
+      : {}),
+    ...(raw.writingGenerationTemperature !== undefined
+      ? { writingGenerationTemperature: raw.writingGenerationTemperature }
+      : {}),
   };
 }
 
@@ -79,6 +116,15 @@ export function applyProjectSettingsJsonExtensions<T extends ProjectSettingsJson
   }
   if (extensions.contextExcerptMaxChars !== undefined) {
     target.contextExcerptMaxChars = clampContextExcerptMaxChars(extensions.contextExcerptMaxChars);
+  }
+  if (extensions.outlineMaxChars !== undefined) {
+    target.outlineMaxChars = clampOutlineMaxChars(extensions.outlineMaxChars);
+  }
+  if (extensions.personaProfileMaxChars !== undefined) {
+    target.personaProfileMaxChars = clampPersonaProfileMaxChars(extensions.personaProfileMaxChars);
+  }
+  if (extensions.relationMemoMaxChars !== undefined) {
+    target.relationMemoMaxChars = clampRelationMemoMaxChars(extensions.relationMemoMaxChars);
   }
   if (extensions.updatePersonaOnSave !== undefined) {
     target.updatePersonaOnSave = extensions.updatePersonaOnSave;
@@ -144,6 +190,26 @@ export function applyProjectSettingsJsonExtensions<T extends ProjectSettingsJson
   if (Array.isArray(extensions.protagonistProgressRules)) {
     target.protagonistProgressRules = extensions.protagonistProgressRules;
   }
+  if (Array.isArray(extensions.writingStyleSamples)) {
+    target.writingStyleSamples = sanitizeWritingStyleSamples(extensions.writingStyleSamples);
+  }
+  if (extensions.generationWritingModel !== undefined) {
+    target.generationWritingModel =
+      extensions.generationWritingModel === null
+        ? null
+        : normalizeGenerationModelId(extensions.generationWritingModel);
+  }
+  if (extensions.generationUtilityModel !== undefined) {
+    target.generationUtilityModel =
+      extensions.generationUtilityModel === null
+        ? null
+        : normalizeGenerationModelId(extensions.generationUtilityModel);
+  }
+  if (extensions.writingGenerationTemperature !== undefined) {
+    target.writingGenerationTemperature = resolveWritingGenerationTemperatureOverride(
+      extensions.writingGenerationTemperature
+    );
+  }
 }
 
 export function mergeProjectSettingsFromJsonMirror(
@@ -175,6 +241,9 @@ export function serializeProjectSettingsForJsonMirror(settings: {
   chapterSummaryMemoryCount: number;
   priorChapterTailChars?: number;
   contextExcerptMaxChars?: number;
+  outlineMaxChars?: number;
+  personaProfileMaxChars?: number;
+  relationMemoMaxChars?: number;
   generationTemperature: number;
   updatePersonaOnSave?: boolean;
   generateRelationEventsOnSave?: boolean;
@@ -187,13 +256,17 @@ export function serializeProjectSettingsForJsonMirror(settings: {
   pipelineSkipCharacterTraitsOutlineReview?: boolean;
   pipelineCharacterAdjustmentEnabled?: boolean;
   pipelineCharacterTraitsEnabled?: boolean;
-  pipelineRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
+  pipelineRulesFixMode?: ChapterPipelineRulesFixMode;
   pipelineRulesModuleEnabled?: boolean;
-  complianceRulesFixMode?: ChapterPipelineConfig['pipelineRulesFixMode'];
+  complianceRulesFixMode?: ChapterPipelineRulesFixMode;
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
   pipelineEnabledModules?: number[];
   protagonistProgressRules?: ProtagonistUnlockRule[];
+  writingStyleSamples?: WritingStyleSample[];
+  generationWritingModel?: string | null;
+  generationUtilityModel?: string | null;
+  writingGenerationTemperature?: number | null;
   updatedAt: Date;
 }): PersistedProjectSettingsRow {
   return {
@@ -207,6 +280,13 @@ export function serializeProjectSettingsForJsonMirror(settings: {
     contextExcerptMaxChars: clampContextExcerptMaxChars(
       settings.contextExcerptMaxChars ?? DEFAULT_CONTEXT_EXCERPT_MAX_CHARS
     ),
+    outlineMaxChars: clampOutlineMaxChars(settings.outlineMaxChars ?? DEFAULT_OUTLINE_MAX_CHARS),
+    personaProfileMaxChars: clampPersonaProfileMaxChars(
+      settings.personaProfileMaxChars ?? DEFAULT_PERSONA_PROFILE_MAX_CHARS
+    ),
+    relationMemoMaxChars: clampRelationMemoMaxChars(
+      settings.relationMemoMaxChars ?? DEFAULT_RELATION_MEMO_MAX_CHARS
+    ),
     generationTemperature: settings.generationTemperature,
     updatePersonaOnSave: settings.updatePersonaOnSave ?? true,
     generateRelationEventsOnSave: settings.generateRelationEventsOnSave ?? true,
@@ -217,7 +297,7 @@ export function serializeProjectSettingsForJsonMirror(settings: {
     contentSafetyCustomRules: sanitizeProjectContentSafetyRules(
       settings.contentSafetyCustomRules
     ).map((rule) => ({ ...rule })),
-    pipelinePreset: settings.pipelinePreset ?? DEFAULT_PIPELINE_CONFIG.pipelinePreset,
+    pipelinePreset: settings.pipelinePreset,
     pipelineSkipSensoryOutlineReview:
       settings.pipelineSkipSensoryOutlineReview ??
       DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
@@ -232,8 +312,10 @@ export function serializeProjectSettingsForJsonMirror(settings: {
       DEFAULT_PIPELINE_CONFIG.pipelineCharacterAdjustmentEnabled,
     pipelineCharacterTraitsEnabled:
       settings.pipelineCharacterTraitsEnabled ?? DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
-    pipelineRulesFixMode:
-      settings.pipelineRulesFixMode ?? DEFAULT_PIPELINE_CONFIG.pipelineRulesFixMode,
+    complianceRulesFixMode: settings.complianceRulesFixMode ?? 'semi',
+    ...(settings.pipelineRulesModuleEnabled !== undefined
+      ? { pipelineRulesModuleEnabled: settings.pipelineRulesModuleEnabled }
+      : {}),
     pipelineHomogenizationEnabled:
       settings.pipelineHomogenizationEnabled ??
       DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationEnabled,
@@ -244,6 +326,18 @@ export function serializeProjectSettingsForJsonMirror(settings: {
       settings.pipelineEnabledModules ?? DEFAULT_PIPELINE_CONFIG.pipelineEnabledModules,
     protagonistProgressRules:
       settings.protagonistProgressRules ?? DEFAULT_PROTAGONIST_PROGRESS_RULES,
+    writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map((item) => ({
+      ...item,
+    })),
+    ...(settings.generationWritingModel !== undefined
+      ? { generationWritingModel: settings.generationWritingModel }
+      : {}),
+    ...(settings.generationUtilityModel !== undefined
+      ? { generationUtilityModel: settings.generationUtilityModel }
+      : {}),
+    ...(settings.writingGenerationTemperature !== undefined
+      ? { writingGenerationTemperature: settings.writingGenerationTemperature }
+      : {}),
     updatedAt: settings.updatedAt.toISOString(),
   };
 }
@@ -251,22 +345,29 @@ export function serializeProjectSettingsForJsonMirror(settings: {
 export const PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS = {
   priorChapterTailChars: DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
   contextExcerptMaxChars: DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
+  outlineMaxChars: DEFAULT_OUTLINE_MAX_CHARS,
+  personaProfileMaxChars: DEFAULT_PERSONA_PROFILE_MAX_CHARS,
+  relationMemoMaxChars: DEFAULT_RELATION_MEMO_MAX_CHARS,
   updatePersonaOnSave: true,
   generateRelationEventsOnSave: true,
   chapterOptimizeSegmentCharSize: DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   contentSafetyScanEnabled: true,
   contentSafetyCustomRules: [] as ProjectContentSafetyRule[],
-  pipelinePreset: DEFAULT_PIPELINE_CONFIG.pipelinePreset,
+  pipelinePreset: DEFAULT_PIPELINE_CONFIG.pipelinePreset ?? 'creative_refine',
   pipelineSkipSensoryOutlineReview: DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
   pipelineSkipCharacterOutlineReview: DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
   pipelineSkipCharacterTraitsOutlineReview:
     DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
   pipelineCharacterAdjustmentEnabled: DEFAULT_PIPELINE_CONFIG.pipelineCharacterAdjustmentEnabled,
   pipelineCharacterTraitsEnabled: DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
-  pipelineRulesFixMode: DEFAULT_PIPELINE_CONFIG.pipelineRulesFixMode,
+  complianceRulesFixMode: 'semi' as ChapterPipelineRulesFixMode,
   pipelineHomogenizationEnabled: DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationEnabled,
   pipelineHomogenizationPriorChapterCount:
     DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationPriorChapterCount,
   pipelineEnabledModules: DEFAULT_PIPELINE_CONFIG.pipelineEnabledModules,
   protagonistProgressRules: DEFAULT_PROTAGONIST_PROGRESS_RULES,
+  writingStyleSamples: [] as WritingStyleSample[],
+  generationWritingModel: null as string | null,
+  generationUtilityModel: null as string | null,
+  writingGenerationTemperature: null as number | null,
 };

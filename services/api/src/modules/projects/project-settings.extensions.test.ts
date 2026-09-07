@@ -45,6 +45,18 @@ test('serializeProjectSettingsForJsonMirror always writes contentSafetyCustomRul
   assert.equal(row.contentSafetyScanEnabled, true);
 });
 
+test('applyProjectSettingsJsonExtensions sanitizes generation profile overrides', () => {
+  const target: Record<string, unknown> = {};
+  applyProjectSettingsJsonExtensions(target, {
+    generationWritingModel: '  deepseek-chat  ',
+    generationUtilityModel: null,
+    writingGenerationTemperature: 0.95,
+  });
+  assert.equal(target.generationWritingModel, 'deepseek-chat');
+  assert.equal(target.generationUtilityModel, null);
+  assert.equal(target.writingGenerationTemperature, 0.95);
+});
+
 test('pickProjectSettingsJsonExtensions ignores null contentSafetyCustomRules', () => {
   const picked = pickProjectSettingsJsonExtensions({
     contentSafetyCustomRules: null as unknown as undefined,

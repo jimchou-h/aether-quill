@@ -22,6 +22,8 @@ export interface PersonaChapterStateRecord {
 }
 
 export interface PersonaContextPayload {
+  /** 人物 ID（用于关联知识库 persona_card.personaId） */
+  id?: string;
   name: string;
   profile: string;
   state: string;

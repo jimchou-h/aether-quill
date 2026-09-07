@@ -8,6 +8,8 @@ export type ChapterSummaryInput = {
   content?: string;
   /** API 同步的正文末尾片段 */
   contentTail?: string;
+  /** 章节结构化匹配文本（出场人物推断 / 大纲区段检索） */
+  structuredMatchingText?: string;
 };
 
 export type PriorChapterPickResult = ChapterSummaryInput & {

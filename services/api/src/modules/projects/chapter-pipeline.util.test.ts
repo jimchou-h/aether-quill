@@ -9,11 +9,17 @@ import {
   buildSensoryRewriteReviseUserPrompt,
   buildSensoryRewriteUserPrompt,
   buildRewriteFixItemsUserPrompt,
+  buildBriefSynthesizeUserPrompt,
+  buildOptimizationIntentBlock,
+  CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_SYSTEM_PROMPT,
+  CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_TEMPLATE_KEY,
+  PIPELINE_SYNTHESIZED_BRIEF_MAX_CHARS,
   computeFinalPolishFingerprint,
   filterPipelinePersonas,
   getPipelineInputText,
   getPostCharacterText,
   mergePipelineConfig,
+  migratePipelineSettingsFromPreset,
   parsePipelineOutlineJson,
   resolvePipelineOutlinePassthroughVersionKey,
   resolveOutlineGenerationTemplateKey,
@@ -41,6 +47,7 @@ import {
   parseOutlineCoverageVerifyJson,
   summarizeOutlineCoverage,
   areRequiredOutlineItemsResolved,
+  type ChapterPipelineConfig,
   type ChapterPipelineSession,
   type PipelineRuleIssue,
 } from './chapter-pipeline.util';
@@ -93,10 +100,9 @@ test('getPipelineInputText uses version chain', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
-      pipelineEnabledModules: [1, 2, 3],
+      pipelineEnabledModules: [1, 2, 4],
     },
     currentModule: 4,
     traceIds: {},
@@ -106,7 +112,7 @@ test('getPipelineInputText uses version chain', () => {
   assert.equal(getPipelineInputText(session, 1), 'original');
   assert.equal(getPipelineInputText(session, 2), 'version-a');
   assert.equal(getPipelineInputText(session, 3), 'version-b');
-  assert.equal(getPipelineInputText(session, 4), 'version-c');
+  assert.equal(getPipelineInputText(session, 4), 'version-b');
 });
 
 test('getPostCharacterText prefers afterCharacterTraits', () => {
@@ -128,10 +134,9 @@ test('getPostCharacterText prefers afterCharacterTraits', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
-      pipelineEnabledModules: [1, 2, 3],
+      pipelineEnabledModules: [1, 2, 4],
     },
     currentModule: 2,
     traceIds: {},
@@ -246,10 +251,9 @@ test('shouldRunCharacterTraitsModule requires module 1 enabled', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
-      pipelineEnabledModules: [1, 2, 3],
+      pipelineEnabledModules: [1, 2, 4],
     }),
     true
   );
@@ -261,7 +265,6 @@ test('shouldRunCharacterTraitsModule requires module 1 enabled', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
       pipelineEnabledModules: [2],
@@ -285,10 +288,9 @@ test('resolvePipelineApplyText prefers final when requested', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
-      pipelineEnabledModules: [1, 2, 3],
+      pipelineEnabledModules: [1, 2, 4],
     },
     currentModule: 'done',
     traceIds: {},
@@ -296,6 +298,29 @@ test('resolvePipelineApplyText prefers final when requested', () => {
   };
   assert.equal(resolvePipelineApplyText(session, 'final'), 'f');
   assert.equal(resolvePipelineApplyText(session, 'afterRules'), 'f');
+});
+
+test('migratePipelineSettingsFromPreset maps sensory_only preset', () => {
+  const migrated = migratePipelineSettingsFromPreset({ pipelinePreset: 'sensory_only' });
+  assert.deepEqual(migrated.pipelineEnabledModules, [2]);
+});
+
+test('mergePipelineConfig honors per-run sensory-only override', () => {
+  const config = mergePipelineConfig(
+    {
+      pipelineEnabledModules: [1, 2],
+      pipelineCharacterAdjustmentEnabled: true,
+      pipelineCharacterTraitsEnabled: true,
+      pipelineHomogenizationEnabled: false,
+    },
+    {
+      pipelineEnabledModules: [2],
+      pipelineCharacterAdjustmentEnabled: false,
+      pipelineCharacterTraitsEnabled: false,
+    }
+  );
+  assert.deepEqual(config.pipelineEnabledModules, [2]);
+  assert.equal(config.pipelineCharacterAdjustmentEnabled, false);
 });
 
 test('mergePipelineConfig creative_refine excludes rules module by default', () => {
@@ -312,20 +337,20 @@ test('mergePipelineConfig full preset enables character adjustment by default', 
     { pipelinePreset: 'full', pipelineHomogenizationEnabled: false },
     {}
   );
-  assert.deepEqual(config.pipelineEnabledModules, [1, 2, 3]);
+  assert.deepEqual(config.pipelineEnabledModules, [1, 2]);
   assert.equal(config.pipelineCharacterAdjustmentEnabled, true);
 });
 
-test('mergePipelineConfig rules module toggle adds module 3', () => {
+test('mergePipelineConfig strips legacy rules module 3', () => {
   const config = mergePipelineConfig(
     {
       pipelinePreset: 'creative_refine',
       pipelineHomogenizationEnabled: false,
-      pipelineRulesModuleEnabled: true,
+      pipelineEnabledModules: [1, 2, 3],
     },
     {}
   );
-  assert.deepEqual(config.pipelineEnabledModules, [1, 2, 3]);
+  assert.deepEqual(config.pipelineEnabledModules, [1, 2]);
 });
 
 test('isPipelineOutlineEmpty treats whitespace-only items as empty', () => {
@@ -422,6 +447,19 @@ test('buildSensoryRewriteUserPrompt uses writing-brief instead of JSON outline',
   assert.doesNotMatch(prompt, /<sensory-outline>/);
 });
 
+test('buildSensoryRewriteUserPrompt prefers prose briefText over list brief', () => {
+  const prompt = buildSensoryRewriteUserPrompt({
+    sourceText: '原文',
+    outline: [{ id: 'r1', text: '加强触觉', priority: 'required' }],
+    personaBlock: '',
+    briefText: '整体提升亲密场景临场感，从触觉与呼吸节奏切入，保持对白口吻不变。',
+  });
+  assert.match(prompt, /<writing-brief>/);
+  assert.match(prompt, /整体提升亲密场景临场感/);
+  assert.doesNotMatch(prompt, /【必须自然体现】/);
+  assert.doesNotMatch(prompt, /r1：/);
+});
+
 test('buildRewriteFixItemsUserPrompt uses writing-brief for fix subset', () => {
   const prompt = buildRewriteFixItemsUserPrompt({
     draftText: '草稿',
@@ -478,7 +516,6 @@ test('shouldRunCharacterAdjustmentModule respects config flag', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: false,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
       pipelineEnabledModules: [1, 2],
@@ -493,10 +530,9 @@ test('shouldRunCharacterAdjustmentModule respects config flag', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
-      pipelineEnabledModules: [1, 2, 3],
+      pipelineEnabledModules: [1, 2, 4],
     }),
     true
   );
@@ -507,7 +543,7 @@ test('mergePipelineConfig removes module 4 when homogenization disabled', () => 
     { pipelinePreset: 'full', pipelineHomogenizationEnabled: false },
     {}
   );
-  assert.deepEqual(config.pipelineEnabledModules, [1, 2, 3]);
+  assert.deepEqual(config.pipelineEnabledModules, [1, 2]);
 });
 
 test('resolveProtagonistContext includes unlock rules', () => {
@@ -787,10 +823,9 @@ test('resolveOutlineSourceText aligns with outline module input text', () => {
       pipelineSkipCharacterTraitsOutlineReview: false,
       pipelineCharacterAdjustmentEnabled: true,
       pipelineCharacterTraitsEnabled: true,
-      pipelineRulesFixMode: 'semi',
       pipelineHomogenizationEnabled: false,
       pipelineHomogenizationPriorChapterCount: 3,
-      pipelineEnabledModules: [1, 2, 3],
+      pipelineEnabledModules: [1, 2, 4],
     },
   } as ChapterPipelineSession;
 
@@ -960,4 +995,61 @@ test('summarizeOutlineCoverage and areRequiredOutlineItemsResolved', () => {
     }),
     true
   );
+});
+
+test('brief synthesize template key and prompt seed are registered', () => {
+  assert.equal(CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_TEMPLATE_KEY, 'chapter.pipeline.brief.synthesize');
+  assert.match(CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_SYSTEM_PROMPT, /编辑意向书/);
+  assert.match(CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_SYSTEM_PROMPT, /200~400/);
+});
+
+test('buildBriefSynthesizeUserPrompt includes outline items and writing goal', () => {
+  const prompt = buildBriefSynthesizeUserPrompt({
+    outlineType: 'sensory',
+    outline: {
+      required: [{ id: 'r1', text: '加强触觉层次', priority: 'required' }],
+      suggested: [],
+      userConfirmed: true,
+      revisionRound: 0,
+    },
+    personaBlock: '主角：林晚',
+  });
+  assert.match(prompt, /感官优化/);
+  assert.match(prompt, /<outline-items>/);
+  assert.match(prompt, /加强触觉层次/);
+  assert.match(prompt, /【人物卡摘要】/);
+  assert.match(prompt, /林晚/);
+});
+
+test('PipelineOutlineState supports synthesizedBrief fields', () => {
+  const state = {
+    required: [],
+    suggested: [],
+    userConfirmed: true,
+    revisionRound: 1,
+    synthesizedBrief: '整体提升亲密场景临场感，保持对白节奏。',
+    briefEditedByUser: true,
+  };
+  assert.ok(state.synthesizedBrief.includes('临场感'));
+  assert.equal(state.briefEditedByUser, true);
+  assert.ok(PIPELINE_SYNTHESIZED_BRIEF_MAX_CHARS >= 2000);
+});
+
+test('buildOptimizationIntentBlock and brief synthesize include optimization intent', () => {
+  const block = buildOptimizationIntentBlock('加强心理描写');
+  assert.ok(block.includes('【用户整体优化意图】'));
+  assert.ok(block.includes('加强心理描写'));
+
+  const prompt = buildBriefSynthesizeUserPrompt({
+    outline: {
+      required: [{ id: 'r1', text: '节奏更紧', priority: 'required' }],
+      suggested: [],
+      userConfirmed: true,
+      revisionRound: 0,
+    },
+    outlineType: 'sensory',
+    optimizationIntent: '加强心理描写',
+  });
+  assert.ok(prompt.includes('加强心理描写'));
+  assert.ok(prompt.includes('节奏更紧'));
 });

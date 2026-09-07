@@ -107,6 +107,10 @@ paths:
     $ref: './paths/projects/chapter-optimize-draft.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/apply:
     $ref: './paths/projects/chapter-optimize-apply.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop:
+    $ref: './paths/projects/chapter-optimize-auto-loop.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop/session:
+    $ref: './paths/projects/chapter-optimize-auto-loop-session.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-check:
     $ref: './paths/projects/chapter-optimize-typo-check.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-fix:
@@ -2201,13 +2205,21 @@ components:
     ChapterOptimizationDraftRequest:
       type: object
       required:
-        - planText
         - instruction
       properties:
+        rewriteMode:
+          type: string
+          enum: [from-plan, direct]
+          default: from-plan
+          description: |
+            `from-plan` (default): `planText` is required and injected as `<optimization-plan>`.
+            `direct`: skip plan generation; `planText` may be omitted; `instruction` is the rewrite brief.
         planText:
           type: string
           minLength: 1
-          description: Confirmed plan text from the previous step. Always re-injected into the prompt.
+          description: |
+            Confirmed plan text from the previous step. Required when `rewriteMode` is `from-plan`
+            or omitted. Ignored when `rewriteMode` is `direct`.
         instruction:
           type: string
           minLength: 1
@@ -2230,6 +2242,14 @@ components:
           description: |
             Optional per-segment diagnosis from the plan step. When provided for long chapters,
             each segment draft prompt includes the matching local diagnosis.
+        sourceText:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          description: |
+            Previous-pass optimized draft used as `<chapter-original>` for a follow-up from-plan
+            rewrite. Ignored when `rewriteMode` is `direct`. Length/reduction validation still
+            compares the result to the stored chapter body, not this field.
     ChapterOptimizationApplyRequest:
       type: object
       required:
@@ -2263,6 +2283,180 @@ components:
       properties:
         chapter:
           $ref: '#/components/schemas/ChapterItem'
+    ChapterAutoLoopRequest:
+      type: object
+      required:
+        - instruction
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: |
+            The optimization brief. Restated to the model on every round as the invariant
+            north star, so later rounds cannot drift away from the original ask.
+        roundBudget:
+          type: integer
+          minimum: 1
+          maximum: 3
+          default: 2
+          description: |
+            Hard upper bound on rounds. Always enforced even when a round still reports `high`
+            severity items, because the diagnosing model and the rewriting model are the same
+            and its self-assessed severity is not fully trustworthy.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+          description: Persona names to inject as character cards for voice consistency.
+    ChapterAutoLoopItem:
+      type: object
+      required:
+        - id
+        - paragraphIndex
+        - anchorQuote
+        - severity
+        - instruction
+        - status
+      properties:
+        id:
+          type: string
+        paragraphIndex:
+          type: integer
+          minimum: 1
+          description: Paragraph number as claimed by the model, copied from the `[n]` markers.
+        anchorQuote:
+          type: string
+          description: |
+            Verbatim excerpt from the target paragraph, used to cross-check `paragraphIndex`.
+            When the two disagree the quote is fuzzy-matched to rescue the location.
+        severity:
+          type: string
+          enum: [high, medium, low]
+        issue:
+          type: string
+        instruction:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - applied
+            - relocated
+            - skipped_unlocatable
+            - deferred
+            - rolled_back
+            - failed
+          description: |
+            `relocated` means the index was wrong but the quote rescued the location and the
+            rewrite landed. `skipped_unlocatable` means the item was surfaced but deliberately
+            not applied. `deferred` means the per-round paragraph cap pushed it to a later round.
+            `rolled_back` means the segment gate rejected the rewrite and the original paragraph
+            was restored.
+        resolvedParagraphIndex:
+          type: integer
+          minimum: 1
+          description: Paragraph actually rewritten, after index/quote reconciliation.
+        note:
+          type: string
+          description: Human-readable reason for a downgrade or rollback.
+    ChapterAutoLoopRound:
+      type: object
+      required:
+        - roundIndex
+        - draft
+        - items
+        - converged
+        - rolledBack
+      properties:
+        roundIndex:
+          type: integer
+          minimum: 1
+        draft:
+          type: string
+          description: |
+            Draft after this round. Every round output is a complete, applyable chapter, which is
+            what makes "stop here and take this one" free. On a whole-round rollback this is the
+            previous round's draft.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterAutoLoopItem'
+        appliedCount:
+          type: integer
+        rolledBackCount:
+          type: integer
+        unlocatableCount:
+          type: integer
+        deferredCount:
+          type: integer
+        discardedCount:
+          type: integer
+          description: Items dropped because their JSON structure was invalid.
+        converged:
+          type: boolean
+          description: This round produced no `high` severity item.
+        rolledBack:
+          type: boolean
+          description: |
+            Chapter-level gate rejected this round. The gate baseline is always the stored
+            chapter, never the previous round, so per-round growth cannot accumulate unnoticed.
+        rollbackReason:
+          type: string
+    ChapterAutoLoopSession:
+      type: object
+      required:
+        - projectId
+        - chapterNo
+        - instruction
+        - roundBudget
+        - baseUpdatedAt
+        - rounds
+        - finalDraft
+        - stoppedReason
+      properties:
+        projectId:
+          type: string
+        chapterNo:
+          type: integer
+          minimum: 1
+        instruction:
+          type: string
+        roundBudget:
+          type: integer
+          minimum: 1
+          maximum: 3
+        baseUpdatedAt:
+          type: string
+          format: date-time
+          description: |
+            Chapter `updatedAt` captured when the loop started; pass it to `optimize/apply` as
+            `expectedChapterUpdatedAt`. A concurrent edit surfaces as error code 1307 and the
+            draft is preserved for manual diff rather than silently overwriting.
+        storedContent:
+          type: string
+        rounds:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterAutoLoopRound'
+        finalDraft:
+          type: string
+        stoppedReason:
+          type: string
+          enum:
+            - converged
+            - budget
+            - aborted
+            - round_rolled_back
+            - plan_parse_failed
+        errorMessage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     ChapterTypoIssue:
       type: object
       required:

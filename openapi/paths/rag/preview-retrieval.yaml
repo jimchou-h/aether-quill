@@ -1,0 +1,46 @@
+post:
+  tags:
+    - Retrieval
+  summary: Preview retrieval evidence for chapter-anchored generation (hybrid title-match + vector)
+  description: |
+    调试用途：不调用 LLM，仅返回本次生成会注入哪些证据条目及 token 预算占用。
+
+    AQ-360：章节锚定场景不再仅走标题匹配（A），默认（`retrievalMode=auto`）会额外执行向量检索（B）作为
+    补足，按 documentId 去重合并，冲突时 A 优先；无 `structuredMatchingText` 时自动退化为纯向量检索，
+    避免返回空证据。可通过 `retrievalMode` 强制指定策略，便于离线回归对比（如 GS-R `structured_only`）。
+
+    经由 `services/api` 的 `RagProxyController` 转发到 rag-orchestrator，服务本身运行在
+    `RAG_ORCHESTRATOR_URL`（默认 `http://localhost:3001`）。
+  security:
+    - BearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/PreviewRetrievalRequest'
+  responses:
+    '200':
+      description: Retrieval preview computed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/PreviewRetrievalResult'
+    '400':
+      description: Missing projectId or projectCtx
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '503':
+      description: RAG orchestrator unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

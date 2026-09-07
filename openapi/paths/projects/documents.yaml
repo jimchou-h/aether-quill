@@ -69,6 +69,12 @@ post:
               type: string
             docType:
               $ref: '../../openapi.yaml#/components/schemas/DocType'
+            personaId:
+              type: string
+              nullable: true
+              description: |
+                关联人物 ID；仅 docType=persona_card 时有语义，且必须能在同项目 personas 中
+                找到对应记录，否则 400。省略或传 null 表示暂不关联（孤儿卡）。
   responses:
     '201':
       description: Document created

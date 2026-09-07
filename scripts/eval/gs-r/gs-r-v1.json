@@ -1,0 +1,435 @@
+{
+  "version": "gs-r-v1",
+  "suite": "GS-R",
+  "description": "Aether Quill 检索 golden 最小集（结构化标题匹配基线，≥30 条；AQ-357）",
+  "createdAt": "2026-08-07",
+  "defaultK": [1, 3, 5, 10, 30],
+  "notes": {
+    "mode": "默认 structured，走 buildStructuredKnowledgeEvidence（不依赖 Qdrant/Embedding）",
+    "expected_document_ids": "标准证据文档 id；expectSkip 样本可为空",
+    "expected_chunk_ids": "向量模式预留字段，离线基线可省略"
+  },
+  "corpus": {
+    "projectId": "gs-r-fixture-project",
+    "knowledgeDocuments": [
+      {
+        "id": "pc-lin",
+        "title": "人物小传：林策",
+        "content": "林策，旧港口走私客，擅长水路潜行。别名策哥。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "pc-shen",
+        "title": "人物小传：沈晚星",
+        "content": "沈晚星，星轨学院观测系优等生，夜观天象。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "pc-gu",
+        "title": "人物小传：顾衡",
+        "content": "顾衡，九阙宫外门执事，暗中调查失踪案。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "pc-ruan",
+        "title": "人物小传：阿阮",
+        "content": "阿阮，雾港黑市情报贩子，以茶换消息。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "pc-bai",
+        "title": "人物小传：白无咎",
+        "content": "白无咎，北境寒原游侠，持霜刃行走雪原。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "pc-su",
+        "title": "人物小传：苏念",
+        "content": "苏念，星轨学院文书官，记录历法与纪年。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "pc-he",
+        "title": "人物小传：贺兰川",
+        "content": "贺兰川，北境寒原部落使者，负责边贸。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "pc-mu",
+        "title": "角色卡·沐青",
+        "content": "沐青，九阙宫内侍，知晓宫规与货币账本。",
+        "docType": "persona_card"
+      },
+      {
+        "id": "ws-harbor",
+        "title": "世界观：旧港口设定集",
+        "content": "旧港口潮汐规律、码头帮派与走私航线。\n\n潮汐每三日大涨，适合夜间离港。",
+        "docType": "world_setting"
+      },
+      {
+        "id": "ws-academy",
+        "title": "世界观：星轨学院志",
+        "content": "星轨学院分观测、文书、术法三系。\n\n观测塔可俯瞰全城星轨。",
+        "docType": "world_setting"
+      },
+      {
+        "id": "ws-north",
+        "title": "世界观：北境寒原志",
+        "content": "北境寒原终年积雪，部落以兽皮贸易。\n\n霜刃矿脉藏于冰裂谷。",
+        "docType": "world_setting"
+      },
+      {
+        "id": "ws-palace",
+        "title": "世界观：九阙宫秘录",
+        "content": "九阙宫外严内松，外门执事可出入市井。\n\n内侍掌管账册与货币。",
+        "docType": "world_setting"
+      },
+      {
+        "id": "ws-mist",
+        "title": "世界观：雾港黑市",
+        "content": "雾港黑市以茶票结算情报。\n\n午夜开市，晨雾散即闭。",
+        "docType": "world_setting"
+      },
+      {
+        "id": "ot-gongfa",
+        "title": "设定：功法总览",
+        "content": "基础功法分身法、眼法、气脉三类。\n\n星轨学院禁止外传术法。",
+        "docType": "other"
+      },
+      {
+        "id": "ot-money",
+        "title": "设定：货币体系",
+        "content": "通行银两与茶票并行。\n\n九阙宫内只用官银。",
+        "docType": "other"
+      },
+      {
+        "id": "ot-calendar",
+        "title": "设定：历法纪年",
+        "content": "以星轨纪元计年。\n\n苏念负责校订历书。",
+        "docType": "other"
+      },
+      {
+        "id": "ot-factions",
+        "title": "设定：势力名录",
+        "content": "旧港口、星轨学院、九阙宫、雾港黑市、北境部落。",
+        "docType": "other"
+      },
+      {
+        "id": "ot-noise",
+        "title": "杂记：无关闲笔",
+        "content": "今日天气晴好，与本案无关。",
+        "docType": "other"
+      }
+    ]
+  },
+  "items": [
+    {
+      "id": "gsr-001",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 1,
+      "structuredMatchingText": "林策",
+      "expected_document_ids": ["pc-lin"],
+      "tags": ["persona", "single"]
+    },
+    {
+      "id": "gsr-002",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 1,
+      "structuredMatchingText": "沈晚星",
+      "expected_document_ids": ["pc-shen"],
+      "tags": ["persona", "single"]
+    },
+    {
+      "id": "gsr-003",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 2,
+      "structuredMatchingText": "顾衡 九阙宫",
+      "expected_document_ids": ["pc-gu", "ws-palace"],
+      "tags": ["persona", "world", "multi"]
+    },
+    {
+      "id": "gsr-004",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 2,
+      "structuredMatchingText": "阿阮 雾港黑市",
+      "expected_document_ids": ["pc-ruan", "ws-mist"],
+      "tags": ["persona", "world", "multi"]
+    },
+    {
+      "id": "gsr-005",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 3,
+      "structuredMatchingText": "白无咎 北境寒原",
+      "expected_document_ids": ["pc-bai", "ws-north"],
+      "tags": ["persona", "world", "multi"]
+    },
+    {
+      "id": "gsr-006",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 3,
+      "structuredMatchingText": "苏念 历法纪年",
+      "expected_document_ids": ["pc-su", "ot-calendar"],
+      "tags": ["persona", "other"]
+    },
+    {
+      "id": "gsr-007",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 4,
+      "structuredMatchingText": "旧港口",
+      "expected_document_ids": ["ws-harbor"],
+      "tags": ["world"]
+    },
+    {
+      "id": "gsr-008",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 4,
+      "structuredMatchingText": "星轨学院",
+      "expected_document_ids": ["ws-academy"],
+      "tags": ["world"]
+    },
+    {
+      "id": "gsr-009",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 5,
+      "structuredMatchingText": "功法总览",
+      "expected_document_ids": ["ot-gongfa"],
+      "tags": ["other"]
+    },
+    {
+      "id": "gsr-010",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 5,
+      "structuredMatchingText": "货币体系",
+      "expected_document_ids": ["ot-money"],
+      "tags": ["other"]
+    },
+    {
+      "id": "gsr-011",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 6,
+      "structuredMatchingText": "林策 旧港口 走私",
+      "expected_document_ids": ["pc-lin", "ws-harbor"],
+      "tags": ["persona", "world"]
+    },
+    {
+      "id": "gsr-012",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 6,
+      "structuredMatchingText": "沈晚星 星轨学院 观测",
+      "expected_document_ids": ["pc-shen", "ws-academy"],
+      "tags": ["persona", "world"]
+    },
+    {
+      "id": "gsr-013",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 7,
+      "structuredMatchingText": "贺兰川",
+      "expected_document_ids": ["pc-he"],
+      "tags": ["persona"]
+    },
+    {
+      "id": "gsr-014",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 7,
+      "structuredMatchingText": "沐青",
+      "expected_document_ids": ["pc-mu"],
+      "tags": ["persona"]
+    },
+    {
+      "id": "gsr-015",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 8,
+      "structuredMatchingText": "势力名录",
+      "expected_document_ids": ["ot-factions"],
+      "tags": ["other"]
+    },
+    {
+      "id": "gsr-016",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 8,
+      "structuredMatchingText": "林策 沈晚星",
+      "expected_document_ids": ["pc-lin", "pc-shen"],
+      "tags": ["persona", "multi"]
+    },
+    {
+      "id": "gsr-017",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 9,
+      "structuredMatchingText": "顾衡 阿阮",
+      "expected_document_ids": ["pc-gu", "pc-ruan"],
+      "tags": ["persona", "multi"]
+    },
+    {
+      "id": "gsr-018",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 9,
+      "structuredMatchingText": "白无咎 贺兰川 北境寒原",
+      "expected_document_ids": ["pc-bai", "pc-he", "ws-north"],
+      "tags": ["persona", "world", "multi"]
+    },
+    {
+      "id": "gsr-019",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 10,
+      "structuredMatchingText": "九阙宫秘录",
+      "expected_document_ids": ["ws-palace"],
+      "tags": ["world"]
+    },
+    {
+      "id": "gsr-020",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 10,
+      "structuredMatchingText": "雾港黑市",
+      "expected_document_ids": ["ws-mist"],
+      "tags": ["world"]
+    },
+    {
+      "id": "gsr-021",
+      "importance": "low",
+      "mode": "structured",
+      "chapterNo": 11,
+      "structuredMatchingText": "人物小传：林策",
+      "expected_document_ids": ["pc-lin"],
+      "tags": ["persona", "title_exact"]
+    },
+    {
+      "id": "gsr-022",
+      "importance": "low",
+      "mode": "structured",
+      "chapterNo": 11,
+      "structuredMatchingText": "世界观：旧港口设定集",
+      "expected_document_ids": ["ws-harbor"],
+      "tags": ["world", "title_exact"]
+    },
+    {
+      "id": "gsr-023",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 12,
+      "structuredMatchingText": "苏念 货币体系 九阙宫",
+      "expected_document_ids": ["pc-su", "ot-money", "ws-palace"],
+      "tags": ["mixed"]
+    },
+    {
+      "id": "gsr-024",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 12,
+      "structuredMatchingText": "沐青 货币",
+      "expected_document_ids": ["pc-mu", "ot-money"],
+      "tags": ["mixed"]
+    },
+    {
+      "id": "gsr-025",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 13,
+      "structuredMatchingText": "林策 阿阮 雾港",
+      "expected_document_ids": ["pc-lin", "pc-ruan", "ws-mist"],
+      "tags": ["mixed"]
+    },
+    {
+      "id": "gsr-026",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 13,
+      "structuredMatchingText": "沈晚星 功法",
+      "expected_document_ids": ["pc-shen", "ot-gongfa"],
+      "tags": ["mixed"]
+    },
+    {
+      "id": "gsr-027",
+      "importance": "low",
+      "mode": "structured",
+      "chapterNo": 14,
+      "structuredMatchingText": "北境寒原志",
+      "expected_document_ids": ["ws-north"],
+      "tags": ["world"]
+    },
+    {
+      "id": "gsr-028",
+      "importance": "low",
+      "mode": "structured",
+      "chapterNo": 14,
+      "structuredMatchingText": "历法纪年",
+      "expected_document_ids": ["ot-calendar"],
+      "tags": ["other"]
+    },
+    {
+      "id": "gsr-029",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 15,
+      "structuredMatchingText": "角色卡·沐青 九阙宫",
+      "expected_document_ids": ["pc-mu", "ws-palace"],
+      "tags": ["persona", "world"]
+    },
+    {
+      "id": "gsr-030",
+      "importance": "high",
+      "mode": "structured",
+      "chapterNo": 15,
+      "structuredMatchingText": "顾衡 沐青 九阙宫 货币体系",
+      "expected_document_ids": ["pc-gu", "pc-mu", "ws-palace", "ot-money"],
+      "tags": ["mixed", "multi"]
+    },
+    {
+      "id": "gsr-031",
+      "importance": "low",
+      "mode": "structured",
+      "chapterNo": 16,
+      "structuredMatchingText": "白无咎",
+      "expected_document_ids": ["pc-bai"],
+      "tags": ["persona"]
+    },
+    {
+      "id": "gsr-032",
+      "importance": "medium",
+      "mode": "structured",
+      "chapterNo": 16,
+      "structuredMatchingText": "星轨学院志 苏念",
+      "expected_document_ids": ["ws-academy", "pc-su"],
+      "tags": ["world", "persona"]
+    },
+    {
+      "id": "gsr-033",
+      "importance": "low",
+      "mode": "structured",
+      "chapterNo": 17,
+      "structuredMatchingText": "",
+      "expected_document_ids": [],
+      "expectSkip": true,
+      "tags": ["skip", "no_structured"]
+    },
+    {
+      "id": "gsr-034",
+      "importance": "low",
+      "mode": "structured",
+      "chapterNo": 17,
+      "structuredMatchingText": "   ",
+      "expected_document_ids": [],
+      "expectSkip": true,
+      "tags": ["skip", "blank_structured"]
+    }
+  ]
+}

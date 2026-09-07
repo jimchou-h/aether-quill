@@ -130,3 +130,68 @@ test('buildNarrativeContextText includes identity relation memory block', async 
   assert.ok(result.text.includes('【人物身份关系】'));
   assert.ok(result.text.includes('沈镜川 → 叶清歌：师父'));
 });
+
+test('buildNarrativeContextText applies outline budget and appearing persona injection', async () => {
+  const longOutline = `${'无关段。\n\n'.repeat(20)}旧港口走私航线。\n\n${'尾部。\n\n'.repeat(20)}`;
+  const result = await buildNarrativeContextText({
+    projectId: 'p1',
+    personaProfile: '不应出现的单卡全文',
+    outlineSummary: longOutline,
+    outlineMaxChars: 80,
+    outlineMatchingQuery: '旧港口',
+    personaProfileMaxChars: 500,
+    chapters: [
+      {
+        chapterNo: 3,
+        title: '三',
+        summary: 's',
+        content: 'c',
+        structuredMatchingText: '林策 旧港口',
+      },
+    ],
+    chapterSummaryPromptCount: 0,
+    chapterSummaryMemoryCount: 0,
+    priorChapterTailChars: 0,
+    contextExcerptMaxChars: 400,
+    currentChapterNo: 3,
+    appearingCharacters: ['林策'],
+    personas: [
+      {
+        id: 'p1',
+        name: '林策',
+        profile: '简介',
+        state: '待更新',
+        status: 'published',
+        chapterStates: [
+          {
+            chapterNo: 2,
+            appeared: true,
+            snapshot: { status: '冷静' },
+            summaryLine: '状态：冷静',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    ],
+    knowledgeDocuments: [
+      {
+        id: 'd1',
+        title: '林策卡',
+        content: '静态设定很长。'.repeat(40),
+        docType: 'persona_card',
+        personaId: 'p1',
+      },
+    ],
+  });
+
+  assert.ok(result.text.includes('【出场人物设定】'));
+  assert.ok(result.text.includes('【静态设定卡】'));
+  assert.equal(result.text.includes('不应出现的单卡全文'), false);
+  assert.equal(result.text.includes('【人物当前快照】'), false);
+  assert.ok(result.meta.appearing_persona_injected_count >= 1);
+  assert.ok(
+    result.meta.outline_budget_mode === 'sectioned' ||
+      result.meta.outline_budget_mode === 'truncated'
+  );
+  assert.ok(result.text.includes('【大纲总结】'));
+});

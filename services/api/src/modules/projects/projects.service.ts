@@ -114,6 +114,7 @@ import {
   isMissingLlmProviderKeyMessage,
   resolveUpstreamFailureMessage,
 } from './orchestrator-error.util';
+import { createUtf8StreamDecoder } from '../../common/utf8-stream-decoder';
 import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
@@ -124,24 +125,31 @@ import {
   CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES,
   assertDraftText,
   assertInstruction,
+  assertOptimizeDraftRequest,
   assertPlanText,
+  buildDirectDraftUserPrompt,
   buildDraftUserPrompt,
   buildPlanRevisionInstruction,
   buildPlanUserPrompt,
   buildPlanSynthesisUserPrompt,
   buildSegmentDiagnosisUserPrompt,
+  buildSegmentPrompt,
   buildTypoCheckUserPrompt,
   buildTypoFixUserPrompt,
   buildSegmentBoundaryAnchors,
   calculateSegmentMaxTokensForIndex,
   ensureChapterVersionMatches,
+  extractSegmentTailText,
   makeOptimizationId,
+  mergeSegmentDraftTexts,
   normalizeInstruction,
   parseExpectedUpdatedAt,
   parseSegmentOutput,
   parseTypoCheckIssues,
   resolveChapterOptimizeLengthStrategy,
   resolveChapterOptimizeConfigWithProjectOverride,
+  resolveOptimizeDraftExecution,
+  resolveOptimizeDraftTemplateKey,
   clampChapterOptimizeSegmentCharSize,
   DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   splitIntoSegments,
@@ -2476,10 +2484,11 @@ export class ProjectsService implements OnModuleInit {
 
     await new Promise<void>((resolveStream, rejectStream) => {
       const stream = response.data as NodeJS.ReadableStream;
+      const utf8 = createUtf8StreamDecoder();
       let buffer = '';
 
       stream.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf-8');
+        buffer += utf8.decode(chunk);
         const segments = buffer.split('\n\n');
         buffer = segments.pop() || '';
 
@@ -2950,9 +2959,11 @@ export class ProjectsService implements OnModuleInit {
       instruction?: string;
       planText?: string;
       planId?: string;
+      rewriteMode?: string;
       appearingCharacters?: string[];
       selectedEventIds?: string[];
       segmentDiagnoses?: string[];
+      sourceText?: string;
     },
     userId: string | undefined,
     callbacks: {
@@ -2998,11 +3009,7 @@ export class ProjectsService implements OnModuleInit {
       throw new BadRequestException(`第${normalizedChapterNo}章正文为空，无法优化`);
     }
 
-    const instruction = normalizeInstruction(payload.instruction);
-    assertInstruction(instruction);
-
-    const planText = typeof payload.planText === 'string' ? payload.planText.trim() : '';
-    assertPlanText(planText);
+    const { rewriteMode, instruction, planText, sourceText } = assertOptimizeDraftRequest(payload);
 
     const settings = this.settingsStore.get(projectId)!;
     const personas = this.personasStore.get(projectId)!;
@@ -3045,55 +3052,130 @@ export class ProjectsService implements OnModuleInit {
     const chapterSummaryForRetrieval =
       (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
 
+    const execution = resolveOptimizeDraftExecution({
+      rewriteMode,
+      strategy: planStrategy,
+    });
+    const templateKey = resolveOptimizeDraftTemplateKey(rewriteMode);
     const traceId = makeOptimizationId('draft');
     callbacks.onStart({
       traceId,
       chapterNo: normalizedChapterNo,
-      optimizationMode: 'single',
-      segmentTotal: 1,
-      strategyLabel:
-        planStrategy.mode === 'segmented'
-          ? '整章生成正文（方案已分段诊断）'
-          : '整章生成正文',
-    });
-
-    const userPrompt = buildDraftUserPrompt({
-      chapter: chapterRef,
-      instruction,
-      planText,
-      appearingCharacters: payload.appearingCharacters,
-      selectedRelationEvents: relationEventRefs,
+      optimizationMode: execution.optimizationMode,
+      segmentTotal: execution.segmentTotal,
+      strategyLabel: execution.strategyLabel,
     });
 
     callbacks.onStage?.({ stage: 'retrieving' });
-    const draftResult = await this.generateOptimizeDraftSegment({
-      projectId,
-      prompt: userPrompt,
-      chapterNo: normalizedChapterNo,
-      planId: payload.planId,
-      chapterTitle: chapter.title,
-      chapterSummaryForRetrieval,
-      instruction,
-      optimizationMode: 'single',
-      segmentIndex: 0,
-      segmentTotal: 1,
-      inputSegmentChars: chapter.content.length,
-      maxTokens: calculateSegmentMaxTokensForIndex(chapter.content, 0, 1),
-      appearingCharacters: payload.appearingCharacters,
-      streamToClient: true,
-      onContent: callbacks.onContent,
-    });
 
-    if (!draftResult.ok) {
-      callbacks.onError(draftResult.errorMessage || '优化正文生成失败');
-      return;
+    const draftParts: string[] = [];
+    if (execution.optimizationMode === 'segmented') {
+      const segments = splitIntoSegments(chapter.content, '', execution.segmentTotal);
+      let previousTail: string | undefined;
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i]!;
+        callbacks.onStage?.({
+          stage: 'draft_segment',
+          segmentIndex: i + 1,
+          segmentTotal: segments.length,
+        });
+        callbacks.onSegmentStart?.({ segmentIndex: i + 1, totalSegments: segments.length });
+        const prompt = buildSegmentPrompt({
+          segment,
+          chapter: chapterRef,
+          instruction,
+          planText: '',
+          omitOptimizationPlan: true,
+          appearingCharacters: payload.appearingCharacters,
+          selectedRelationEvents: relationEventRefs,
+          previousSegmentTail: previousTail,
+          boundaryAnchors: buildSegmentBoundaryAnchors(segment, segments),
+          totalSegments: segments.length,
+        });
+        const draftResult = await this.generateOptimizeDraftSegment({
+          projectId,
+          prompt,
+          chapterNo: normalizedChapterNo,
+          planId: payload.planId,
+          chapterTitle: chapter.title,
+          chapterSummaryForRetrieval,
+          instruction,
+          optimizationMode: 'segmented',
+          segmentIndex: i,
+          segmentTotal: segments.length,
+          inputSegmentChars: segment.originalText.length,
+          maxTokens: calculateSegmentMaxTokensForIndex(
+            segment.originalText,
+            i,
+            segments.length
+          ),
+          appearingCharacters: payload.appearingCharacters,
+          streamToClient: true,
+          onContent: callbacks.onContent,
+          templateKey,
+        });
+        if (!draftResult.ok) {
+          callbacks.onError(
+            draftResult.errorMessage || `第 ${i + 1}/${segments.length} 段正文生成失败`
+          );
+          return;
+        }
+        draftParts.push(draftResult.segmentText);
+        previousTail = extractSegmentTailText(draftResult.segmentText);
+      }
+    } else {
+      const userPrompt =
+        rewriteMode === 'direct'
+          ? buildDirectDraftUserPrompt({
+              chapter: chapterRef,
+              instruction,
+              appearingCharacters: payload.appearingCharacters,
+              selectedRelationEvents: relationEventRefs,
+            })
+          : buildDraftUserPrompt({
+              chapter: chapterRef,
+              instruction,
+              planText,
+              sourceText: sourceText || undefined,
+              appearingCharacters: payload.appearingCharacters,
+              selectedRelationEvents: relationEventRefs,
+            });
+      const promptBasisChars = sourceText ? sourceText.length : chapter.content.length;
+      const draftResult = await this.generateOptimizeDraftSegment({
+        projectId,
+        prompt: userPrompt,
+        chapterNo: normalizedChapterNo,
+        planId: payload.planId,
+        chapterTitle: chapter.title,
+        chapterSummaryForRetrieval,
+        instruction,
+        optimizationMode: 'single',
+        segmentIndex: 0,
+        segmentTotal: 1,
+        inputSegmentChars: promptBasisChars,
+        maxTokens: calculateSegmentMaxTokensForIndex(
+          sourceText || chapter.content,
+          0,
+          1
+        ),
+        appearingCharacters: payload.appearingCharacters,
+        streamToClient: true,
+        onContent: callbacks.onContent,
+        templateKey,
+      });
+      if (!draftResult.ok) {
+        callbacks.onError(draftResult.errorMessage || '优化正文生成失败');
+        return;
+      }
+      draftParts.push(draftResult.segmentText);
     }
 
+    const mergedDraft = mergeSegmentDraftTexts(draftParts);
     callbacks.onStage?.({ stage: 'merge_validation' });
     const qualityCheck = validateMergedChapterDraft({
       originalContent: chapter.content,
-      mergedDraft: draftResult.segmentText,
-      planText,
+      mergedDraft,
+      planText: rewriteMode === 'direct' ? instruction : planText,
     });
 
     if (!qualityCheck.passed) {
@@ -3101,12 +3183,12 @@ export class ProjectsService implements OnModuleInit {
       return;
     }
 
-    let finalDraftText = draftResult.segmentText;
+    let finalDraftText = mergedDraft;
     const safety = await this.runContentSafetyForText(
       projectId,
       finalDraftText,
       traceId,
-      'chapter.optimize.draft',
+      templateKey,
       (progress) => {
         callbacks.onStage?.({
           stage: progress.stage,
@@ -3121,13 +3203,13 @@ export class ProjectsService implements OnModuleInit {
     }
 
     finalDraftText = safety.text;
-    if (finalDraftText !== draftResult.segmentText) {
+    if (finalDraftText !== mergedDraft) {
       callbacks.onContentReplace?.(finalDraftText);
     }
 
     callbacks.onEnd({
       traceId,
-      finalDraftText: finalDraftText !== draftResult.segmentText ? finalDraftText : undefined,
+      finalDraftText: finalDraftText !== mergedDraft ? finalDraftText : undefined,
       contentSafety: toContentSafetyScanPayload(safety),
     });
   }
@@ -3418,9 +3500,10 @@ export class ProjectsService implements OnModuleInit {
       };
 
       const stream = response.data as NodeJS.ReadableStream;
+      const utf8 = createUtf8StreamDecoder();
 
       stream.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf-8');
+        buffer += utf8.decode(chunk);
         const segments = buffer.split('\n\n');
         buffer = segments.pop() || '';
 
@@ -4979,10 +5062,11 @@ export class ProjectsService implements OnModuleInit {
 
     await new Promise<void>((resolveStream, rejectStream) => {
       const stream = response.data as NodeJS.ReadableStream;
+      const utf8 = createUtf8StreamDecoder();
       let buffer = '';
 
       stream.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf-8');
+        buffer += utf8.decode(chunk);
         const segments = buffer.split('\n\n');
         buffer = segments.pop() || '';
 
@@ -5077,6 +5161,7 @@ export class ProjectsService implements OnModuleInit {
     streamToClient: boolean;
     retryCount?: number;
     onContent?: (text: string) => void;
+    templateKey?: string;
   }): Promise<{ ok: boolean; segmentText: string; errorMessage?: string }> {
     let response;
     try {
@@ -5086,10 +5171,13 @@ export class ProjectsService implements OnModuleInit {
           projectId: input.projectId,
           prompt: input.prompt,
           useSSE: true,
-          templateKey: CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
+          templateKey: input.templateKey ?? CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
           maxTokens: input.maxTokens,
           context: {
-            task: input.segmentTotal > 1 ? 'chapter.optimize.segment' : 'chapter.optimize.draft',
+            task:
+              input.segmentTotal > 1
+                ? 'chapter.optimize.segment'
+                : (input.templateKey ?? 'chapter.optimize.draft'),
             chapterNo: input.chapterNo,
             planId: input.planId || null,
             segmentIndex: input.segmentIndex,
@@ -5106,7 +5194,7 @@ export class ProjectsService implements OnModuleInit {
               : {}),
           },
         },
-        { responseType: 'stream' }
+        { responseType: 'stream', timeout: 0 }
       );
     } catch (error) {
       return {
@@ -5161,9 +5249,10 @@ export class ProjectsService implements OnModuleInit {
       let sawEnd = false;
       let errorMessage: string | undefined;
       let buffer = '';
+      const utf8 = createUtf8StreamDecoder();
 
       stream.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString('utf-8');
+        buffer += utf8.decode(chunk);
         const segments = buffer.split('\n\n');
         buffer = segments.pop() || '';
 
@@ -5332,7 +5421,10 @@ export class ProjectsService implements OnModuleInit {
       }
     }
 
-    await axios.post(`${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`, {
+    try {
+      await axios.post(
+        `${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`,
+        {
       systemPromptText: this.promptTemplatesService.resolveProjectSystemPromptText(projectId),
       taskPrompts: this.taskPromptsService.getEffectivePublishedTaskPromptsMap(projectId),
       personaProfile: activePersona
@@ -5382,7 +5474,21 @@ export class ProjectsService implements OnModuleInit {
       writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map((item) => ({
         ...item,
       })),
-    });
+        },
+        { timeout: 30_000 }
+      );
+    } catch (error) {
+      const code = axios.isAxiosError(error) ? error.code : undefined;
+      if (code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
+        throw new BadGatewayException('无法连接编排服务，请确认 rag-orchestrator 已启动');
+      }
+      if (code === 'ECONNABORTED' || (error instanceof Error && /timeout of \d+ms exceeded/i.test(error.message))) {
+        throw new BadGatewayException('同步项目上下文超时，请确认编排服务可访问');
+      }
+      throw new BadGatewayException(
+        await resolveUpstreamFailureMessage(error, '同步项目上下文失败')
+      );
+    }
   }
 
   private normalizeWriteTaskInput(payload: Partial<WriteTaskInput>): WriteChapterTaskInput {

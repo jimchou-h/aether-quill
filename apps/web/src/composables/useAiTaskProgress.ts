@@ -113,8 +113,7 @@ export function applyAiTaskProgressEvent(
     message: event.message ?? state.value.message,
     currentStep:
       typeof event.currentStep === 'number' ? event.currentStep : state.value.currentStep,
-    totalSteps:
-      typeof event.totalSteps === 'number' ? event.totalSteps : state.value.totalSteps,
+    totalSteps: typeof event.totalSteps === 'number' ? event.totalSteps : state.value.totalSteps,
     percent: typeof event.percent === 'number' ? event.percent : state.value.percent,
     active: true,
     cancelled: false,
@@ -122,10 +121,7 @@ export function applyAiTaskProgressEvent(
   };
 }
 
-export function completeAiTaskProgress(
-  state: Ref<AiTaskProgressState>,
-  message = '已完成'
-) {
+export function completeAiTaskProgress(state: Ref<AiTaskProgressState>, message = '已完成') {
   state.value = {
     ...state.value,
     message,
@@ -174,6 +170,8 @@ const TASK_PROGRESS_MESSAGES: Record<string, string> = {
   'write.chapter.draft': '正在生成章节正文…',
   'chapter.optimize.plan': '正在生成优化方案…',
   'chapter.optimize.draft': '正在生成优化正文…',
+  'chapter.optimize.direct-draft': '正在按要求改写正文…',
+  'chapter.optimize.auto-loop': '自动优化循环执行中…',
   'chapter.optimize.typo-fix': '正在自动修正错字…',
   'chapter.pipeline.run': '创作精修执行中…',
   'chapter.pipeline.run-all': '全自动精修执行中…',
@@ -197,8 +195,7 @@ export function resolveAiTaskProgressMessage(taskKey: string, fallback?: string)
 }
 
 export function formatAiActivityBusyMessage(current: AiTaskProgressState): string {
-  const chapter =
-    typeof current.chapterNo === 'number' ? `第 ${current.chapterNo} 章` : '当前';
+  const chapter = typeof current.chapterNo === 'number' ? `第 ${current.chapterNo} 章` : '当前';
   const detail = current.message?.trim() || '有任务进行中';
   return `${chapter} AI 任务进行中：${detail}。请先等待完成或中断后再试。`;
 }

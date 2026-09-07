@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { isCrossEncoderRerankEnabled } from './cross-encoder-scorer';
 import { Reranker, computeFusedRerankScore, normalizeVectorScore } from './reranker';
-import { tokenizeForRerank } from './reranker-tokenize';
+import { RERANK_QUERY_MAX_CHARS, tokenizeForRerank } from './reranker-tokenize';
 import type { ChunkWithEmbedding } from './types';
 
 function chunk(
@@ -40,6 +40,20 @@ describe('tokenizeForRerank', () => {
     assert.ok(tokens.includes('hello'));
     assert.ok(tokens.includes('world'));
     assert.ok(tokens.includes('42'));
+  });
+
+  it('caps huge CJK query so token count stays bounded', () => {
+    const huge = '很长的章节正文内容'.repeat(4000);
+    const tokens = tokenizeForRerank(huge);
+    assert.ok(huge.length > RERANK_QUERY_MAX_CHARS);
+    assert.ok(tokens.length <= RERANK_QUERY_MAX_CHARS);
+    const started = Date.now();
+    new Reranker({ vectorWeight: 0, lexicalWeight: 1 }).rerank(
+      huge,
+      [chunk('a', '很长的章节正文', 0.4)],
+      1
+    );
+    assert.ok(Date.now() - started < 200);
   });
 });
 

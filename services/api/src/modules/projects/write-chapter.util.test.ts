@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   assertConfirmedOutlineForDraft,
   assertOutlineText,
-  buildWriteDraftUserPrompt,
   buildWriteOutlineUserPrompt,
   makeWriteOutlineId,
 } from './write-chapter.util';
@@ -36,15 +35,6 @@ describe('write-chapter.util', () => {
     assert.match(prompt, /揭示师父身份/);
     assert.match(prompt, /林默 ↔ 师父/);
     assert.match(prompt, /章节大纲/);
-  });
-
-  it('buildWriteDraftUserPrompt injects chapter-outline', () => {
-    const prompt = buildWriteDraftUserPrompt({
-      task: baseTask,
-      confirmedOutlineText: '场景一：雨夜对峙\n场景二：真相揭晓',
-    });
-    assert.match(prompt, /<chapter-outline>[\s\S]*场景一：雨夜对峙[\s\S]*<\/chapter-outline>/);
-    assert.match(prompt, /严格按/);
   });
 
   it('assertOutlineText rejects empty', () => {

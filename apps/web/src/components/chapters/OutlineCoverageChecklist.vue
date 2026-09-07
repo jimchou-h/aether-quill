@@ -41,7 +41,7 @@ const hasFixable = computed(() => fixableIds.value.length > 0);
 const summaryLine = computed(() => {
   const s = props.summary;
   if (!s) {
-    return '尚未验收；改写完成后将自动对照大纲复检。';
+    return '尚未验收；改写完成后将自动对照大纲复检，请勾选未落实项后手动补修。';
   }
   return `必需 ${s.requiredResolved}/${s.requiredTotal} 已落实${
     s.requiredMissed > 0 ? `，${s.requiredMissed} 条待补` : ''
@@ -107,11 +107,10 @@ function clearSelection() {
 }
 
 function submitFix() {
-  const ids = selectedIds.value.length ? selectedIds.value : fixableIds.value;
-  if (!ids.length) {
+  if (!selectedIds.value.length) {
     return;
   }
-  emit('fix-items', ids);
+  emit('fix-items', [...selectedIds.value]);
   selectedIds.value = [];
 }
 
@@ -170,10 +169,16 @@ function canMarkManual(item: PipelineOutlineItem): boolean {
         v-if="hasFixable"
         class="primary-button"
         type="button"
-        :disabled="busy || verifying"
+        :disabled="busy || verifying || !selectedIds.length"
         @click="submitFix"
       >
-        {{ busy ? '补修中…' : selectedIds.length ? `补修选中（${selectedIds.length}）` : '补修全部待补项' }}
+        {{
+          busy
+            ? '补修中…'
+            : selectedIds.length
+              ? `补修选中（${selectedIds.length}）`
+              : '请先勾选待补项'
+        }}
       </button>
     </div>
 

@@ -2,21 +2,22 @@
 import { onMounted, ref } from 'vue';
 import { apiClient, type ProtagonistUnlockRule, type ProjectSettings } from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
+import {
+  buildBasePipelineEnabledModules,
+  selectionFromProjectSettings,
+} from '../../utils/pipelineModuleSelection';
 
 const props = defineProps<{
   projectId: string;
 }>();
 
-const pipelinePreset = ref<'creative_refine' | 'full' | 'character_rules' | 'sensory_only'>(
-  'creative_refine'
-);
+const sensoryEnabled = ref(true);
 const skipOutlineReview = ref(false);
 const skipCharacterOutlineReview = ref(false);
 const skipCharacterTraitsOutlineReview = ref(false);
 const characterAdjustmentEnabled = ref(false);
 const characterTraitsEnabled = ref(true);
-const rulesModuleEnabled = ref(false);
-const rulesFixMode = ref<'auto' | 'semi' | 'manual'>('semi');
+const complianceRulesFixMode = ref<'auto' | 'semi' | 'manual'>('semi');
 const homogenizationEnabled = ref(false);
 const homogenizationPriorCount = ref(3);
 const protagonistRules = ref<ProtagonistUnlockRule[]>([]);
@@ -47,28 +48,29 @@ async function loadSettings() {
 }
 
 function applySettings(settings: ProjectSettings & {
-  pipelinePreset?: typeof pipelinePreset.value;
   pipelineSkipSensoryOutlineReview?: boolean;
   pipelineSkipCharacterOutlineReview?: boolean;
   pipelineSkipCharacterTraitsOutlineReview?: boolean;
   pipelineCharacterAdjustmentEnabled?: boolean;
   pipelineCharacterTraitsEnabled?: boolean;
-  pipelineRulesModuleEnabled?: boolean;
-  pipelineRulesFixMode?: typeof rulesFixMode.value;
+  complianceRulesFixMode?: typeof complianceRulesFixMode.value;
+  pipelineRulesFixMode?: typeof complianceRulesFixMode.value;
   pipelineHomogenizationEnabled?: boolean;
   pipelineHomogenizationPriorChapterCount?: number;
   protagonistProgressRules?: ProtagonistUnlockRule[];
+  pipelineEnabledModules?: number[];
 }) {
-  pipelinePreset.value = settings.pipelinePreset ?? 'creative_refine';
+  const selection = selectionFromProjectSettings(settings);
+  sensoryEnabled.value = selection.sensory;
+  characterAdjustmentEnabled.value = selection.characterAdjustment;
+  characterTraitsEnabled.value = selection.characterTraits;
+  homogenizationEnabled.value = selection.homogenization;
   skipOutlineReview.value = settings.pipelineSkipSensoryOutlineReview ?? false;
   skipCharacterOutlineReview.value = settings.pipelineSkipCharacterOutlineReview ?? false;
   skipCharacterTraitsOutlineReview.value =
     settings.pipelineSkipCharacterTraitsOutlineReview ?? false;
-  characterAdjustmentEnabled.value = settings.pipelineCharacterAdjustmentEnabled ?? false;
-  characterTraitsEnabled.value = settings.pipelineCharacterTraitsEnabled ?? true;
-  rulesModuleEnabled.value = settings.pipelineRulesModuleEnabled ?? false;
-  rulesFixMode.value = settings.pipelineRulesFixMode ?? 'semi';
-  homogenizationEnabled.value = settings.pipelineHomogenizationEnabled ?? false;
+  complianceRulesFixMode.value =
+    settings.complianceRulesFixMode ?? settings.pipelineRulesFixMode ?? 'semi';
   homogenizationPriorCount.value = settings.pipelineHomogenizationPriorChapterCount ?? 3;
   protagonistRules.value = (settings.protagonistProgressRules ?? []).map((r) => ({ ...r }));
 }
@@ -76,15 +78,19 @@ function applySettings(settings: ProjectSettings & {
 async function saveSettings() {
   saving.value = true;
   try {
+    const pipelineEnabledModules = buildBasePipelineEnabledModules({
+      characterAdjustment: characterAdjustmentEnabled.value,
+      characterTraits: characterTraitsEnabled.value,
+      sensory: sensoryEnabled.value,
+    });
     await apiClient.updateSettings(props.projectId, {
-      pipelinePreset: pipelinePreset.value,
+      pipelineEnabledModules,
       pipelineSkipSensoryOutlineReview: skipOutlineReview.value,
       pipelineSkipCharacterOutlineReview: skipCharacterOutlineReview.value,
       pipelineSkipCharacterTraitsOutlineReview: skipCharacterTraitsOutlineReview.value,
       pipelineCharacterAdjustmentEnabled: characterAdjustmentEnabled.value,
       pipelineCharacterTraitsEnabled: characterTraitsEnabled.value,
-      pipelineRulesModuleEnabled: rulesModuleEnabled.value,
-      pipelineRulesFixMode: rulesFixMode.value,
+      complianceRulesFixMode: complianceRulesFixMode.value,
       pipelineHomogenizationEnabled: homogenizationEnabled.value,
       pipelineHomogenizationPriorChapterCount: homogenizationPriorCount.value,
       protagonistProgressRules: protagonistRules.value.filter(
@@ -108,46 +114,37 @@ onMounted(() => {
   <section class="panel">
     <h3 class="panel-title">创作精修流水线</h3>
     <p class="field-hint">
-      默认链：特征润色 → 感官优化；硬规则请使用「终稿合规检验」。可选启用角色对白调整或规则模块（旧版）。
+      配置项目默认精修模块与大纲 gate；单次启动时仍可在弹窗内按章覆盖勾选。硬规则请使用「终稿合规检验」。
     </p>
 
     <p v-if="loading" class="loading-text">加载中…</p>
     <template v-else>
-      <div class="row">
-        <label class="field-label" for="pipeline-preset">预设方案</label>
-        <select id="pipeline-preset" v-model="pipelinePreset" class="field-select">
-          <option value="creative_refine">创作精修（推荐）</option>
-          <option value="full">完整四步含规则（旧版）</option>
-          <option value="character_rules">角色 + 规则</option>
-          <option value="sensory_only">仅感官</option>
-        </select>
-      </div>
-
-      <div class="toggle-row">
-        <label class="toggle-label">
-          <input v-model="characterAdjustmentEnabled" class="toggle-checkbox" type="checkbox" />
-          <span class="toggle-text">启用角色对白调整（模块一 a/b）</span>
-        </label>
-      </div>
-
-      <div class="toggle-row">
-        <label class="toggle-label">
-          <input v-model="rulesModuleEnabled" class="toggle-checkbox" type="checkbox" />
-          <span class="toggle-text">启用规则模块（旧版，创作精修内修硬规则）</span>
-        </label>
+      <div class="module-defaults">
+        <h4 class="sub-title">默认精修模块</h4>
+        <div class="toggle-row">
+          <label class="toggle-label">
+            <input v-model="characterAdjustmentEnabled" class="toggle-checkbox" type="checkbox" />
+            <span class="toggle-text">角色对白调整</span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle-label">
+            <input v-model="characterTraitsEnabled" class="toggle-checkbox" type="checkbox" />
+            <span class="toggle-text">角色特征润色</span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle-label">
+            <input v-model="sensoryEnabled" class="toggle-checkbox" type="checkbox" />
+            <span class="toggle-text">感官优化</span>
+          </label>
+        </div>
       </div>
 
       <div class="toggle-row">
         <label class="toggle-label">
           <input v-model="skipCharacterOutlineReview" class="toggle-checkbox" type="checkbox" />
           <span class="toggle-text">默认跳过角色调整大纲审核</span>
-        </label>
-      </div>
-
-      <div class="toggle-row">
-        <label class="toggle-label">
-          <input v-model="characterTraitsEnabled" class="toggle-checkbox" type="checkbox" />
-          <span class="toggle-text">启用角色特征润色（模块一-b）</span>
         </label>
       </div>
 
@@ -170,8 +167,8 @@ onMounted(() => {
       </div>
 
       <div class="row">
-        <label class="field-label" for="rules-fix-mode">规则修复模式</label>
-        <select id="rules-fix-mode" v-model="rulesFixMode" class="field-select">
+        <label class="field-label" for="compliance-rules-fix-mode">终稿合规修复模式</label>
+        <select id="compliance-rules-fix-mode" v-model="complianceRulesFixMode" class="field-select">
           <option value="auto">全自动</option>
           <option value="semi">半自动（推荐）</option>
           <option value="manual">全人工</option>
@@ -259,6 +256,12 @@ onMounted(() => {
   margin: 0;
   color: #6b7280;
   font-size: 0.9rem;
+}
+
+.module-defaults {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #f3f4f6;
 }
 
 .row {

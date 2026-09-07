@@ -38,6 +38,9 @@ export function resolveGenerationPromptLogKind(
   if (templateKey === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY) {
     return 'optimize-draft';
   }
+  if (templateKey === 'chapter.optimize.direct-draft') {
+    return 'optimize-draft';
+  }
   if (templateKey.startsWith('chapter.pipeline.')) {
     return 'pipeline';
   }

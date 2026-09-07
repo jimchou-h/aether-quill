@@ -22,6 +22,8 @@ export interface GenerationContext {
   narrativeContext: string;
   /** 向量检索 + 重排后的证据块，对应 `{{retrievedEvidence}}` */
   retrievedEvidence?: string;
+  /** 文风样本参照块（【文风参照】），插入于检索证据与用户需求之间 */
+  styleSampleBlock?: string;
 }
 
 export interface LlmChatMessage {
@@ -54,6 +56,9 @@ export function buildUserMessage(context: GenerationContext, userPrompt: string)
       evidence = `${MULTI_PERSONA_WRITING_GUARD}\n\n${evidence}`;
     }
     sections.push(`【检索证据】\n${evidence}`);
+  }
+  if (context.styleSampleBlock?.trim()) {
+    sections.push(context.styleSampleBlock.trim());
   }
 
   sections.push(`【用户需求】\n${userPrompt}`);

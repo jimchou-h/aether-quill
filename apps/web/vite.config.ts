@@ -28,6 +28,9 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+        // SSE 文笔优化 / 精修可能远超默认 120s，禁止代理空闲掐断
+        timeout: 0,
+        proxyTimeout: 0,
       },
     },
   },

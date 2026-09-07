@@ -1,13 +1,13 @@
 /**
- * 叙事上下文拼装（AQ-224）
+ * 叙事上下文拼装（AQ-224 / AQ-362 / AQ-365）
  *
  * 按固定顺序拼接多段文本，写入 LLM 的【叙事上下文】（与【检索证据】分离）：
  *
  * 1. 【前章衔接】     — 上一章正文尾部（priorChapterTailChars 预算）
- * 2. 【人物当前快照】 — 截至 currentChapterNo-1 的按章人物状态
+ * 2. 【人物当前快照】 — 截至 currentChapterNo-1 的按章人物状态（无出场合并块时）
  * 3. 【近期章节摘要】 — 当前章之前最近 N 章摘要（无摘要时用正文摘录降级）
  * 4. 【语义记忆章节】 — Qdrant 检索历史章节摘要（与近期摘要去重）
- * 5. 【人物设定】【大纲总结】【关系备忘】
+ * 5. 【出场人物设定】或回退【人物设定】+【大纲总结】+【关系备忘】（各块可配预算）
  * 6. 【下章衔接】     — 仅章节优化链路：第 N+1 章开头锚点（只读，防抢跑）
  */
 
@@ -16,7 +16,13 @@ import {
   clampChapterSummaryMemoryCount,
   clampChapterSummaryPromptCount,
   clampContextExcerptMaxChars,
+  clampOutlineMaxChars,
+  clampPersonaProfileMaxChars,
   clampPriorChapterTailChars,
+  clampRelationMemoMaxChars,
+  DEFAULT_OUTLINE_MAX_CHARS,
+  DEFAULT_PERSONA_PROFILE_MAX_CHARS,
+  DEFAULT_RELATION_MEMO_MAX_CHARS,
 } from './generation-preferences';
 import {
   pickPriorChapterSummariesForPrompt,
@@ -30,6 +36,14 @@ import {
   buildPersonaSnapshotSection,
   type PersonaContextPayload,
 } from './persona-snapshot';
+import {
+  applyHeadCharBudget,
+  applyOutlineBudget,
+} from './narrative-budget';
+import {
+  buildAppearingPersonaInjection,
+  type KnowledgeDocForPersonaInject,
+} from './appearing-persona-injection';
 
 export type NarrativeContextMeta = {
   prior_chapter_tail_injected: boolean;
@@ -41,6 +55,8 @@ export type NarrativeContextMeta = {
   excerpt_fallback_chapter_nos: number[];
   persona_snapshot_injected_count: number;
   persona_snapshot_as_of_chapter: number | null;
+  appearing_persona_injected_count: number;
+  outline_budget_mode: 'full' | 'sectioned' | 'truncated' | 'omitted' | null;
 };
 
 export type NarrativeContextBuildInput = {
@@ -52,11 +68,19 @@ export type NarrativeContextBuildInput = {
   chapterSummaryMemoryCount: number;
   priorChapterTailChars: number;
   contextExcerptMaxChars: number;
+  outlineMaxChars?: number;
+  personaProfileMaxChars?: number;
+  relationMemoMaxChars?: number;
   selectedRelationMemory?: string;
   identityRelationMemory?: string;
   currentChapterNo?: number;
-  /** 全部人物及其按章快照，用于【人物当前快照】段 */
+  /** 全部人物及其按章快照，用于【人物当前快照】/出场合并注入 */
   personas?: PersonaContextPayload[];
+  knowledgeDocuments?: KnowledgeDocForPersonaInject[];
+  /** 本章出场人物名单；有值时走合并注入并跳过单一 active persona 全文 */
+  appearingCharacters?: string[];
+  /** 大纲区段检索 query（通常取本章 structuredMatchingText） */
+  outlineMatchingQuery?: string;
   /** 章节优化：注入第 N+1 章开头只读锚点（复用 priorChapterTailChars 预算） */
   includeNextChapterHead?: boolean;
 };
@@ -71,6 +95,65 @@ function formatPriorPoolEntry(ch: PriorChapterPickResult): string {
   return `第${ch.chapterNo}章 ${ch.title}${label}: ${ch.summary}`;
 }
 
+function resolveAppearingNames(input: NarrativeContextBuildInput): string[] {
+  const explicit = (input.appearingCharacters ?? [])
+    .map((n) => n.trim())
+    .filter((n) => n.length >= 2);
+  if (explicit.length > 0) {
+    return [...new Set(explicit)];
+  }
+
+  const chapterNo = input.currentChapterNo;
+  if (!chapterNo || chapterNo <= 0) {
+    return [];
+  }
+  const chapter = input.chapters.find((c) => c.chapterNo === chapterNo);
+  const haystack = (chapter?.structuredMatchingText ?? '').toLowerCase();
+  if (!haystack.trim()) {
+    return [];
+  }
+  const matched: string[] = [];
+  for (const persona of input.personas ?? []) {
+    const name = persona.name?.trim();
+    if (!name || name.length < 2) {
+      continue;
+    }
+    if (haystack.includes(name.toLowerCase())) {
+      matched.push(name);
+    }
+  }
+  return matched;
+}
+
+function applyRelationMemoBudget(
+  identity?: string,
+  selected?: string,
+  maxChars?: number
+): string[] {
+  const budget = clampRelationMemoMaxChars(
+    maxChars ?? DEFAULT_RELATION_MEMO_MAX_CHARS
+  );
+  if (budget <= 0) {
+    return [];
+  }
+  const parts: string[] = [];
+  if (identity?.trim()) {
+    parts.push(identity.trim());
+  }
+  if (selected?.trim()) {
+    parts.push(`【已选关系事件备忘】\n${selected.trim()}`);
+  }
+  if (parts.length === 0) {
+    return [];
+  }
+  const joined = parts.join('\n\n');
+  if (joined.length <= budget) {
+    return parts;
+  }
+  // Prefer keeping identity + truncated selected as one block under budget
+  return [applyHeadCharBudget(joined, budget)];
+}
+
 export async function buildNarrativeContextText(
   input: NarrativeContextBuildInput
 ): Promise<NarrativeContextBuildResult> {
@@ -79,7 +162,14 @@ export async function buildNarrativeContextText(
 
   const tailChars = clampPriorChapterTailChars(input.priorChapterTailChars);
   const excerptMax = clampContextExcerptMaxChars(input.contextExcerptMaxChars);
+  const outlineMax = clampOutlineMaxChars(
+    input.outlineMaxChars ?? DEFAULT_OUTLINE_MAX_CHARS
+  );
+  const personaMax = clampPersonaProfileMaxChars(
+    input.personaProfileMaxChars ?? DEFAULT_PERSONA_PROFILE_MAX_CHARS
+  );
   const currentChapterNo = input.currentChapterNo;
+  const appearingNames = resolveAppearingNames(input);
 
   // §1 前章正文尾部衔接
   let priorTail = resolvePriorChapterTail(input.chapters, currentChapterNo ?? 0, tailChars);
@@ -89,13 +179,28 @@ export async function buildNarrativeContextText(
     priorTail = { ...priorTail, skipped: true };
   }
 
-  // §2 人物快照（截至写本章前的最新按章状态）
-  const snapshotSection = buildPersonaSnapshotSection({
-    personas: input.personas ?? [],
-    currentChapterNo,
-  });
-  if (snapshotSection.text) {
-    sections.push(snapshotSection.text);
+  // §5 前置：出场人物合并注入（静态卡 + 动态快照），成功则跳过全局快照与单 active 全文
+  const appearingInjection =
+    appearingNames.length > 0
+      ? buildAppearingPersonaInjection({
+          appearingNames,
+          personas: input.personas ?? [],
+          knowledgeDocuments: input.knowledgeDocuments ?? [],
+          currentChapterNo,
+          staticCardMaxChars: personaMax,
+        })
+      : { text: '', injectedNames: [] };
+
+  // §2 人物快照：无出场合并块时注入已发布人物快照；有合并块则快照已含在块内
+  let snapshotSection = { text: '', injectedCount: 0, asOfChapterNo: null as number | null };
+  if (!appearingInjection.text) {
+    snapshotSection = buildPersonaSnapshotSection({
+      personas: input.personas ?? [],
+      currentChapterNo,
+    });
+    if (snapshotSection.text) {
+      sections.push(snapshotSection.text);
+    }
   }
 
   // §3 近期章节摘要（确定性选取，非向量）
@@ -137,19 +242,45 @@ export async function buildNarrativeContextText(
     }
   }
 
-  // §5 静态设定与关系备忘
-  if (input.personaProfile && input.personaProfile !== '未配置人物设定') {
-    sections.push(`【人物设定】\n${input.personaProfile}`);
+  // §5 静态设定与关系备忘（预算治理）
+  if (appearingInjection.text) {
+    sections.push(appearingInjection.text);
+  } else if (
+    input.personaProfile &&
+    input.personaProfile !== '未配置人物设定' &&
+    personaMax > 0
+  ) {
+    sections.push(
+      `【人物设定】\n${applyHeadCharBudget(input.personaProfile, personaMax)}`
+    );
   }
+
+  let outlineBudgetMode: NarrativeContextMeta['outline_budget_mode'] = null;
   if (input.outlineSummary?.trim()) {
-    sections.push(`【大纲总结】\n${input.outlineSummary.trim()}`);
+    const outline = applyOutlineBudget(
+      input.outlineSummary,
+      outlineMax,
+      input.outlineMatchingQuery
+    );
+    outlineBudgetMode = outline.mode;
+    if (outline.text) {
+      const modeHint =
+        outline.mode === 'sectioned'
+          ? '（已按本章相关区段裁剪）'
+          : outline.mode === 'truncated'
+            ? '（已按预算截断）'
+            : '';
+      sections.push(`【大纲总结】${modeHint}\n${outline.text}`);
+    }
   }
-  if (input.identityRelationMemory?.trim()) {
-    sections.push(input.identityRelationMemory.trim());
-  }
-  if (input.selectedRelationMemory?.trim()) {
-    sections.push(`【已选关系事件备忘】\n${input.selectedRelationMemory.trim()}`);
-  }
+
+  sections.push(
+    ...applyRelationMemoBudget(
+      input.identityRelationMemory,
+      input.selectedRelationMemory,
+      input.relationMemoMaxChars
+    )
+  );
 
   // §6 下章开头锚点（章节优化专用，防止改写时与下章冲突）
   let nextHead = resolveNextChapterHead(input.chapters, currentChapterNo ?? 0, tailChars);
@@ -173,6 +304,8 @@ export async function buildNarrativeContextText(
     excerpt_fallback_chapter_nos: excerptFallbackChapterNos,
     persona_snapshot_injected_count: snapshotSection.injectedCount,
     persona_snapshot_as_of_chapter: snapshotSection.asOfChapterNo,
+    appearing_persona_injected_count: appearingInjection.injectedNames.length,
+    outline_budget_mode: outlineBudgetMode,
   };
 
   return { text: sections.join('\n\n'), meta };

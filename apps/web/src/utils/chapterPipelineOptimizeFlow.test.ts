@@ -8,13 +8,11 @@ import {
 
 function buildConfig(overrides: Partial<ChapterPipelineConfig> = {}): ChapterPipelineConfig {
   return {
-    pipelinePreset: 'creative_refine',
     pipelineSkipSensoryOutlineReview: false,
     pipelineSkipCharacterOutlineReview: false,
     pipelineSkipCharacterTraitsOutlineReview: false,
     pipelineCharacterAdjustmentEnabled: true,
     pipelineCharacterTraitsEnabled: true,
-    pipelineRulesFixMode: 'auto',
     pipelineHomogenizationEnabled: false,
     pipelineHomogenizationPriorChapterCount: 0,
     pipelineEnabledModules: [1, 2],

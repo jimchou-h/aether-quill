@@ -17,6 +17,14 @@ test('resolveLlmChatProviderEndpoint routes deepseek and siliconflow separately'
   assert.match(silicon.providerUrl, /siliconflow/);
 });
 
+test('resolveLlmChatProviderEndpoint uses SILICONFLOW_API_BASE', () => {
+  const silicon = resolveLlmChatProviderEndpoint('siliconflow', {
+    SILICONFLOW_API_KEY: 'sf-key',
+    SILICONFLOW_API_BASE: 'https://api.siliconflow.cn/v1',
+  } as NodeJS.ProcessEnv);
+  assert.equal(silicon.providerUrl, 'https://api.siliconflow.cn/v1/chat/completions');
+});
+
 test('resolveLlmChatProviderEndpoint fails clearly when key missing', () => {
   assert.throws(
     () => resolveLlmChatProviderEndpoint('siliconflow', { DEEPSEEK_API_KEY: 'only-ds' } as NodeJS.ProcessEnv),

@@ -4,11 +4,17 @@ import {
   clampChapterSummaryPromptCount,
   clampContextExcerptMaxChars,
   clampGenerationTemperature,
+  clampOutlineMaxChars,
+  clampPersonaProfileMaxChars,
   clampPriorChapterTailChars,
+  clampRelationMemoMaxChars,
   DEFAULT_CHAPTER_SUMMARY_PROMPT_COUNT,
   DEFAULT_CONTEXT_EXCERPT_MAX_CHARS,
   DEFAULT_GENERATION_TEMPERATURE,
+  DEFAULT_OUTLINE_MAX_CHARS,
+  DEFAULT_PERSONA_PROFILE_MAX_CHARS,
   DEFAULT_PRIOR_CHAPTER_TAIL_CHARS,
+  DEFAULT_RELATION_MEMO_MAX_CHARS,
   sliceContentTail,
 } from './project-settings.util';
 
@@ -45,6 +51,19 @@ test('clampContextExcerptMaxChars uses default and clamps 200~800', () => {
   assert.equal(clampContextExcerptMaxChars(undefined), DEFAULT_CONTEXT_EXCERPT_MAX_CHARS);
   assert.equal(clampContextExcerptMaxChars(100), 200);
   assert.equal(clampContextExcerptMaxChars(900), 800);
+});
+
+test('clampOutlineMaxChars uses default and clamps 0~8000', () => {
+  assert.equal(clampOutlineMaxChars(undefined), DEFAULT_OUTLINE_MAX_CHARS);
+  assert.equal(clampOutlineMaxChars(-1), 0);
+  assert.equal(clampOutlineMaxChars(99999), 8000);
+});
+
+test('clampPersonaProfileMaxChars and clampRelationMemoMaxChars', () => {
+  assert.equal(clampPersonaProfileMaxChars(undefined), DEFAULT_PERSONA_PROFILE_MAX_CHARS);
+  assert.equal(clampRelationMemoMaxChars(undefined), DEFAULT_RELATION_MEMO_MAX_CHARS);
+  assert.equal(clampPersonaProfileMaxChars(0), 0);
+  assert.equal(clampRelationMemoMaxChars(9000), 8000);
 });
 
 test('sliceContentTail returns tail segment', () => {

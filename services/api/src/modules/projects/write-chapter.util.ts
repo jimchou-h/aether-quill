@@ -27,7 +27,6 @@ export interface WriteChapterUsedRelationEvent {
 }
 
 export const WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY = 'write.chapter.outline';
-export const WRITE_CHAPTER_DRAFT_TEMPLATE_KEY = 'write.chapter';
 
 export const WRITE_CHAPTER_OUTLINE_SYSTEM_PROMPT = [
   '你是一位资深小说策划编辑，正在根据作者的写作要求为本章拟定「章节大纲」。',
@@ -38,16 +37,6 @@ export const WRITE_CHAPTER_OUTLINE_SYSTEM_PROMPT = [
   '3) 主要出场人物的目标、阻碍与状态变化；',
   '4) 与项目大纲、人物设定、关系事件的一致性提示（如有冲突须标明）。',
   '请始终参考下文 <writing-task> 中的写作要求，不得脱离作者约束凭空扩写。',
-].join('\n');
-
-export const WRITE_CHAPTER_DRAFT_SYSTEM_PROMPT = [
-  '你是一位专业小说写作助手，正在根据作者已确认的章节大纲撰写本章正文。',
-  '硬约束：',
-  '1) 必须严格遵循 <chapter-outline> 中已确认的章节大纲结构与节拍；',
-  '2) 必须满足 <writing-task> 中的写作目标、视角、必须包含与避免项；',
-  '3) 保持与【叙事上下文】及【检索证据】（如有）一致，不得违背已知设定；',
-  '4) 直接输出小说正文，不要输出大纲、说明、Markdown 标题或代码块包裹；',
-  '5) 不得使用「（此处省略）」等占位语。',
 ].join('\n');
 
 export function assertOutlineText(value: string): void {
@@ -133,62 +122,6 @@ export function buildWriteOutlineUserPrompt(input: {
   sections.push(taskXml);
   sections.push(
     '请输出本章「章节大纲」：使用清晰的分点或分场景结构，覆盖冲突、节拍与人物弧线，不要写正文。'
-  );
-
-  return sections.join('\n\n');
-}
-
-export function buildWriteDraftUserPrompt(input: {
-  task: WriteChapterTaskInput;
-  confirmedOutlineText: string;
-  selectedRelationEvents?: WriteChapterUsedRelationEvent[];
-}): string {
-  const { task, confirmedOutlineText, selectedRelationEvents } = input;
-  const sections: string[] = [];
-
-  sections.push(`【本章写作任务】请撰写第 ${task.chapterNo} 章小说正文。`);
-  sections.push(`【写作目标】\n${task.goal.trim()}`);
-  sections.push(`【叙事视角】${task.pov.trim()}`);
-
-  if (task.mustInclude.length > 0) {
-    sections.push(`【必须包含】\n${task.mustInclude.map((item, i) => `${i + 1}. ${item}`).join('\n')}`);
-  }
-  if (task.avoid.length > 0) {
-    sections.push(`【避免内容】\n${task.avoid.map((item, i) => `${i + 1}. ${item}`).join('\n')}`);
-  }
-
-  sections.push(buildTargetWordsLine(task.targetWords));
-
-  if (task.appearingCharacters && task.appearingCharacters.length > 0) {
-    sections.push(`【本章出场角色】${task.appearingCharacters.join('、')}`);
-  }
-
-  if (selectedRelationEvents && selectedRelationEvents.length > 0) {
-    const lines = selectedRelationEvents.map((event, index) => {
-      const chapterTag =
-        typeof event.chapterNo === 'number' && event.chapterNo > 0
-          ? `（第${event.chapterNo}章）`
-          : '';
-      return `${index + 1}. ${event.protagonist} ↔ ${event.counterparty}${chapterTag}：${event.summary}`;
-    });
-    sections.push(`【关联关系事件】\n${lines.join('\n')}`);
-  }
-
-  sections.push(
-    `<chapter-outline>\n${confirmedOutlineText.trim()}\n</chapter-outline>`
-  );
-
-  const taskXml = [
-    '<writing-task>',
-    `chapterNo: ${task.chapterNo}`,
-    `goal: ${task.goal.trim()}`,
-    `pov: ${task.pov.trim()}`,
-    '</writing-task>',
-  ].join('\n');
-
-  sections.push(taskXml);
-  sections.push(
-    '请严格按 <chapter-outline> 中的已确认大纲撰写本章正文，保持情节连贯与设定一致。'
   );
 
   return sections.join('\n\n');

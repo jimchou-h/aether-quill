@@ -1,0 +1,90 @@
+get:
+  tags:
+    - Projects
+  summary: List project writing style samples
+  description: |
+    Returns the project-level few-shot style sample library (AQ-336).
+    Samples are persisted in project settings extensions.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Style samples retrieved
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '../../openapi.yaml#/components/schemas/WritingStyleSample'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+
+post:
+  tags:
+    - Projects
+  summary: Create writing style sample
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/WritingStyleSampleInput'
+  responses:
+    '200':
+      description: Sample created
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/WritingStyleSample'
+    '400':
+      description: Invalid input or sample library full
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or source chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

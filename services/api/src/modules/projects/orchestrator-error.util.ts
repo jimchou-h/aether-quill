@@ -73,6 +73,12 @@ export async function resolveUpstreamFailureMessage(
   }
 
   const generic = error.message?.trim() || '';
+  if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+    return '编排服务不可用，请确认 rag-orchestrator 已启动';
+  }
+  if (error.code === 'ECONNABORTED' || /timeout of \d+ms exceeded/i.test(generic)) {
+    return `${fallback}：请求超时`;
+  }
   if (generic && !/^Request failed with status code \d+$/i.test(generic)) {
     return generic;
   }

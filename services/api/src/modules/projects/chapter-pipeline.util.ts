@@ -47,6 +47,7 @@ export const CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY =
   'chapter.pipeline.homogenization.scan';
 export const CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_TEMPLATE_KEY =
   'chapter.pipeline.homogenization.rewrite';
+export const CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_TEMPLATE_KEY = 'chapter.pipeline.brief.synthesize';
 
 export const CHAPTER_PIPELINE_TEMPLATE_KEYS = [
   CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
@@ -57,7 +58,6 @@ export const CHAPTER_PIPELINE_TEMPLATE_KEYS = [
   CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
   CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_RULES_SCAN_TEMPLATE_KEY,
   CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
   CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY,
   CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_TEMPLATE_KEY,
@@ -208,6 +208,17 @@ export const CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_SYSTEM_PROMPT = [
   '直接输出完整章节正文。',
 ].join('\n');
 
+export const CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在把多条大纲修改项综合为一段连贯的「编辑意向书」。',
+  '输出 200~400 字连贯叙述，面向改写模型的写作指导。',
+  '禁止：编号列表、条目 id、JSON、Markdown 标题；禁止逐条复述大纲原文。',
+  '必须：覆盖所有 priority=required 的编辑意图（可合并表述）；suggested 项可在不冗长时酌情融入。',
+  '语气：编辑对作者的口头 briefing，强调整体方向与文笔节奏，而非验收清单。',
+  '只输出意向书正文，不要前言或说明。',
+].join('\n');
+
+export const PIPELINE_SYNTHESIZED_BRIEF_MAX_CHARS = 2000;
+
 // ── Types ──────────────────────────────────────────────────────
 
 export type ChapterPipelinePreset = 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
@@ -220,8 +231,6 @@ export type ChapterPipelineRunModule =
   | 'character-traits'
   | 'sensory-outline'
   | 'sensory-rewrite'
-  | 'rules-scan'
-  | 'rules-fix'
   | 'homogenization'
   | 'homogenization-scan'
   | 'homogenization-rewrite'
@@ -253,6 +262,8 @@ export type ChapterPipelineStage =
   | 'pipeline_rules_fix'
   | 'pipeline_homogenization_scan'
   | 'pipeline_homogenization_rewrite'
+  | 'pipeline_typo_check'
+  | 'pipeline_typo_fix'
   | 'pipeline_final_polish_done'
   | 'compliance_pre_scan'
   | 'compliance_outline'
@@ -273,6 +284,10 @@ export interface FinalPolishResult {
   traceIds: Record<string, string>;
   createdAt: string;
   cached?: boolean;
+  typoPolish?: {
+    issueCount: number;
+    corrected: boolean;
+  };
 }
 
 export type PipelineRuleCategory =
@@ -309,14 +324,14 @@ export interface ProtagonistUnlockRule {
 }
 
 export interface ChapterPipelineConfig {
-  pipelinePreset: ChapterPipelinePreset;
+  /** @deprecated AQ-356：仅用于读取存量 preset 迁移，新配置请用 pipelineEnabledModules */
+  pipelinePreset?: ChapterPipelinePreset;
   pipelineSkipSensoryOutlineReview: boolean;
   pipelineSkipCharacterOutlineReview: boolean;
   pipelineSkipCharacterTraitsOutlineReview: boolean;
   /** 是否跑模块一 a/b 角色对白调整（character-outline → character） */
   pipelineCharacterAdjustmentEnabled: boolean;
   pipelineCharacterTraitsEnabled: boolean;
-  pipelineRulesFixMode: ChapterPipelineRulesFixMode;
   pipelineHomogenizationEnabled: boolean;
   pipelineHomogenizationPriorChapterCount: number;
   pipelineEnabledModules: ChapterPipelineModule[];
@@ -356,6 +371,10 @@ export interface PipelineOutlineState {
   suggested: PipelineOutlineItem[];
   userConfirmed: boolean;
   revisionRound: number;
+  /** 由大纲条目合成的连贯编辑意向书（改写 prompt 优先使用） */
+  synthesizedBrief?: string;
+  /** 用户是否手动编辑过意向书（为 true 时重新合成须显式触发） */
+  briefEditedByUser?: boolean;
   /** 最近 N 轮 AI 修订快照，用于撤销 */
   revisionHistory?: Array<{
     required: PipelineOutlineItem[];
@@ -468,6 +487,8 @@ export interface ChapterPipelineSession {
   versions: ChapterPipelineVersions;
   /** 用户检索预览确认后注入的角色名（空则回退全部已发布人物） */
   selectedPersonaNames?: string[];
+  /** 用户整体优化意图（由原章节优化 instruction 迁移，可选） */
+  optimizationIntent?: string;
   characterOutline?: PipelineOutlineState;
   characterTraitsOutline?: PipelineOutlineState;
   sensoryOutline?: PipelineOutlineState;
@@ -484,13 +505,11 @@ export interface ChapterPipelineSession {
 // ── Defaults ───────────────────────────────────────────────────
 
 export const DEFAULT_PIPELINE_CONFIG: ChapterPipelineConfig = {
-  pipelinePreset: 'creative_refine',
   pipelineSkipSensoryOutlineReview: false,
   pipelineSkipCharacterOutlineReview: false,
   pipelineSkipCharacterTraitsOutlineReview: false,
   pipelineCharacterAdjustmentEnabled: false,
   pipelineCharacterTraitsEnabled: true,
-  pipelineRulesFixMode: 'semi',
   pipelineHomogenizationEnabled: false,
   pipelineHomogenizationPriorChapterCount: 3,
   pipelineEnabledModules: [1, 2],
@@ -498,6 +517,30 @@ export const DEFAULT_PIPELINE_CONFIG: ChapterPipelineConfig = {
 
 export const PIPELINE_OUTLINE_REVISION_HISTORY_LIMIT = 5;
 export const PIPELINE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS = 2000;
+export const PIPELINE_OPTIMIZATION_INTENT_MAX_CHARS = 2000;
+
+export function normalizeOptimizationIntent(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+export function assertOptimizationIntent(value: string): void {
+  if (value.length > PIPELINE_OPTIMIZATION_INTENT_MAX_CHARS) {
+    throw new Error(
+      `整体优化意图不能超过 ${PIPELINE_OPTIMIZATION_INTENT_MAX_CHARS} 字符`
+    );
+  }
+}
+
+export function buildOptimizationIntentBlock(optimizationIntent?: string): string {
+  const text = optimizationIntent?.trim();
+  if (!text) {
+    return '';
+  }
+  return `【用户整体优化意图】\n${text}`;
+}
 
 export const DEFAULT_PROTAGONIST_PROGRESS_RULES: ProtagonistUnlockRule[] = [];
 
@@ -505,10 +548,36 @@ export const DEFAULT_PROTAGONIST_PROGRESS_RULES: ProtagonistUnlockRule[] = [];
 
 const PRESET_MODULES: Record<ChapterPipelinePreset, ChapterPipelineModule[]> = {
   creative_refine: [1, 2],
-  full: [1, 2, 3, 4],
-  character_rules: [1, 3],
+  full: [1, 2, 4],
+  character_rules: [1],
   sensory_only: [2],
 };
+
+export function migratePipelineSettingsFromPreset<
+  T extends Partial<ChapterPipelineConfig> & { pipelinePreset?: ChapterPipelinePreset },
+>(settings: T): Partial<ChapterPipelineConfig> & T {
+  const result = { ...settings };
+  const preset = settings.pipelinePreset;
+  if (!result.pipelineEnabledModules?.length && preset) {
+    result.pipelineEnabledModules = [...PRESET_MODULES[preset]];
+  }
+  if (result.pipelineCharacterAdjustmentEnabled === undefined && preset) {
+    result.pipelineCharacterAdjustmentEnabled =
+      resolveDefaultCharacterAdjustmentEnabled(preset);
+  }
+  if (result.pipelineHomogenizationEnabled === undefined && preset === 'full') {
+    result.pipelineHomogenizationEnabled = true;
+  }
+  return result;
+}
+
+function normalizePipelineEnabledModules(
+  modules: ChapterPipelineModule[]
+): ChapterPipelineModule[] {
+  return [...new Set(modules.filter((module) => module !== 3))].sort(
+    (a, b) => a - b
+  ) as ChapterPipelineModule[];
+}
 
 function resolveDefaultCharacterAdjustmentEnabled(
   preset: ChapterPipelinePreset,
@@ -531,72 +600,57 @@ export function resolvePipelineEnabledModules(
   if (!homogenizationEnabled) {
     modules = modules.filter((m) => m !== 4);
   }
-  return [...new Set(modules)].sort((a, b) => a - b);
+  return normalizePipelineEnabledModules(modules);
 }
 
 export function mergePipelineConfig(
   projectDefaults: Partial<ChapterPipelineConfig> & {
+    pipelinePreset?: ChapterPipelinePreset;
     protagonistProgressRules?: ProtagonistUnlockRule[];
-    pipelineRulesModuleEnabled?: boolean;
   },
-  overrides?: Partial<ChapterPipelineConfig> & { pipelineRulesModuleEnabled?: boolean }
+  overrides?: Partial<ChapterPipelineConfig>
 ): ChapterPipelineConfig {
-  const preset =
-    overrides?.pipelinePreset ??
-    projectDefaults.pipelinePreset ??
-    DEFAULT_PIPELINE_CONFIG.pipelinePreset;
-  const homogenizationEnabled =
-    overrides?.pipelineHomogenizationEnabled ??
-    projectDefaults.pipelineHomogenizationEnabled ??
-    false;
-  let enabledModules = resolvePipelineEnabledModules(
-    preset,
-    homogenizationEnabled,
-    overrides?.pipelineEnabledModules ?? projectDefaults.pipelineEnabledModules
+  const merged = migratePipelineSettingsFromPreset({
+    ...projectDefaults,
+    ...(overrides ?? {}),
+  });
+
+  const homogenizationEnabled = merged.pipelineHomogenizationEnabled ?? false;
+  let modules = normalizePipelineEnabledModules(
+    merged.pipelineEnabledModules ?? DEFAULT_PIPELINE_CONFIG.pipelineEnabledModules
   );
-  const rulesModuleEnabled =
-    overrides?.pipelineRulesModuleEnabled ?? projectDefaults.pipelineRulesModuleEnabled;
-  if (rulesModuleEnabled && !enabledModules.includes(3)) {
-    enabledModules = [...enabledModules, 3].sort((a, b) => a - b) as ChapterPipelineModule[];
+  if (homogenizationEnabled) {
+    if (!modules.includes(4)) {
+      modules = normalizePipelineEnabledModules([...modules, 4]);
+    }
+  } else {
+    modules = modules.filter((module) => module !== 4);
   }
-  const characterAdjustmentEnabled = resolveDefaultCharacterAdjustmentEnabled(
-    preset,
-    overrides?.pipelineCharacterAdjustmentEnabled ??
-      projectDefaults.pipelineCharacterAdjustmentEnabled
-  );
 
   return {
-    pipelinePreset: preset,
     pipelineSkipSensoryOutlineReview:
-      overrides?.pipelineSkipSensoryOutlineReview ??
-      projectDefaults.pipelineSkipSensoryOutlineReview ??
-      false,
+      merged.pipelineSkipSensoryOutlineReview ??
+      DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
     pipelineSkipCharacterOutlineReview:
-      overrides?.pipelineSkipCharacterOutlineReview ??
-      projectDefaults.pipelineSkipCharacterOutlineReview ??
-      false,
+      merged.pipelineSkipCharacterOutlineReview ??
+      DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
     pipelineSkipCharacterTraitsOutlineReview:
-      overrides?.pipelineSkipCharacterTraitsOutlineReview ??
-      projectDefaults.pipelineSkipCharacterTraitsOutlineReview ??
-      false,
-    pipelineCharacterAdjustmentEnabled: characterAdjustmentEnabled,
+      merged.pipelineSkipCharacterTraitsOutlineReview ??
+      DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
+    pipelineCharacterAdjustmentEnabled: merged.pipelineCharacterAdjustmentEnabled ?? false,
     pipelineCharacterTraitsEnabled:
-      overrides?.pipelineCharacterTraitsEnabled ??
-      projectDefaults.pipelineCharacterTraitsEnabled ??
-      true,
-    pipelineRulesFixMode:
-      overrides?.pipelineRulesFixMode ?? projectDefaults.pipelineRulesFixMode ?? 'semi',
+      merged.pipelineCharacterTraitsEnabled ??
+      DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
     pipelineHomogenizationEnabled: homogenizationEnabled,
     pipelineHomogenizationPriorChapterCount: Math.min(
       10,
       Math.max(
         1,
-        overrides?.pipelineHomogenizationPriorChapterCount ??
-          projectDefaults.pipelineHomogenizationPriorChapterCount ??
-          3
+        merged.pipelineHomogenizationPriorChapterCount ??
+          DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationPriorChapterCount
       )
     ),
-    pipelineEnabledModules: enabledModules,
+    pipelineEnabledModules: modules,
   };
 }
 
@@ -761,7 +815,6 @@ export function getPipelineInputText(
       return session.versions.afterSensory ?? getPostCharacterText(session);
     case 4:
       return (
-        session.versions.afterRules ??
         session.versions.afterSensory ??
         getPostCharacterText(session)
       );
@@ -851,15 +904,10 @@ export function assertModulePrerequisites(
       throw new Error('感官大纲尚未确认');
     }
   }
-  if (module.startsWith('rules') && enabled.includes(3)) {
-    const input = getPipelineInputText(session, 3);
-    if (!input.trim()) {
-      throw new Error('规则扫描输入正文为空');
-    }
-  }
   if (module.startsWith('homogenization') && enabled.includes(4)) {
-    if (!session.versions.afterRules && enabled.includes(3)) {
-      throw new Error('请先完成模块三（规则检查）');
+    const input = getPipelineInputText(session, 4);
+    if (!input.trim()) {
+      throw new Error('同质化检测输入正文为空');
     }
   }
 }
@@ -1019,6 +1067,34 @@ function wrapWritingBriefTag(brief: string): string {
   return `<writing-brief>\n${brief}\n</writing-brief>`;
 }
 
+function buildWritingBriefBlock(input: {
+  briefText?: string;
+  outlineItems?: PipelineOutlineItem[];
+  moduleLabel: string;
+  writingGoal: string;
+}): string {
+  const prose = input.briefText?.trim();
+  if (prose) {
+    return wrapWritingBriefTag(prose);
+  }
+  const items = (input.outlineItems ?? []).filter((item) => Boolean(item.text?.trim()));
+  if (items.length === 0) {
+    return '';
+  }
+  return wrapWritingBriefTag(
+    renderOutlineWritingBrief({
+      outlineItems: items,
+      moduleLabel: input.moduleLabel,
+      writingGoal: input.writingGoal,
+    })
+  );
+}
+
+export function resolveOutlineBriefText(outline?: PipelineOutlineState): string | undefined {
+  const text = outline?.synthesizedBrief?.trim();
+  return text || undefined;
+}
+
 // ── Prompt builders ────────────────────────────────────────────
 
 export function buildCharacterUserPrompt(input: {
@@ -1026,17 +1102,14 @@ export function buildCharacterUserPrompt(input: {
   protagonistContext: string;
   personaBlock: string;
   outline?: PipelineOutlineItem[];
+  briefText?: string;
 }): string {
-  const outlineBlock =
-    input.outline && input.outline.length > 0
-      ? wrapWritingBriefTag(
-          renderOutlineWritingBrief({
-            outlineItems: input.outline,
-            moduleLabel: '角色调整',
-            writingGoal: OUTLINE_WRITING_GOALS.character,
-          })
-        )
-      : '';
+  const outlineBlock = buildWritingBriefBlock({
+    briefText: input.briefText,
+    outlineItems: input.outline,
+    moduleLabel: '角色调整',
+    writingGoal: OUTLINE_WRITING_GOALS.character,
+  });
   return [
     input.protagonistContext,
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
@@ -1066,8 +1139,10 @@ export function buildCharacterOutlineUserPrompt(input: {
   sourceText: string;
   protagonistContext: string;
   personaBlock: string;
+  optimizationIntent?: string;
 }): string {
   return [
+    buildOptimizationIntentBlock(input.optimizationIntent),
     input.protagonistContext,
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
     [
@@ -1085,8 +1160,10 @@ export function buildCharacterOutlineUserPrompt(input: {
 export function buildCharacterTraitsOutlineUserPrompt(input: {
   sourceText: string;
   personaBlock: string;
+  optimizationIntent?: string;
 }): string {
   return [
+    buildOptimizationIntentBlock(input.optimizationIntent),
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
     ['【输出要求】', CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_JSON_FORMAT].join('\n'),
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
@@ -1099,8 +1176,10 @@ export function buildCharacterTraitsRewriteUserPrompt(input: {
   sourceText: string;
   outline: PipelineOutlineItem[];
   personaBlock: string;
+  briefText?: string;
 }): string {
-  const brief = renderOutlineWritingBrief({
+  const briefBlock = buildWritingBriefBlock({
+    briefText: input.briefText,
     outlineItems: input.outline,
     moduleLabel: '角色特征润色',
     writingGoal: OUTLINE_WRITING_GOALS.characterTraits,
@@ -1108,7 +1187,7 @@ export function buildCharacterTraitsRewriteUserPrompt(input: {
   return [
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
     ['【改写原则】', '按编辑意图自然补足角色卡特征；不改动情节骨架、对白、体位顺序。'].join('\n'),
-    wrapWritingBriefTag(brief),
+    briefBlock,
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
   ]
     .filter(Boolean)
@@ -1166,8 +1245,10 @@ export function buildOutlineGateRecheckUserPrompt(input: {
 export function buildSensoryOutlineUserPrompt(input: {
   sourceText: string;
   personaBlock: string;
+  optimizationIntent?: string;
 }): string {
   return [
+    buildOptimizationIntentBlock(input.optimizationIntent),
     input.personaBlock ? `【人物卡】\n${input.personaBlock}` : '',
     [
       '【输出要求】',
@@ -1186,8 +1267,10 @@ export function buildSensoryRewriteUserPrompt(input: {
   sourceText: string;
   outline: PipelineOutlineItem[];
   personaBlock: string;
+  briefText?: string;
 }): string {
-  const brief = renderOutlineWritingBrief({
+  const briefBlock = buildWritingBriefBlock({
+    briefText: input.briefText,
     outlineItems: input.outline,
     moduleLabel: '感官优化',
     writingGoal: OUTLINE_WRITING_GOALS.sensory,
@@ -1199,7 +1282,7 @@ export function buildSensoryRewriteUserPrompt(input: {
       '本步仅提升感官描写质量，不修复禁用词、平台红线或叙事规则问题。',
       '编辑意图仅为方向指引，不是可照搬的成品句子；请根据 brief 自行创作描写。',
     ].join('\n'),
-    wrapWritingBriefTag(brief),
+    briefBlock,
     `<chapter-original>\n${input.sourceText}\n</chapter-original>`,
   ]
     .filter(Boolean)
@@ -1212,8 +1295,10 @@ export function buildCharacterRewriteReviseUserPrompt(input: {
   userFeedback: string;
   personaBlock: string;
   protagonistContext?: string;
+  briefText?: string;
 }): string {
-  const brief = renderOutlineWritingBrief({
+  const briefBlock = buildWritingBriefBlock({
+    briefText: input.briefText,
     outlineItems: input.outline,
     moduleLabel: '角色调整',
     writingGoal: OUTLINE_WRITING_GOALS.character,
@@ -1227,7 +1312,7 @@ export function buildCharacterRewriteReviseUserPrompt(input: {
       '不修改感官描写密度、角色卡特征补缺、禁用词与叙事规则。',
       '须符合已确认编辑意图，条目服从文脉。',
     ].join('\n'),
-    wrapWritingBriefTag(brief),
+    briefBlock,
     `<chapter-draft>\n${input.draftText}\n</chapter-draft>`,
     `<revision-feedback>\n${input.userFeedback.trim()}\n</revision-feedback>`,
   ]
@@ -1240,8 +1325,10 @@ export function buildSensoryRewriteReviseUserPrompt(input: {
   outline: PipelineOutlineItem[];
   userFeedback: string;
   personaBlock: string;
+  briefText?: string;
 }): string {
-  const brief = renderOutlineWritingBrief({
+  const briefBlock = buildWritingBriefBlock({
+    briefText: input.briefText,
     outlineItems: input.outline,
     moduleLabel: '感官优化',
     writingGoal: OUTLINE_WRITING_GOALS.sensory,
@@ -1254,7 +1341,7 @@ export function buildSensoryRewriteReviseUserPrompt(input: {
       '不修复禁用词、平台红线或叙事规则问题；不改动对白、剧情、角色特征。',
       '须符合已确认编辑意图，条目服从文脉，不得违背其中约束。',
     ].join('\n'),
-    wrapWritingBriefTag(brief),
+    briefBlock,
     `<chapter-draft>\n${input.draftText}\n</chapter-draft>`,
     `<revision-feedback>\n${input.userFeedback.trim()}\n</revision-feedback>`,
   ]
@@ -1494,6 +1581,58 @@ export function resolveFixItemsModuleLabel(module: ChapterPipelineRewriteFixItem
     default:
       return '感官优化';
   }
+}
+
+export function resolveOutlineTypeModuleLabel(outlineType: ChapterPipelineOutlineType): string {
+  switch (outlineType) {
+    case 'character':
+      return '角色调整';
+    case 'character-traits':
+      return '角色特征润色';
+    default:
+      return '感官优化';
+  }
+}
+
+export function resolveOutlineWritingGoalForOutlineType(
+  outlineType: ChapterPipelineOutlineType
+): string {
+  switch (outlineType) {
+    case 'character':
+      return OUTLINE_WRITING_GOALS.character;
+    case 'character-traits':
+      return OUTLINE_WRITING_GOALS.characterTraits;
+    default:
+      return OUTLINE_WRITING_GOALS.sensory;
+  }
+}
+
+export function buildBriefSynthesizeUserPrompt(input: {
+  outline: PipelineOutlineState;
+  outlineType: ChapterPipelineOutlineType;
+  personaBlock?: string;
+  optimizationIntent?: string;
+}): string {
+  const itemsJson = JSON.stringify(
+    {
+      required: input.outline.required,
+      suggested: input.outline.suggested,
+    },
+    null,
+    2
+  );
+  const moduleLabel = resolveOutlineTypeModuleLabel(input.outlineType);
+  const writingGoal = resolveOutlineWritingGoalForOutlineType(input.outlineType);
+  return [
+    buildOptimizationIntentBlock(input.optimizationIntent),
+    `【模块】${moduleLabel}`,
+    `【写作目标】${writingGoal}`,
+    input.personaBlock ? `【人物卡摘要】\n${input.personaBlock}` : '',
+    `<outline-items>\n${itemsJson}\n</outline-items>`,
+    '请将上述大纲条目综合为一段连贯编辑意向书（200~400 字）。required 意图必须全部覆盖。',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function patchOutlineCoverageManual(
@@ -2343,6 +2482,8 @@ export function formatPipelineStageLabel(stage: ChapterPipelineStage): string {
     pipeline_rules_fix: '规则修复中…',
     pipeline_homogenization_scan: '同质化检测中…',
     pipeline_homogenization_rewrite: '同质化改写中…',
+    pipeline_typo_check: '错字检查中…',
+    pipeline_typo_fix: '错字修正中…',
     pipeline_final_polish_done: '终稿已生成，等待审核',
     compliance_pre_scan: '硬规则预扫描中…',
     compliance_outline: '生成合规大纲…',

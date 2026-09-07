@@ -28,6 +28,9 @@ export interface ChapterOptimizeUsedRelationEvent {
 
 export const CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY = 'chapter.optimize.plan';
 export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
+export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY = 'chapter.optimize.direct-draft';
+
+export type ChapterOptimizeRewriteMode = 'from-plan' | 'direct';
 
 export const CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT = [
   '你是一位资深小说编辑，正在协助用户对一段已存在的章节正文进行定向优化。',
@@ -56,6 +59,21 @@ export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
   '8) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
 ].join('\n');
 
+export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_SYSTEM_PROMPT = [
+  '你是一位资深小说写作助手，正在按照用户的优化要求重写一段已有章节正文。',
+  '本步骤需要直接输出「优化后的章节正文」，不要输出任何方案、说明、Markdown 标题或代码块包裹。',
+  '硬约束：',
+  '1) 必须以下文 <chapter-original> 中的原章节正文为蓝本进行改写，禁止凭摘要扩写；',
+  '2) 必须遵循【用户优化要求】，不得另起优化方案或大纲；',
+  '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
+  '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非用户要求明确修改；',
+  '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
+  '6) 若提示中含【边界锚点】/【前段末文】，锚点与末文仅用于把握衔接，不得照抄进正文；',
+  '7) 须遵守边界锚点：段首承接上段原文末句之后、段末落点不越过本段原文末句；禁止提前写入下段原文首句之后的情节；',
+  '8) 若【叙事上下文】含【下章衔接】，本章末（尤其最后一段）须与下章开头自然衔接，不得矛盾或提前写下章情节；',
+  '9) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
+].join('\n');
+
 /** 低于此字数优先单段生成，减少硬切分（可通过环境变量覆盖） */
 export const OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD = 2800;
 /** 长章按固定字数切分，每段约 3000 字（项目 settings 可覆盖；0 表示不分段） */
@@ -81,6 +99,50 @@ export interface ChapterOptimizeLengthStrategy {
   segmentCount: number;
   inputChapterChars: number;
   strategyLabel: string;
+}
+
+export interface OptimizeDraftExecution {
+  optimizationMode: ChapterOptimizeMode;
+  segmentTotal: number;
+  strategyLabel: string;
+  skipPlanDiagnosis: boolean;
+}
+
+export function resolveOptimizeDraftExecution(input: {
+  rewriteMode: ChapterOptimizeRewriteMode;
+  strategy: ChapterOptimizeLengthStrategy;
+}): OptimizeDraftExecution {
+  const skipPlanDiagnosis = input.rewriteMode === 'direct';
+  if (input.rewriteMode === 'direct' && input.strategy.mode === 'segmented') {
+    return {
+      optimizationMode: 'segmented',
+      segmentTotal: input.strategy.segmentCount,
+      strategyLabel: `按要求直接分段生成正文（${input.strategy.segmentCount} 段）`,
+      skipPlanDiagnosis,
+    };
+  }
+  return {
+    optimizationMode: 'single',
+    segmentTotal: 1,
+    strategyLabel:
+      input.rewriteMode === 'direct'
+        ? '按要求直接生成正文'
+        : input.strategy.mode === 'segmented'
+          ? '整章生成正文（方案已分段诊断）'
+          : '整章生成正文',
+    skipPlanDiagnosis,
+  };
+}
+
+export function listOptimizeDraftSseStages(
+  execution: Pick<OptimizeDraftExecution, 'optimizationMode'>
+): ChapterOptimizeStage[] {
+  const stages: ChapterOptimizeStage[] = ['syncing_context', 'retrieving'];
+  if (execution.optimizationMode === 'segmented') {
+    stages.push('draft_segment');
+  }
+  stages.push('merge_validation');
+  return stages;
 }
 
 export interface ChapterOptimizeConfig {
@@ -222,6 +284,55 @@ export function assertPlanText(value: string): void {
   if (!value || !value.trim()) {
     throw new Error('优化方案 planText 不能为空');
   }
+}
+
+export function normalizeRewriteMode(value: unknown): ChapterOptimizeRewriteMode {
+  return value === 'direct' ? 'direct' : 'from-plan';
+}
+
+export function resolveOptimizeDraftTemplateKey(mode: ChapterOptimizeRewriteMode): string {
+  return mode === 'direct'
+    ? CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY
+    : CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY;
+}
+
+export const DRAFT_REFINE_USER_CONSTRAINT =
+  '本轮是按已确认优化方案对上一稿正文的收紧改写：<chapter-original> 为上一轮优化正文，不是入库原文。必须执行 <optimization-plan> 中尚未落实或落实不足的条目，不得另起优化方案或大纲。';
+
+export function normalizeDraftSourceText(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (trimmed.length > 200000) {
+    throw new Error('上一稿正文 sourceText 长度不能超过 200000 字符');
+  }
+  return trimmed;
+}
+
+export function assertOptimizeDraftRequest(input: {
+  rewriteMode?: unknown;
+  instruction?: unknown;
+  planText?: unknown;
+  sourceText?: unknown;
+}): {
+  rewriteMode: ChapterOptimizeRewriteMode;
+  instruction: string;
+  planText: string;
+  sourceText: string;
+} {
+  const rewriteMode = normalizeRewriteMode(input.rewriteMode);
+  const instruction = normalizeInstruction(input.instruction);
+  assertInstruction(instruction);
+  const planText = typeof input.planText === 'string' ? input.planText.trim() : '';
+  if (rewriteMode === 'from-plan') {
+    assertPlanText(planText);
+  }
+  const sourceText = rewriteMode === 'direct' ? '' : normalizeDraftSourceText(input.sourceText);
+  return { rewriteMode, instruction, planText, sourceText };
 }
 
 export function buildPlanRevisionInstruction(input: {
@@ -416,14 +527,14 @@ export function buildPlanSynthesisUserPrompt(input: {
   return sections.join('\n\n');
 }
 
-const PLACEHOLDER_PATTERNS: RegExp[] = [
-  /（此处省略）/,
-  /\[原段落保留\]/,
-  /原文保留/,
-  /此处略/,
-  /原段落保留/,
-  /同上/,
-  /同前/,
+const PLACEHOLDER_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  { label: '（此处省略）', pattern: /（此处省略）/u },
+  { label: '[原段落保留]', pattern: /\[原段落保留\]/u },
+  { label: '原文保留', pattern: /原文保留/u },
+  { label: '此处略', pattern: /此处略/u },
+  { label: '原段落保留', pattern: /原段落保留/u },
+  { label: '同上', pattern: /(?<!合)同上(?!述)/u },
+  { label: '同前', pattern: /(?<![\p{Script=Han}])同前(?![\p{Script=Han}])/u },
 ];
 
 export function detectPlaceholderText(text: string): string | null {
@@ -431,9 +542,9 @@ export function detectPlaceholderText(text: string): string | null {
   if (!trimmed) {
     return null;
   }
-  for (const pattern of PLACEHOLDER_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      return pattern.source;
+  for (const item of PLACEHOLDER_PATTERNS) {
+    if (item.pattern.test(trimmed)) {
+      return item.label;
     }
   }
   return null;
@@ -503,10 +614,13 @@ export function buildDraftUserPrompt(input: {
   chapter: ChapterOptimizeChapterRef;
   instruction: string;
   planText: string;
+  sourceText?: string;
   appearingCharacters?: string[];
   selectedRelationEvents?: ChapterOptimizeUsedRelationEvent[];
 }): string {
   const { chapter, instruction, planText, appearingCharacters, selectedRelationEvents } = input;
+  const sourceText = input.sourceText?.trim() ?? '';
+  const originalForPrompt = sourceText || chapter.content;
   const sections: string[] = [];
 
   sections.push(
@@ -533,11 +647,55 @@ export function buildDraftUserPrompt(input: {
     `<optimization-plan chapter-no="${chapter.chapterNo}">\n${planText.trim()}\n</optimization-plan>`
   );
   sections.push(
+    `<chapter-original chapter-no="${chapter.chapterNo}">\n${originalForPrompt}\n</chapter-original>`
+  );
+
+  if (sourceText) {
+    sections.push(DRAFT_REFINE_USER_CONSTRAINT);
+  }
+
+  sections.push(
+    '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。必须基于 <chapter-original> 逐段改写并完整覆盖原文信息，不得遗漏关键情节、对白、人物动作与指代关系；若某段无需修改请保留原意并输出该段。除非优化方案明确要求删减，输出总字数应不低于原文的95%，段落数不得少于原文。'
+  );
+
+  return sections.join('\n\n');
+}
+
+export function buildDirectDraftUserPrompt(input: {
+  chapter: ChapterOptimizeChapterRef;
+  instruction: string;
+  appearingCharacters?: string[];
+  selectedRelationEvents?: ChapterOptimizeUsedRelationEvent[];
+}): string {
+  const { chapter, instruction, appearingCharacters, selectedRelationEvents } = input;
+  const sections: string[] = [];
+
+  sections.push(
+    `【写作目标】请按用户优化要求重写第${chapter.chapterNo}章「${chapter.title}」的正文。`
+  );
+  sections.push(`【用户优化要求】\n${instruction}`);
+
+  if (appearingCharacters && appearingCharacters.length > 0) {
+    sections.push(`【本章出场角色】${appearingCharacters.join('、')}`);
+  }
+
+  if (selectedRelationEvents && selectedRelationEvents.length > 0) {
+    const lines = selectedRelationEvents.map((event, index) => {
+      const chapterTag =
+        typeof event.chapterNo === 'number' && event.chapterNo > 0
+          ? `（第${event.chapterNo}章）`
+          : '';
+      return `${index + 1}. ${event.protagonist} ↔ ${event.counterparty}${chapterTag}：${event.summary}`;
+    });
+    sections.push(`【关联关系事件】\n${lines.join('\n')}`);
+  }
+
+  sections.push(
     `<chapter-original chapter-no="${chapter.chapterNo}">\n${chapter.content}\n</chapter-original>`
   );
 
   sections.push(
-    '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。必须基于 <chapter-original> 逐段改写并完整覆盖原文信息，不得遗漏关键情节、对白、人物动作与指代关系；若某段无需修改请保留原意并输出该段。除非优化方案明确要求删减，输出总字数应不低于原文的95%，段落数不得少于原文。'
+    '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。必须基于 <chapter-original> 逐段改写并完整覆盖原文信息，不得遗漏关键情节、对白、人物动作与指代关系；若某段无需修改请保留原意并输出该段。除非用户优化要求明确要求删减，输出总字数应不低于原文的95%，段落数不得少于原文。'
   );
 
   return sections.join('\n\n');
@@ -578,7 +736,9 @@ export function ensureChapterVersionMatches(chapterNo: number, expected: Date, a
 /**
  * 用稳定的伪随机生成 planId / draftId，便于 trace 关联。
  */
-export function makeOptimizationId(prefix: 'plan' | 'draft' | 'typo-check' | 'typo-fix'): string {
+export function makeOptimizationId(
+  prefix: 'plan' | 'draft' | 'typo-check' | 'typo-fix' | 'auto-loop'
+): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -674,6 +834,7 @@ export interface SegmentPromptInput {
   /** 原文边界句锚点（情节范围） */
   boundaryAnchors?: SegmentBoundaryAnchors;
   totalSegments: number;
+  omitOptimizationPlan?: boolean;
 }
 
 export function splitChapterParagraphs(content: string): string[] {
@@ -926,6 +1087,7 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     previousSegmentTail,
     boundaryAnchors,
     totalSegments,
+    omitOptimizationPlan,
   } = input;
 
   const sections: string[] = [];
@@ -975,10 +1137,12 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     sections.push(`【关联关系事件】\n${lines.join('\n')}`);
   }
 
-  sections.push(`<optimization-plan>\n${planText.trim()}\n</optimization-plan>`);
+  if (!omitOptimizationPlan) {
+    sections.push(`<optimization-plan>\n${(planText ?? '').trim()}\n</optimization-plan>`);
+  }
 
-  const localPlan = segment.planExcerpt?.trim();
-  if (localPlan && localPlan !== planText.trim()) {
+  const localPlan = omitOptimizationPlan ? '' : segment.planExcerpt?.trim();
+  if (localPlan && localPlan !== (planText ?? '').trim()) {
     sections.push(`<segment-local-plan>\n${localPlan}\n</segment-local-plan>`);
   }
 

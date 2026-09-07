@@ -4,6 +4,7 @@
 
 import axios from 'axios';
 import { resolveUpstreamFailureMessage } from './orchestrator-error.util';
+import { createUtf8StreamDecoder } from '../../common/utf8-stream-decoder';
 
 export interface PipelineOrchestratorStreamCallbacks {
   onStart?: (traceId: string) => void;
@@ -47,10 +48,11 @@ export async function streamPipelineGeneration(input: {
 
   await new Promise<void>((resolve, reject) => {
     const stream = response.data as NodeJS.ReadableStream;
+    const utf8 = createUtf8StreamDecoder();
     let buffer = '';
 
     stream.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString('utf-8');
+      buffer += utf8.decode(chunk);
       const segments = buffer.split('\n\n');
       buffer = segments.pop() || '';
 

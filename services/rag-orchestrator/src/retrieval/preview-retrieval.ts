@@ -27,6 +27,8 @@ import {
   resolveChapterScopedEmbeddingQuery,
   resolveMemoryChapterSummaryEmbeddingQuery,
   type KnowledgeDocumentForMatch,
+  type StructuredKnowledgeRetrievalResult,
+  type KnowledgeRetrievalResult,
 } from './knowledge-retrieval';
 import { extractPersonaDisplayName } from './persona-card-evidence';
 import {
@@ -35,16 +37,21 @@ import {
   parseAppearingCharactersFromExtra,
   shouldApplyChapterOptimizeMatchingBoost,
 } from './optimize-matching-text';
+import { mergeTitleAndVectorEvidence, type RetrievalMode } from './hybrid-knowledge-merge';
 import { countEvidenceTokens, resolveEvidenceTokenBudget } from './token-budget';
-import type { ChunkWithEmbedding } from './types';
 import { Reranker } from './reranker';
 import { VectorStore } from './vector-store';
+
+/** 请求侧检索策略：auto 由是否有 structuredMatchingText 决定，其余为强制指定 */
+export type PreviewRetrievalModeParam = 'auto' | 'structured_only' | 'vector_only' | 'hybrid';
 
 export interface PreviewRetrievalRequest {
   projectId: string;
   prompt?: string;
   chapterNo?: number;
   useStructuredKb?: boolean;
+  /** AQ-360：默认 auto（标题匹配为主 + 向量补足），可强制 structured_only/vector_only/hybrid */
+  retrievalMode?: PreviewRetrievalModeParam;
   projectCtx: {
     outlineSummary: string;
     personaProfile: string;
@@ -80,6 +87,12 @@ export interface PreviewRetrievalResult {
   tokenBudget: number;
   tokenUsed: number;
   query: string;
+  /** AQ-360：本次实际生效的检索模式（auto 已按数据情况归一为具体值） */
+  retrievalMode: RetrievalMode;
+  titleMatchedDocumentIds: string[];
+  vectorDocumentIds: string[];
+  mergedDocumentIds: string[];
+  dualHitDocumentIds: string[];
 }
 
 export async function runPreviewRetrieval(
@@ -136,12 +149,16 @@ export async function runPreviewRetrieval(
     });
   }
 
-  const useStructured =
+  const requestedMode = input.retrievalMode ?? 'auto';
+  const canStructured =
     input.useStructuredKb !== false && chapterNo > 0 && projectCtx.chapters.length > 0;
+  const wantStructured = canStructured && requestedMode !== 'vector_only';
+  const wantVector = requestedMode !== 'structured_only';
 
   let structuredMatchingQuery = '';
+  let sr: StructuredKnowledgeRetrievalResult | null = null;
 
-  if (useStructured) {
+  if (wantStructured) {
     const extra = input.extraContext;
     const optimizeInstruction = (
       typeof extra?.retrievalInstruction === 'string' ? extra.retrievalInstruction : prompt
@@ -162,7 +179,7 @@ export async function runPreviewRetrieval(
         }
       : undefined;
 
-    const sr = buildStructuredKnowledgeEvidence(
+    sr = buildStructuredKnowledgeEvidence(
       chapterNo,
       {
         chapterNo,
@@ -178,11 +195,61 @@ export async function runPreviewRetrieval(
       },
       { personaTopN: personaQuota, otherTopN: otherQuota }
     );
-    structuredEvidenceText = sr.evidenceText;
     structuredMatchingQuery = sr.query.trim();
+  }
 
-    const evidenceIds = new Set(sr.evidenceDocumentIds ?? []);
-    for (const doc of sr.fullDocuments ?? []) {
+  // AQ-360：标题匹配（A）保留命中，向量检索（B）作为补足；无 structuredMatchingText 时 B 兜底，不再空证据
+  let vectorPart: KnowledgeRetrievalResult | null = null;
+  if (wantVector) {
+    const chapterScopedEmbeddingQuery =
+      chapterNo > 0
+        ? resolveChapterScopedEmbeddingQuery(
+            { chapters: projectCtx.chapters },
+            chapterNo,
+            chapterNo
+          )
+        : undefined;
+    const embeddingQuery =
+      chapterScopedEmbeddingQuery !== undefined && chapterScopedEmbeddingQuery.trim()
+        ? chapterScopedEmbeddingQuery
+        : buildEmbeddingRetrievalQuery(prompt, projectCtx, input.extraContext);
+    const vectorQueryText = (sr?.query?.trim() || query || prompt).trim();
+
+    if (vectorQueryText) {
+      try {
+        vectorPart = await retrieveKnowledgeForDraft(
+          vectorStore,
+          reranker,
+          projectId,
+          vectorQueryText,
+          { apiBaseUrl, enrichFullDocuments: true, embeddingQuery }
+        );
+      } catch (error) {
+        console.error('Preview retrieval vector supplement failed:', error);
+      }
+    }
+  }
+
+  let retrievalMode: RetrievalMode = 'skipped';
+  let titleMatchedDocumentIds: string[] = [];
+  let vectorDocumentIds: string[] = [];
+  let dualHitDocumentIds: string[] = [];
+  let mergedDocumentIds: string[] = [];
+
+  if (sr || vectorPart) {
+    const merged = mergeTitleAndVectorEvidence(sr, vectorPart, {
+      personaTopN: personaQuota,
+      otherTopN: otherQuota,
+    });
+    structuredEvidenceText = merged.evidenceText;
+    retrievalMode = merged.retrievalMode;
+    titleMatchedDocumentIds = merged.titleMatchedDocumentIds;
+    vectorDocumentIds = merged.vectorDocumentIds;
+    dualHitDocumentIds = merged.dualHitDocumentIds;
+    mergedDocumentIds = (merged.fullDocuments ?? []).map((d) => d.documentId);
+
+    const evidenceIds = new Set(merged.evidenceDocumentIds ?? []);
+    for (const doc of merged.fullDocuments ?? []) {
       const pool = doc.docType === 'persona_card' ? 'persona_card' : 'other_docs';
       const included = evidenceIds.has(doc.documentId);
       items.push({
@@ -196,74 +263,11 @@ export async function runPreviewRetrieval(
           docType: doc.docType,
           reason: doc.reason,
           excludedByTokenBudget: !included,
+          evidenceSource: doc.evidenceSource,
+          dualHit: doc.dualHit === true,
           canonicalCharacter:
             doc.docType === 'persona_card' ? extractPersonaDisplayName(doc.title) : undefined,
         },
-      });
-    }
-  } else if (query.trim()) {
-    const chapterScopedEmbeddingQuery =
-      chapterNo > 0
-        ? resolveChapterScopedEmbeddingQuery(
-            { chapters: projectCtx.chapters },
-            chapterNo,
-            chapterNo
-          )
-        : undefined;
-    const embeddingQuery =
-      chapterScopedEmbeddingQuery !== undefined && chapterScopedEmbeddingQuery.trim()
-        ? chapterScopedEmbeddingQuery
-        : buildEmbeddingRetrievalQuery(prompt, projectCtx, input.extraContext);
-
-    const retrieval = await retrieveKnowledgeForDraft(vectorStore, reranker, projectId, query, {
-      apiBaseUrl,
-      enrichFullDocuments: true,
-      embeddingQuery,
-    });
-    for (const doc of retrieval.fullDocuments ?? []) {
-      const pool = doc.docType === 'persona_card' ? 'persona_card' : 'other_docs';
-      items.push({
-        id: doc.documentId,
-        pool,
-        title: doc.title,
-        preview: doc.content.trim().slice(0, 400),
-        selected: true,
-        meta: { docType: doc.docType },
-      });
-    }
-    const personaIds = new Set(
-      (retrieval.fullDocuments ?? [])
-        .filter((d) => d.docType === 'persona_card')
-        .map((d) => d.documentId)
-    );
-    const chunkGroups = new Map<string, ChunkWithEmbedding[]>();
-    for (const chunk of retrieval.chunks) {
-      if (personaIds.has(chunk.documentId)) {
-        continue;
-      }
-      const list = chunkGroups.get(chunk.documentId) ?? [];
-      list.push(chunk);
-      chunkGroups.set(chunk.documentId, list);
-    }
-    for (const [docId, chunks] of chunkGroups) {
-      if (items.some((i) => i.id === docId)) {
-        continue;
-      }
-      const title =
-        typeof chunks[0]?.metadata?.docTitle === 'string'
-          ? String(chunks[0].metadata.docTitle)
-          : docId;
-      items.push({
-        id: docId,
-        pool: 'other_docs',
-        title,
-        preview: chunks
-          .slice(0, 3)
-          .map((c) => c.content.trim())
-          .join('\n')
-          .slice(0, 400),
-        selected: true,
-        meta: { chunkIds: chunks.map((c) => c.id) },
       });
     }
   }
@@ -325,5 +329,10 @@ export async function runPreviewRetrieval(
     tokenBudget,
     tokenUsed,
     query: structuredMatchingQuery || query || prompt,
+    retrievalMode,
+    titleMatchedDocumentIds,
+    vectorDocumentIds,
+    mergedDocumentIds,
+    dualHitDocumentIds,
   };
 }

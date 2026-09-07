@@ -13,7 +13,7 @@ export class DocumentsController {
   @Post('api/projects/:projectId/documents')
   create(
     @Param('projectId') projectId: string,
-    @Body() data: { title: string; content: string; docType?: string }
+    @Body() data: { title: string; content: string; docType?: string; personaId?: string | null }
   ) {
     return this.documentsService.create(projectId, data);
   }
@@ -33,7 +33,7 @@ export class DocumentsController {
   @Put('api/documents/:id')
   update(
     @Param('id') id: string,
-    @Body() data: { title?: string; content?: string; docType?: string }
+    @Body() data: { title?: string; content?: string; docType?: string; personaId?: string | null }
   ) {
     return this.documentsService.update(id, data);
   }

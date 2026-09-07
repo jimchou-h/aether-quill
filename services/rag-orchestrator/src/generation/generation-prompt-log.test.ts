@@ -45,6 +45,12 @@ test('resolveGenerationPromptLogKind 识别写作工作台与章节优化', () =
   );
   assert.equal(
     resolveGenerationPromptLogKind(
+      trace({ context: { templateKey: 'chapter.optimize.direct-draft' } })
+    ),
+    'optimize-draft'
+  );
+  assert.equal(
+    resolveGenerationPromptLogKind(
       trace({ context: { templateKey: 'chapter.pipeline.character-traits.outline' } })
     ),
     'pipeline'

@@ -32,7 +32,9 @@ const editingDocId = ref<string | null>(null);
 const formTitle = ref('');
 const formContent = ref('');
 const formDocType = ref<DocType>('other');
+const formPersonaId = ref<string>('');
 const filterDocType = ref<DocType | ''>('');
+const personas = ref<Array<{ id: string; name: string; status: string }>>([]);
 
 const docTypeOptions: Array<{ value: DocType; label: string }> = [
   { value: 'persona_card', label: '角色卡' },
@@ -41,6 +43,14 @@ const docTypeOptions: Array<{ value: DocType; label: string }> = [
   { value: 'lore', label: '设定 lore' },
   { value: 'other', label: '其他' },
 ];
+
+const showPersonaLink = computed(() => formDocType.value === 'persona_card');
+
+const orphanPersonaCards = computed(() =>
+  documents.value.filter(
+    (doc) => (doc.docType ?? 'other') === 'persona_card' && !doc.personaId
+  )
+);
 
 const filteredDocuments = computed(() => {
   if (!filterDocType.value) {
@@ -52,7 +62,9 @@ const filteredDocuments = computed(() => {
 const docModalTitle = computed(() => (editingDocId.value ? '编辑文档' : '新建文档'));
 
 const docModalSubtitle = computed(() =>
-  editingDocId.value ? '修改标题、类型或正文后保存即可。' : '填写文档信息，创建后可触发索引供检索使用。'
+  editingDocId.value
+    ? '修改标题、类型或正文后保存即可；内容变更会自动排队重新索引。'
+    : '填写文档信息，创建后会自动排队分块索引供检索使用。'
 );
 
 const docModalSubmitLabel = computed(() => {
@@ -64,6 +76,13 @@ const docModalSubmitLabel = computed(() => {
 
 function docTypeLabel(value?: DocType): string {
   return docTypeOptions.find((o) => o.value === (value ?? 'other'))?.label ?? '其他';
+}
+
+function personaNameById(personaId?: string | null): string {
+  if (!personaId) {
+    return '';
+  }
+  return personas.value.find((p) => p.id === personaId)?.name ?? personaId.slice(0, 8);
 }
 
 const selectedDoc = ref<DocumentItem | null>(null);
@@ -103,6 +122,7 @@ function resetDocForm() {
   formTitle.value = '';
   formContent.value = '';
   formDocType.value = 'other';
+  formPersonaId.value = '';
 }
 
 function openCreateModal() {
@@ -117,6 +137,7 @@ function openEditModal(doc: DocumentItem) {
   formTitle.value = doc.title;
   formContent.value = doc.content;
   formDocType.value = doc.docType ?? 'other';
+  formPersonaId.value = doc.personaId ?? '';
   showDocModal.value = true;
 }
 
@@ -132,8 +153,14 @@ async function loadDocuments() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const response = (await apiClient.documents.list(projectId.value)) as any;
-    documents.value = response?.data ?? (Array.isArray(response) ? response : []);
+    const [response, personaList] = await Promise.all([
+      apiClient.documents.list(projectId.value) as Promise<{ data?: DocumentItem[] } | DocumentItem[]>,
+      apiClient.getPersonas(projectId.value).catch(() => [] as Array<{ id: string; name: string; status: string }>),
+    ]);
+    documents.value = Array.isArray(response)
+      ? response
+      : ((response as { data?: DocumentItem[] })?.data ?? []);
+    personas.value = Array.isArray(personaList) ? personaList : [];
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '加载文档失败');
   } finally {
@@ -147,6 +174,23 @@ async function handleSubmitDoc() {
     return;
   }
 
+  if (formDocType.value === 'persona_card' && !formPersonaId.value) {
+    const confirmed = await confirmAction({
+      title: '未关联人物',
+      content:
+        '角色卡尚未关联人物。生成时将无法按人物 ID 精确注入静态卡，建议先选择关联人物。仍要保存吗？',
+      okText: '仍要保存',
+    });
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  const personaPayload =
+    formDocType.value === 'persona_card'
+      ? { personaId: formPersonaId.value.trim() || null }
+      : { personaId: null };
+
   submitting.value = true;
   errorMessage.value = '';
   message.value = '';
@@ -156,6 +200,7 @@ async function handleSubmitDoc() {
         title: formTitle.value.trim() || undefined,
         content: formContent.value || undefined,
         docType: formDocType.value,
+        ...personaPayload,
       });
       message.value = presentSuccess('文档已更新');
     } else {
@@ -163,6 +208,7 @@ async function handleSubmitDoc() {
         title: formTitle.value.trim(),
         content: formContent.value,
         docType: formDocType.value,
+        ...personaPayload,
       });
       message.value = presentSuccess('文档已创建');
     }
@@ -269,8 +315,25 @@ function getStatusClass(status: string) {
       return 'status-running';
     case 'failed':
       return 'status-error';
+    case 'stale':
+      return 'status-stale';
     default:
       return 'status-pending';
+  }
+}
+
+function indexStatusLabel(status: string) {
+  switch (status) {
+    case 'completed':
+      return '已索引';
+    case 'indexing':
+      return '索引中';
+    case 'failed':
+      return '索引失败';
+    case 'stale':
+      return '索引过期';
+    default:
+      return '待索引';
   }
 }
 
@@ -284,7 +347,9 @@ onMounted(() => {
     <header class="page-header">
       <div>
         <h2 class="page-title">知识库</h2>
-        <p class="page-subtitle">管理项目文档，上传后可以自动分块索引供检索使用。</p>
+        <p class="page-subtitle">
+          管理项目文档。保存后会自动排队分块索引；失败或过期状态会在列表中显示，也可手动点「索引」重跑。
+        </p>
       </div>
     </header>
 
@@ -307,33 +372,42 @@ onMounted(() => {
       </div>
 
       <p v-if="loading" class="message">正在加载文档...</p>
+      <p
+        v-if="!loading && orphanPersonaCards.length > 0"
+        class="message message-warn"
+      >
+        有 {{ orphanPersonaCards.length }} 张角色卡尚未关联人物；生成时可能无法按人物精确注入静态设定。
+      </p>
 
-      <div v-else-if="documents.length === 0" class="empty-state">
+      <div v-if="!loading && documents.length === 0" class="empty-state">
         <p>暂无文档，点击「新建文档」开始添加。</p>
       </div>
 
-      <div v-else-if="filteredDocuments.length === 0" class="empty-state">
+      <div v-else-if="!loading && filteredDocuments.length === 0" class="empty-state">
         <p>当前筛选条件下暂无文档。</p>
       </div>
 
-      <div v-else class="doc-list">
+      <div v-else-if="!loading" class="doc-list">
         <article v-for="doc in filteredDocuments" :key="doc.id" class="doc-card">
           <header class="doc-header">
             <div class="doc-info">
               <h4 class="doc-title">{{ doc.title }}</h4>
               <div class="doc-meta">
                 <span class="doc-type-tag">{{ docTypeLabel(doc.docType) }}</span>
+                <span
+                  v-if="(doc.docType ?? 'other') === 'persona_card'"
+                  class="doc-type-tag"
+                  :class="doc.personaId ? 'persona-linked' : 'persona-orphan'"
+                >
+                  {{
+                    doc.personaId
+                      ? `关联：${personaNameById(doc.personaId)}`
+                      : '未关联人物'
+                  }}
+                </span>
                 <span class="doc-version">v{{ doc.version }}</span>
                 <span :class="['doc-status', getStatusClass(doc.indexStatus)]">
-                  {{
-                    doc.indexStatus === 'completed'
-                      ? '已索引'
-                      : doc.indexStatus === 'indexing'
-                        ? '索引中'
-                        : doc.indexStatus === 'failed'
-                          ? '索引失败'
-                          : '待索引'
-                  }}
+                  {{ indexStatusLabel(doc.indexStatus) }}
                 </span>
                 <span class="doc-date">{{ new Date(doc.updatedAt).toLocaleDateString() }}</span>
               </div>
@@ -447,6 +521,18 @@ onMounted(() => {
               {{ opt.label }}
             </option>
           </select>
+        </div>
+        <div v-if="showPersonaLink" class="field-group">
+          <label class="field-label" for="doc-form-persona">关联人物</label>
+          <select id="doc-form-persona" v-model="formPersonaId" class="field-input">
+            <option value="">不关联（孤儿卡）</option>
+            <option v-for="persona in personas" :key="persona.id" :value="persona.id">
+              {{ persona.name }}（{{ persona.status === 'published' ? '已发布' : '草稿' }}）
+            </option>
+          </select>
+          <p class="field-hint">
+            角色卡应关联人物页中的动态设定；静态正文保存在知识库，状态轮转在人物页维护。
+          </p>
         </div>
         <div class="field-group">
           <label class="field-label" for="doc-form-content">文档内容</label>
@@ -579,6 +665,31 @@ onMounted(() => {
   font-weight: 500;
 }
 
+.doc-type-tag.persona-linked {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.doc-type-tag.persona-orphan {
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.message-warn {
+  color: #b54708;
+  background: #fffaeb;
+  border: 1px solid #fedf89;
+  border-radius: var(--aq-radius-xs);
+  padding: 0.55rem 0.75rem;
+}
+
+.field-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--aq-text-secondary, #6b7280);
+  line-height: 1.45;
+}
+
 .doc-version {
   background: var(--aq-bg-subtle);
   padding: 0.1rem 0.4rem;
@@ -608,6 +719,11 @@ onMounted(() => {
 .status-pending {
   background: #f3f4f6;
   color: #6b7280;
+}
+
+.status-stale {
+  background: #fef3c7;
+  color: #92400e;
 }
 
 .doc-content-preview {

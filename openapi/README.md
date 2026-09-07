@@ -15,8 +15,6 @@ openapi/
     │   ├── index.yaml              # GET/POST /api/projects
     │   ├── by-id.yaml              # GET/PATCH /api/projects/:id
     │   ├── documents.yaml          # GET/POST /api/projects/:id/documents
-    │   ├── generate.yaml           # POST /api/projects/:id/generate
-    │   ├── generation-traces.yaml   # GET /api/projects/:id/generation-traces
     │   ├── prompt-config.yaml       # GET/PUT /api/projects/:id/prompt-config
     │   ├── prompt-config-publish.yaml    # POST /api/projects/:id/prompt-config/publish
     │   ├── prompt-config-rollback.yaml  # POST /api/projects/:id/prompt-config/rollback
@@ -25,11 +23,9 @@ openapi/
     │   ├── task-prompt-publish.yaml       # POST .../task-prompts/:templateKey/publish
     │   └── task-prompt-rollback.yaml      # POST .../task-prompts/:templateKey/rollback
     ├── documents/
+    │   ├── by-id.yaml              # GET/PUT/DELETE /api/documents/:id
     │   ├── reindex.yaml            # POST /api/documents/:id/reindex
     │   └── chunks.yaml             # GET /api/documents/:id/chunks
-    └── drafts/
-        ├── accept.yaml             # POST /api/drafts/:id/accept
-        └── rewrite.yaml            # POST /api/drafts/:id/rewrite
 ```
 
 ## API 端点概览
@@ -46,15 +42,15 @@ openapi/
 
 ### 文档管理
 - `GET /api/projects/:id/documents` - 获取项目文档列表
-- `POST /api/projects/:id/documents` - 创建文档
+- `POST /api/projects/:id/documents` - 创建文档（`docType=persona_card` 时可选传 `personaId` 关联人物）
+- `GET /api/documents/:id` - 获取文档详情
+- `PUT /api/documents/:id` - 更新文档（含 `personaId` 关联人物；传 null 解除关联）
+- `DELETE /api/documents/:id` - 删除文档
 - `POST /api/documents/:id/reindex` - 重新索引文档
 - `GET /api/documents/:id/chunks` - 获取文档分块
 
 ### 生成与写作
-- `POST /api/projects/:id/generate` - 生成内容（支持 SSE）
-- `GET /api/projects/:id/generation-traces` - 获取生成记录
-- `POST /api/drafts/:id/accept` - 接受草稿
-- `POST /api/drafts/:id/rewrite` - 重写草稿
+- 章节正文/大纲等生成由 `rag-orchestrator` 提供（`POST /api/generate`、`POST /api/generate/draft` 等），不在本 API 合同内重复定义幽灵路径
 
 ### Prompt 配置
 - `GET /api/projects/:id/prompt-config` - 获取 Prompt 配置
@@ -164,7 +160,9 @@ npx @openapitools/openapi-generator-cli generate \
   projectId: string;   // 项目 ID
   title: string;       // 文档标题
   content?: string;    // 文档内容
-  indexStatus: 'pending' | 'indexing' | 'completed' | 'failed';
+  docType?: 'persona_card' | 'world_setting' | 'reference' | 'lore' | 'other';
+  personaId?: string | null; // 关联人物 ID；仅 docType=persona_card 有语义，null=孤儿卡
+  indexStatus: 'pending' | 'indexing' | 'completed' | 'failed' | 'stale';
   createdAt: string;   // ISO 8601 日期时间
   updatedAt: string;   // ISO 8601 日期时间
 }

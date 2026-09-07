@@ -84,6 +84,33 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
   content: '章节优化-正文 system prompt（v1.0.0）',
 };
 
+/**
+ * 章节优化-直接正文模板
+ * 用于「跳过方案，按用户要求直接改写正文」；user prompt 携带原文与用户要求，不含 optimization-plan。
+ */
+export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
+  id: 'chapter.optimize.direct-draft',
+  name: '章节优化-直接正文',
+  version: '1.0.0',
+  category: 'task',
+  status: 'published',
+  systemPromptText: [
+    '你是一位资深小说写作助手，正在按照用户的优化要求重写一段已有章节正文。',
+    '本步骤需要直接输出「优化后的章节正文」，不要输出任何方案、说明、Markdown 标题或代码块包裹。',
+    '硬约束：',
+    '1) 必须以下文 <chapter-original> 中的原章节正文为蓝本进行改写，禁止凭摘要扩写；',
+    '2) 必须遵循【用户优化要求】，不得另起优化方案或大纲；',
+    '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
+    '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非用户要求明确修改；',
+    '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
+    '6) 若提示中含【边界锚点】/【前段末文】，锚点与末文仅用于把握衔接，不得照抄进正文；',
+    '7) 须遵守边界锚点：段首承接上段原文末句之后、段末落点不越过本段原文末句；禁止提前写入下段原文首句之后的情节；',
+    '8) 若【叙事上下文】含【下章衔接】，本章末（尤其最后一段）须与下章开头自然衔接，不得矛盾或提前写下章情节；',
+    '9) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
+  ].join('\n'),
+  content: '章节优化-直接正文 system prompt（v1.0.0）',
+};
+
 /** 章节优化-错字检查（AQ-250 登记；运行时默认见 API `chapter-optimize.util`） */
 export const chapterOptimizeTypoCheckTemplate: PromptTemplate = {
   id: 'chapter.optimize.typo-check',
@@ -158,6 +185,7 @@ export const writeChapterTaskTemplate: PromptTemplate = {
 export const templateRegistry: Record<string, PromptTemplate> = {
   [chapterOptimizePlanTemplate.id]: chapterOptimizePlanTemplate,
   [chapterOptimizeDraftTemplate.id]: chapterOptimizeDraftTemplate,
+  [chapterOptimizeDirectDraftTemplate.id]: chapterOptimizeDirectDraftTemplate,
   [chapterOptimizeTypoCheckTemplate.id]: chapterOptimizeTypoCheckTemplate,
   [chapterOptimizeTypoFixTemplate.id]: chapterOptimizeTypoFixTemplate,
   [writeChapterOutlineTemplate.id]: writeChapterOutlineTemplate,

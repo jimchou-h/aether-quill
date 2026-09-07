@@ -53,6 +53,20 @@ describe('generation prompt assembly', () => {
     assert.match(user, /【用户需求】\n请优化本章/);
   });
 
+  it('buildUserMessage inserts style sample block before user demand', () => {
+    const user = buildUserMessage(
+      {
+        ...baseContext,
+        styleSampleBlock: '【文风参照】\n<style-sample scene="dialogue">\n示例\n</style-sample>',
+      },
+      '请优化本章'
+    );
+    const styleIndex = user.indexOf('【文风参照】');
+    const demandIndex = user.indexOf('【用户需求】');
+    assert.ok(styleIndex >= 0 && demandIndex > styleIndex);
+    assert.match(user, /【检索证据】[\s\S]*【文风参照】[\s\S]*【用户需求】/);
+  });
+
   it('buildSystemMessage merges global, project, and task layers', () => {
     const system = buildSystemMessage(baseContext);
     assert.match(system, new RegExp(GLOBAL_SYSTEM_DEFAULT_TEXT));

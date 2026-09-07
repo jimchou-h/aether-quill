@@ -60,7 +60,7 @@ pnpm dev   # 默认 http://localhost:3001
 写作工作台「生成大纲」「生成正文」，以及章节优化「生成方案」「生成正文」时，`rag-orchestrator` 终端会打印送入 LLM 的完整拼装 prompt（含 system、叙事上下文、检索证据、用户需求）。
 
 - 默认开启；设置 `LOG_GENERATION_PROMPT=false` 或 `LOG_WRITE_CHAPTER_PROMPT=false` 可关闭
-- trace `context` 记录 `system_message`、`user_message` 与 `assembled_prompt`，可通过 `GET /api/traces/:traceId` 查看
+- trace `context` 记录 `system_message`、`user_message` 与 `assembled_prompt`；本地调试以终端日志为准（`LOG_GENERATION_PROMPT`）
 
 ## 主要 API
 

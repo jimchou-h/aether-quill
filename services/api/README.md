@@ -51,9 +51,7 @@ pnpm dev
 - `POST /api/projects/:id/knowledge/chapters/:chapterNo/summarize` - 单章语义摘要任务
 - `POST /api/projects/:id/knowledge/chapters/summarize` - 批量语义摘要任务
 - `GET /api/projects/:id/knowledge/summarize/:jobId` - 查询摘要任务状态
-- `POST /api/projects/:id/knowledge/reindex` - 重建章节摘要索引（全量/增量）
-- `GET /api/projects/:id/knowledge/reindex/:jobId` - 查询索引任务状态
 
 ### 写作编排
 
-- `POST /api/projects/:id/write` - 基于项目上下文生成章节草稿，并自动回写章节摘要/设定进展
+- 章节正文生成经前端 SSE 直连 `rag-orchestrator`（`POST /api/generate/draft`），API 侧不再提供非流式 `write` 端点

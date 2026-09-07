@@ -1,7 +1,7 @@
 post:
   tags:
     - Projects
-  summary: Apply chapter optimization draft
+  summary: Apply writing optimization draft
   description: |
     Overwrite the chapter content with the confirmed optimized draft. Returns 1307 if the chapter
     has been updated by another action since the optimization session started.

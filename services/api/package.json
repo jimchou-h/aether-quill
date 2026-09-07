@@ -14,7 +14,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
-    "migrate:json-to-pg": "prisma generate && tsx scripts/migrate-json-to-pg.ts"
+    "migrate:json-to-pg": "prisma generate && tsx scripts/migrate-json-to-pg.ts",
+    "link-persona-cards": "prisma generate && tsx scripts/link-persona-cards-by-title.ts"
   },
   "dependencies": {
     "@aether-quill/config": "workspace:*",

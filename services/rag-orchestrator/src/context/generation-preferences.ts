@@ -6,6 +6,9 @@ export const DEFAULT_GENERATION_TEMPERATURE = 0.7;
 export const DEFAULT_KNOWLEDGE_DOC_QUOTA = 10;
 export const DEFAULT_PRIOR_CHAPTER_TAIL_CHARS = 800;
 export const DEFAULT_CONTEXT_EXCERPT_MAX_CHARS = 400;
+export const DEFAULT_OUTLINE_MAX_CHARS = 4000;
+export const DEFAULT_PERSONA_PROFILE_MAX_CHARS = 2000;
+export const DEFAULT_RELATION_MEMO_MAX_CHARS = 2000;
 
 export function clampChapterSummaryPromptCount(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value);
@@ -56,4 +59,24 @@ export function clampContextExcerptMaxChars(value: unknown): number {
     return DEFAULT_CONTEXT_EXCERPT_MAX_CHARS;
   }
   return Math.min(800, Math.max(200, Math.trunc(n)));
+}
+
+export function clampNarrativeBlockMaxChars(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+  return Math.min(8000, Math.max(0, Math.trunc(n)));
+}
+
+export function clampOutlineMaxChars(value: unknown): number {
+  return clampNarrativeBlockMaxChars(value, DEFAULT_OUTLINE_MAX_CHARS);
+}
+
+export function clampPersonaProfileMaxChars(value: unknown): number {
+  return clampNarrativeBlockMaxChars(value, DEFAULT_PERSONA_PROFILE_MAX_CHARS);
+}
+
+export function clampRelationMemoMaxChars(value: unknown): number {
+  return clampNarrativeBlockMaxChars(value, DEFAULT_RELATION_MEMO_MAX_CHARS);
 }

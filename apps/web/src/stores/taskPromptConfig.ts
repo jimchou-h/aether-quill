@@ -2,6 +2,10 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { apiClient, type TaskPromptListItem } from '../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
+import {
+  groupTaskPromptItems,
+  TASK_PROMPT_GROUP_DEFINITIONS,
+} from '../utils/taskPromptGroups';
 
 export const useTaskPromptConfigStore = defineStore('taskPromptConfig', () => {
   const items = ref<TaskPromptListItem[]>([]);
@@ -14,6 +18,8 @@ export const useTaskPromptConfigStore = defineStore('taskPromptConfig', () => {
   const rollingBackKey = ref('');
 
   const chapterOptimizeItems = computed(() => items.value);
+  const groupedItems = computed(() => groupTaskPromptItems(items.value));
+  const taskPromptGroups = TASK_PROMPT_GROUP_DEFINITIONS;
 
   function draftFor(templateKey: string): string {
     return drafts.value[templateKey] ?? '';
@@ -166,6 +172,8 @@ export const useTaskPromptConfigStore = defineStore('taskPromptConfig', () => {
     publishingKey,
     rollingBackKey,
     chapterOptimizeItems,
+    groupedItems,
+    taskPromptGroups,
     draftFor,
     itemFor,
     isDraftModified,

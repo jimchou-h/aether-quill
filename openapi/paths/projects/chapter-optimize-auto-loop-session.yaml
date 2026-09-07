@@ -1,0 +1,50 @@
+get:
+  tags:
+    - Projects
+  summary: Get latest chapter auto-optimize loop session
+  description: |
+    Return the most recent auto-optimize loop session for this chapter and caller, so the client
+    can restore rounds and the latest draft after a refresh or an accidentally closed dialog.
+
+    The session lives in API process memory with a 4h TTL (same tier as the chapter pipeline
+    session) and therefore does not survive an API restart. When the session is missing or expired
+    the endpoint returns `data: null` with a 200 envelope; clients MUST treat that as
+    "start fresh" rather than an error.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    '200':
+      description: Session found, or `null` when absent/expired
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterAutoLoopSession'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

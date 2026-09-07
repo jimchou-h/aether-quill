@@ -16,7 +16,7 @@ get:
       required: true
       schema:
         type: string
-        description: Task template key, e.g. chapter.optimize.plan
+        description: Task template key, e.g. chapter.compliance.outline
   responses:
     '200':
       description: Task prompt detail retrieved

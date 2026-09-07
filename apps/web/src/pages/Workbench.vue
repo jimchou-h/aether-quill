@@ -289,11 +289,17 @@ function buildPreviewProjectCtx(
       title: doc.title,
       content: doc.content,
       docType: doc.docType ?? 'other',
+      personaId: (doc as { personaId?: string | null }).personaId ?? null,
     })),
     chapterSummaryPromptCount: workspace.settings.chapterSummaryPromptCount,
     chapterSummaryMemoryCount: workspace.settings.chapterSummaryMemoryCount ?? 3,
     priorChapterTailChars: workspace.settings.priorChapterTailChars ?? 800,
     contextExcerptMaxChars: workspace.settings.contextExcerptMaxChars ?? 400,
+    outlineMaxChars: (workspace.settings as { outlineMaxChars?: number }).outlineMaxChars ?? 4000,
+    personaProfileMaxChars:
+      (workspace.settings as { personaProfileMaxChars?: number }).personaProfileMaxChars ?? 2000,
+    relationMemoMaxChars:
+      (workspace.settings as { relationMemoMaxChars?: number }).relationMemoMaxChars ?? 2000,
     personas: buildPersonasContextPayload(workspace.personas),
   };
 }

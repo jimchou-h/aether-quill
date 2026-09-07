@@ -41,8 +41,6 @@ post:
           - character-traits
           - sensory-outline
           - sensory-rewrite
-          - rules-scan
-          - rules-fix
           - homogenization
           - homogenization-scan
           - homogenization-rewrite

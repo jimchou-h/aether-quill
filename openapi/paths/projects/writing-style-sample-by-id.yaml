@@ -1,0 +1,100 @@
+patch:
+  tags:
+    - Projects
+  summary: Update writing style sample
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: sampleId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/WritingStyleSamplePatch'
+  responses:
+    '200':
+      description: Sample updated
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/WritingStyleSample'
+    '400':
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or sample not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+
+delete:
+  tags:
+    - Projects
+  summary: Delete writing style sample
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: sampleId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Sample deleted
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    required:
+                      - id
+                    properties:
+                      id:
+                        type: string
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or sample not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

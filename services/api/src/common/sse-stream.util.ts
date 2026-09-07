@@ -23,6 +23,10 @@ export function createSseStreamContext(req: Request, res: Response): SseStreamCo
   req.on('close', markAborted);
   res.on('close', markAborted);
 
+  if (typeof req.socket?.setNoDelay === 'function') {
+    req.socket.setNoDelay(true);
+  }
+
   res.writeHead(200, SSE_HEADERS);
   res.write(': keep-alive\n\n');
 
@@ -34,6 +38,10 @@ export function createSseStreamContext(req: Request, res: Response): SseStreamCo
     }
     try {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      const flushable = res as Response & { flush?: () => void };
+      if (typeof flushable.flush === 'function') {
+        flushable.flush();
+      }
       return !isAborted();
     } catch {
       markAborted();

@@ -9,6 +9,8 @@
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "pnpm --filter @aether-quill/config run build && pnpm --filter @aether-quill/model-providers run build && tsc --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",
+    "eval:gs-r": "tsx ../../scripts/eval/gs-r/run-gs-r.ts",
+    "eval:gs-r:test": "tsx --test ../../scripts/eval/gs-r/metrics.test.ts",
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {

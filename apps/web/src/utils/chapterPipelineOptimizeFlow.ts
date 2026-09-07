@@ -14,7 +14,6 @@ export type PipelineDialogStep =
   | 'character-traits'
   | 'sensory-outline'
   | 'sensory-rewrite'
-  | 'rules'
   | 'homogenization'
   | 'done';
 
@@ -32,7 +31,6 @@ type MinimalPipelineSession = Pick<
   | 'characterOutline'
   | 'characterTraitsOutline'
   | 'sensoryOutline'
-  | 'ruleIssues'
   | 'homogenizationReport'
 >;
 
@@ -144,8 +142,8 @@ export function resolvePipelineBootstrapAction(
     if (hasModule(enabled, 2)) {
       return { step: 'sensory-outline', module: 'run-all', autoRun: true };
     }
-    if (hasModule(enabled, 3)) {
-      return { step: 'rules', module: 'run-all', autoRun: true };
+    if (hasModule(enabled, 4) && config.pipelineHomogenizationEnabled) {
+      return { step: 'homogenization', module: 'run-all', autoRun: true };
     }
     return { step: 'done', module: 'run-all', autoRun: true };
   }
@@ -172,14 +170,6 @@ export function resolvePipelineBootstrapAction(
       session?.sensoryOutline,
       isVersionReady(session, 'afterSensory')
     );
-  }
-
-  if (hasModule(enabled, 3)) {
-    return {
-      step: 'rules',
-      module: session?.ruleIssues?.length ? 'rules-fix' : 'rules-scan',
-      autoRun: true,
-    };
   }
 
   if (hasModule(enabled, 4) && config.pipelineHomogenizationEnabled) {
@@ -228,15 +218,7 @@ export function resolveManualContinueAction(
     }
   }
 
-  if (currentStep === 'sensory-rewrite' && hasModule(enabled, 3)) {
-    return {
-      step: 'rules',
-      module: session?.ruleIssues?.length ? 'rules-fix' : 'rules-scan',
-      autoRun: true,
-    };
-  }
-
-  if ((currentStep === 'sensory-rewrite' && !hasModule(enabled, 3)) || currentStep === 'rules') {
+  if (currentStep === 'sensory-rewrite') {
     if (hasModule(enabled, 4) && config.pipelineHomogenizationEnabled) {
       return {
         step: 'homogenization',
