@@ -21,6 +21,7 @@ const emit = defineEmits<{
   summarize: [chapterNo: number];
   generateRelationEvents: [chapterNo: number];
   writingOptimize: [chapter: ChapterItem];
+  sceneWorkbench: [chapter: ChapterItem];
   finalPolish: [chapter: ChapterItem];
   complianceCheck: [chapter: ChapterItem];
   pipelineOptimize: [chapter: ChapterItem];
@@ -468,6 +469,13 @@ defineExpose({ clearEditing, clearBatchSelection });
                 {{
                   props.optimizingChapterNo === selectedChapter.chapterNo ? '优化中...' : '章节优化'
                 }}
+              </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                @click="emit('sceneWorkbench', selectedChapter)"
+              >
+                按场成稿
               </button>
               <div class="dropdown-container">
                 <button

@@ -19,7 +19,13 @@ import {
   resolveLlmChatProviderEndpoint,
   type LlmChatProviderId,
 } from '@aether-quill/config';
-import { withDeepSeekNonThinkingChatBody } from '@aether-quill/model-providers';
+import {
+  applyThinkingTokenReserve,
+  formatEmptyChatContentError,
+  shouldEnableChatThinking,
+  shouldRetryChatWithoutThinking,
+  withChatThinkingMode,
+} from '@aether-quill/model-providers';
 import { TraceRecord, GenerateRequest } from './types';
 import { consumeProviderSseStreamChunk, flushProviderSseStreamBuffer } from './provider-sse-stream';
 import { createUtf8StreamDecoder } from './utf8-stream-decoder';
@@ -55,10 +61,27 @@ interface ProviderCallOptions {
   model?: string;
   frequencyPenalty?: number;
   provider?: LlmChatProviderId;
+  enableThinking?: boolean;
+}
+
+interface ProviderStreamStats {
+  sawReasoning: boolean;
+  finishReason: string | null;
 }
 
 function isLlmChatProviderId(value: unknown): value is LlmChatProviderId {
   return value === 'deepseek' || value === 'siliconflow';
+}
+
+function isProviderAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const err = error as { code?: string; name?: string; message?: string };
+  if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+    return true;
+  }
+  return /aborted|canceled|cancelled/i.test(err.message ?? '');
 }
 
 function formatProviderHttpError(
@@ -137,6 +160,20 @@ export class GenerationService {
       context.generation_provider = generationProvider;
     }
 
+    const contextMaxTokensRaw = context.maxTokens;
+    const contextMaxTokens =
+      typeof contextMaxTokensRaw === 'number' && Number.isFinite(contextMaxTokensRaw)
+        ? Math.trunc(contextMaxTokensRaw)
+        : typeof contextMaxTokensRaw === 'string' && contextMaxTokensRaw.trim()
+          ? Number.parseInt(contextMaxTokensRaw, 10)
+          : NaN;
+    const requestMaxTokens =
+      typeof request.maxTokens === 'number' && Number.isFinite(request.maxTokens)
+        ? Math.trunc(request.maxTokens)
+        : Number.isFinite(contextMaxTokens)
+          ? contextMaxTokens
+          : undefined;
+
     const trace: TraceRecord = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       projectId: request.projectId,
@@ -148,6 +185,11 @@ export class GenerationService {
       createdAt: new Date().toISOString(),
       ...(typeof request.temperature === 'number' && Number.isFinite(request.temperature)
         ? { temperature: request.temperature }
+        : {}),
+      ...(typeof requestMaxTokens === 'number' &&
+      Number.isFinite(requestMaxTokens) &&
+      requestMaxTokens > 0
+        ? { maxTokens: requestMaxTokens }
         : {}),
     };
 
@@ -181,15 +223,10 @@ export class GenerationService {
     userMessage: string
   ): void {
     logAssembledGenerationPrompt(trace, userMessage, systemMessage);
-    const assembledPrompt =
-      systemMessage.trim().length > 0
-        ? `【system】\n${systemMessage.trim()}\n\n【user】\n${userMessage}`
-        : userMessage;
     this.updateTrace(trace.id, {
       context: {
-        system_message: systemMessage.trim() || undefined,
-        user_message: userMessage,
-        assembled_prompt: assembledPrompt,
+        systemChars: systemMessage.trim().length,
+        userChars: userMessage.length,
       },
     });
   }
@@ -204,7 +241,21 @@ export class GenerationService {
     const callOptions = this.resolveCallOptionsForTrace(trace);
 
     try {
-      const response = await this.callProviderApi(messages, callOptions);
+      let response = await this.callProviderApi(messages, callOptions);
+      if (
+        shouldRetryChatWithoutThinking({
+          thinkingEnabled: callOptions.enableThinking === true,
+          contentEmpty: !response.content.trim(),
+        })
+      ) {
+        response = await this.callProviderApi(messages, {
+          ...callOptions,
+          enableThinking: false,
+        });
+      }
+      if (!response.content.trim()) {
+        throw new Error(formatEmptyChatContentError());
+      }
       this.updateTrace(trace.id, {
         status: 'completed',
         result: response.content,
@@ -226,7 +277,8 @@ export class GenerationService {
 
   async *generateStream(
     trace: TraceRecord,
-    context: GenerationContext
+    context: GenerationContext,
+    signal?: AbortSignal
   ): AsyncGenerator<string, void, unknown> {
     const messages = this.buildLlmMessages(context, trace.prompt);
     const systemMessage = messages.find((m) => m.role === 'system')?.content ?? '';
@@ -234,15 +286,65 @@ export class GenerationService {
     this.recordAssembledPrompt(trace, systemMessage, userMessage);
     this.updateTrace(trace.id, { status: 'generating' });
     let fullContent = '';
+    const callOptions = this.resolveCallOptionsForTrace(trace);
+    const stats: ProviderStreamStats = { sawReasoning: false, finishReason: null };
 
     try {
-      for await (const chunk of this.callProviderStream(messages, trace)) {
+      for await (const chunk of this.callProviderStream(messages, trace, signal, { stats })) {
+        if (signal?.aborted) {
+          break;
+        }
         fullContent += chunk;
         yield chunk;
       }
 
+      if (signal?.aborted) {
+        this.updateTrace(trace.id, {
+          status: 'failed',
+          error: 'aborted',
+          completedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (
+        shouldRetryChatWithoutThinking({
+          thinkingEnabled: callOptions.enableThinking === true,
+          contentEmpty: !fullContent.trim(),
+        })
+      ) {
+        const retryStats: ProviderStreamStats = { sawReasoning: false, finishReason: null };
+        for await (const chunk of this.callProviderStream(messages, trace, signal, {
+          enableThinking: false,
+          stats: retryStats,
+        })) {
+          if (signal?.aborted) {
+            break;
+          }
+          fullContent += chunk;
+          yield chunk;
+        }
+        if (retryStats.finishReason) {
+          stats.finishReason = retryStats.finishReason;
+        }
+      }
+
+      if (signal?.aborted) {
+        this.updateTrace(trace.id, {
+          status: 'failed',
+          error: 'aborted',
+          completedAt: new Date().toISOString(),
+        });
+        return;
+      }
+
       if (!fullContent.trim()) {
-        throw new Error('模型未返回正文');
+        throw new Error(
+          formatEmptyChatContentError({
+            sawReasoning: stats.sawReasoning,
+            finishReason: stats.finishReason,
+          })
+        );
       }
 
       this.updateTrace(trace.id, {
@@ -252,6 +354,14 @@ export class GenerationService {
       });
       logGenerationResponse(trace, fullContent);
     } catch (error) {
+      if (signal?.aborted || isProviderAbortError(error)) {
+        this.updateTrace(trace.id, {
+          status: 'failed',
+          error: 'aborted',
+          completedAt: new Date().toISOString(),
+        });
+        return;
+      }
       const errorMsg = error instanceof Error ? error.message : 'Generation failed';
       this.updateTrace(trace.id, {
         status: 'failed',
@@ -278,12 +388,19 @@ export class GenerationService {
       typeof trace.temperature === 'number' && Number.isFinite(trace.temperature)
         ? Math.min(2, Math.max(0, trace.temperature))
         : provider.temperature;
+    const maxTokens =
+      typeof trace.maxTokens === 'number' && Number.isFinite(trace.maxTokens) && trace.maxTokens > 0
+        ? Math.trunc(trace.maxTokens)
+        : provider.maxTokens;
+    const templateKey =
+      typeof trace.context?.templateKey === 'string' ? trace.context.templateKey : '';
     return {
       model: trace.model?.trim() || provider.model,
-      maxTokens: provider.maxTokens,
+      maxTokens,
       temperature,
       frequencyPenalty,
       provider: providerId,
+      enableThinking: shouldEnableChatThinking(templateKey),
     };
   }
 
@@ -847,8 +964,19 @@ export class GenerationService {
       typeof promptOrMessages === 'string'
         ? [{ role: 'user' as const, content: promptOrMessages }]
         : promptOrMessages;
-    const body = withDeepSeekNonThinkingChatBody(
-      this.buildProviderRequestBody(messages, provider, options)
+    const body = withChatThinkingMode(
+      this.buildProviderRequestBody(
+        messages,
+        provider,
+        {
+          ...options,
+          maxTokens: applyThinkingTokenReserve(
+            options?.maxTokens ?? provider.maxTokens,
+            options?.enableThinking === true
+          ),
+        }
+      ),
+      options?.enableThinking ? 'enabled' : 'disabled'
     );
     const model = String(body.model ?? provider.model);
 
@@ -858,7 +986,7 @@ export class GenerationService {
           Authorization: `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 60000,
+        timeout: 180000,
       });
 
       const choice = response.data?.choices?.[0];
@@ -887,9 +1015,19 @@ export class GenerationService {
 
   private async *callProviderStream(
     messages: LlmChatMessage[],
-    trace: TraceRecord
+    trace: TraceRecord,
+    signal?: AbortSignal,
+    extras?: { enableThinking?: boolean; stats?: ProviderStreamStats }
   ): AsyncGenerator<string, void, unknown> {
+    if (signal?.aborted) {
+      return;
+    }
+
     const callOptions = this.streamParamsForTrace(trace);
+    const thinkingEnabled =
+      typeof extras?.enableThinking === 'boolean'
+        ? extras.enableThinking
+        : Boolean(callOptions.enableThinking);
     const providerId =
       callOptions.provider ??
       (isLlmChatProviderId(trace.context?.generation_provider)
@@ -897,13 +1035,19 @@ export class GenerationService {
         : undefined);
     const provider = this.resolveProviderConfig(providerId);
 
-    const streamBody = withDeepSeekNonThinkingChatBody({
-      model: callOptions.model ?? provider.model,
-      messages,
-      max_tokens: callOptions.maxTokens ?? provider.maxTokens,
-      temperature: callOptions.temperature ?? provider.temperature,
-      stream: true,
-    });
+    const streamBody = withChatThinkingMode(
+      {
+        model: callOptions.model ?? provider.model,
+        messages,
+        max_tokens: applyThinkingTokenReserve(
+          callOptions.maxTokens ?? provider.maxTokens,
+          thinkingEnabled
+        ),
+        temperature: callOptions.temperature ?? provider.temperature,
+        stream: true,
+      },
+      thinkingEnabled ? 'enabled' : 'disabled'
+    );
     if (
       typeof callOptions.frequencyPenalty === 'number' &&
       Number.isFinite(callOptions.frequencyPenalty)
@@ -911,16 +1055,25 @@ export class GenerationService {
       streamBody.frequency_penalty = callOptions.frequencyPenalty;
     }
 
-    const response = await axios.post(provider.providerUrl, streamBody, {
-      headers: {
-        Authorization: `Bearer ${provider.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      responseType: 'stream',
-      // 长章节流式生成可能远超 120s；首包慢时不应被总时长误杀（各环境对 stream+timeout 语义不一致）
-      timeout: 0,
-      validateStatus: () => true,
-    });
+    let response;
+    try {
+      response = await axios.post(provider.providerUrl, streamBody, {
+        headers: {
+          Authorization: `Bearer ${provider.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        responseType: 'stream',
+        // 长章节流式生成可能远超 120s；首包慢时不应被总时长误杀（各环境对 stream+timeout 语义不一致）
+        timeout: 0,
+        validateStatus: () => true,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      if (signal?.aborted || isProviderAbortError(error)) {
+        return;
+      }
+      throw error;
+    }
 
     if (response.status >= 400) {
       const chunks: Buffer[] = [];
@@ -945,26 +1098,100 @@ export class GenerationService {
     }
 
     const stream = response.data as NodeJS.ReadableStream;
+    const destroyStream = () => {
+      const destroyable = stream as NodeJS.ReadableStream & {
+        destroy?: (error?: Error) => void;
+      };
+      try {
+        destroyable.destroy?.();
+      } catch {
+        // ignore
+      }
+    };
+    const onAbort = () => destroyStream();
+    if (signal) {
+      if (signal.aborted) {
+        destroyStream();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
     const utf8 = createUtf8StreamDecoder();
     let lineBuffer = '';
 
-    for await (const chunk of stream) {
-      const consumed = consumeProviderSseStreamChunk(
-        lineBuffer,
-        utf8.decode(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
-      );
-      lineBuffer = consumed.nextBuffer;
+    try {
+      for await (const chunk of stream) {
+        if (signal?.aborted) {
+          return;
+        }
+        const consumed = consumeProviderSseStreamChunk(
+          lineBuffer,
+          utf8.decode(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+        );
+        lineBuffer = consumed.nextBuffer;
 
-      for (const event of consumed.events) {
+        for (const event of consumed.events) {
+          if (event.type === 'done') {
+            return;
+          }
+          if (event.type === 'reasoning') {
+            if (extras?.stats) {
+              extras.stats.sawReasoning = true;
+              if (event.finishReason) {
+                extras.stats.finishReason = event.finishReason;
+              }
+            }
+            continue;
+          }
+          if (event.type === 'content') {
+            if (extras?.stats && event.finishReason) {
+              extras.stats.finishReason = event.finishReason;
+            }
+            yield event.content;
+            continue;
+          }
+          if (event.type === 'skip' && extras?.stats && event.finishReason) {
+            extras.stats.finishReason = event.finishReason;
+          }
+          if (event.type === 'malformed') {
+            console.error('[callProviderStream] malformed SSE line after reassembly', {
+              traceId: trace.id,
+              error: event.error,
+              linePreview: event.data.slice(0, 200),
+              lineLength: event.data.length,
+            });
+          }
+        }
+      }
+
+      lineBuffer += utf8.flush();
+      const flushed = flushProviderSseStreamBuffer(lineBuffer);
+      for (const event of flushed.events) {
         if (event.type === 'done') {
           return;
         }
+        if (event.type === 'reasoning') {
+          if (extras?.stats) {
+            extras.stats.sawReasoning = true;
+            if (event.finishReason) {
+              extras.stats.finishReason = event.finishReason;
+            }
+          }
+          continue;
+        }
         if (event.type === 'content') {
+          if (extras?.stats && event.finishReason) {
+            extras.stats.finishReason = event.finishReason;
+          }
           yield event.content;
           continue;
         }
+        if (event.type === 'skip' && extras?.stats && event.finishReason) {
+          extras.stats.finishReason = event.finishReason;
+        }
         if (event.type === 'malformed') {
-          console.error('[callProviderStream] malformed SSE line after reassembly', {
+          console.error('[callProviderStream] malformed SSE line in stream tail', {
             traceId: trace.id,
             error: event.error,
             linePreview: event.data.slice(0, 200),
@@ -972,26 +1199,13 @@ export class GenerationService {
           });
         }
       }
-    }
-
-    lineBuffer += utf8.flush();
-    const flushed = flushProviderSseStreamBuffer(lineBuffer);
-    for (const event of flushed.events) {
-      if (event.type === 'done') {
+    } catch (error) {
+      if (signal?.aborted || isProviderAbortError(error)) {
         return;
       }
-      if (event.type === 'content') {
-        yield event.content;
-        continue;
-      }
-      if (event.type === 'malformed') {
-        console.error('[callProviderStream] malformed SSE line in stream tail', {
-          traceId: trace.id,
-          error: event.error,
-          linePreview: event.data.slice(0, 200),
-          lineLength: event.data.length,
-        });
-      }
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
     }
   }
 }

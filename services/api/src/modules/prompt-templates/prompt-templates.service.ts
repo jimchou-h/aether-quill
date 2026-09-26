@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path';
 import { ProjectsService } from '../projects/projects.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { usePostgresPersistence } from '../../persistence/use-postgres';
+import { createAsyncSerialQueue } from '../../persistence/async-serial-queue';
 import {
   loadPromptTemplatesFromPostgres,
   syncPromptTemplatesToPostgres,
@@ -23,6 +24,13 @@ import {
   PublishResult,
   TemplateCategory,
 } from './prompt-templates.entity';
+import {
+  isBlankPromptText,
+  pickSystemTemplate,
+  promptTemplateUpdateChanged,
+  resolveEffectiveSystemPromptContent,
+  WAREHOUSE_DEFAULT_SYSTEM_PROMPT,
+} from './prompt-template-draft.util';
 
 interface PersistedTemplateState {
   templates: Array<{
@@ -51,7 +59,7 @@ const DEFAULT_TEMPLATES: Array<{ name: string; category: TemplateCategory; conte
   {
     name: '系统默认模板',
     category: 'system',
-    content: '你是一位专业的小说写作助手。请帮助用户进行小说创作，保持逻辑连贯和设定一致性。',
+    content: WAREHOUSE_DEFAULT_SYSTEM_PROMPT,
   },
   {
     name: '章节写作模板',
@@ -72,12 +80,20 @@ export class PromptTemplatesService implements OnModuleInit {
 
   private readonly templates: TemplateRecord[] = [];
   private readonly versions = new Map<string, TemplateVersion[]>();
+  private resolveReady!: () => void;
+  readonly whenReady: Promise<void>;
+  /** hydrate 完成前禁止落盘，避免空内存把 PG 里已发布模板冲掉 */
+  private persistAllowed = false;
+  private readonly pgPersistQueue = createAsyncSerialQueue();
 
   constructor(
     @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
     private readonly prisma: PrismaService
   ) {
+    this.whenReady = new Promise<void>((resolve) => {
+      this.resolveReady = resolve;
+    });
     if (usePostgresPersistence()) {
       return;
     }
@@ -85,6 +101,13 @@ export class PromptTemplatesService implements OnModuleInit {
     if (restored) {
       this.applyRestored(restored);
     }
+    this.persistAllowed = true;
+    this.resolveReady();
+  }
+
+  /** 内存已与存储对齐，空项目可以种默认模板 */
+  get canSeedDefaults(): boolean {
+    return this.persistAllowed;
   }
 
   async onModuleInit() {
@@ -92,13 +115,25 @@ export class PromptTemplatesService implements OnModuleInit {
     if (!usePostgresPersistence()) {
       return;
     }
+    let hydrated = false;
     try {
       const fromPg = await loadPromptTemplatesFromPostgres(this.prisma);
       if (fromPg) {
         this.applyRestored(fromPg);
+      } else {
+        const fromDisk = this.restoreStateFromDisk();
+        if (fromDisk && fromDisk.templates.length > 0) {
+          this.applyRestored(fromDisk);
+          this.persistAllowed = true;
+          this.persistState();
+        }
       }
+      hydrated = true;
     } catch (err) {
       console.error('[persistence] prompt-templates PG 初始化失败', err);
+    } finally {
+      this.persistAllowed = hydrated;
+      this.resolveReady();
     }
   }
 
@@ -113,16 +148,17 @@ export class PromptTemplatesService implements OnModuleInit {
     return this.templates.filter((t) => t.projectId === projectId);
   }
 
-  /** 运行时注入 orchestrator 的项目级 systemPromptText（优先 system 模板，回退 settings） */
+  /** 运行时注入 orchestrator 的项目级 systemPromptText（优先已发布 system 模板，回退 settings） */
   resolveProjectSystemPromptText(projectId: string): string {
     this.projectsService.findOne(projectId);
-    const systemTemplate = this.templates.find(
-      (t) => t.projectId === projectId && t.category === 'system'
+    const systemTemplate = pickSystemTemplate(
+      this.templates.filter((t) => t.projectId === projectId)
     );
-    if (systemTemplate?.content?.trim()) {
-      return systemTemplate.content.trim();
-    }
-    return this.projectsService.getSettings(projectId).systemPromptText.trim();
+    return resolveEffectiveSystemPromptContent(
+      systemTemplate,
+      systemTemplate ? this.versions.get(systemTemplate.id) : undefined,
+      this.projectsService.getSettings(projectId).systemPromptText
+    );
   }
 
   private syncSystemPromptToProjectSettings(projectId: string, tmpl: TemplateRecord): void {
@@ -131,6 +167,10 @@ export class PromptTemplatesService implements OnModuleInit {
     }
     const content = tmpl.content?.trim();
     if (!content) {
+      return;
+    }
+    const current = this.projectsService.getSettings(projectId).systemPromptText?.trim() ?? '';
+    if (content === WAREHOUSE_DEFAULT_SYSTEM_PROMPT && current.length > content.length) {
       return;
     }
     this.projectsService.updateSettings(projectId, { systemPromptText: content });
@@ -185,13 +225,32 @@ export class PromptTemplatesService implements OnModuleInit {
 
   initDefaults(projectId: string): TemplateRecord[] {
     const created: TemplateRecord[] = [];
+    const hasSystem = this.templates.some(
+      (t) => t.projectId === projectId && t.category === 'system'
+    );
+    let settingsText = '';
+    try {
+      settingsText = this.projectsService.getSettings(projectId).systemPromptText?.trim() ?? '';
+    } catch {
+      settingsText = '';
+    }
     for (const def of DEFAULT_TEMPLATES) {
+      if (def.category === 'system' && hasSystem) {
+        continue;
+      }
       const existing = this.templates.find(
         (t) => t.projectId === projectId && t.category === def.category && t.name === def.name
       );
-      if (!existing) {
-        created.push(this.create(projectId, def));
+      if (existing) {
+        continue;
       }
+      const content =
+        def.category === 'system' &&
+        settingsText &&
+        settingsText !== WAREHOUSE_DEFAULT_SYSTEM_PROMPT
+          ? settingsText
+          : def.content;
+      created.push(this.create(projectId, { ...def, content }));
     }
     return created;
   }
@@ -202,6 +261,19 @@ export class PromptTemplatesService implements OnModuleInit {
     payload: { name?: string; content?: string }
   ): TemplateRecord {
     const tmpl = this.findById(projectId, templateId);
+    if (payload.content !== undefined && isBlankPromptText(payload.content)) {
+      throw new BadRequestException('content 不能为空');
+    }
+    if (
+      !promptTemplateUpdateChanged({
+        currentContent: tmpl.content,
+        currentName: tmpl.name,
+        nextContent: payload.content,
+        nextName: payload.name,
+      })
+    ) {
+      return tmpl;
+    }
 
     const now = new Date();
     if (payload.name !== undefined) tmpl.name = payload.name.trim() || tmpl.name;
@@ -301,11 +373,14 @@ export class PromptTemplatesService implements OnModuleInit {
   }
 
   private persistState() {
+    if (!this.persistAllowed) {
+      return;
+    }
     const payload = this.buildPersistedPayload();
     if (usePostgresPersistence()) {
-      void syncPromptTemplatesToPostgres(this.prisma, payload).catch((err) =>
-        console.error('[persistence] prompt-templates PG 同步失败', err)
-      );
+      void this.pgPersistQueue
+        .enqueue(() => syncPromptTemplatesToPostgres(this.prisma, payload))
+        .catch((err) => console.error('[persistence] prompt-templates PG 同步失败', err));
       return;
     }
     const targetDir = dirname(this.storagePath);

@@ -6,7 +6,7 @@
  */
 
 export const AUTO_LOOP_ROUND_BUDGET_MIN = 1;
-export const AUTO_LOOP_ROUND_BUDGET_MAX = 3;
+export const AUTO_LOOP_ROUND_BUDGET_MAX = 5;
 export const AUTO_LOOP_ROUND_BUDGET_DEFAULT = 2;
 export const CHAPTER_AUTO_LOOP_PREFS_STORAGE_KEY = 'aq.chapterAutoLoop.prefs.v1';
 

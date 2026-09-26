@@ -7,6 +7,7 @@ import {
   NormalizedSseEvent,
   ProviderConfig,
 } from './types';
+import { withDeepSeekNonThinkingChatBody } from './deepseek-thinking';
 
 /**
  * SiliconFlow 供应商配置
@@ -95,14 +96,14 @@ export class SiliconFlowProvider implements ModelProvider {
 
     const response = await this.client.post<SiliconFlowChatCompletionResponse>(
       '/chat/completions',
-      {
+      withDeepSeekNonThinkingChatBody({
         model,
         messages,
         max_tokens: request.maxTokens || 4096,
         temperature: request.temperature || 0.7,
         top_p: request.topP || 0.95,
         stream: false,
-      }
+      })
     );
 
     const choice = response.data.choices[0];
@@ -138,14 +139,14 @@ export class SiliconFlowProvider implements ModelProvider {
     try {
       const response = await this.client.post(
         '/chat/completions',
-        {
+        withDeepSeekNonThinkingChatBody({
           model,
           messages,
           max_tokens: request.maxTokens || 4096,
           temperature: request.temperature || 0.7,
           top_p: request.topP || 0.95,
           stream: true,
-        },
+        }),
         {
           responseType: 'stream',
           headers: {

@@ -36,6 +36,19 @@ test('auto-loop injects into segment rewrite but not into diagnosis', () => {
   assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.loop.plan'), false);
 });
 
+test('workbench injects style samples only into the two draft keys', () => {
+  assert.equal(
+    isWritingStyleInjectionTemplateKey('chapter.optimize.workbench-draft-sex'),
+    true
+  );
+  assert.equal(
+    isWritingStyleInjectionTemplateKey('chapter.optimize.workbench-draft-prose'),
+    true
+  );
+  assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.workbench-review'), false);
+  assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.workbench-fix-span'), false);
+});
+
 test('selectWritingStyleSamplesForTask excludes current chapter and prefers scene match', () => {
   const samples = [
     baseSample({

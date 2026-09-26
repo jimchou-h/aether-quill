@@ -7,11 +7,20 @@ import type {
 } from '../services/api';
 import {
   describeAutoLoopItemStatus,
+  describeAutoLoopResumeAction,
   describeAutoLoopStoppedReason,
   mergeAutoLoopItemStatus,
   resolveAutoLoopAcceptableDraft,
   restoreAutoLoopSessionView,
   summarizeAutoLoopRound,
+  autoLoopRoundKey,
+  upsertAutoLoopTimelineRound,
+  formatAutoLoopTimelineLabel,
+  resolveAutoLoopSelectedRoundKey,
+  resolveAutoLoopTimelineItems,
+  resolveAutoLoopTimelineLatestKey,
+  shouldShowAutoLoopParagraphMismatchHint,
+  AUTO_LOOP_PARAGRAPH_MISMATCH_HINT,
 } from './chapterAutoLoopItems';
 
 function makeItem(overrides: Partial<ChapterAutoLoopItem> = {}): ChapterAutoLoopItem {
@@ -55,6 +64,8 @@ describe('describeAutoLoopItemStatus', () => {
     assert.equal(describeAutoLoopItemStatus('applied').label, '已改写');
     assert.equal(describeAutoLoopItemStatus('relocated').label, '按引文改写');
     assert.equal(describeAutoLoopItemStatus('relocated').tone, 'warning');
+    assert.equal(describeAutoLoopItemStatus('deleted').label, '已删除');
+    assert.equal(describeAutoLoopItemStatus('deleted').tone, 'success');
   });
 
   it('surfaces the segment-level rollback separately from a failure', () => {
@@ -98,7 +109,7 @@ describe('summarizeAutoLoopRound', () => {
     const summary = summarizeAutoLoopRound(
       makeRound({ items: [], appliedCount: 0, converged: true })
     );
-    assert.ok(summary.includes('未发现严重问题'));
+    assert.ok(summary.includes('未发现明显未落实或改坏'));
   });
 
   it('flags a discard-bearing round as an incomplete diagnosis, never as clean', () => {
@@ -210,11 +221,68 @@ describe('restoreAutoLoopSessionView', () => {
     });
     assert.equal(view.finalDraft, '一轮稿');
   });
+
+  it('surfaces a resumable rewrite checkpoint so the dialog can continue mid-round', () => {
+    const view = restoreAutoLoopSessionView({
+      projectId: 'p1',
+      chapterNo: 7,
+      instruction: '收紧战斗节奏',
+      roundBudget: 3,
+      baseUpdatedAt: '2026-09-08T00:00:00.000Z',
+      storedContent: '入库原文',
+      rounds: [makeRound({ roundIndex: 1, draft: '一轮稿' })],
+      finalDraft: '一轮稿',
+      stoppedReason: 'aborted',
+      resumable: true,
+      resumeStage: 'rewrite',
+      resumeRoundIndex: 2,
+      resumeSegmentIndex: 9,
+      resumeSegmentTotal: 10,
+      inProgressItems: [makeItem({ id: 'pending-9', status: 'pending' })],
+      createdAt: '2026-09-08T00:00:00.000Z',
+      updatedAt: '2026-09-08T00:10:00.000Z',
+    });
+    assert.equal(view.resumable, true);
+    assert.equal(view.resumeStage, 'rewrite');
+    assert.equal(view.resumeSegmentIndex, 9);
+    assert.equal(view.inProgressItems[0]?.id, 'pending-9');
+  });
+
+  it('restores prompt-lab snapshots so the lab can reopen after a refresh', () => {
+    const view = restoreAutoLoopSessionView({
+      projectId: 'p1',
+      chapterNo: 7,
+      instruction: '收紧战斗节奏',
+      roundBudget: 2,
+      baseUpdatedAt: '2026-09-08T00:00:00.000Z',
+      storedContent: '入库原文',
+      rounds: [makeRound({ roundIndex: 1, draft: '一轮稿' })],
+      finalDraft: '一轮稿',
+      stoppedReason: 'converged',
+      promptLabCalls: [
+        {
+          id: 'lab-1',
+          kind: 'diagnose',
+          templateKey: 'chapter.optimize.loop.plan',
+          roundIndex: 1,
+          windowIndex: 1,
+          userPrompt: '冻住的 user',
+          taskPromptText: '任务 Prompt',
+          output: '诊断输出',
+          frozenRetrievedEvidence: '证据',
+          createdAt: '2026-09-11T00:00:00.000Z',
+        },
+      ],
+      createdAt: '2026-09-08T00:00:00.000Z',
+      updatedAt: '2026-09-08T00:10:00.000Z',
+    });
+    assert.equal(view.promptLabCalls[0]?.id, 'lab-1');
+  });
 });
 
 describe('describeAutoLoopStoppedReason', () => {
   it('explains an early exit as convergence rather than a truncated run', () => {
-    assert.ok(describeAutoLoopStoppedReason('converged').includes('未发现严重问题'));
+    assert.ok(describeAutoLoopStoppedReason('converged').includes('未发现明显未落实或改坏'));
   });
 
   it('names the hard round ceiling explicitly', () => {
@@ -231,5 +299,142 @@ describe('describeAutoLoopStoppedReason', () => {
     ] as const) {
       assert.ok(describeAutoLoopStoppedReason(reason).length > 0, reason);
     }
+  });
+
+  it('tells the author they can continue after a parse failure', () => {
+    assert.ok(describeAutoLoopStoppedReason('plan_parse_failed').includes('从失败处继续'));
+  });
+});
+
+describe('describeAutoLoopResumeAction', () => {
+  it('names the remaining rewrite segment', () => {
+    assert.equal(
+      describeAutoLoopResumeAction({
+        resumeStage: 'rewrite',
+        resumeRoundIndex: 5,
+        resumeSegmentIndex: 9,
+        resumeSegmentTotal: 10,
+      }),
+      '从第 5 轮第 9/10 段继续'
+    );
+  });
+
+  it('names a diagnose retry when rewrite has not started', () => {
+    assert.equal(
+      describeAutoLoopResumeAction({
+        resumeStage: 'diagnose',
+        resumeRoundIndex: 2,
+      }),
+      '从第 2 轮复诊继续'
+    );
+  });
+
+  it('names the window when the chapter was split', () => {
+    assert.equal(
+      describeAutoLoopResumeAction({
+        resumeStage: 'diagnose',
+        resumeRoundIndex: 1,
+        resumeWindowIndex: 2,
+        resumeWindowTotal: 4,
+      }),
+      '第 2/4 窗，从第 1 轮复诊继续'
+    );
+  });
+
+  it('omits the window prefix when there is only one window', () => {
+    assert.equal(
+      describeAutoLoopResumeAction({
+        resumeStage: 'diagnose',
+        resumeRoundIndex: 2,
+        resumeWindowIndex: 1,
+        resumeWindowTotal: 1,
+      }),
+      '从第 2 轮复诊继续'
+    );
+  });
+});
+
+describe('auto-loop history timeline', () => {
+  it('does not collapse the same roundIndex across windows', () => {
+    const first = makeRound({ roundIndex: 1, windowIndex: 1, windowTotal: 2, draft: '窗1' });
+    const second = makeRound({ roundIndex: 1, windowIndex: 2, windowTotal: 2, draft: '窗2' });
+    const merged = upsertAutoLoopTimelineRound(upsertAutoLoopTimelineRound([], first), second);
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0]?.draft, '窗1');
+    assert.equal(merged[1]?.draft, '窗2');
+    assert.equal(autoLoopRoundKey(first), '1:1');
+    assert.equal(autoLoopRoundKey(second), '2:1');
+  });
+
+  it('labels window and round on one line when split', () => {
+    assert.equal(
+      formatAutoLoopTimelineLabel({ roundIndex: 2, windowIndex: 1, windowTotal: 3 }),
+      '第 1/3 窗 · 第 2 轮'
+    );
+    assert.equal(formatAutoLoopTimelineLabel({ roundIndex: 2 }), '第 2 轮');
+  });
+
+  it('keeps a locked historical selection while a later round ends', () => {
+    const rounds = [
+      makeRound({ roundIndex: 1, windowIndex: 1, windowTotal: 2, items: [makeItem({ id: 'a' })] }),
+      makeRound({ roundIndex: 1, windowIndex: 2, windowTotal: 2, items: [makeItem({ id: 'b' })] }),
+    ];
+    const selectedKey = resolveAutoLoopSelectedRoundKey({
+      lockedKey: autoLoopRoundKey(rounds[0]!),
+      rounds,
+      running: true,
+      liveWindowIndex: 2,
+      liveRoundIndex: 1,
+    });
+    assert.equal(selectedKey, '1:1');
+    const latestKey = resolveAutoLoopTimelineLatestKey({
+      rounds,
+      running: true,
+      liveWindowIndex: 2,
+      liveRoundIndex: 1,
+    });
+    const items = resolveAutoLoopTimelineItems({
+      selectedKey,
+      latestKey,
+      rounds,
+      liveItems: [makeItem({ id: 'live' })],
+      running: true,
+    });
+    assert.equal(items[0]?.id, 'a');
+    assert.equal(
+      shouldShowAutoLoopParagraphMismatchHint({ selectedKey, latestKey }),
+      true
+    );
+    assert.ok(AUTO_LOOP_PARAGRAPH_MISMATCH_HINT.includes('段号'));
+  });
+
+  it('back-to-current (unlocked) follows live items on the latest round', () => {
+    const rounds = [
+      makeRound({ roundIndex: 1, windowIndex: 1, windowTotal: 2 }),
+      makeRound({ roundIndex: 1, windowIndex: 2, windowTotal: 2 }),
+    ];
+    const selectedKey = resolveAutoLoopSelectedRoundKey({
+      lockedKey: null,
+      rounds,
+      running: true,
+      liveWindowIndex: 2,
+      liveRoundIndex: 1,
+    });
+    const latestKey = resolveAutoLoopTimelineLatestKey({
+      rounds,
+      running: true,
+      liveWindowIndex: 2,
+      liveRoundIndex: 1,
+    });
+    assert.equal(selectedKey, latestKey);
+    const items = resolveAutoLoopTimelineItems({
+      selectedKey,
+      latestKey,
+      rounds,
+      liveItems: [makeItem({ id: 'live' })],
+      running: true,
+    });
+    assert.equal(items[0]?.id, 'live');
+    assert.equal(shouldShowAutoLoopParagraphMismatchHint({ selectedKey, latestKey }), false);
   });
 });

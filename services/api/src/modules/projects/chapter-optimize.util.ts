@@ -45,33 +45,33 @@ export const CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT = [
 ].join('\n');
 
 export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
-  '你是一位资深小说写作助手，正在按照已确认的优化方案重写一段已有章节正文。',
-  '本步骤需要直接输出「优化后的章节正文」，不要输出任何方案、说明、Markdown 标题或代码块包裹。',
-  '硬约束：',
-  '1) 必须以下文 <chapter-original> 中的原章节正文为蓝本进行改写，禁止凭摘要扩写；',
-  '2) 必须严格遵循 <optimization-plan> 中已确认的优化方案；',
-  '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
-  '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非方案明确要求修改；',
-  '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
-  '6) 若提示中含【边界锚点】/【前段末文】，锚点与末文仅用于把握衔接，不得照抄进正文；',
-  '7) 须遵守边界锚点：段首承接上段原文末句之后、段末落点不越过本段原文末句；禁止提前写入下段原文首句之后的情节；',
-  '8) 若【叙事上下文】含【下章衔接】，本章末（尤其最后一段）须与下章开头自然衔接，不得矛盾或提前写下章情节；',
-  '8) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
+  '你是一位资深小说写作助手。本步骤按已确认的优化方案对给定正文做实质性重写；只输出「优化后的章节正文」，不要方案、说明、Markdown 标题或代码块。',
+  '工作方式：',
+  '1) 若方案含「主锚 / 关键一笔」，须在对应落点自然织入改写意图（可改写措辞，不必逐字粘贴方案例句）；其余部分也要按方案整体意图重写，禁止大段照抄原文。',
+  '2) 改动幅度由【用户优化要求】与方案决定：该大改就大改，该扩就扩，该删就删；禁止因「方案未点名某句 / 未给句级落点」而几乎不动。',
+  '3) 以原文为情节与信息基础，禁止凭空另起无关剧情。',
+  '硬约束（仅保底，不压制改写幅度）：',
+  '1) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
+  '2) 语言、人称、时态、人物名称须与原文一致，除非方案明确要求修改；',
+  '3) 输出风格须与项目 systemPrompt 与人物设定保持一致；',
+  '4) 若提示中含【边界锚点】/【前段末文】：只锁情节起止边界，不锁措辞与密度；禁止提前写入下段情节；',
+  '5) 若【叙事上下文】含【下章衔接】，章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
+  '6) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
 ].join('\n');
 
 export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_SYSTEM_PROMPT = [
-  '你是一位资深小说写作助手，正在按照用户的优化要求重写一段已有章节正文。',
+  '你是一位资深小说写作助手，正在按照用户的优化要求重写给定章节正文。',
   '本步骤需要直接输出「优化后的章节正文」，不要输出任何方案、说明、Markdown 标题或代码块包裹。',
-  '硬约束：',
-  '1) 必须以下文 <chapter-original> 中的原章节正文为蓝本进行改写，禁止凭摘要扩写；',
+  '工作方式：改动幅度由【用户优化要求】决定——该大改就大改，该扩就扩，该删就删；禁止大段照抄原文。',
+  '硬约束（仅保底，不压制改写幅度）：',
+  '1) 以 <chapter-original> 为情节与信息基础改写，禁止凭空另起无关剧情；',
   '2) 必须遵循【用户优化要求】，不得另起优化方案或大纲；',
   '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
   '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非用户要求明确修改；',
   '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
-  '6) 若提示中含【边界锚点】/【前段末文】，锚点与末文仅用于把握衔接，不得照抄进正文；',
-  '7) 须遵守边界锚点：段首承接上段原文末句之后、段末落点不越过本段原文末句；禁止提前写入下段原文首句之后的情节；',
-  '8) 若【叙事上下文】含【下章衔接】，本章末（尤其最后一段）须与下章开头自然衔接，不得矛盾或提前写下章情节；',
-  '9) 中段（非首段且非末段）不得写章节总结、情绪收束或悬念式章末收尾。',
+  '6) 若提示中含【边界锚点】/【前段末文】：只锁情节起止边界，不锁措辞与密度；禁止提前写入下段情节；',
+  '7) 若【叙事上下文】含【下章衔接】，本章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
+  '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
 ].join('\n');
 
 /** 低于此字数优先单段生成，减少硬切分（可通过环境变量覆盖） */
@@ -92,7 +92,8 @@ export type ChapterOptimizeStage =
   | 'draft_segment'
   | 'merge_validation'
   | 'content_safety_scan'
-  | 'content_safety_rewrite';
+  | 'content_safety_rewrite'
+  | 'frozen_review';
 
 export interface ChapterOptimizeLengthStrategy {
   mode: ChapterOptimizeMode;
@@ -113,11 +114,14 @@ export function resolveOptimizeDraftExecution(input: {
   strategy: ChapterOptimizeLengthStrategy;
 }): OptimizeDraftExecution {
   const skipPlanDiagnosis = input.rewriteMode === 'direct';
-  if (input.rewriteMode === 'direct' && input.strategy.mode === 'segmented') {
+  if (input.strategy.mode === 'segmented') {
     return {
       optimizationMode: 'segmented',
       segmentTotal: input.strategy.segmentCount,
-      strategyLabel: `按要求直接分段生成正文（${input.strategy.segmentCount} 段）`,
+      strategyLabel:
+        input.rewriteMode === 'direct'
+          ? `按要求直接分段生成正文（${input.strategy.segmentCount} 段）`
+          : `按方案分段生成正文（${input.strategy.segmentCount} 段）`,
       skipPlanDiagnosis,
     };
   }
@@ -125,11 +129,7 @@ export function resolveOptimizeDraftExecution(input: {
     optimizationMode: 'single',
     segmentTotal: 1,
     strategyLabel:
-      input.rewriteMode === 'direct'
-        ? '按要求直接生成正文'
-        : input.strategy.mode === 'segmented'
-          ? '整章生成正文（方案已分段诊断）'
-          : '整章生成正文',
+      input.rewriteMode === 'direct' ? '按要求直接生成正文' : '整章生成正文',
     skipPlanDiagnosis,
   };
 }
@@ -251,9 +251,21 @@ export function resolveChapterOptimizeLengthStrategy(
 }
 export const SEGMENT_TAIL_CONTEXT_CHARS = 400;
 export const SEGMENT_LEAD_CONTEXT_CHARS = 200;
-/** 中段 maxTokens 相对原文字符上限倍率（抑制越界扩写） */
-export const MIDDLE_SEGMENT_MAX_TOKEN_CHAR_RATIO = 1.15;
-export const SEGMENT_LENGTH_RETRY_RATIO = 1.35;
+/**
+ * 中段 maxTokens 相对原文字符的余量倍率。
+ *
+ * 这是防跑飞的安全阀，不是改动量约束：留足扩写空间，越界由边界锚点在 prompt 层把关。
+ */
+export const MIDDLE_SEGMENT_MAX_TOKEN_CHAR_RATIO = 2.2;
+/** 短章也给够一轮写完的带宽 */
+export const CHAPTER_OPTIMIZE_MIN_MAX_TOKENS = 4096;
+/**
+ * 整章 / 分段正文输出上限。DeepSeek V4 官方 max output 384K，这里只放宽到
+ * 65536，避免长章方案改写被 16K 掐断，同时限制单次费用和超时。
+ */
+export const CHAPTER_OPTIMIZE_MAX_MAX_TOKENS = 65536;
+/** 单段输出超过原文此倍率视为跑飞（写进了下段情节），才触发重试 */
+export const SEGMENT_LENGTH_RETRY_RATIO = 2.5;
 /** 分段诊断 / 生成失败时，每段最多额外重试次数 */
 export const CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES = 1;
 
@@ -271,12 +283,14 @@ export function normalizeInstruction(value: unknown): string {
   return value.trim();
 }
 
+export const MAX_OPTIMIZE_INSTRUCTION_CHARS = 20000;
+
 export function assertInstruction(value: string): void {
   if (!value) {
     throw new Error('优化要求 instruction 不能为空');
   }
-  if (value.length > 2000) {
-    throw new Error('优化要求 instruction 长度不能超过 2000 字符');
+  if (value.length > MAX_OPTIMIZE_INSTRUCTION_CHARS) {
+    throw new Error(`优化要求 instruction 长度不能超过 ${MAX_OPTIMIZE_INSTRUCTION_CHARS} 字符`);
   }
 }
 
@@ -299,6 +313,68 @@ export function resolveOptimizeDraftTemplateKey(mode: ChapterOptimizeRewriteMode
 export const DRAFT_REFINE_USER_CONSTRAINT =
   '本轮是按已确认优化方案对上一稿正文的收紧改写：<chapter-original> 为上一轮优化正文，不是入库原文。必须执行 <optimization-plan> 中尚未落实或落实不足的条目，不得另起优化方案或大纲。';
 
+export const DRAFT_REVIEW_GAPS_CONSTRAINT =
+  '本轮只补【冻结合同未落实缺口】里的实质缺口，禁止另开润色愿望、另起方案或重写无关段落。';
+
+export const CHAPTER_OPTIMIZE_FROZEN_REVIEW_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在对照「冻结合同」验收一稿刚写完的章节正文。',
+  '冻结合同 = 用户优化要求 + 本轮已确认优化方案 + 项目写作风格（systemPrompt）。',
+  '只判断：合同是否仍有实质未落实，或改写是否改坏了合同要求保留的情节 / 人物 / 衔接。',
+  '禁止提出合同之外的新润色愿望，禁止输出新正文或新方案。',
+  '若没有实质缺口，只输出一行：【验收结论】CLOSED',
+  '若有实质缺口，第一行必须是【验收结论】GAPS，随后用【缺口说明】列出可执行缺口（点明落点与要补的意图）。',
+].join('\n');
+
+export function parseFrozenReviewResult(reviewText: string): {
+  hasMaterialGaps: boolean;
+  reviewText: string;
+} {
+  const text = reviewText.trim();
+  const hasClosed = /【验收结论】\s*CLOSED/i.test(text);
+  const hasGaps = /【验收结论】\s*GAPS/i.test(text);
+  if (hasClosed && !hasGaps) {
+    return { hasMaterialGaps: false, reviewText: text };
+  }
+  if (hasGaps) {
+    return { hasMaterialGaps: true, reviewText: text };
+  }
+  if (/无实质缺口|没有实质缺口|可以收口/.test(text) && text.length < 200) {
+    return { hasMaterialGaps: false, reviewText: text };
+  }
+  return { hasMaterialGaps: text.length >= 80, reviewText: text };
+}
+
+export function buildFrozenReviewUserPrompt(input: {
+  chapter: ChapterOptimizeChapterRef;
+  instruction: string;
+  planText: string;
+  draftText: string;
+}): string {
+  return [
+    `【验收目标】对照冻结合同验收第${input.chapter.chapterNo}章「${input.chapter.title}」的新正文。`,
+    `【用户优化要求】\n${input.instruction.trim()}`,
+    `<optimization-plan chapter-no="${input.chapter.chapterNo}">\n${input.planText.trim()}\n</optimization-plan>`,
+    `<chapter-draft chapter-no="${input.chapter.chapterNo}">\n${input.draftText.trim()}\n</chapter-draft>`,
+    '只输出验收结论。没有实质缺口则【验收结论】CLOSED；有则【验收结论】GAPS + 【缺口说明】。禁止新正文或新方案。',
+  ].join('\n\n');
+}
+
+export function normalizeReviewGaps(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > 8000) {
+    throw new Error('验收缺口 reviewGaps 长度不能超过 8000 字符');
+  }
+  return trimmed;
+}
+
+export function resolveDraftSplitSource(chapterContent: string, sourceText?: string): string {
+  const previous = sourceText?.trim();
+  return previous || chapterContent;
+}
+
 export function normalizeDraftSourceText(value: unknown): string {
   if (typeof value !== 'string') {
     return '';
@@ -318,11 +394,13 @@ export function assertOptimizeDraftRequest(input: {
   instruction?: unknown;
   planText?: unknown;
   sourceText?: unknown;
+  reviewGaps?: unknown;
 }): {
   rewriteMode: ChapterOptimizeRewriteMode;
   instruction: string;
   planText: string;
   sourceText: string;
+  reviewGaps: string;
 } {
   const rewriteMode = normalizeRewriteMode(input.rewriteMode);
   const instruction = normalizeInstruction(input.instruction);
@@ -332,7 +410,8 @@ export function assertOptimizeDraftRequest(input: {
     assertPlanText(planText);
   }
   const sourceText = rewriteMode === 'direct' ? '' : normalizeDraftSourceText(input.sourceText);
-  return { rewriteMode, instruction, planText, sourceText };
+  const reviewGaps = rewriteMode === 'direct' ? '' : normalizeReviewGaps(input.reviewGaps);
+  return { rewriteMode, instruction, planText, sourceText, reviewGaps };
 }
 
 export function buildPlanRevisionInstruction(input: {
@@ -415,6 +494,16 @@ export const CHAPTER_OPTIMIZE_SEGMENT_DIAGNOSIS_SYSTEM_PROMPT = [
   '4) 与前后段的边界约束（段首承接、段末落点，不得越界）。',
 ].join('\n');
 
+export function buildSegmentDiagnosisSystemPrompt(publishedPlanText?: string): string {
+  const plan = publishedPlanText?.trim() || CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT;
+  return [
+    plan,
+    '',
+    CHAPTER_OPTIMIZE_SEGMENT_DIAGNOSIS_SYSTEM_PROMPT,
+    '【本步限定】只扫描当前片段。仍按上方方案标准判断本段；禁止输出整章方案或新正文。',
+  ].join('\n');
+}
+
 export const CHAPTER_OPTIMIZE_PLAN_SYNTHESIS_SYSTEM_PROMPT = [
   '你是一位资深小说编辑，正在把多段局部诊断汇总为一份完整的整章优化方案。',
   '本步骤只输出「优化方案」，不要直接输出新的正文。',
@@ -474,7 +563,9 @@ export function buildSegmentDiagnosisUserPrompt(input: {
   sections.push(
     `<segment-original segment="${segment.index + 1}/${totalSegments}">\n${segment.originalText}\n</segment-original>`
   );
-  sections.push('请输出本段结构化诊断报告，禁止输出正文或整章方案。');
+  sections.push(
+    '请输出本段结构化诊断报告（控制在 200～400 字），禁止输出正文或整章方案。'
+  );
 
   return sections.join('\n\n');
 }
@@ -521,7 +612,10 @@ export function buildPlanSynthesisUserPrompt(input: {
     `<chapter-original chapter-no="${chapter.chapterNo}">\n${chapter.content}\n</chapter-original>`
   );
   sections.push(
-    '请基于分段诊断与原文输出完整整章优化方案，结构化呈现要点，禁止直接输出新的正文。'
+    [
+      '请基于分段诊断与原文输出完整整章优化方案，结构化呈现要点，禁止直接输出新的正文。',
+      '不要机械拼接分段报告：须去重、合并同类问题并按全章节奏重新统筹，同时保证每段扫描出的有效问题都有明确去向。',
+    ].join('\n')
   );
 
   return sections.join('\n\n');
@@ -550,24 +644,22 @@ export function detectPlaceholderText(text: string): string | null {
   return null;
 }
 
-export function planAllowsContentReduction(planText: string): boolean {
-  return /删减|缩短|删除|压缩篇幅|精简|大幅削减/.test(planText);
-}
-
 export interface ChapterOptimizeQualityCheckResult {
   passed: boolean;
   failures: string[];
 }
 
+/**
+ * 合并正文有效性校验。
+ *
+ * 只判断输出能不能用（空输出、占位语），不裁决改动幅度。
+ * 改多改少由【用户优化要求】与优化方案决定，系统不设字数或段落数门槛。
+ */
 export function validateMergedChapterDraft(input: {
-  originalContent: string;
   mergedDraft: string;
-  planText: string;
 }): ChapterOptimizeQualityCheckResult {
   const failures: string[] = [];
-  const original = input.originalContent.trim();
   const merged = input.mergedDraft.trim();
-  const allowReduction = planAllowsContentReduction(input.planText);
 
   if (!merged) {
     failures.push('合并正文为空');
@@ -579,24 +671,44 @@ export function validateMergedChapterDraft(input: {
     failures.push(`合并正文含占位语（${placeholder}）`);
   }
 
-  if (original.length > 0 && !allowReduction) {
-    const minLength = Math.floor(original.length * 0.95);
-    if (merged.length < minLength) {
-      failures.push(
-        `合并正文字数 ${merged.length} 低于原文 95%（${minLength} 字）`
-      );
+  return { passed: failures.length === 0, failures };
+}
+
+export interface ChapterDraftChangeRate {
+  originalParagraphs: number;
+  draftParagraphs: number;
+  unchangedParagraphs: number;
+  unchangedRatio: number;
+  originalChars: number;
+  draftChars: number;
+}
+
+/**
+ * 改动量只读指标：逐段比对原文与改写稿，统计有多少段一字未动。
+ *
+ * 仅用于日志与展示，不参与任何通过/失败判定。
+ */
+export function measureChapterDraftChangeRate(
+  originalContent: string,
+  draftContent: string
+): ChapterDraftChangeRate {
+  const originalParagraphs = splitChapterParagraphs(originalContent);
+  const draftParagraphs = splitChapterParagraphs(draftContent);
+  const draftSet = new Set(draftParagraphs.map((text) => text.trim()));
+  let unchangedParagraphs = 0;
+  for (const paragraph of originalParagraphs) {
+    if (draftSet.has(paragraph.trim())) {
+      unchangedParagraphs += 1;
     }
   }
-
-  const originalParagraphs = countNonEmptyParagraphs(original);
-  const mergedParagraphs = countNonEmptyParagraphs(merged);
-  if (originalParagraphs > 1 && mergedParagraphs < Math.ceil(originalParagraphs * 0.8)) {
-    failures.push(
-      `合并正文段落数 ${mergedParagraphs} 明显少于原文 ${originalParagraphs} 段`
-    );
-  }
-
-  return { passed: failures.length === 0, failures };
+  return {
+    originalParagraphs: originalParagraphs.length,
+    draftParagraphs: draftParagraphs.length,
+    unchangedParagraphs,
+    unchangedRatio: originalParagraphs.length ? unchangedParagraphs / originalParagraphs.length : 0,
+    originalChars: originalContent.trim().length,
+    draftChars: draftContent.trim().length,
+  };
 }
 
 export function countNonEmptyParagraphs(text: string): number {
@@ -615,6 +727,7 @@ export function buildDraftUserPrompt(input: {
   instruction: string;
   planText: string;
   sourceText?: string;
+  reviewGaps?: string;
   appearingCharacters?: string[];
   selectedRelationEvents?: ChapterOptimizeUsedRelationEvent[];
 }): string {
@@ -654,8 +767,19 @@ export function buildDraftUserPrompt(input: {
     sections.push(DRAFT_REFINE_USER_CONSTRAINT);
   }
 
+  const reviewGaps = input.reviewGaps?.trim() ?? '';
+  if (reviewGaps) {
+    sections.push(`【冻结合同未落实缺口】\n${reviewGaps}`);
+    sections.push(DRAFT_REVIEW_GAPS_CONSTRAINT);
+  }
+
   sections.push(
-    '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。必须基于 <chapter-original> 逐段改写并完整覆盖原文信息，不得遗漏关键情节、对白、人物动作与指代关系；若某段无需修改请保留原意并输出该段。除非优化方案明确要求删减，输出总字数应不低于原文的95%，段落数不得少于原文。'
+    [
+      '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。',
+      '按 <optimization-plan> 与【用户优化要求】对正文做实质性重写，按方案整体意图改写。',
+      '禁止因「方案未点名具体句子 / 没有落点」而大段照抄；改动幅度由要求与方案决定，不必迁就原文篇幅或段落数。',
+      '须保留情节节点、对白含义、人物动作与指代关系；措辞、句式、感官密度可大胆重写。',
+    ].join('\n')
   );
 
   return sections.join('\n\n');
@@ -695,7 +819,11 @@ export function buildDirectDraftUserPrompt(input: {
   );
 
   sections.push(
-    '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。必须基于 <chapter-original> 逐段改写并完整覆盖原文信息，不得遗漏关键情节、对白、人物动作与指代关系；若某段无需修改请保留原意并输出该段。除非用户优化要求明确要求删减，输出总字数应不低于原文的95%，段落数不得少于原文。'
+    [
+      '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。',
+      '必须基于 <chapter-original> 改写，保留情节节点、对白含义、人物动作与指代关系；禁止大段原样照抄。',
+      '改动幅度由【用户优化要求】决定：该大改就大改，该扩就扩，该收紧就收紧，不必迁就原文的篇幅或段落数。',
+    ].join('\n')
   );
 
   return sections.join('\n\n');
@@ -737,7 +865,7 @@ export function ensureChapterVersionMatches(chapterNo: number, expected: Date, a
  * 用稳定的伪随机生成 planId / draftId，便于 trace 关联。
  */
 export function makeOptimizationId(
-  prefix: 'plan' | 'draft' | 'typo-check' | 'typo-fix' | 'auto-loop'
+  prefix: 'plan' | 'draft' | 'typo-check' | 'typo-fix' | 'auto-loop' | 'review'
 ): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -835,6 +963,7 @@ export interface SegmentPromptInput {
   boundaryAnchors?: SegmentBoundaryAnchors;
   totalSegments: number;
   omitOptimizationPlan?: boolean;
+  reviewGaps?: string;
 }
 
 export function splitChapterParagraphs(content: string): string[] {
@@ -1053,7 +1182,10 @@ export function splitIntoSegments(content: string, planText: string, maxSegments
 }
 
 function formatBoundaryAnchorsBlock(anchors: SegmentBoundaryAnchors, segmentIndex: number): string {
-  const lines = ['【边界锚点·只读】'];
+  const lines = [
+    '【边界锚点·只读】',
+    '用途：只锁情节起止边界，不限制本段内部如何改写。措辞、句式、感官密度可按方案/要求大胆重写。',
+  ];
   if (anchors.previousOriginalLastSentence) {
     lines.push(
       `- 上段原文末句：「${anchors.previousOriginalLastSentence}」（本段须从此句之后自然承接，不得重复该句）`
@@ -1062,10 +1194,10 @@ function formatBoundaryAnchorsBlock(anchors: SegmentBoundaryAnchors, segmentInde
     lines.push('- 上段原文末句：（无，本段为章节后续部分）');
   }
   lines.push(
-    `- 本段原文首句：「${anchors.currentOriginalFirstSentence}」（改写后首句应与之语义等价或顺滑替换）`
+    `- 本段原文首句：「${anchors.currentOriginalFirstSentence}」（段首情节从此附近起笔即可，允许完全重写措辞）`
   );
   lines.push(
-    `- 本段原文末句：「${anchors.currentOriginalLastSentence}」（改写后末句应落在此句附近，不得写到更后情节）`
+    `- 本段原文末句：「${anchors.currentOriginalLastSentence}」（段末情节落在此附近即可，不得写到更后情节；允许完全重写措辞）`
   );
   if (anchors.nextOriginalFirstSentence) {
     lines.push(
@@ -1088,6 +1220,7 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     boundaryAnchors,
     totalSegments,
     omitOptimizationPlan,
+    reviewGaps,
   } = input;
 
   const sections: string[] = [];
@@ -1095,7 +1228,7 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     totalSegments > 2 && segment.index > 0 && segment.index < totalSegments - 1;
 
   sections.push(
-    `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段，请聚焦本段原文进行改写，确保完整覆盖。`
+    `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段。请对本段全文做可见改写，保留情节信息，但禁止前半改、后半抄。`
   );
 
   if (totalSegments > 1) {
@@ -1104,18 +1237,18 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     );
     if (segment.startParagraph === segment.endParagraph) {
       sections.push(
-        `【本段范围】仅改写原文第 ${segment.startParagraph + 1} 段（以空行分段计），不得写到其他段落的情节。`
+        `【本段范围】仅改写原文第 ${segment.startParagraph + 1} 段（以空行分段计），不得写到其他段落的情节；范围内允许大胆重写措辞与密度。`
       );
     } else {
       sections.push(
-        `【本段范围】仅改写原文第 ${segment.startParagraph + 1}–${segment.endParagraph + 1} 段（以空行分段计），不得写到其他段落的情节。`
+        `【本段范围】仅改写原文第 ${segment.startParagraph + 1}–${segment.endParagraph + 1} 段（以空行分段计），不得写到其他段落的情节；范围内允许大胆重写措辞与密度。`
       );
     }
   }
 
   if (isMiddleSegment) {
     sections.push(
-      '【中段专用】本段是章节「过渡段」，不是章节结尾。禁止：章节总结、情绪收束、悬念式章末收尾、写下一段已发生的事件或对白。'
+      '【中段专用】本段不是章节结尾。禁止写成章末式收束，禁止写下一段已发生的事件或对白；段内情绪与感官密度不设上限。'
     );
   }
 
@@ -1160,10 +1293,21 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     sections.push(`【前段情节摘要】\n${previousSegmentSummary}`);
   }
 
+  const gapText = reviewGaps?.trim() ?? '';
+  if (gapText) {
+    sections.push(`【冻结合同未落实缺口】\n${gapText}`);
+    sections.push(DRAFT_REVIEW_GAPS_CONSTRAINT);
+  }
+
   sections.push(`<segment-original>\n${segment.originalText}\n</segment-original>`);
 
   sections.push(
-    '请直接输出优化后的本段正文。末尾另起一行输出 `【SEG_SUMMARY】本段摘要内容`（供下段使用）。确保完整覆盖原文内容，不得遗漏情节、对白、动作描写。不得使用「同上」「同前」「此处省略」「原段落保留」等占位语。若本段无需修改，则原样输出并附摘要。'
+    [
+      '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',
+      '改写要求：按【用户优化要求】与（若有）优化方案对本段从头到尾重写；保留情节节点、对白含义与人物动作，但禁止大段照抄原文。',
+      '禁止「前半改写、后半原样粘贴」；不得以「方案未点名本段句子」为由几乎不动。',
+      '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语；禁止原样输出本段原文。',
+    ].join('\n')
   );
 
   return sections.join('\n\n');
@@ -1187,22 +1331,20 @@ export function parseSegmentOutput(output: string): { segmentText: string; summa
 
 export function calculateSegmentMaxTokens(originalText: string): number {
   const charCount = originalText.length;
-  const estimated = Math.ceil(charCount * 1.5);
-  return Math.max(2048, Math.min(estimated, 4096));
+  // 中文约 1.5–2 字/token；给足扩写余量，避免写到后半被 max_tokens 掐断后回抄原文
+  const estimated = Math.ceil(charCount * 2.5);
+  return Math.max(
+    CHAPTER_OPTIMIZE_MIN_MAX_TOKENS,
+    Math.min(estimated, CHAPTER_OPTIMIZE_MAX_MAX_TOKENS)
+  );
 }
 
 export function calculateSegmentMaxTokensForIndex(
   originalText: string,
-  segmentIndex: number,
-  totalSegments: number
+  _segmentIndex: number,
+  _totalSegments: number
 ): number {
-  const base = calculateSegmentMaxTokens(originalText);
-  const isMiddle = totalSegments > 2 && segmentIndex > 0 && segmentIndex < totalSegments - 1;
-  if (!isMiddle) {
-    return base;
-  }
-  const middleCap = Math.ceil(originalText.length * MIDDLE_SEGMENT_MAX_TOKEN_CHAR_RATIO);
-  return Math.min(base, middleCap);
+  return calculateSegmentMaxTokens(originalText);
 }
 
 export function shouldRetrySegmentForLength(originalText: string, generatedText: string): boolean {
@@ -1214,7 +1356,7 @@ export function shouldRetrySegmentForLength(originalText: string, generatedText:
 }
 
 export function appendSegmentLengthRetryHint(prompt: string): string {
-  return `${prompt}\n\n【重试约束】上次输出超出本段原文情节范围。请严格限定在本段原文首句与末句之间，删除下段情节与章末收束，压缩至与本段原文相当的长度。`;
+  return `${prompt}\n\n【重试约束】上次输出越出了本段情节边界（写入了下段情节或章末式收束）。请仍按方案/要求大胆改写本段，但情节落点须停在本段原文末句附近，删除下段情节；不要为了缩短而压缩已写好的改写密度。`;
 }
 
 export function parseTypoCheckIssues(raw: unknown): ChapterTypoIssueRecord[] {

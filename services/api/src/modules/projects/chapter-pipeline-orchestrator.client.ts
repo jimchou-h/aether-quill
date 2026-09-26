@@ -13,6 +13,28 @@ export interface PipelineOrchestratorStreamCallbacks {
   onError?: (message: string) => void;
 }
 
+export function isUpstreamAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const err = error as { code?: string; name?: string; message?: string };
+  if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+    return true;
+  }
+  return /aborted|canceled|cancelled/i.test(err.message ?? '');
+}
+
+function destroyReadableStream(stream: NodeJS.ReadableStream): void {
+  const destroyable = stream as NodeJS.ReadableStream & {
+    destroy?: (error?: Error) => void;
+  };
+  try {
+    destroyable.destroy?.();
+  } catch {
+    // 断开时流可能已结束
+  }
+}
+
 export async function streamPipelineGeneration(input: {
   orchestratorUrl: string;
   projectId: string;
@@ -20,8 +42,22 @@ export async function streamPipelineGeneration(input: {
   templateKey: string;
   maxTokens?: number;
   context: Record<string, unknown>;
+  systemPromptOverride?: string;
   callbacks: PipelineOrchestratorStreamCallbacks;
-}): Promise<{ ok: boolean; text: string; traceId: string; errorMessage?: string }> {
+  /** 前端 SSE 断开时传入，用于取消 axios 与销毁上游流 */
+  signal?: AbortSignal;
+}): Promise<{
+  ok: boolean;
+  text: string;
+  traceId: string;
+  errorMessage?: string;
+  retrievedEvidence?: string;
+  aborted?: boolean;
+}> {
+  if (input.signal?.aborted) {
+    return { ok: false, text: '', traceId: '', errorMessage: 'aborted', aborted: true };
+  }
+
   let response;
   try {
     response = await axios.post(
@@ -33,10 +69,20 @@ export async function streamPipelineGeneration(input: {
         templateKey: input.templateKey,
         maxTokens: input.maxTokens,
         context: input.context,
+        ...(input.systemPromptOverride
+          ? { systemPromptOverride: input.systemPromptOverride }
+          : {}),
       },
-      { responseType: 'stream', timeout: 300000 }
+      {
+        responseType: 'stream',
+        timeout: 300000,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }
     );
   } catch (error) {
+    if (input.signal?.aborted || isUpstreamAbortError(error)) {
+      return { ok: false, text: '', traceId: '', errorMessage: 'aborted', aborted: true };
+    }
     const message = await resolveUpstreamFailureMessage(error, '调用生成服务失败');
     input.callbacks.onError?.(message);
     return { ok: false, text: '', traceId: '', errorMessage: message };
@@ -45,13 +91,43 @@ export async function streamPipelineGeneration(input: {
   let accumulated = '';
   let traceId = '';
   let errorMessage: string | undefined;
+  let retrievedEvidence = '';
 
   await new Promise<void>((resolve, reject) => {
     const stream = response.data as NodeJS.ReadableStream;
     const utf8 = createUtf8StreamDecoder();
     let buffer = '';
+    let settled = false;
+
+    const finish = (handler: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (input.signal) {
+        input.signal.removeEventListener('abort', onAbort);
+      }
+      handler();
+    };
+
+    const onAbort = () => {
+      destroyReadableStream(stream);
+      finish(() => resolve());
+    };
+
+    if (input.signal) {
+      if (input.signal.aborted) {
+        onAbort();
+        return;
+      }
+      input.signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     stream.on('data', (chunk: Buffer) => {
+      if (input.signal?.aborted) {
+        onAbort();
+        return;
+      }
       buffer += utf8.decode(chunk);
       const segments = buffer.split('\n\n');
       buffer = segments.pop() || '';
@@ -72,6 +148,7 @@ export async function streamPipelineGeneration(input: {
           stage?: string;
           segmentIndex?: number;
           segmentTotal?: number;
+          retrievedEvidence?: string;
         };
         try {
           event = JSON.parse(dataPart);
@@ -104,23 +181,43 @@ export async function streamPipelineGeneration(input: {
             break;
           case 'end':
             traceId = typeof event.traceId === 'string' ? event.traceId : traceId;
+            if (typeof event.retrievedEvidence === 'string') {
+              retrievedEvidence = event.retrievedEvidence;
+            }
             break;
         }
       }
     });
 
-    stream.on('end', () => resolve());
-    stream.on('error', (err: unknown) => reject(err));
+    stream.on('end', () => finish(() => resolve()));
+    stream.on('error', (err: unknown) => {
+      if (input.signal?.aborted || isUpstreamAbortError(err)) {
+        finish(() => resolve());
+        return;
+      }
+      finish(() => reject(err));
+    });
   });
+
+  if (input.signal?.aborted) {
+    return {
+      ok: false,
+      text: accumulated.trim(),
+      traceId,
+      errorMessage: 'aborted',
+      retrievedEvidence,
+      aborted: true,
+    };
+  }
 
   const text = accumulated.trim();
   if (errorMessage) {
-    return { ok: false, text, traceId, errorMessage };
+    return { ok: false, text, traceId, errorMessage, retrievedEvidence };
   }
   if (!text) {
-    return { ok: false, text: '', traceId, errorMessage: '未收到有效响应' };
+    return { ok: false, text: '', traceId, errorMessage: '未收到有效响应', retrievedEvidence };
   }
-  return { ok: true, text, traceId };
+  return { ok: true, text, traceId, retrievedEvidence };
 }
 
 export async function generatePipelinePlainText(input: {
@@ -131,18 +228,36 @@ export async function generatePipelinePlainText(input: {
   context: Record<string, unknown>;
   maxTokens?: number;
   timeoutMs?: number;
+  systemPromptOverride?: string;
+  signal?: AbortSignal;
 }): Promise<string> {
-  const { data } = await axios.post(
-    `${input.orchestratorUrl}/api/generate`,
-    {
-      projectId: input.projectId,
-      prompt: input.prompt,
-      useSSE: false,
-      templateKey: input.templateKey,
-      maxTokens: input.maxTokens,
-      context: input.context,
-    },
-    { timeout: input.timeoutMs ?? 180000 }
-  );
-  return typeof data?.content === 'string' ? data.content.trim() : '';
+  if (input.signal?.aborted) {
+    throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+  }
+  try {
+    const { data } = await axios.post(
+      `${input.orchestratorUrl}/api/generate`,
+      {
+        projectId: input.projectId,
+        prompt: input.prompt,
+        useSSE: false,
+        templateKey: input.templateKey,
+        maxTokens: input.maxTokens,
+        context: input.context,
+        ...(input.systemPromptOverride
+          ? { systemPromptOverride: input.systemPromptOverride }
+          : {}),
+      },
+      {
+        timeout: input.timeoutMs ?? 180000,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }
+    );
+    return typeof data?.content === 'string' ? data.content.trim() : '';
+  } catch (error) {
+    if (input.signal?.aborted || isUpstreamAbortError(error)) {
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    }
+    throw new Error(await resolveUpstreamFailureMessage(error, '调用生成服务失败'));
+  }
 }

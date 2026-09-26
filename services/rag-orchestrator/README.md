@@ -55,12 +55,13 @@ pnpm install
 pnpm dev   # 默认 http://localhost:3001
 ```
 
-### 调试：查看大纲 / 正文 / 优化方案完整 Prompt
+### 调试：查看大纲 / 正文 / 优化方案 Prompt
 
-写作工作台「生成大纲」「生成正文」，以及章节优化「生成方案」「生成正文」时，`rag-orchestrator` 终端会打印送入 LLM 的完整拼装 prompt（含 system、叙事上下文、检索证据、用户需求）。
+写作工作台「生成大纲」「生成正文」，以及章节优化「生成方案」「生成正文」时，`rag-orchestrator` 终端默认只打印字数摘要（`systemChars` / `userChars`）。
 
-- 默认开启；设置 `LOG_GENERATION_PROMPT=false` 或 `LOG_WRITE_CHAPTER_PROMPT=false` 可关闭
-- trace `context` 记录 `system_message`、`user_message` 与 `assembled_prompt`；本地调试以终端日志为准（`LOG_GENERATION_PROMPT`）
+- 默认摘要；`LOG_GENERATION_PROMPT=true`（或 `full`）才打印完整拼装 prompt
+- `LOG_GENERATION_PROMPT=false` 关闭
+- trace 落盘只保留字数与元数据，不写 `assembled_prompt` / 正文全文
 
 ## 主要 API
 

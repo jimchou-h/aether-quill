@@ -175,7 +175,7 @@ export const CHAPTER_PIPELINE_REWRITE_FIX_ITEMS_SYSTEM_PROMPT = [
   DIMENSION_BOUNDARY,
   'ONLY：围绕 <writing-brief> 中列出的意图，小范围重织相关段落与过渡句，使补修自然融入原文。',
   '可调整相邻过渡句与句序以保证节奏；保持剧情事实、对白含义、人物关系不变。',
-  '禁止为完成条目简单插句或打补丁；禁止越界修改未列出的维度。',
+  '禁止为完成条目简单插句或打补丁；禁止插入「单手……另一只手……」之类对账说明句；先后动作保持原文顺序，禁止叠成同一瞬间；禁止越界修改未列出的维度。',
   '直接输出完整正文，不要说明或 Markdown。',
 ].join('\n');
 
@@ -2312,6 +2312,146 @@ export function stripPipelineOutlineJsonFence(raw: string): string {
   return withoutEdgeFence;
 }
 
+/** 补全被 max_tokens 截断的 JSON：闭合未结束字符串，丢掉残缺尾巴，再补齐括号。 */
+export function repairTruncatedJsonText(raw: string): string {
+  const trimmed = raw.replace(/^\uFEFF/, '').trim();
+  if (!trimmed) {
+    throw new SyntaxError('Empty JSON');
+  }
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    // continue
+  }
+
+  const closedString = closeDanglingJsonString(trimmed);
+  const attempts = [closedString, stripTrailingJsonComma(closedString)];
+  const lastComma = lastUnquotedCommaIndex(closedString);
+  if (lastComma >= 0) {
+    attempts.push(closedString.slice(0, lastComma));
+  }
+
+  for (const attempt of attempts) {
+    const closed = closeOpenJsonBrackets(stripTrailingJsonComma(attempt));
+    try {
+      JSON.parse(closed);
+      return closed;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new SyntaxError('Unable to repair truncated JSON');
+}
+
+function closeDanglingJsonString(text: string): string {
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    }
+  }
+  if (!inString) {
+    return text;
+  }
+  let body = text;
+  if (escaped) {
+    body = body.slice(0, -1);
+  }
+  return `${body}"`;
+}
+
+function stripTrailingJsonComma(text: string): string {
+  return text.replace(/,+\s*$/, '');
+}
+
+function lastUnquotedCommaIndex(text: string): number {
+  let inString = false;
+  let escaped = false;
+  let last = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === ',') {
+      last = i;
+    }
+  }
+  return last;
+}
+
+function closeOpenJsonBrackets(text: string): string {
+  let inString = false;
+  let escaped = false;
+  const stack: Array<'{' | '['> = [];
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      stack.push('{');
+    } else if (ch === '[') {
+      stack.push('[');
+    } else if (ch === '}' || ch === ']') {
+      stack.pop();
+    }
+  }
+
+  let closed = text;
+  while (stack.length > 0) {
+    const top = stack.pop();
+    closed += top === '{' ? '}' : ']';
+  }
+  return closed;
+}
+
 function extractBalancedJsonObject(text: string, startIndex: number): string | null {
   if (text[startIndex] !== '{') {
     return null;
@@ -2381,7 +2521,12 @@ export function parsePipelineOutlineJson(raw: string): {
   suggested: PipelineOutlineItem[];
 } {
   const cleaned = stripPipelineOutlineJsonFence(raw);
-  const parsed: unknown = JSON.parse(cleaned);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    parsed = JSON.parse(repairTruncatedJsonText(cleaned));
+  }
   const collected = collectOutlineItemPartialsFromRoot(parsed);
 
   const required = collected.required

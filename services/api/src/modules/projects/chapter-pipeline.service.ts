@@ -387,11 +387,7 @@ export class ChapterPipelineService {
       segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
 
     if (segmentTexts.length > 1) {
-      const qualityCheck = validateMergedChapterDraft({
-        originalContent: draftText,
-        mergedDraft: merged,
-        planText: '',
-      });
+      const qualityCheck = validateMergedChapterDraft({ mergedDraft: merged });
       if (!qualityCheck.passed) {
         const message = `${isCharacter ? '角色正文' : '感官正文'}修订合并校验未通过：${qualityCheck.failures.join('；')}`;
         callbacks.onError?.(message);
@@ -615,11 +611,7 @@ export class ChapterPipelineService {
       segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
 
     if (segmentTexts.length > 1) {
-      const qualityCheck = validateMergedChapterDraft({
-        originalContent: draftText,
-        mergedDraft: merged,
-        planText: '',
-      });
+      const qualityCheck = validateMergedChapterDraft({ mergedDraft: merged });
       if (!qualityCheck.passed) {
         const message = `按清单补修合并校验未通过：${qualityCheck.failures.join('；')}`;
         callbacks.onError?.(message);
@@ -1683,11 +1675,7 @@ export class ChapterPipelineService {
       segmentTexts.length > 1 ? mergeSegmentDraftTexts(segmentTexts) : segmentTexts[0] ?? '';
 
     if (segmentTexts.length > 1) {
-      const qualityCheck = validateMergedChapterDraft({
-        originalContent: sourceText,
-        mergedDraft: merged,
-        planText: '',
-      });
+      const qualityCheck = validateMergedChapterDraft({ mergedDraft: merged });
       if (!qualityCheck.passed) {
         const message = `感官改写合并校验未通过：${qualityCheck.failures.join('；')}`;
         callbacks.onError?.(message);

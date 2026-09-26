@@ -1,32 +1,129 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, shallowRef, watch } from 'vue';
 import type { ChapterAutoLoopItem, ChapterAutoLoopRound } from '../../services/api';
 import {
+  AUTO_LOOP_PARAGRAPH_MISMATCH_HINT,
+  autoLoopRoundKey,
   describeAutoLoopItemStatus,
+  formatAutoLoopTimelineLabel,
+  formatAutoLoopWindowPrefix,
+  resolveAutoLoopSelectedRoundKey,
+  resolveAutoLoopTimelineItems,
+  resolveAutoLoopTimelineLatestKey,
+  shouldShowAutoLoopParagraphMismatchHint,
   summarizeAutoLoopRound,
 } from '../../utils/chapterAutoLoopItems';
+import { canOpenPromptLabKind, findPromptLabCall } from '../../utils/autoLoopPromptLab';
+import type { AutoLoopPromptLabCall } from '../../services/api';
 
 const props = defineProps<{
   rounds: ChapterAutoLoopRound[];
   liveItems: ChapterAutoLoopItem[];
   activeRoundIndex: number;
   activeRoundBudget: number;
+  liveWindowIndex?: number;
+  liveWindowTotal?: number;
   paragraphCount: number;
   running: boolean;
+  promptLabCalls?: AutoLoopPromptLabCall[];
 }>();
 
-/** 已完成轮直接读回传的最终条目；进行中的那一轮读实时条目。 */
+const emit = defineEmits<{
+  openDiagnoseLab: [call: AutoLoopPromptLabCall];
+}>();
+
+const lockedKey = shallowRef<string | null>(null);
+
+watch(
+  () => props.rounds.length,
+  (length) => {
+    if (length === 0) {
+      lockedKey.value = null;
+    }
+  }
+);
+
+const latestKey = computed(() =>
+  resolveAutoLoopTimelineLatestKey({
+    rounds: props.rounds,
+    running: props.running,
+    liveWindowIndex: props.liveWindowIndex ?? 0,
+    liveRoundIndex: props.activeRoundIndex,
+  })
+);
+
+const selectedKey = computed(() =>
+  resolveAutoLoopSelectedRoundKey({
+    lockedKey: lockedKey.value,
+    rounds: props.rounds,
+    running: props.running,
+    liveWindowIndex: props.liveWindowIndex ?? 0,
+    liveRoundIndex: props.activeRoundIndex,
+  })
+);
+
 const activeItems = computed(() =>
-  props.running || props.rounds.length === 0 ? props.liveItems : (props.rounds.at(-1)?.items ?? [])
+  resolveAutoLoopTimelineItems({
+    selectedKey: selectedKey.value,
+    latestKey: latestKey.value,
+    rounds: props.rounds,
+    liveItems: props.liveItems,
+    running: props.running,
+  })
+);
+
+const showMismatchHint = computed(() =>
+  shouldShowAutoLoopParagraphMismatchHint({
+    selectedKey: selectedKey.value,
+    latestKey: latestKey.value,
+  })
+);
+
+const showBackToCurrent = computed(
+  () => Boolean(lockedKey.value) && lockedKey.value !== latestKey.value
 );
 
 const activeRoundLabel = computed(() => {
   if (props.activeRoundIndex <= 0) {
     return '';
   }
+  const windowLabel = formatAutoLoopWindowPrefix(props.liveWindowIndex, props.liveWindowTotal);
   const budget = props.activeRoundBudget > 0 ? ` / ${props.activeRoundBudget}` : '';
-  return `第 ${props.activeRoundIndex}${budget} 轮`;
+  const roundLabel = `第 ${props.activeRoundIndex}${budget} 轮`;
+  return windowLabel ? `${windowLabel} · ${roundLabel}` : roundLabel;
 });
+
+function isLatestRound(round: ChapterAutoLoopRound): boolean {
+  return autoLoopRoundKey(round) === latestKey.value;
+}
+
+function selectRound(round: ChapterAutoLoopRound) {
+  const key = autoLoopRoundKey(round);
+  lockedKey.value = key === latestKey.value ? null : key;
+}
+
+function backToCurrent() {
+  lockedKey.value = null;
+}
+
+function diagnoseCallFor(round: ChapterAutoLoopRound) {
+  const byId = round.promptLabCallId
+    ? (props.promptLabCalls ?? []).find((call) => call.id === round.promptLabCallId)
+    : undefined;
+  return (
+    byId ??
+    findPromptLabCall(props.promptLabCalls ?? [], {
+      kind: 'diagnose',
+      roundIndex: round.roundIndex,
+      windowIndex: round.windowIndex,
+    })
+  );
+}
+
+function canOpenDiagnoseLab(round: ChapterAutoLoopRound) {
+  const call = diagnoseCallFor(round);
+  return Boolean(call && canOpenPromptLabKind(call.kind));
+}
 </script>
 
 <template>
@@ -35,16 +132,49 @@ const activeRoundLabel = computed(() => {
       {{ activeRoundLabel }}
       <span v-if="paragraphCount > 0" class="loop-round-meta">共 {{ paragraphCount }} 段</span>
       <span v-if="running" class="loop-badge">进行中</span>
+      <button
+        v-if="showBackToCurrent"
+        class="loop-back-current"
+        type="button"
+        @click="backToCurrent"
+      >
+        回到当前
+      </button>
+    </p>
+    <p v-else-if="showBackToCurrent" class="loop-round-head">
+      <button class="loop-back-current" type="button" @click="backToCurrent">回到当前</button>
     </p>
 
     <ol v-if="rounds.length > 0" class="loop-round-list">
-      <li v-for="round in rounds" :key="round.roundIndex" class="loop-round-item">
-        <span class="loop-round-index">第 {{ round.roundIndex }} 轮</span>
-        <span :class="['loop-round-summary', { 'loop-round-summary--danger': round.rolledBack }]">
-          {{ summarizeAutoLoopRound(round) }}
-        </span>
+      <li v-for="round in rounds" :key="autoLoopRoundKey(round)" class="loop-round-item">
+        <button
+          :class="[
+            'loop-round-button',
+            { 'loop-round-button--selected': autoLoopRoundKey(round) === selectedKey },
+          ]"
+          type="button"
+          @click="selectRound(round)"
+        >
+          <span class="loop-round-index">{{ formatAutoLoopTimelineLabel(round) }}</span>
+          <span v-if="running && isLatestRound(round)" class="loop-badge"> 进行中 </span>
+          <span :class="['loop-round-summary', { 'loop-round-summary--danger': round.rolledBack }]">
+            {{ summarizeAutoLoopRound(round) }}
+          </span>
+        </button>
+        <button
+          v-if="canOpenDiagnoseLab(round)"
+          class="loop-lab-button"
+          type="button"
+          @click.stop="emit('openDiagnoseLab', diagnoseCallFor(round)!)"
+        >
+          调诊断 Prompt
+        </button>
       </li>
     </ol>
+
+    <p v-if="showMismatchHint" class="loop-mismatch-hint">
+      {{ AUTO_LOOP_PARAGRAPH_MISMATCH_HINT }}
+    </p>
 
     <p v-if="activeItems.length === 0" class="loop-empty">
       {{ running ? '正在复诊，稍后会列出要改的段落…' : '暂无诊断条目' }}
@@ -69,7 +199,7 @@ const activeRoundLabel = computed(() => {
           </span>
         </div>
         <p v-if="item.issue" class="loop-item-issue">{{ item.issue }}</p>
-        <p class="loop-item-instruction">{{ item.instruction }}</p>
+        <p v-if="item.instruction" class="loop-item-instruction">{{ item.instruction }}</p>
         <p v-if="item.note" class="loop-item-note">{{ item.note }}</p>
       </li>
     </ul>
@@ -81,6 +211,8 @@ const activeRoundLabel = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  height: auto;
+  overflow: visible;
 }
 
 .loop-round-head {
@@ -91,6 +223,7 @@ const activeRoundLabel = computed(() => {
   font-size: 14px;
   font-weight: 600;
   color: #1f2937;
+  flex-wrap: wrap;
 }
 
 .loop-round-meta {
@@ -124,6 +257,61 @@ const activeRoundLabel = computed(() => {
   color: #374151;
 }
 
+.loop-round-button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.loop-round-button:hover {
+  background: #f9fafb;
+}
+
+.loop-round-button--selected {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.loop-back-current {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.loop-lab-button {
+  margin-top: 6px;
+  padding: 1px 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.loop-mismatch-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #b45309;
+}
+
 .loop-round-index {
   flex: 0 0 auto;
   font-weight: 600;
@@ -146,8 +334,6 @@ const activeRoundLabel = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 320px;
-  overflow-y: auto;
 }
 
 .loop-item {

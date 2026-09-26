@@ -9,6 +9,7 @@ post:
     `<chapter-original>` (used for a follow-up pass over the previous draft); omit it to use the
     stored chapter. When `rewriteMode` is `direct`, `planText` and `sourceText` may be omitted and
     the user `instruction` is the rewrite brief (no `<optimization-plan>` block).
+    Optional `reviewGaps` injects the frozen-review gap list for a single refine pass.
 
     SSE event sequence is identical to `/api/generate/draft`:
       - `data: {"event":"stage","stage":"syncing_context|retrieving|waiting_llm"}` (prep before/around LLM stream)

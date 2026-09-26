@@ -1,6 +1,6 @@
 import type { PersonaContextPayload } from './persona-snapshot';
 import { resolvePersonaSnapshotAsOfChapter } from './persona-snapshot';
-import { applyHeadCharBudget } from './narrative-budget';
+import { applyHeadCharBudget, PERSONA_CARD_INJECT_MAX_CHARS } from './narrative-budget';
 
 export type KnowledgeDocForPersonaInject = {
   id: string;
@@ -17,6 +17,8 @@ export type AppearingPersonaInjectionInput = {
   currentChapterNo?: number;
   /** 每张静态卡最大字符 */
   staticCardMaxChars?: number;
+  /** 默认 true。按场成稿关掉：完整卡已在【检索证据】，这里只留快照。 */
+  includeStaticCard?: boolean;
 };
 
 function normalizeName(value: string): string {
@@ -79,12 +81,15 @@ export function buildAppearingPersonaInjection(
         : null;
 
     const parts: string[] = [`---------- 出场角色·${name} ----------`];
-    if (card?.content?.trim() && maxChars > 0) {
-      parts.push('【静态设定卡】');
-      parts.push(applyHeadCharBudget(card.content, maxChars));
-    } else if (persona?.profile?.trim() && maxChars > 0) {
-      parts.push('【人物简介】');
-      parts.push(applyHeadCharBudget(persona.profile, Math.min(400, maxChars)));
+    const includeStaticCard = input.includeStaticCard !== false;
+    if (includeStaticCard) {
+      if (card?.content?.trim()) {
+        parts.push('【静态设定卡】');
+        parts.push(applyHeadCharBudget(card.content, PERSONA_CARD_INJECT_MAX_CHARS));
+      } else if (persona?.profile?.trim() && maxChars > 0) {
+        parts.push('【人物简介】');
+        parts.push(applyHeadCharBudget(persona.profile, Math.min(400, maxChars)));
+      }
     }
     if (snapshot?.summaryLine || snapshot?.snapshot) {
       parts.push('【动态快照】');

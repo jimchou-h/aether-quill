@@ -11,6 +11,8 @@ export interface TraceRecord {
   status: TraceStatus;
   /** 本次生成使用的采样温度（已解析后的最终值） */
   temperature?: number;
+  /** 本次生成 completion max_tokens（请求显式传入时优先于供应商默认） */
+  maxTokens?: number;
   usage?: {
     promptTokens: number;
     completionTokens: number;

@@ -923,6 +923,28 @@ test('stripPipelineOutlineJsonFence extracts fenced JSON from mixed output', () 
   assert.equal(parsed.suggested[0]?.text, '建议项');
 });
 
+test('parsePipelineOutlineJson salvages truncated outline cut inside a string', () => {
+  const raw =
+    '{"required":[{"id":"r1","text":"定位：宫颈口出现。修改方向：替换该词。","priority":"required"}],"suggested":[{"id":"s1","text":"定位：正文中研磨';
+
+  const parsed = parsePipelineOutlineJson(raw);
+  assert.equal(parsed.required.length, 1);
+  assert.equal(parsed.required[0]?.id, 'r1');
+  assert.match(parsed.required[0]?.text ?? '', /宫颈口/);
+  assert.equal(parsed.suggested.length, 1);
+  assert.equal(parsed.suggested[0]?.id, 's1');
+  assert.match(parsed.suggested[0]?.text ?? '', /研磨/);
+});
+
+test('parsePipelineOutlineJson salvages truncated outline cut after a complete item', () => {
+  const raw =
+    '{"required":[{"id":"r1","text":"必改","priority":"required"},{"id":"r2","text":"未写完';
+
+  const parsed = parsePipelineOutlineJson(raw);
+  assert.equal(parsed.required.map((item) => item.id).join(','), 'r1,r2');
+  assert.equal(parsed.suggested.length, 0);
+});
+
 test('isPipelineEditableVersionKey accepts pipeline version keys only', () => {
   assert.equal(isPipelineEditableVersionKey('afterCharacterTraits'), true);
   assert.equal(isPipelineEditableVersionKey('final'), true);

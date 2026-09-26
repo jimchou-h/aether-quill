@@ -83,6 +83,12 @@ export type NarrativeContextBuildInput = {
   outlineMatchingQuery?: string;
   /** 章节优化：注入第 N+1 章开头只读锚点（复用 priorChapterTailChars 预算） */
   includeNextChapterHead?: boolean;
+  /** 默认 true。按场成稿关掉：范围内原文 + 前后只读衔接已够。 */
+  includePriorChapterSummaries?: boolean;
+  /** 默认 true。按场成稿关掉语义记忆摘要。 */
+  includeChapterSummaryMemory?: boolean;
+  /** 默认 true。按场成稿关掉：角色卡已在检索证据，叙事只留快照。 */
+  includeAppearingStaticCards?: boolean;
 };
 
 export type NarrativeContextBuildResult = {
@@ -188,6 +194,7 @@ export async function buildNarrativeContextText(
           knowledgeDocuments: input.knowledgeDocuments ?? [],
           currentChapterNo,
           staticCardMaxChars: personaMax,
+          includeStaticCard: input.includeAppearingStaticCards,
         })
       : { text: '', injectedNames: [] };
 
@@ -204,12 +211,14 @@ export async function buildNarrativeContextText(
   }
 
   // §3 近期章节摘要（确定性选取，非向量）
-  const maxCount = clampChapterSummaryPromptCount(input.chapterSummaryPromptCount);
-  const prior = pickPriorChapterSummariesForPrompt(input.chapters, {
-    currentChapterNo,
-    maxCount,
-    excerptMaxChars: excerptMax,
-  });
+  const includePriorSummaries = input.includePriorChapterSummaries !== false;
+  const prior = includePriorSummaries
+    ? pickPriorChapterSummariesForPrompt(input.chapters, {
+        currentChapterNo,
+        maxCount: clampChapterSummaryPromptCount(input.chapterSummaryPromptCount),
+        excerptMaxChars: excerptMax,
+      })
+    : [];
   for (const ch of prior) {
     if (ch.usedExcerptFallback) {
       excerptFallbackChapterNos.push(ch.chapterNo);
@@ -220,7 +229,10 @@ export async function buildNarrativeContextText(
   }
 
   // §4 语义记忆：用 structuredMatchingText 做 embedding，从 Qdrant 捞相关历史章摘要
-  const memoryMax = clampChapterSummaryMemoryCount(input.chapterSummaryMemoryCount);
+  const includeMemory = input.includeChapterSummaryMemory !== false;
+  const memoryMax = includeMemory
+    ? clampChapterSummaryMemoryCount(input.chapterSummaryMemoryCount)
+    : 0;
   if (memoryMax > 0) {
     const memoryQuery = resolveMemoryChapterSummaryEmbeddingQuery({
       currentChapterNo,

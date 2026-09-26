@@ -13,6 +13,7 @@ import {
   type ChapterAutoLoopItem,
   type ChapterAutoLoopRound,
   type ChapterAutoLoopStoppedReason,
+  type AutoLoopPromptLabCall,
   type ChapterItem,
 } from '../services/api';
 import { useAbortableSse } from './useAbortableSse';
@@ -27,10 +28,13 @@ import {
 import { isSseAbortError } from '../utils/sseStream';
 import { presentErrorFromCaught } from '../utils/pageFeedback';
 import {
+  describeAutoLoopResumeAction,
   describeAutoLoopStoppedReason,
+  formatAutoLoopWindowPrefix,
   mergeAutoLoopItemStatus,
   resolveAutoLoopAcceptableDraft,
   restoreAutoLoopSessionView,
+  upsertAutoLoopTimelineRound,
   type AutoLoopSessionView,
 } from '../utils/chapterAutoLoopItems';
 
@@ -49,6 +53,7 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
   const running = shallowRef(false);
   const rounds = shallowRef<ChapterAutoLoopRound[]>([]);
   const liveItems = shallowRef<ChapterAutoLoopItem[]>([]);
+  const promptLabCalls = shallowRef<AutoLoopPromptLabCall[]>([]);
   const activeRoundIndex = shallowRef(0);
   const activeRoundBudget = shallowRef(0);
   const paragraphCount = shallowRef(0);
@@ -58,6 +63,13 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
   const errorMessage = shallowRef('');
   const restoredFromSession = shallowRef(false);
   const stoppedByUser = shallowRef(false);
+  const resumable = shallowRef(false);
+  const resumeStage = shallowRef<'diagnose' | 'rewrite' | null>(null);
+  const resumeRoundIndex = shallowRef(0);
+  const resumeSegmentIndex = shallowRef(0);
+  const resumeSegmentTotal = shallowRef(0);
+  const resumeWindowIndex = shallowRef(0);
+  const resumeWindowTotal = shallowRef(0);
 
   const acceptableDraft = computed(() =>
     resolveAutoLoopAcceptableDraft({ rounds: rounds.value, storedContent: '' })
@@ -66,12 +78,42 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
   const stoppedReasonText = computed(() =>
     stoppedReason.value ? describeAutoLoopStoppedReason(stoppedReason.value) : ''
   );
+  const canResume = computed(() => resumable.value && !running.value);
+  const resumeActionText = computed(() =>
+    describeAutoLoopResumeAction({
+      resumeStage: resumeStage.value,
+      resumeRoundIndex: resumeRoundIndex.value,
+      resumeSegmentIndex: resumeSegmentIndex.value,
+      resumeSegmentTotal: resumeSegmentTotal.value,
+      resumeWindowIndex: resumeWindowIndex.value,
+      resumeWindowTotal: resumeWindowTotal.value,
+    })
+  );
+
+  function applyResumeSummary(input: {
+    resumable?: boolean;
+    resumeStage?: 'diagnose' | 'rewrite' | null;
+    resumeRoundIndex?: number;
+    resumeSegmentIndex?: number;
+    resumeSegmentTotal?: number;
+    resumeWindowIndex?: number;
+    resumeWindowTotal?: number;
+  }) {
+    resumable.value = input.resumable === true;
+    resumeStage.value = input.resumeStage ?? null;
+    resumeRoundIndex.value = input.resumeRoundIndex ?? 0;
+    resumeSegmentIndex.value = input.resumeSegmentIndex ?? 0;
+    resumeSegmentTotal.value = input.resumeSegmentTotal ?? 0;
+    resumeWindowIndex.value = input.resumeWindowIndex ?? 0;
+    resumeWindowTotal.value = input.resumeWindowTotal ?? 0;
+  }
 
   function reset() {
     stream.abort();
     running.value = false;
     rounds.value = [];
     liveItems.value = [];
+    promptLabCalls.value = [];
     activeRoundIndex.value = 0;
     activeRoundBudget.value = 0;
     paragraphCount.value = 0;
@@ -81,10 +123,33 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
     errorMessage.value = '';
     restoredFromSession.value = false;
     stoppedByUser.value = false;
+    applyResumeSummary({ resumable: false });
+  }
+
+  function applyRestoredSession(view: AutoLoopSessionView) {
+    rounds.value = view.rounds;
+    promptLabCalls.value = view.promptLabCalls;
+    liveItems.value =
+      view.inProgressItems.length > 0 ? view.inProgressItems : (view.rounds.at(-1)?.items ?? []);
+    activeRoundIndex.value = view.resumeRoundIndex || view.rounds.length;
+    activeRoundBudget.value = view.roundBudget;
+    stoppedReason.value = view.stoppedReason;
+    baseUpdatedAt.value = view.baseUpdatedAt;
+    errorMessage.value = view.errorMessage;
+    restoredFromSession.value = true;
+    applyResumeSummary(view);
+    statusText.value = view.stoppedReason
+      ? `已恢复上次循环：${describeAutoLoopStoppedReason(view.stoppedReason)}`
+      : '已恢复上次循环进度';
+    if (view.finalDraft.trim()) {
+      options.onDraftAvailable(view.finalDraft);
+    }
   }
 
   /** 打开弹窗时静默尝试恢复；无会话就当全新开始，不打扰用户。 */
-  async function restoreSession(): Promise<AutoLoopSessionView | null> {
+  async function restoreSession(input?: {
+    onlyIfResumable?: boolean;
+  }): Promise<AutoLoopSessionView | null> {
     const chapter = options.chapter();
     if (!chapter) {
       return null;
@@ -95,23 +160,13 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
         chapter.chapterNo
       );
       const view = restoreAutoLoopSessionView(session);
-      if (!view.restored) {
+      if (!view.restored || (input?.onlyIfResumable && !view.resumable)) {
+        if (input?.onlyIfResumable) {
+          applyResumeSummary({ resumable: false });
+        }
         return null;
       }
-      rounds.value = view.rounds;
-      liveItems.value = view.rounds.at(-1)?.items ?? [];
-      activeRoundIndex.value = view.rounds.length;
-      activeRoundBudget.value = view.roundBudget;
-      stoppedReason.value = view.stoppedReason;
-      baseUpdatedAt.value = view.baseUpdatedAt;
-      errorMessage.value = view.errorMessage;
-      restoredFromSession.value = true;
-      statusText.value = view.stoppedReason
-        ? `已恢复上次循环：${describeAutoLoopStoppedReason(view.stoppedReason)}`
-        : '已恢复上次循环进度';
-      if (view.finalDraft.trim()) {
-        options.onDraftAvailable(view.finalDraft);
-      }
+      applyRestoredSession(view);
       return view;
     } catch {
       // 恢复是纯增益路径：失败就走全新开始，不该把用户拦在门外
@@ -119,10 +174,24 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
     }
   }
 
+  async function confirmResumeFromServer() {
+    for (const delay of [200, 500, 1000]) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, delay);
+      });
+      const view = await restoreSession({ onlyIfResumable: true });
+      if (view) {
+        return;
+      }
+    }
+    applyResumeSummary({ resumable: false });
+  }
+
   async function start(input: {
     instruction: string;
     roundBudget: number;
     appearingCharacters?: string[];
+    resume?: boolean;
   }): Promise<'ok' | 'error' | 'aborted' | 'busy'> {
     const chapter = options.chapter();
     if (!chapter || running.value) {
@@ -131,7 +200,7 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
 
     const started = tryStartAiTaskProgress(options.aiTaskProgress, {
       taskKey: CHAPTER_AUTO_LOOP_TASK_KEY,
-      message: '自动优化循环启动中…',
+      message: input.resume ? '从失败处继续自动优化…' : '自动优化循环启动中…',
       source: 'dialog:writing-optimize',
       chapterNo: chapter.chapterNo,
       interruptible: true,
@@ -142,13 +211,17 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
 
     running.value = true;
     stoppedByUser.value = false;
-    rounds.value = [];
-    liveItems.value = [];
-    activeRoundIndex.value = 0;
+    if (!input.resume) {
+      rounds.value = [];
+      liveItems.value = [];
+      promptLabCalls.value = [];
+      activeRoundIndex.value = 0;
+      restoredFromSession.value = false;
+      applyResumeSummary({ resumable: false });
+    }
     stoppedReason.value = null;
     errorMessage.value = '';
-    restoredFromSession.value = false;
-    statusText.value = '自动优化循环启动中…';
+    statusText.value = input.resume ? '从失败处继续自动优化…' : '自动优化循环启动中…';
 
     const setStatus = (message: string, stage = 'running') => {
       statusText.value = message;
@@ -171,6 +244,7 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
           ...(input.appearingCharacters?.length
             ? { appearingCharacters: input.appearingCharacters }
             : {}),
+          ...(input.resume ? { resume: true } : {}),
         },
         {
           onStart: (event) => {
@@ -178,26 +252,70 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
             activeRoundBudget.value = event.roundBudget;
             setStatus(`自动优化循环开始，最多 ${event.roundBudget} 轮`);
           },
-          onStage: ({ stage, roundIndex, segmentIndex, segmentTotal }) => {
+          onStage: ({
+            stage,
+            roundIndex,
+            segmentIndex,
+            segmentTotal,
+            windowIndex,
+            windowTotal,
+          }) => {
+            if (windowIndex) {
+              resumeWindowIndex.value = windowIndex;
+            }
+            if (windowTotal) {
+              resumeWindowTotal.value = windowTotal;
+            }
+            const windowLabel = formatAutoLoopWindowPrefix(
+              windowIndex ?? resumeWindowIndex.value,
+              windowTotal ?? resumeWindowTotal.value
+            );
             const roundLabel = roundIndex ? `第 ${roundIndex} 轮` : '';
+            const head = [windowLabel, roundLabel].filter(Boolean).join(' ');
             if (stage === 'syncing_context') {
               setStatus('正在同步章节上下文…', stage);
               return;
             }
             if (stage === 'loop_diagnose') {
-              setStatus(`${roundLabel}复诊中…`, stage);
+              resumeStage.value = 'diagnose';
+              if (roundIndex) {
+                resumeRoundIndex.value = roundIndex;
+              }
+              resumeSegmentIndex.value = 0;
+              resumeSegmentTotal.value = 0;
+              setStatus(head ? `${head}复诊中…` : '复诊中…', stage);
               return;
             }
             if (stage === 'loop_segment_rewrite') {
+              resumeStage.value = 'rewrite';
+              if (roundIndex) {
+                resumeRoundIndex.value = roundIndex;
+              }
+              if (segmentIndex) {
+                resumeSegmentIndex.value = segmentIndex;
+              }
+              if (segmentTotal) {
+                resumeSegmentTotal.value = segmentTotal;
+              }
               const position =
                 segmentIndex && segmentTotal ? `（${segmentIndex}/${segmentTotal} 段）` : '';
-              setStatus(`${roundLabel}逐段改写中${position}`, stage);
+              setStatus(head ? `${head}逐段改写中${position}` : `逐段改写中${position}`, stage);
               return;
             }
-            setStatus(`${roundLabel}整章校验中…`, stage);
+            setStatus(head ? `${head}整章校验中…` : '整章校验中…', stage);
           },
           onProgress: (event) => {
             setStatus(event.message, event.stage ?? 'running');
+          },
+          onWindowStart: ({ windowIndex, windowTotal }) => {
+            resumeWindowIndex.value = windowIndex;
+            resumeWindowTotal.value = windowTotal;
+            liveItems.value = [];
+            activeRoundIndex.value = 0;
+            const windowLabel = formatAutoLoopWindowPrefix(windowIndex, windowTotal);
+            if (windowLabel) {
+              setStatus(`${windowLabel}开始，本窗最多 ${activeRoundBudget.value} 轮`);
+            }
           },
           onRoundStart: (event) => {
             activeRoundIndex.value = event.roundIndex;
@@ -216,11 +334,28 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
             liveItems.value = mergeAutoLoopItemStatus(liveItems.value, event.item);
           },
           onRoundEnd: (event) => {
-            rounds.value = [...rounds.value, event.round];
-            liveItems.value = event.round.items;
-            if (!event.round.rolledBack && event.round.draft.trim()) {
-              options.onDraftAvailable(event.round.draft);
+            const stamped: ChapterAutoLoopRound = {
+              ...event.round,
+              windowIndex:
+                event.round.windowIndex ?? event.windowIndex ?? (resumeWindowIndex.value || 1),
+              windowTotal:
+                event.round.windowTotal ?? event.windowTotal ?? (resumeWindowTotal.value || 1),
+            };
+            rounds.value = upsertAutoLoopTimelineRound(rounds.value, stamped);
+            liveItems.value = stamped.items;
+            if (!stamped.rolledBack && stamped.draft.trim()) {
+              options.onDraftAvailable(stamped.draft);
             }
+          },
+          onPromptLabCall: (call) => {
+            const next = [...promptLabCalls.value];
+            const index = next.findIndex((item) => item.id === call.id);
+            if (index >= 0) {
+              next[index] = call;
+            } else {
+              next.push(call);
+            }
+            promptLabCalls.value = next;
           },
           onEnd: (event) => {
             stoppedReason.value = event.stoppedReason;
@@ -230,12 +365,18 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
             if (event.finalDraftText.trim()) {
               options.onDraftAvailable(event.finalDraftText);
             }
+            applyResumeSummary(event);
+            if (event.stoppedReason === 'plan_parse_failed') {
+              outcome = 'error';
+              return;
+            }
             outcome = 'ok';
             statusText.value = describeAutoLoopStoppedReason(event.stoppedReason);
             completeAiTaskProgress(options.aiTaskProgress, statusText.value);
           },
           onError: (message) => {
             errorMessage.value = message;
+            statusText.value = message;
             outcome = 'error';
             failAiTaskProgress(options.aiTaskProgress, message);
           },
@@ -246,7 +387,9 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
       if (isSseAbortError(error) || stoppedByUser.value) {
         outcome = 'aborted';
         stoppedReason.value = 'aborted';
+        applyResumeSummary({ resumable: false });
         cancelAiTaskProgress(options.aiTaskProgress, '已停止自动优化循环');
+        await confirmResumeFromServer();
       } else {
         errorMessage.value = presentErrorFromCaught(error, '自动优化循环失败');
         outcome = 'error';
@@ -268,16 +411,19 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
     stream.abort();
     running.value = false;
     stoppedReason.value = 'aborted';
+    applyResumeSummary({ resumable: false });
     statusText.value = hasAcceptableDraft.value
       ? '已停止，保留最近完成轮的成稿'
       : '已停止，尚无完成轮成稿';
     cancelAiTaskProgress(options.aiTaskProgress, statusText.value);
+    void confirmResumeFromServer();
   }
 
   return {
     running,
     rounds,
     liveItems,
+    promptLabCalls,
     activeRoundIndex,
     activeRoundBudget,
     paragraphCount,
@@ -287,8 +433,13 @@ export function useChapterAutoLoop(options: UseChapterAutoLoopOptions) {
     statusText,
     errorMessage,
     restoredFromSession,
+    resumable,
+    canResume,
+    resumeActionText,
     acceptableDraft,
     hasAcceptableDraft,
+    liveWindowIndex: resumeWindowIndex,
+    liveWindowTotal: resumeWindowTotal,
     start,
     stopAndAccept,
     restoreSession,

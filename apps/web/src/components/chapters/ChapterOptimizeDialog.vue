@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
 import {
   apiClient,
   formatChapterOptimizeStageLabel,
   type ChapterItem,
   type ChapterOptimizationPlanResult,
+  type PersonaItem,
 } from '../../services/api';
 import { useAbortableSse } from '../../composables/useAbortableSse';
 import { confirmAction } from '../../composables/useAppConfirm';
@@ -28,23 +29,29 @@ import {
   type WritingOptimizeStep,
 } from '../../utils/writingOptimizeStepVisual';
 import { resolveChapterOptimizePrepProgress } from '../../utils/chapterOptimizePrepProgress';
+import { shouldRenderOptimizeDiff } from '../../utils/chapterOptimizeDiff';
+import { formatWritingOptimizePassLabel } from '../../utils/writingOptimizeMultiPass';
 import {
-  WRITING_OPTIMIZE_PASS_MAX,
-  WRITING_OPTIMIZE_PASS_MIN,
-  WRITING_OPTIMIZE_PLAN_REFINE_FEEDBACK,
-  formatWritingOptimizePassLabel,
-  resolveDraftSourceText,
-} from '../../utils/writingOptimizeMultiPass';
-import { useWritingOptimizeRunPrefs } from '../../composables/useWritingOptimizeRunPrefs';
+  formatFromPlanClosedRunStatus,
+  shouldRunFromPlanRefinePass,
+} from '../../utils/fromPlanClosedRun';
 import { useChapterAutoLoop } from '../../composables/useChapterAutoLoop';
 import { useChapterAutoLoopPrefs } from '../../composables/useChapterAutoLoopPrefs';
+import { canOpenPromptLabKind } from '../../utils/autoLoopPromptLab';
+import {
+  suggestAutoLoopPersonaNames,
+  toggleAutoLoopPersonaName,
+} from '../../utils/autoLoopPersonas';
 import {
   AUTO_LOOP_ROUND_BUDGET_MAX,
   AUTO_LOOP_ROUND_BUDGET_MIN,
 } from '../../utils/chapterAutoLoopPrefs';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import AutoLoopRoundsPanel from './AutoLoopRoundsPanel.vue';
+import AutoLoopPromptLabDrawer from './AutoLoopPromptLabDrawer.vue';
+import ChapterOptimizeComparePane from './ChapterOptimizeComparePane.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
+import type { AutoLoopPromptLabCall } from '../../services/api';
 
 type OptimizeStep = WritingOptimizeStep;
 
@@ -79,11 +86,16 @@ const planStream = useAbortableSse();
 const draftStream = useAbortableSse();
 const aiTaskProgress = useChapterPageAiActivity();
 const activityInterruptHandler = useChapterAiActivityInterrupt();
-const { autoStartDraft, planPassCount, draftPassCount } = useWritingOptimizeRunPrefs();
 const { roundBudget } = useChapterAutoLoopPrefs();
+const personaOptions = ref<PersonaItem[]>([]);
+const selectedPersonaNames = ref<string[]>([]);
+const personasLoading = shallowRef(false);
 const passLoopAborted = shallowRef(false);
-const passCountOptions = [WRITING_OPTIMIZE_PASS_MIN, 2, WRITING_OPTIMIZE_PASS_MAX];
-const roundBudgetOptions = [AUTO_LOOP_ROUND_BUDGET_MIN, 2, AUTO_LOOP_ROUND_BUDGET_MAX];
+const closedRunStatus = shallowRef('');
+const roundBudgetOptions = Array.from(
+  { length: AUTO_LOOP_ROUND_BUDGET_MAX - AUTO_LOOP_ROUND_BUDGET_MIN + 1 },
+  (_, index) => AUTO_LOOP_ROUND_BUDGET_MIN + index
+);
 
 const {
   running: autoLoopRunning,
@@ -97,6 +109,11 @@ const {
   statusText: autoLoopStatusText,
   errorMessage: autoLoopError,
   restoredFromSession: autoLoopRestored,
+  canResume: autoLoopCanResume,
+  resumeActionText: autoLoopResumeActionText,
+  liveWindowIndex: autoLoopWindowIndex,
+  liveWindowTotal: autoLoopWindowTotal,
+  promptLabCalls: autoLoopPromptLabCalls,
   start: runAutoLoop,
   stopAndAccept: autoLoopStopAndAccept,
   restoreSession: autoLoopRestoreSession,
@@ -110,6 +127,21 @@ const {
     draftText.value = draft;
   },
 });
+
+const promptLabOpen = shallowRef(false);
+const promptLabCall = shallowRef<AutoLoopPromptLabCall | null>(null);
+
+function openPromptLab(call: AutoLoopPromptLabCall) {
+  if (!canOpenPromptLabKind(call.kind)) {
+    return;
+  }
+  promptLabCall.value = call;
+  promptLabOpen.value = true;
+}
+
+function closePromptLab() {
+  promptLabOpen.value = false;
+}
 
 const isBusy = computed(
   () => generatingPlan.value || generatingDraft.value || applying.value || autoLoopRunning.value
@@ -154,15 +186,45 @@ const stepVisualInput = computed(() => ({
 }));
 
 const canStartAutoLoop = computed(() => Boolean(instruction.value.trim()) && !isBusy.value);
+const canContinueAutoLoop = computed(
+  () => canStartAutoLoop.value && autoLoopCanResume.value && !autoLoopRunning.value
+);
+const personaChipOptions = computed(() => {
+  const content = props.chapter?.content ?? '';
+  return personaOptions.value.filter(
+    (persona) => persona.status === 'published' || content.includes(persona.name)
+  );
+});
+
+async function loadAutoLoopPersonas() {
+  if (!props.visible || !props.projectId || rewriteMode.value !== 'auto-loop') {
+    return;
+  }
+  personasLoading.value = true;
+  try {
+    const list = await apiClient.getPersonas(props.projectId);
+    personaOptions.value = list;
+    selectedPersonaNames.value = suggestAutoLoopPersonaNames(list, props.chapter?.content ?? '');
+  } catch {
+    personaOptions.value = [];
+    selectedPersonaNames.value = [];
+  } finally {
+    personasLoading.value = false;
+  }
+}
+
+function togglePersonaChip(name: string) {
+  selectedPersonaNames.value = toggleAutoLoopPersonaName(selectedPersonaNames.value, name);
+}
 
 const modeSubtitle = computed(() => {
   if (isAutoLoopMode.value) {
-    return '按同一要求反复「复诊 → 只改命中段落」，未命中段落逐字节保留；随时可以停下并收下当前成稿。';
+    return '只补「要求没落地」或「上轮改坏」的段落；复诊和改写会带上勾选角色的角色卡。未命中段落逐字节保留。随时可以停下并收下当前成稿。';
   }
   if (isDirectMode.value) {
     return '根据自由要求直接改写整章正文；只有确认应用后才会覆盖原文。';
   }
-  return '根据自由要求先生成编辑方案，再改写整章正文。可连跑方案/正文多轮；只有确认应用后才会覆盖原文。';
+  return '根据自由要求先生成编辑方案，再按冻结合同改写并验收；最多再补一刀后收口。只有确认应用后才会覆盖原文。';
 });
 
 function bindInterruptHandler() {
@@ -191,6 +253,7 @@ function setRewriteMode(mode: WritingOptimizeRewriteMode) {
   draftText.value = '';
   errorMessage.value = '';
   statusText.value = '';
+  closedRunStatus.value = '';
   autoLoopReset();
   if (mode === 'auto-loop') {
     void resumeAutoLoopSession();
@@ -236,18 +299,23 @@ function resetState() {
   expectedChapterUpdatedAt.value = props.chapter?.updatedAt ?? '';
   statusText.value = '';
   errorMessage.value = '';
+  closedRunStatus.value = '';
   generatingPlan.value = false;
   generatingDraft.value = false;
   applying.value = false;
   planStream.abort();
   draftStream.abort();
   autoLoopReset();
+  personaOptions.value = [];
+  selectedPersonaNames.value = [];
+  personasLoading.value = false;
   clearInterruptHandler();
 }
 
 watch(
   () => props.visible,
   (visible) => {
+    closePromptLab();
     if (visible) {
       resetState();
     }
@@ -255,7 +323,15 @@ watch(
   { immediate: true }
 );
 
-// 循环的乐观锁基线由后端在开跑时快照，可能早于弹窗打开时的快照（会话恢复场景）
+watch(
+  () => [props.visible, rewriteMode.value, props.projectId, props.chapter?.chapterNo] as const,
+  ([visible, mode]) => {
+    if (!visible || mode !== 'auto-loop') {
+      return;
+    }
+    void loadAutoLoopPersonas();
+  }
+);
 watch(
   () => autoLoopBaseUpdatedAt.value,
   (baseUpdatedAt) => {
@@ -313,6 +389,38 @@ async function startAutoLoop() {
     const outcome = await runAutoLoop({
       instruction: instruction.value.trim(),
       roundBudget: roundBudget.value,
+      ...(selectedPersonaNames.value.length
+        ? { appearingCharacters: [...selectedPersonaNames.value] }
+        : {}),
+    });
+    if (outcome === 'busy') {
+      step.value = 'instruction';
+    }
+  } finally {
+    clearInterruptHandler();
+  }
+}
+
+async function continueAutoLoop() {
+  if (!props.chapter || !canStartAutoLoop.value || autoLoopRunning.value) {
+    return;
+  }
+  errorMessage.value = '';
+  statusText.value = '';
+  step.value = 'loop';
+  const view = await autoLoopRestoreSession({ onlyIfResumable: true });
+  if (!view) {
+    return;
+  }
+  bindInterruptHandler();
+  try {
+    const outcome = await runAutoLoop({
+      instruction: instruction.value.trim(),
+      roundBudget: roundBudget.value,
+      resume: true,
+      ...(selectedPersonaNames.value.length
+        ? { appearingCharacters: [...selectedPersonaNames.value] }
+        : {}),
     });
     if (outcome === 'busy') {
       step.value = 'instruction';
@@ -496,10 +604,9 @@ async function generatePlan() {
     return;
   }
 
-  const total = rewriteMode.value === 'direct' ? 1 : planPassCount.value;
   const started = tryStartAiTaskProgress(aiTaskProgress, {
     taskKey: 'chapter.optimize.plan',
-    message: formatWritingOptimizePassLabel('plan', 1, total),
+    message: formatWritingOptimizePassLabel('plan', 1, 1),
     source: 'dialog:writing-optimize',
     chapterNo: chapter.chapterNo,
     interruptible: true,
@@ -513,35 +620,16 @@ async function generatePlan() {
   passLoopAborted.value = false;
   generatingPlan.value = true;
   errorMessage.value = '';
-  let allOk = true;
+  closedRunStatus.value = '';
   try {
-    for (let passIndex = 1; passIndex <= total; passIndex += 1) {
-      if (passLoopAborted.value) {
-        allOk = false;
-        break;
-      }
-      const outcome = await runSinglePlanPass({
-        chapter,
-        revision: passIndex > 1,
-        revisionFeedback: WRITING_OPTIMIZE_PLAN_REFINE_FEEDBACK,
-        passIndex,
-        passTotal: total,
-        completeOnEnd: passIndex === total,
-      });
-      if (outcome !== 'ok') {
-        allOk = false;
-        break;
-      }
-    }
-    if (
-      allOk &&
-      autoStartDraft.value &&
-      rewriteMode.value === 'from-plan' &&
-      !passLoopAborted.value
-    ) {
-      generatingPlan.value = false;
-      await generateDraft();
-    }
+    await runSinglePlanPass({
+      chapter,
+      revision: false,
+      revisionFeedback: '',
+      passIndex: 1,
+      passTotal: 1,
+      completeOnEnd: true,
+    });
   } finally {
     generatingPlan.value = false;
   }
@@ -557,13 +645,16 @@ async function runSingleDraftPass(input: {
   passIndex: number;
   passTotal: number;
   sourceText?: string;
+  reviewGaps?: string;
   completeOnEnd: boolean;
 }): Promise<PassOutcome> {
   const currentPlan = plan.value;
   const taskKey = input.isDirect ? 'chapter.optimize.direct-draft' : 'chapter.optimize.draft';
   const passLabel = input.isDirect
     ? '正在按要求改写正文…'
-    : formatWritingOptimizePassLabel('draft', input.passIndex, input.passTotal);
+    : formatFromPlanClosedRunStatus({
+        phase: input.passIndex > 1 ? 'draft2' : 'draft1',
+      });
   statusText.value = passLabel;
   draftText.value = '';
   step.value = 'draft';
@@ -588,6 +679,7 @@ async function runSingleDraftPass(input: {
             segmentDiagnoses: currentPlan?.segmentDiagnoses,
             rewriteMode: 'from-plan',
             ...(input.sourceText ? { sourceText: input.sourceText } : {}),
+            ...(input.reviewGaps ? { reviewGaps: input.reviewGaps } : {}),
           },
       {
         onStart: (event) => {
@@ -681,10 +773,9 @@ async function generateDraft() {
     return;
   }
 
-  const total = isDirect ? 1 : draftPassCount.value;
   const progressMessage = isDirect
     ? '正在按要求改写正文…'
-    : formatWritingOptimizePassLabel('draft', 1, total);
+    : formatFromPlanClosedRunStatus({ phase: 'draft1' });
   const started = tryStartAiTaskProgress(aiTaskProgress, {
     taskKey: isDirect ? 'chapter.optimize.direct-draft' : 'chapter.optimize.draft',
     message: progressMessage,
@@ -701,31 +792,138 @@ async function generateDraft() {
   passLoopAborted.value = false;
   generatingDraft.value = true;
   errorMessage.value = '';
+  closedRunStatus.value = '';
   let lastSuccessful = draftText.value.trim();
   try {
-    for (let passIndex = 1; passIndex <= total; passIndex += 1) {
-      if (passLoopAborted.value) {
+    const firstOutcome = await runSingleDraftPass({
+      chapter,
+      isDirect,
+      passIndex: 1,
+      passTotal: isDirect ? 1 : 2,
+      completeOnEnd: isDirect,
+    });
+    if (firstOutcome !== 'ok' || isDirect) {
+      if (firstOutcome !== 'ok') {
         draftText.value = lastSuccessful;
-        break;
       }
-      const outcome = await runSingleDraftPass({
-        chapter,
-        isDirect,
-        passIndex,
-        passTotal: total,
-        sourceText: isDirect ? undefined : resolveDraftSourceText(passIndex, lastSuccessful),
-        completeOnEnd: passIndex === total,
-      });
-      if (outcome === 'ok') {
-        lastSuccessful = draftText.value.trim();
-        continue;
-      }
+      return;
+    }
+
+    lastSuccessful = draftText.value.trim();
+    const review = await runFrozenReview(chapter);
+    if (review === 'aborted') {
       draftText.value = lastSuccessful;
-      break;
+      return;
+    }
+    if (!shouldRunFromPlanRefinePass(review.hasMaterialGaps)) {
+      closedRunStatus.value = formatFromPlanClosedRunStatus({
+        phase: 'closed',
+        hasMaterialGaps: false,
+      });
+      statusText.value = closedRunStatus.value;
+      completeAiTaskProgress(aiTaskProgress, closedRunStatus.value);
+      return;
+    }
+
+    const refineOutcome = await runSingleDraftPass({
+      chapter,
+      isDirect: false,
+      passIndex: 2,
+      passTotal: 2,
+      sourceText: lastSuccessful,
+      reviewGaps: review.reviewText,
+      completeOnEnd: true,
+    });
+    if (refineOutcome !== 'ok') {
+      draftText.value = lastSuccessful;
+    }
+    closedRunStatus.value = formatFromPlanClosedRunStatus({
+      phase: 'closed',
+      hasMaterialGaps: refineOutcome === 'ok',
+    });
+    if (refineOutcome === 'ok') {
+      statusText.value = closedRunStatus.value;
+      completeAiTaskProgress(aiTaskProgress, closedRunStatus.value);
     }
   } finally {
     generatingDraft.value = false;
   }
+}
+
+async function runFrozenReview(
+  chapter: ChapterItem
+): Promise<{ hasMaterialGaps: boolean; reviewText: string } | 'aborted'> {
+  const currentPlan = plan.value;
+  const draft = draftText.value.trim();
+  if (!currentPlan || !draft) {
+    return { hasMaterialGaps: false, reviewText: '' };
+  }
+
+  const passLabel = formatFromPlanClosedRunStatus({ phase: 'review' });
+  statusText.value = passLabel;
+  applyAiTaskProgressEvent(aiTaskProgress, {
+    taskKey: 'chapter.optimize.draft',
+    stage: 'frozen_review',
+    message: passLabel,
+  });
+
+  const signal = planStream.begin();
+  bindInterruptHandler();
+  let outcome: { hasMaterialGaps: boolean; reviewText: string } | 'aborted' | 'error' = 'error';
+
+  try {
+    await apiClient.optimizeChapterReviewSSE(
+      props.projectId,
+      chapter.chapterNo,
+      {
+        instruction: instruction.value.trim(),
+        planText: editablePlanText.value.trim(),
+        draftText: draft,
+        planId: currentPlan.planId,
+      },
+      {
+        onStage: ({ stage }) => {
+          const label = `${passLabel} · ${formatChapterOptimizeStageLabel(stage)}`;
+          statusText.value = label;
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.optimize.draft',
+            stage,
+            message: label,
+          });
+        },
+        onEnd: (event) => {
+          outcome = {
+            hasMaterialGaps: event.hasMaterialGaps,
+            reviewText: event.reviewText,
+          };
+        },
+        onError: (messageText) => {
+          errorMessage.value = messageText;
+          outcome = 'error';
+        },
+      },
+      { signal }
+    );
+  } catch (error) {
+    if (isSseAbortError(error) || passLoopAborted.value) {
+      outcome = 'aborted';
+      cancelAiTaskProgress(aiTaskProgress, '已中断文笔优化生成');
+    } else {
+      errorMessage.value = presentErrorFromCaught(error, '冻结验收失败');
+      outcome = 'error';
+    }
+  } finally {
+    planStream.abort();
+    clearInterruptHandler();
+  }
+
+  if (outcome === 'aborted') {
+    return 'aborted';
+  }
+  if (outcome === 'error') {
+    return { hasMaterialGaps: false, reviewText: '' };
+  }
+  return outcome;
 }
 
 async function applyDraft() {
@@ -765,7 +963,10 @@ async function applyDraft() {
 <template>
   <a-modal
     :open="props.visible"
-    :width="1080"
+    width="100%"
+    wrap-class-name="writing-optimize-fullscreen"
+    transition-name=""
+    :style="{ top: 0, paddingBottom: 0, maxWidth: '100vw', margin: 0 }"
     :title="`文笔优化${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
     destroy-on-close
@@ -773,349 +974,437 @@ async function applyDraft() {
     :closable="!applying"
     @cancel="close"
   >
-    <p class="modal-subtitle">{{ modeSubtitle }}</p>
+    <div class="wo-shell">
+      <header class="wo-chrome">
+        <p class="modal-subtitle">{{ modeSubtitle }}</p>
+        <div class="mode-toggle" role="radiogroup" aria-label="文笔优化模式">
+          <button
+            type="button"
+            class="mode-toggle-button"
+            :class="{ active: rewriteMode === 'from-plan' }"
+            :disabled="isBusy"
+            @click="setRewriteMode('from-plan')"
+          >
+            方案改写
+          </button>
+          <button
+            type="button"
+            class="mode-toggle-button"
+            :class="{ active: rewriteMode === 'direct' }"
+            :disabled="isBusy"
+            @click="setRewriteMode('direct')"
+          >
+            直接改写
+          </button>
+          <button
+            type="button"
+            class="mode-toggle-button"
+            :class="{ active: rewriteMode === 'auto-loop' }"
+            :disabled="isBusy"
+            @click="setRewriteMode('auto-loop')"
+          >
+            自动循环
+          </button>
+        </div>
 
-    <div class="mode-toggle" role="radiogroup" aria-label="文笔优化模式">
-      <button
-        type="button"
-        class="mode-toggle-button"
-        :class="{ active: rewriteMode === 'from-plan' }"
-        :disabled="isBusy"
-        @click="setRewriteMode('from-plan')"
-      >
-        方案改写
-      </button>
-      <button
-        type="button"
-        class="mode-toggle-button"
-        :class="{ active: rewriteMode === 'direct' }"
-        :disabled="isBusy"
-        @click="setRewriteMode('direct')"
-      >
-        直接改写
-      </button>
-      <button
-        type="button"
-        class="mode-toggle-button"
-        :class="{ active: rewriteMode === 'auto-loop' }"
-        :disabled="isBusy"
-        @click="setRewriteMode('auto-loop')"
-      >
-        自动循环
-      </button>
-    </div>
+        <div v-if="isAutoLoopMode" class="run-prefs">
+          <label class="run-pref">
+            循环轮数上限
+            <select v-model.number="roundBudget" :disabled="isBusy">
+              <option v-for="count in roundBudgetOptions" :key="`round-${count}`" :value="count">
+                {{ count }}
+              </option>
+            </select>
+          </label>
+          <span class="field-hint">
+            1～5，对每一窗生效。每轮＝复诊该窗上一稿 + 只改命中段落；中间轮每轮最多约 12 段，多出来的顺延。最后一轮会把本轮点到的条目全部改完再结束。没有明显未落实或改坏会提前收敛。
+          </span>
+        </div>
 
-    <div v-if="isAutoLoopMode" class="run-prefs">
-      <label class="run-pref">
-        循环轮数上限
-        <select v-model.number="roundBudget" :disabled="isBusy">
-          <option v-for="count in roundBudgetOptions" :key="`round-${count}`" :value="count">
-            {{ count }}
-          </option>
-        </select>
-      </label>
-      <span class="field-hint">每轮＝复诊上一稿 + 只改命中段落；无严重问题会提前收敛。</span>
-    </div>
+        <ol class="stepper">
+          <li
+            v-for="(stepKey, index) in stepperSteps"
+            :key="stepKey"
+            :class="[`step--${stepVisualFor(stepKey)}`, { active: step === stepKey }]"
+          >
+            {{ index + 1 }}. {{ stepperLabels[stepKey] }}
+            <span v-if="stepVisualFor(stepKey) === 'running'" class="step-badge">生成中</span>
+            <span
+              v-else-if="stepVisualFor(stepKey) === 'awaiting'"
+              class="step-badge step-badge--await"
+              >待确认</span
+            >
+          </li>
+        </ol>
 
-    <div v-else-if="!isDirectMode" class="run-prefs">
-      <label class="run-pref run-pref--check">
-        <input v-model="autoStartDraft" type="checkbox" :disabled="isBusy" />
-        方案完成后自动生成正文
-      </label>
-      <label class="run-pref">
-        方案次数
-        <select v-model.number="planPassCount" :disabled="isBusy">
-          <option v-for="count in passCountOptions" :key="`plan-${count}`" :value="count">
-            {{ count }}
-          </option>
-        </select>
-      </label>
-      <label class="run-pref">
-        正文次数
-        <select v-model.number="draftPassCount" :disabled="isBusy">
-          <option v-for="count in passCountOptions" :key="`draft-${count}`" :value="count">
-            {{ count }}
-          </option>
-        </select>
-      </label>
-    </div>
-
-    <ol class="stepper">
-      <li
-        v-for="(stepKey, index) in stepperSteps"
-        :key="stepKey"
-        :class="[`step--${stepVisualFor(stepKey)}`, { active: step === stepKey }]"
-      >
-        {{ index + 1 }}. {{ stepperLabels[stepKey] }}
-        <span v-if="stepVisualFor(stepKey) === 'running'" class="step-badge">生成中</span>
-        <span v-else-if="stepVisualFor(stepKey) === 'awaiting'" class="step-badge step-badge--await"
-          >待确认</span
-        >
-      </li>
-    </ol>
-
-    <AiTaskProgressPanel
-      :progress="aiTaskProgress"
-      show-trace-on-error
-      @interrupt="interruptGeneration"
-    />
-
-    <div v-if="generatingPlan || generatingDraft || autoLoopRunning" class="stream-actions">
-      <SseInterruptButton @interrupt="interruptGeneration" />
-    </div>
-    <p v-if="statusText && !aiTaskProgress.active" class="message message-info">{{ statusText }}</p>
-    <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
-    <pre v-if="generatingPlan && streamedPlanText" class="plan-stream-preview">{{
-      streamedPlanText
-    }}</pre>
-
-    <section v-if="step === 'instruction'" class="step-section">
-      <label class="field-label" for="writing-optimize-instruction">文笔优化要求</label>
-      <textarea
-        id="writing-optimize-instruction"
-        v-model="instruction"
-        class="instruction-input"
-        rows="6"
-        maxlength="2000"
-        :disabled="isBusy"
-        placeholder="例如：收紧节奏，减少解释性叙述，加强人物之间的张力，同时保持剧情和人物设定不变。"
-      />
-      <div class="actions">
-        <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
-          取消
-        </button>
-        <button
-          v-if="isAutoLoopMode"
-          class="primary-button"
-          type="button"
-          :disabled="!canStartAutoLoop"
-          @click="startAutoLoop"
-        >
-          {{ autoLoopRunning ? '循环中…' : '开始自动循环' }}
-        </button>
-        <button
-          v-else-if="isDirectMode"
-          class="primary-button"
-          type="button"
-          :disabled="!canGenerateDraft"
-          @click="generateDraft"
-        >
-          {{ generatingDraft ? '生成中…' : '直接生成正文' }}
-        </button>
-        <button
-          v-else
-          class="primary-button"
-          type="button"
-          :disabled="!canGeneratePlan"
-          @click="generatePlan"
-        >
-          {{ generatingPlan ? '生成中…' : '生成优化方案' }}
-        </button>
-      </div>
-    </section>
-
-    <section v-else-if="step === 'plan'" class="step-section">
-      <div class="plan-editor-head">
-        <label class="field-label" for="writing-optimize-plan">当前优化方案（可直接编辑）</label>
-        <span v-if="planRevisionRound > 0" class="revision-badge">
-          已完成 {{ planRevisionRound }} 轮 AI 调整
-        </span>
-      </div>
-      <textarea
-        id="writing-optimize-plan"
-        v-model="editablePlanText"
-        class="plan-input"
-        rows="14"
-        :disabled="isBusy"
-      />
-
-      <div class="revision-panel">
-        <label class="field-label" for="writing-optimize-plan-feedback">方案修改意见</label>
-        <textarea
-          id="writing-optimize-plan-feedback"
-          v-model="planRevisionFeedback"
-          class="revision-feedback-input"
-          rows="4"
-          maxlength="2000"
-          :disabled="isBusy"
-          placeholder="例如：保留第二项不变；第三项不要删减对白，改为增加人物心理活动。"
+        <AiTaskProgressPanel
+          :progress="aiTaskProgress"
+          show-trace-on-error
+          @interrupt="interruptGeneration"
         />
-        <div class="revision-actions">
-          <span class="field-hint">AI 将基于上方当前方案调整；可反复提交多轮意见。</span>
+
+        <div v-if="generatingPlan || generatingDraft || autoLoopRunning" class="stream-actions">
+          <SseInterruptButton @interrupt="interruptGeneration" />
+        </div>
+        <p v-if="statusText && !aiTaskProgress.active" class="message message-info">
+          {{ statusText }}
+        </p>
+        <p v-if="closedRunStatus && !isBusy" class="message message-info">{{ closedRunStatus }}</p>
+        <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
+        <pre v-if="generatingPlan && streamedPlanText" class="plan-stream-preview">{{
+          streamedPlanText
+        }}</pre>
+      </header>
+
+      <div class="wo-body">
+        <section v-if="step === 'instruction'" class="step-section step-section--fill">
+          <label class="field-label" for="writing-optimize-instruction">文笔优化要求</label>
+          <textarea
+            id="writing-optimize-instruction"
+            v-model="instruction"
+            class="instruction-input"
+            rows="6"
+            :disabled="isBusy"
+            placeholder="例如：收紧节奏，减少解释性叙述，加强人物之间的张力，同时保持剧情和人物设定不变。"
+          />
+          <div v-if="isAutoLoopMode" class="persona-picker">
+            <p class="field-label">角色卡</p>
+            <p class="field-hint">
+              复诊和改写都会注入勾选角色的人设与角色卡全文。默认勾上正文里出现的名字；不勾则按正文出场人物，没有名字时用全部已发布人物。
+            </p>
+            <p v-if="personasLoading" class="field-hint">正在加载人物…</p>
+            <p v-else-if="personaChipOptions.length === 0" class="field-hint">
+              项目还没有可注入的人物。
+            </p>
+            <div v-else class="chip-list">
+              <button
+                v-for="persona in personaChipOptions"
+                :key="persona.id"
+                type="button"
+                class="chip-button"
+                :class="{ 'chip-button-active': selectedPersonaNames.includes(persona.name) }"
+                :disabled="isBusy"
+                @click="togglePersonaChip(persona.name)"
+              >
+                {{ persona.name }}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section v-else-if="step === 'plan'" class="step-section step-section--fill">
+          <div class="plan-editor-head">
+            <label class="field-label" for="writing-optimize-plan"
+              >当前优化方案（可直接编辑）</label
+            >
+            <span v-if="planRevisionRound > 0" class="revision-badge">
+              已完成 {{ planRevisionRound }} 轮 AI 调整
+            </span>
+          </div>
+          <textarea
+            id="writing-optimize-plan"
+            v-model="editablePlanText"
+            class="plan-input"
+            rows="14"
+            :disabled="isBusy"
+          />
+
+          <div class="revision-panel">
+            <label class="field-label" for="writing-optimize-plan-feedback">方案修改意见</label>
+            <textarea
+              id="writing-optimize-plan-feedback"
+              v-model="planRevisionFeedback"
+              class="revision-feedback-input"
+              rows="4"
+              maxlength="2000"
+              :disabled="isBusy"
+              placeholder="例如：保留第二项不变；第三项不要删减对白，改为增加人物心理活动。"
+            />
+            <div class="revision-actions">
+              <span class="field-hint">AI 将基于上方当前方案调整；可反复提交多轮意见。</span>
+              <button
+                class="secondary-button"
+                type="button"
+                :disabled="!canRevisePlan"
+                @click="revisePlan"
+              >
+                {{ generatingPlan ? '调整中…' : 'AI 按意见修改方案' }}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section v-else-if="step === 'loop'" class="wo-loop">
+          <p v-if="autoLoopRestored" class="message message-info">
+            已恢复上次未看完的循环结果，可直接对比应用，或从失败处继续。
+          </p>
+          <p v-if="autoLoopError" class="message message-error">
+            {{ autoLoopError }}
+          </p>
+          <p v-else-if="autoLoopStoppedText" class="message message-info">
+            {{ autoLoopStoppedText }}
+          </p>
+
+          <div class="wo-loop-split">
+            <aside class="wo-rail">
+              <AutoLoopRoundsPanel
+                :rounds="autoLoopRounds"
+                :live-items="autoLoopItems"
+                :active-round-index="autoLoopRoundIndex"
+                :active-round-budget="autoLoopActiveBudget"
+                :live-window-index="autoLoopWindowIndex"
+                :live-window-total="autoLoopWindowTotal"
+                :paragraph-count="autoLoopParagraphCount"
+                :running="autoLoopRunning"
+                :prompt-lab-calls="autoLoopPromptLabCalls"
+                @open-diagnose-lab="openPromptLab"
+              />
+            </aside>
+            <div class="wo-main">
+              <ChapterOptimizeComparePane
+                v-model="draftText"
+                :original="originalText"
+                draft-title="循环成稿（可编辑）"
+                :draft-disabled="autoLoopRunning || applying"
+                :show-diff="shouldRenderOptimizeDiff(autoLoopRunning)"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section v-else class="step-section step-section--fill">
+          <ChapterOptimizeComparePane
+            v-model="draftText"
+            :original="originalText"
+            draft-title="优化正文（可编辑）"
+            :draft-disabled="generatingDraft || applying"
+            :show-diff="shouldRenderOptimizeDiff(generatingDraft)"
+          />
+        </section>
+      </div>
+
+      <footer class="wo-footer">
+        <template v-if="step === 'instruction'">
+          <button class="secondary-button" type="button" :disabled="isBusy" @click="close">
+            取消
+          </button>
+          <button
+            v-if="isAutoLoopMode"
+            class="primary-button"
+            type="button"
+            :disabled="!canStartAutoLoop"
+            @click="startAutoLoop"
+          >
+            {{ autoLoopRunning ? '循环中…' : '开始自动循环' }}
+          </button>
+          <button
+            v-else-if="isDirectMode"
+            class="primary-button"
+            type="button"
+            :disabled="!canGenerateDraft"
+            @click="generateDraft"
+          >
+            {{ generatingDraft ? '生成中…' : '直接生成正文' }}
+          </button>
+          <button
+            v-else
+            class="primary-button"
+            type="button"
+            :disabled="!canGeneratePlan"
+            @click="generatePlan"
+          >
+            {{ generatingPlan ? '生成中…' : '生成优化方案' }}
+          </button>
+        </template>
+        <template v-else-if="step === 'plan'">
           <button
             class="secondary-button"
             type="button"
-            :disabled="!canRevisePlan"
-            @click="revisePlan"
+            :disabled="isBusy"
+            @click="step = 'instruction'"
           >
-            {{ generatingPlan ? '调整中…' : 'AI 按意见修改方案' }}
+            修改要求
           </button>
-        </div>
-      </div>
-
-      <div class="actions">
-        <button
-          class="secondary-button"
-          type="button"
-          :disabled="isBusy"
-          @click="step = 'instruction'"
-        >
-          修改要求
-        </button>
-        <button class="secondary-button" type="button" :disabled="isBusy" @click="generatePlan">
-          放弃当前方案并重生成
-        </button>
-        <button
-          class="primary-button"
-          type="button"
-          :disabled="!canGenerateDraft"
-          @click="generateDraft"
-        >
-          生成优化正文
-        </button>
-      </div>
-    </section>
-
-    <section v-else-if="step === 'loop'" class="step-section">
-      <p v-if="autoLoopRestored" class="message message-info">
-        已恢复上次未看完的循环结果，可直接对比应用，或重新开始。
-      </p>
-      <p v-if="autoLoopError" class="message message-error">
-        {{ autoLoopError }}
-      </p>
-      <p v-else-if="autoLoopStoppedText" class="message message-info">
-        {{ autoLoopStoppedText }}
-      </p>
-
-      <AutoLoopRoundsPanel
-        :rounds="autoLoopRounds"
-        :live-items="autoLoopItems"
-        :active-round-index="autoLoopRoundIndex"
-        :active-round-budget="autoLoopActiveBudget"
-        :paragraph-count="autoLoopParagraphCount"
-        :running="autoLoopRunning"
-      />
-
-      <div class="compare-grid">
-        <div class="compare-panel">
-          <h4 class="panel-title">原文</h4>
-          <pre class="original-text">{{ originalText }}</pre>
-        </div>
-        <div class="compare-panel">
-          <h4 class="panel-title">循环成稿（可编辑）</h4>
-          <textarea
-            v-model="draftText"
-            class="draft-input"
-            :disabled="autoLoopRunning || applying"
-          />
-        </div>
-      </div>
-
-      <div class="actions">
-        <button
-          v-if="autoLoopRunning"
-          class="secondary-button"
-          type="button"
-          @click="stopAutoLoopAndAccept"
-        >
-          停在当前轮并收下
-        </button>
-        <button
-          v-else
-          class="secondary-button"
-          type="button"
-          :disabled="isBusy"
-          @click="step = 'instruction'"
-        >
-          修改要求
-        </button>
-        <button
-          class="secondary-button"
-          type="button"
-          :disabled="!canStartAutoLoop"
-          @click="startAutoLoop"
-        >
-          重新开始循环
-        </button>
-        <button class="primary-button" type="button" :disabled="!canApply" @click="applyDraft">
-          {{ applying ? '应用中…' : '应用循环成稿' }}
-        </button>
-      </div>
-    </section>
-
-    <section v-else class="step-section">
-      <div class="compare-grid">
-        <div class="compare-panel">
-          <h4 class="panel-title">原文</h4>
-          <pre class="original-text">{{ originalText }}</pre>
-        </div>
-        <div class="compare-panel">
-          <h4 class="panel-title">优化正文（可编辑）</h4>
-          <textarea
-            v-model="draftText"
-            class="draft-input"
-            :disabled="generatingDraft || applying"
-          />
-        </div>
-      </div>
-      <div class="actions">
-        <button
-          v-if="isDirectMode"
-          class="secondary-button"
-          type="button"
-          :disabled="isBusy"
-          @click="step = 'instruction'"
-        >
-          修改要求
-        </button>
-        <button
-          v-else
-          class="secondary-button"
-          type="button"
-          :disabled="isBusy"
-          @click="step = 'plan'"
-        >
-          返回方案
-        </button>
-        <button class="secondary-button" type="button" :disabled="isBusy" @click="generateDraft">
-          重新生成正文
-        </button>
-        <button class="primary-button" type="button" :disabled="!canApply" @click="applyDraft">
-          {{ applying ? '应用中…' : '应用优化正文' }}
-        </button>
-      </div>
-    </section>
+          <button class="secondary-button" type="button" :disabled="isBusy" @click="generatePlan">
+            放弃当前方案并重生成
+          </button>
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="!canGenerateDraft"
+            @click="generateDraft"
+          >
+            按方案改写并收口
+          </button>
+        </template>
+        <template v-else-if="step === 'loop'">
+          <button
+            v-if="autoLoopRunning"
+            class="secondary-button"
+            type="button"
+            @click="stopAutoLoopAndAccept"
+          >
+            停在当前轮并收下
+          </button>
+          <button
+            v-else
+            class="secondary-button"
+            type="button"
+            :disabled="isBusy"
+            @click="step = 'instruction'"
+          >
+            修改要求
+          </button>
+          <button
+            v-if="autoLoopCanResume && !autoLoopRunning"
+            class="primary-button"
+            type="button"
+            :disabled="!canContinueAutoLoop"
+            @click="continueAutoLoop"
+          >
+            {{ autoLoopResumeActionText }}
+          </button>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="!canStartAutoLoop"
+            @click="startAutoLoop"
+          >
+            重新开始循环
+          </button>
+          <button class="primary-button" type="button" :disabled="!canApply" @click="applyDraft">
+            {{ applying ? '应用中…' : '应用循环成稿' }}
+          </button>
+        </template>
+        <template v-else>
+          <button
+            v-if="isDirectMode"
+            class="secondary-button"
+            type="button"
+            :disabled="isBusy"
+            @click="step = 'instruction'"
+          >
+            修改要求
+          </button>
+          <button
+            v-else
+            class="secondary-button"
+            type="button"
+            :disabled="isBusy"
+            @click="step = 'plan'"
+          >
+            返回方案
+          </button>
+          <button class="secondary-button" type="button" :disabled="isBusy" @click="generateDraft">
+            重新按方案改写并收口
+          </button>
+          <button class="primary-button" type="button" :disabled="!canApply" @click="applyDraft">
+            {{ applying ? '应用中…' : '应用优化正文' }}
+          </button>
+        </template>
+      </footer>
+    </div>
   </a-modal>
+  <AutoLoopPromptLabDrawer
+    :open="promptLabOpen"
+    :project-id="projectId"
+    :chapter-no="chapter?.chapterNo ?? 0"
+    :call="promptLabCall"
+    @close="closePromptLab"
+  />
 </template>
 
 <style scoped>
+.wo-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  overflow: visible;
+}
+.wo-chrome {
+  flex: 0 0 auto;
+}
+.wo-body {
+  flex: 1 0 auto;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+}
+.wo-footer {
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0 8px;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+}
+.wo-loop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wo-loop-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.wo-rail {
+  height: auto;
+  overflow: visible;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.wo-main {
+  min-width: 0;
+  overflow: visible;
+}
 .modal-subtitle {
-  margin: 0 0 0.8rem;
+  margin: 0 0 8px;
   color: #6b7280;
-  font-size: 0.88rem;
+  font-size: 13px;
 }
 
 .mode-toggle {
   display: flex;
-  gap: 0.5rem;
-  margin: 0 0 0.85rem;
+  gap: 0;
+  margin: 0 0 8px;
+  padding: 3px;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f3f4f6;
 }
 
 .mode-toggle-button {
-  flex: 1;
-  padding: 0.45rem 0.75rem;
-  border: 1px solid #d1d5db;
+  padding: 6px 14px;
+  border: 0;
   border-radius: 6px;
-  background: #fff;
+  background: transparent;
   color: #4b5563;
   cursor: pointer;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.mode-toggle-button:hover:not(:disabled) {
+  color: #1f2937;
 }
 
 .mode-toggle-button.active {
-  border-color: #2563eb;
-  background: #eff6ff;
+  background: #fff;
   color: #1d4ed8;
   font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .mode-toggle-button:disabled {
@@ -1123,24 +1412,29 @@ async function applyDraft() {
   opacity: 0.65;
 }
 
+.mode-toggle-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .run-prefs {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.85rem 1.25rem;
-  margin: 0 0 1rem;
-  padding: 0.7rem 0.85rem;
+  gap: 8px 16px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #f9fafb;
 }
 
 .run-pref {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 6px;
   color: #374151;
-  font-size: 0.86rem;
+  font-size: 13px;
 }
 
 .run-pref--check {
@@ -1148,7 +1442,7 @@ async function applyDraft() {
 }
 
 .run-pref select {
-  padding: 0.2rem 0.4rem;
+  padding: 2px 6px;
   border: 1px solid #d1d5db;
   border-radius: 4px;
   background: #fff;
@@ -1156,19 +1450,20 @@ async function applyDraft() {
 
 .stepper {
   display: flex;
-  gap: 0.5rem;
-  margin: 0 0 1rem;
+  gap: 6px;
+  margin: 0 0 8px;
   padding: 0;
   list-style: none;
 }
 
 .stepper li {
   flex: 1;
-  padding: 0.55rem 0.75rem;
+  padding: 6px 10px;
   border-radius: 6px;
   background: #f3f4f6;
   color: #6b7280;
   text-align: center;
+  font-size: 13px;
 }
 
 .stepper li.active {
@@ -1210,12 +1505,15 @@ async function applyDraft() {
 }
 
 .step-section {
-  display: grid;
-  gap: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.step-section--fill {
+  flex: 1 0 auto;
 }
 
-.field-label,
-.panel-title {
+.field-label {
   margin: 0;
   color: #111827;
   font-weight: 600;
@@ -1223,8 +1521,7 @@ async function applyDraft() {
 
 .instruction-input,
 .plan-input,
-.revision-feedback-input,
-.draft-input {
+.revision-feedback-input {
   width: 100%;
   padding: 0.7rem;
   border: 1px solid #d1d5db;
@@ -1234,13 +1531,21 @@ async function applyDraft() {
   resize: vertical;
 }
 
+.instruction-input {
+  flex: 1;
+  min-height: 160px;
+  resize: none;
+}
+
 .plan-input {
-  min-height: 280px;
+  flex: 1;
+  min-height: 160px;
+  resize: none;
 }
 
 .plan-stream-preview {
-  max-height: 220px;
-  margin: 0.5rem 0;
+  max-height: 120px;
+  margin: 0 0 8px;
   padding: 0.9rem;
   overflow: auto;
   border: 1px solid #e5e7eb;
@@ -1278,38 +1583,6 @@ async function applyDraft() {
   font-size: 0.82rem;
 }
 
-.compare-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-
-.compare-panel {
-  display: grid;
-  grid-template-rows: auto minmax(420px, 60vh);
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.original-text,
-.draft-input {
-  min-height: 420px;
-  margin: 0;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.original-text {
-  padding: 0.7rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #f9fafb;
-  font-family: inherit;
-  line-height: 1.65;
-}
-
-.actions,
 .stream-actions {
   display: flex;
   justify-content: flex-end;
@@ -1321,6 +1594,10 @@ async function applyDraft() {
   padding: 0.48rem 0.9rem;
   border-radius: 6px;
   cursor: pointer;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    opacity 180ms ease;
 }
 
 .primary-button {
@@ -1329,10 +1606,19 @@ async function applyDraft() {
   color: #fff;
 }
 
+.primary-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
 .secondary-button {
   border: 1px solid #d1d5db;
   background: #fff;
   color: #374151;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
 .primary-button:disabled,
@@ -1341,8 +1627,14 @@ async function applyDraft() {
   opacity: 0.55;
 }
 
+.primary-button:focus-visible,
+.secondary-button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .message {
-  margin: 0.5rem 0;
+  margin: 0 0 8px;
   font-size: 0.86rem;
 }
 
@@ -1354,9 +1646,80 @@ async function applyDraft() {
   color: #dc2626;
 }
 
-@media (max-width: 820px) {
-  .compare-grid {
+.persona-picker {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chip-button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  border-radius: 8px;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.chip-button:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #f0f5ff;
+}
+
+.chip-button-active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.chip-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 960px) {
+  .wo-loop-split {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style>
+.writing-optimize-fullscreen.ant-modal-wrap {
+  overflow: hidden;
+}
+.writing-optimize-fullscreen.ant-modal-wrap .ant-modal {
+  max-width: 100%;
+  top: 0;
+  padding-bottom: 0;
+  margin: 0;
+}
+.writing-optimize-fullscreen.ant-modal-wrap .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  border-radius: 0;
+  box-shadow: none;
+}
+.writing-optimize-fullscreen.ant-modal-wrap .ant-modal-header {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+.writing-optimize-fullscreen.ant-modal-wrap .ant-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 16px 0;
+  display: flex;
+  flex-direction: column;
 }
 </style>

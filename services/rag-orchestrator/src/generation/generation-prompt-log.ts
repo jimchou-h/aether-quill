@@ -41,6 +41,13 @@ export function resolveGenerationPromptLogKind(
   if (templateKey === 'chapter.optimize.direct-draft') {
     return 'optimize-draft';
   }
+  if (
+    templateKey === 'chapter.optimize.workbench-draft-sex' ||
+    templateKey === 'chapter.optimize.workbench-draft-prose' ||
+    templateKey === 'chapter.optimize.workbench-fix-span'
+  ) {
+    return 'optimize-draft';
+  }
   if (templateKey.startsWith('chapter.pipeline.')) {
     return 'pipeline';
   }
@@ -51,12 +58,27 @@ export function resolveGenerationPromptLogKind(
 export const resolveWriteChapterPromptKind = resolveGenerationPromptLogKind;
 
 export function isGenerationPromptLoggingEnabled(): boolean {
-  const raw = process.env.LOG_GENERATION_PROMPT ?? process.env.LOG_WRITE_CHAPTER_PROMPT;
-  if (raw === undefined || raw.trim() === '') {
-    return true;
+  return resolveGenerationPromptLogMode() !== 'off';
+}
+
+export function isGenerationPromptFullLoggingEnabled(): boolean {
+  return resolveGenerationPromptLogMode() === 'full';
+}
+
+export type GenerationPromptLogMode = 'off' | 'summary' | 'full';
+
+/** 默认只打字数摘要；true/full 打全文；false 关闭。 */
+export function resolveGenerationPromptLogMode(): GenerationPromptLogMode {
+  const raw = (process.env.LOG_GENERATION_PROMPT ?? process.env.LOG_WRITE_CHAPTER_PROMPT ?? '')
+    .trim()
+    .toLowerCase();
+  if (raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') {
+    return 'off';
   }
-  const normalized = raw.trim().toLowerCase();
-  return normalized !== '0' && normalized !== 'false' && normalized !== 'off' && normalized !== 'no';
+  if (raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes' || raw === 'full') {
+    return 'full';
+  }
+  return 'summary';
 }
 
 /** @deprecated 使用 isGenerationPromptLoggingEnabled */
@@ -71,8 +93,8 @@ const KIND_LABEL: Record<GenerationPromptLogKind, string> = {
 };
 
 /**
- * 打印并记录写作工作台 / 章节优化「大纲·方案 / 正文」最终拼装 prompt（送入 LLM 的 system + user）。
- * 可通过 `LOG_GENERATION_PROMPT=false` 或 `LOG_WRITE_CHAPTER_PROMPT=false` 关闭。
+ * 打印写作工作台 / 章节优化送入 LLM 的 prompt 摘要。
+ * 默认只打字数；`LOG_GENERATION_PROMPT=true` 才输出全文（会拖慢 Windows 终端）。
  */
 export function logAssembledGenerationPrompt(
   trace: TraceRecord,
@@ -80,7 +102,8 @@ export function logAssembledGenerationPrompt(
   systemMessage?: string
 ): void {
   const kind = resolveGenerationPromptLogKind(trace);
-  if (!kind || !isGenerationPromptLoggingEnabled()) {
+  const mode = resolveGenerationPromptLogMode();
+  if (!kind || mode === 'off') {
     return;
   }
 
@@ -90,6 +113,7 @@ export function logAssembledGenerationPrompt(
   const task = extractTaskName(trace);
   const chapterNo = extractChapterNo(trace);
   const systemText = typeof systemMessage === 'string' ? systemMessage.trim() : '';
+  const dumpFull = mode === 'full';
 
   logger.info('generation_prompt', {
     traceId: trace.id,
@@ -100,8 +124,9 @@ export function logAssembledGenerationPrompt(
     chapterNo,
     systemChars: systemText.length,
     userChars: userMessage.length,
-    systemMessage: systemText || undefined,
-    userMessage,
+    ...(dumpFull
+      ? { systemMessage: systemText || undefined, userMessage }
+      : {}),
   });
 
   const header = [
@@ -115,10 +140,16 @@ export function logAssembledGenerationPrompt(
     task ? `task=${task}` : null,
     `systemChars=${systemText.length}`,
     `userChars=${userMessage.length}`,
+    dumpFull ? null : '（摘要；全文请设 LOG_GENERATION_PROMPT=true）',
     '='.repeat(72),
   ]
     .filter(Boolean)
     .join('\n');
+
+  if (!dumpFull) {
+    console.log(`${header}\n`);
+    return;
+  }
 
   const body = systemText
     ? `【system】\n${systemText}\n\n【user】\n${userMessage}`
@@ -130,7 +161,8 @@ export function logAssembledGenerationPrompt(
 /** 打印分步精修等任务的 LLM 原始返回（与 logAssembledGenerationPrompt 配套） */
 export function logGenerationResponse(trace: TraceRecord, content: string): void {
   const kind = resolveGenerationPromptLogKind(trace);
-  if (!kind || !isGenerationPromptLoggingEnabled()) {
+  const mode = resolveGenerationPromptLogMode();
+  if (!kind || mode === 'off') {
     return;
   }
 
@@ -138,6 +170,7 @@ export function logGenerationResponse(trace: TraceRecord, content: string): void
   const templateKey =
     typeof trace.context?.templateKey === 'string' ? trace.context.templateKey : undefined;
   const responseText = typeof content === 'string' ? content.trim() : '';
+  const dumpFull = mode === 'full';
 
   logger.info('generation_response', {
     traceId: trace.id,
@@ -145,27 +178,29 @@ export function logGenerationResponse(trace: TraceRecord, content: string): void
     kind,
     templateKey,
     responseChars: responseText.length,
-    response: responseText || undefined,
+    ...(dumpFull ? { response: responseText || undefined } : {}),
   });
 
-  console.log(
-    [
-      '',
-      '='.repeat(72),
-      `[rag-orchestrator] ${label} · LLM 返回`,
-      `traceId=${trace.id}`,
-      `projectId=${trace.projectId}`,
-      templateKey ? `templateKey=${templateKey}` : null,
-      `responseChars=${responseText.length}`,
-      '='.repeat(72),
-      '【response】',
-      responseText,
-      '='.repeat(72),
-      '',
-    ]
-      .filter(Boolean)
-      .join('\n')
-  );
+  const header = [
+    '',
+    '='.repeat(72),
+    `[rag-orchestrator] ${label} · LLM 返回`,
+    `traceId=${trace.id}`,
+    `projectId=${trace.projectId}`,
+    templateKey ? `templateKey=${templateKey}` : null,
+    `responseChars=${responseText.length}`,
+    dumpFull ? null : '（摘要；全文请设 LOG_GENERATION_PROMPT=true）',
+    '='.repeat(72),
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  if (!dumpFull) {
+    console.log(`${header}\n`);
+    return;
+  }
+
+  console.log(`${header}\n【response】\n${responseText}\n${'='.repeat(72)}\n`);
 }
 
 /** @deprecated 使用 logAssembledGenerationPrompt */

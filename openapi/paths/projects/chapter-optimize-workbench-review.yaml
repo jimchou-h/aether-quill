@@ -1,0 +1,71 @@
+post:
+  tags:
+    - Projects
+  summary: Review a scene-workbench range draft
+  description: |
+    Run a single review of a range draft. Returns JSON `{ items: [...] }`. An empty list is success.
+
+    Each item `kind` is `pose`, `vocab`, or `regression`. `regression` only covers abbreviation,
+    paragraph merging, on-beat contact deleted, or a metaphor cut short. Additive instructions
+    such as 「加深」「写细」「补接吻」「更色」 are not legal.
+
+    `profile=prose` MUST NOT request pose close-ups or vocab swaps (pose/vocab items are not required).
+    `profile=sex` may emit pose, vocab, and regression.
+
+    This path is additive and MUST NOT change existing from-plan frozen review.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizeWorkbenchReviewRequest'
+  responses:
+    '200':
+      description: Review items (empty list is success)
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizeWorkbenchReviewResult'
+    '400':
+      description: Invalid request (empty rangeText or invalid profile)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Workbench review generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

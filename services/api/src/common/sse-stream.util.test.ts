@@ -36,8 +36,21 @@ test('createSseStreamContext stops writing after request close', () => {
   const ctx = createSseStreamContext(req, res);
 
   assert.equal(ctx.writeEvent({ event: 'start' }), true);
+  assert.equal(ctx.abortSignal.aborted, false);
   req.emit('close');
   assert.equal(ctx.isAborted(), true);
+  assert.equal(ctx.abortSignal.aborted, true);
   assert.equal(ctx.writeEvent({ event: 'content', data: 'x' }), false);
-  assert.equal(chunks.length, 2);
+  assert.ok(chunks.some((chunk) => chunk.includes('data:')));
+  ctx.end();
+});
+
+test('createSseStreamContext 正常 end 后的 close 不再二次 abort', () => {
+  const req = new EventEmitter() as Request;
+  const { res } = createMockResponse();
+  const ctx = createSseStreamContext(req, res);
+  assert.equal(ctx.abortSignal.aborted, false);
+  // mock end() 会先置 writableEnded 再 emit close，应被忽略
+  ctx.end();
+  assert.equal(ctx.abortSignal.aborted, false);
 });

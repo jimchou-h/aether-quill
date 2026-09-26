@@ -14,8 +14,12 @@
   - 测试：`chapter-auto-loop.util.test.ts` 覆盖「引文救回错编号」「零命中」「多命中�?- [x] 2.2 SSE 推送条目状态与 `unlocatableCount`；前端在条目面板明列「N 条未能定位已跳过�?  - 测试：前�?`chapterAutoLoopItems.test.ts` 断言降级条目渲染为可见的跳过�?
 ## 3. 切片三：分层闸门
 
-- [x] 3.1 段级校验 `validateAutoLoopSegment`：字数带�?50%�?50%、占位语 / Markdown / 说明性开头拒收；失败只回滚该段并�?`rolled_back`
-  - 测试：`chapter-auto-loop.util.test.ts` 覆盖「坏段回滚不影响同轮好段�?- [x] 3.2 章级校验 `validateAutoLoopRound`：基准为**入库原文**，带�?90%�?50%（允许删减时下限 60%）；越界整轮回滚并终�?  - 测试：同上文件，覆盖「累积漂移以入库原文为基准判越界�?- [x] 3.3 前端呈现回滚原因（段�?/ 章级各自文案�?  - 测试：`chapterAutoLoopItems.test.ts` 断言两类回滚文案
+- [x] 3.1 段级校验 `validateAutoLoopSegment`：拒收空输出 / 占位语 / Markdown / 说明性开头；不因扩写或收紧失败；失败只回滚该段并记 `rolled_back`
+  - 测试：`chapter-auto-loop.util.test.ts` 覆盖坏段回滚不影响同轮好段，以及扩写通过
+- [x] 3.2 章级校验 `validateAutoLoopRound`：基准为入库原文，只守下限（默认 80%，允许删减时 60%）；不设上限
+  - 测试：同上文件，覆盖扩写通过、过短仍回滚
+- [x] 3.3 前端呈现回滚原因（段级 / 章级各自文案）
+  - 测试：`chapterAutoLoopItems.test.ts` 断言两类回滚文案
 
 ## 4. 切片四：多轮、收敛与命中上限
 
@@ -35,8 +39,26 @@
 
 - [x] 6.1 进程�?session store（key `projectId:chapterNo:userId`，TTL 4h），存各轮条�?/ 成稿 / 基线 `updatedAt`
   - 测试：`chapter-auto-loop-session.store.test.ts` 覆盖写入、读取、TTL 过期
-- [x] 6.2 前端打开弹窗时尝试恢复；过期或不存在时静默退回全新开�?  - 测试：`chapterAutoLoopItems.test.ts`（或新增）断言空会话不报错且呈现可全新开�?
-## 7. 回归与门�?
-- [x] 7.1 `from-plan` / `direct` 行为零变更；`chapter.optimize.loop.*` 落入「文笔优化」分组；`loop.draft` 进风格样本白名单�?`loop.plan` 不进
+- [x] 6.2 前端打开弹窗时尝试恢复；过期或不存在时静默退回全新开始
+  - 测试：`chapterAutoLoopItems.test.ts`（或新增）断言空会话不报错且呈现可全新开始
+
+## 7. 回归与门禁
+- [x] 7.1 `from-plan` / `direct` 行为零变更；`chapter.optimize.loop.*` 落入「文笔优化」分组；`loop.draft` 进风格样本白名单、`loop.plan` 不进
   - 测试：`taskPromptGroups.test.ts` + `packages/config/src/writing-style-samples/injection.test.ts`
 - [x] 7.2 自检门禁：`pnpm -r lint` / `typecheck` / `test` / `build` 全绿
+
+## 8. 失败后续跑
+
+- [x] 8.1 复诊 JSON 单条脏字段不得整轮判死：漏引号 id 可修回；外层解不开时按单条捞合法条目
+  - 测试：`chapter-auto-loop.util.test.ts`
+- [x] 8.2 引擎在 `plan_parse_failed` / 改写中断时留下 resume 断点；`resume: true` 从复诊或剩余段落继续
+  - 测试：`chapter-auto-loop.engine.test.ts`
+- [x] 8.3 OpenAPI `ChapterAutoLoopRequest.resume` 与 session 可续跑字段；前端失败态提供「从失败处继续」
+  - 测试：`chapterAutoLoopItems.test.ts` 断言续跑文案与会话恢复
+
+## 9. 整段删除抽槽
+
+- [x] 9.1 命中段全部条目为整段/整句删除时，抽掉槽位使邻段衔接，不调用改写 LLM，不把空输出当成生成失败
+  - 测试：`chapter-auto-loop.util.test.ts` 判定与拼回；`chapter-auto-loop.engine.test.ts` 断言未调用 rewrite
+- [x] 9.2 条目状态 `deleted`；前端文案「已删除」
+  - 测试：`chapterAutoLoopItems.test.ts`

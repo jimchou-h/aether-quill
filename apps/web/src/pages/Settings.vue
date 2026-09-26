@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue';
+import { computed, shallowRef, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { apiClient } from '../services/api';
 import { usePromptConfigStore } from '../stores/promptConfig';
@@ -22,24 +22,40 @@ const taskPromptConfigStore = useTaskPromptConfigStore();
 
 const loading = shallowRef(false);
 const errorMessage = shallowRef('');
+let loadSeq = 0;
 
 async function loadData() {
+  const seq = ++loadSeq;
   loading.value = true;
   errorMessage.value = '';
   try {
     await apiClient.getWorkspace(projectId.value);
     await promptConfigStore.loadConfig(projectId.value);
     await taskPromptConfigStore.loadList(projectId.value);
+    if (seq !== loadSeq) {
+      return;
+    }
   } catch (error) {
+    if (seq !== loadSeq) {
+      return;
+    }
     errorMessage.value = presentErrorFromCaught(error, '加载设置失败');
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) {
+      loading.value = false;
+    }
   }
 }
 
-onMounted(() => {
-  void loadData();
-});
+watch(
+  projectId,
+  (id) => {
+    if (id) {
+      void loadData();
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 <template>

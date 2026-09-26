@@ -12,6 +12,10 @@ export function isSseAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
+export type SseDataLineHandler = (
+  dataLine: string
+) => void | boolean | Promise<void | boolean>;
+
 function bindAbortToReader(reader: ReadableStreamDefaultReader<Uint8Array>, signal?: AbortSignal) {
   if (!signal) {
     return () => {};
@@ -30,9 +34,19 @@ function bindAbortToReader(reader: ReadableStreamDefaultReader<Uint8Array>, sign
   return () => signal.removeEventListener('abort', onAbort);
 }
 
+async function emitSseDataLine(
+  onDataLine: SseDataLineHandler,
+  dataPart: string
+): Promise<boolean> {
+  if (!dataPart) {
+    return false;
+  }
+  return (await onDataLine(dataPart)) === true;
+}
+
 export async function readSseSegments(
   response: Response,
-  onDataLine: (dataLine: string) => void,
+  onDataLine: SseDataLineHandler,
   signal?: AbortSignal
 ): Promise<void> {
   if (!response.body) {
@@ -69,8 +83,9 @@ export async function readSseSegments(
           continue;
         }
         const dataPart = trimmed.replace(/^data:\s*/, '');
-        if (dataPart) {
-          onDataLine(dataPart);
+        if (await emitSseDataLine(onDataLine, dataPart)) {
+          await reader.cancel().catch(() => {});
+          return;
         }
       }
     }
@@ -78,9 +93,7 @@ export async function readSseSegments(
     const tail = buffer.trim();
     if (tail.startsWith('data:')) {
       const dataPart = tail.replace(/^data:\s*/, '');
-      if (dataPart) {
-        onDataLine(dataPart);
-      }
+      await emitSseDataLine(onDataLine, dataPart);
     }
   } finally {
     unbind();
@@ -145,7 +158,7 @@ export type SseFetchInit = {
 export async function fetchSse(
   url: string,
   init: SseFetchInit,
-  onDataLine: (dataLine: string) => void,
+  onDataLine: SseDataLineHandler,
   mode: 'segments' | 'lines' = 'segments'
 ): Promise<void> {
   const response = await fetch(url, {

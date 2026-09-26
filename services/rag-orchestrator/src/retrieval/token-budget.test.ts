@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { trimTextsToTokenBudget, trimTextsToTokenBudgetDetailed } from './token-budget';
+import {
+  trimEvidencePreferPersonaCards,
+  trimTextsToTokenBudget,
+  trimTextsToTokenBudgetDetailed,
+} from './token-budget';
 
 describe('trimTextsToTokenBudget', () => {
   it('keeps blocks within budget', () => {
@@ -18,5 +22,19 @@ describe('trimTextsToTokenBudget', () => {
     const { texts, includedIndices } = trimTextsToTokenBudgetDetailed(['A', 'B', 'C'], 500);
     assert.equal(texts.length, 3);
     assert.deepEqual(includedIndices, [0, 1, 2]);
+  });
+});
+
+describe('trimEvidencePreferPersonaCards', () => {
+  it('keeps persona cards even when they exceed the evidence budget', () => {
+    const long = '角色设定。'.repeat(200);
+    const { texts, includedIndices } = trimEvidencePreferPersonaCards(
+      [{ docType: 'persona_card' }, { docType: 'world_setting' }],
+      [long, '世界观短句'],
+      10
+    );
+    assert.deepEqual(includedIndices, [0]);
+    assert.equal(texts.length, 1);
+    assert.ok(texts[0].includes('角色设定'));
   });
 });

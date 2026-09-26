@@ -5,6 +5,7 @@ import {
   clearAutoLoopSessionsForTest,
   getAutoLoopSession,
   putAutoLoopSession,
+  toPublicAutoLoopSession,
 } from './chapter-auto-loop-session.store';
 import type { ChapterAutoLoopSession } from './chapter-auto-loop-session.store';
 
@@ -20,6 +21,7 @@ function makeSession(overrides: Partial<ChapterAutoLoopSession> = {}): ChapterAu
     rounds: [],
     finalDraft: '原文第一段。\n\n原文第二段。',
     stoppedReason: 'budget',
+    resumable: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -60,6 +62,18 @@ test('超过 TTL 的会话读回为空，不抛错', () => {
   assert.equal(getAutoLoopSession('p1', 7, 'u1'), undefined);
 });
 
+test('TTL 以最近更新为准，开跑超过 4 小时但仍在续跑的会话不丢', () => {
+  clearAutoLoopSessionsForTest();
+  const started = new Date(Date.now() - AUTO_LOOP_SESSION_TTL_MS - 1000);
+  putAutoLoopSession(
+    makeSession({
+      createdAt: started,
+      updatedAt: new Date(),
+    })
+  );
+  assert.ok(getAutoLoopSession('p1', 7, 'u1'));
+});
+
 test('不存在的会话读回为空', () => {
   clearAutoLoopSessionsForTest();
   assert.equal(getAutoLoopSession('p1', 99, 'u1'), undefined);
@@ -70,4 +84,31 @@ test('缺少 userId 时不与真实用户会话混淆', () => {
   putAutoLoopSession(makeSession({ userId: undefined }));
   assert.ok(getAutoLoopSession('p1', 7, undefined));
   assert.equal(getAutoLoopSession('p1', 7, 'u1'), undefined);
+});
+
+test('GET 公开会话带回 promptLabCalls，不带 resume', () => {
+  clearAutoLoopSessionsForTest();
+  putAutoLoopSession(
+    makeSession({
+      promptLabCalls: [
+        {
+          id: 'lab-diagnose-1',
+          kind: 'diagnose',
+          templateKey: 'chapter.optimize.loop.plan',
+          roundIndex: 1,
+          windowIndex: 1,
+          userPrompt: '冻住的 user',
+          taskPromptText: '任务 Prompt',
+          output: '诊断输出',
+          frozenRetrievedEvidence: '证据',
+          createdAt: '2026-09-11T00:00:00.000Z',
+        },
+      ],
+    })
+  );
+  const loaded = getAutoLoopSession('p1', 7, 'u1');
+  assert.equal(loaded?.promptLabCalls?.[0]?.id, 'lab-diagnose-1');
+  const publicSession = toPublicAutoLoopSession(loaded!);
+  assert.equal(publicSession.promptLabCalls?.[0]?.id, 'lab-diagnose-1');
+  assert.equal('resume' in publicSession, false);
 });

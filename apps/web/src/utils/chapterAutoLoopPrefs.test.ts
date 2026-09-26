@@ -31,9 +31,10 @@ describe('clampAutoLoopRoundBudget', () => {
     assert.equal(clampAutoLoopRoundBudget(Number.NaN), AUTO_LOOP_ROUND_BUDGET_DEFAULT);
   });
 
-  it('clamps into the 1..3 band rather than trusting caller input', () => {
+  it('clamps into the 1..5 band rather than trusting caller input', () => {
     assert.equal(clampAutoLoopRoundBudget(0), AUTO_LOOP_ROUND_BUDGET_MIN);
     assert.equal(clampAutoLoopRoundBudget(-5), AUTO_LOOP_ROUND_BUDGET_MIN);
+    assert.equal(clampAutoLoopRoundBudget(5), AUTO_LOOP_ROUND_BUDGET_MAX);
     assert.equal(clampAutoLoopRoundBudget(99), AUTO_LOOP_ROUND_BUDGET_MAX);
     assert.equal(clampAutoLoopRoundBudget(2.4), 2);
     assert.equal(clampAutoLoopRoundBudget('3'), 3);

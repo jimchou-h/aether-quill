@@ -249,7 +249,12 @@ test('GenerationService.resolveCallOptionsForTrace uses trace model and frequenc
           model: string;
           temperature?: number;
           context: Record<string, unknown>;
-        }) => { model: string; temperature: number; frequencyPenalty?: number };
+        }) => {
+          model: string;
+          temperature: number;
+          frequencyPenalty?: number;
+          enableThinking?: boolean;
+        };
       }
     ).resolveCallOptionsForTrace.bind(service);
 
@@ -261,6 +266,19 @@ test('GenerationService.resolveCallOptionsForTrace uses trace model and frequenc
     assert.equal(options.model, 'writing-model-x');
     assert.equal(options.temperature, 0.92);
     assert.equal(options.frequencyPenalty, 0.25);
+    assert.equal(options.enableThinking, false);
+
+    const direct = resolve({
+      model: 'Pro/deepseek-ai/DeepSeek-V3.2',
+      context: { templateKey: 'chapter.optimize.direct-draft' },
+    });
+    assert.equal(direct.enableThinking, true);
+
+    const fromPlan = resolve({
+      model: 'Pro/deepseek-ai/DeepSeek-V3.2',
+      context: { templateKey: 'chapter.optimize.draft' },
+    });
+    assert.equal(fromPlan.enableThinking, false);
   } finally {
     if (prevKey === undefined) {
       delete process.env.DEEPSEEK_API_KEY;

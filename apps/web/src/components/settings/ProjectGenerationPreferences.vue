@@ -2,6 +2,7 @@
 import { computed, onMounted, shallowRef, watch } from 'vue';
 import { apiClient, type ProjectContentSafetyRule, type ProjectSettings } from '../../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../../utils/pageFeedback';
+import { CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE_HINT } from './generationPreferencesCopy';
 
 const CONTENT_SAFETY_CUSTOM_RULES_MAX = 200;
 const CONTENT_SAFETY_PATTERN_MAX_LENGTH = 64;
@@ -550,7 +551,7 @@ onMounted(() => {
         />
       </div>
       <p class="field-hint inline-hint">
-        方案阶段长章按字数切分诊断；范围 0~20000，默认 3000。设为 0 表示不按字数分段（始终整章方案）。
+        {{ CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE_HINT }}
       </p>
 
       <div class="toggle-row">

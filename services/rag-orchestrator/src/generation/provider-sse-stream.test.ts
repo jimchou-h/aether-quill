@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   consumeProviderSseStreamChunk,
+  extractProviderChatText,
   flushProviderSseStreamBuffer,
   parseProviderSseLine,
   splitProviderSseBuffer,
@@ -52,7 +53,7 @@ test('parseProviderSseLine ignores reasoning_content and only yields answer cont
     parseProviderSseLine(
       'data: {"choices":[{"delta":{"reasoning_content":"先分析方案再写正文"}}]}'
     ).type,
-    'skip'
+    'reasoning'
   );
   const contentLine = parseProviderSseLine(
     'data: {"choices":[{"delta":{"content":"夜风很凉。"}}]}'
@@ -61,6 +62,31 @@ test('parseProviderSseLine ignores reasoning_content and only yields answer cont
   if (contentLine.type === 'content') {
     assert.equal(contentLine.content, '夜风很凉。');
   }
+});
+
+test('parseProviderSseLine reads message.content and finish_reason', () => {
+  const trailing = parseProviderSseLine(
+    'data: {"choices":[{"message":{"content":"整章正文"},"finish_reason":"stop"}]}'
+  );
+  assert.equal(trailing.type, 'content');
+  if (trailing.type === 'content') {
+    assert.equal(trailing.content, '整章正文');
+    assert.equal(trailing.finishReason, 'stop');
+  }
+
+  const lengthOnly = parseProviderSseLine(
+    'data: {"choices":[{"delta":{},"finish_reason":"length"}]}'
+  );
+  assert.equal(lengthOnly.type, 'skip');
+  if (lengthOnly.type === 'skip') {
+    assert.equal(lengthOnly.finishReason, 'length');
+  }
+});
+
+test('extractProviderChatText flattens text parts', () => {
+  assert.equal(extractProviderChatText('夜风'), '夜风');
+  assert.equal(extractProviderChatText([{ text: '夜' }, { text: '风' }]), '夜风');
+  assert.equal(extractProviderChatText({ text: '夜风' }), '夜风');
 });
 
 test('parseProviderSseLine reports malformed only for invalid complete lines', () => {

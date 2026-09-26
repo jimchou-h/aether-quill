@@ -148,6 +148,11 @@ export interface InlineDiffSegment {
   added?: boolean;
 }
 
+/** SSE / 自动循环未结束时不算、不渲染红绿对照，避免每条流式增量重跑整章 diff。 */
+export function shouldRenderOptimizeDiff(isGenerating: boolean): boolean {
+  return !isGenerating;
+}
+
 /** 全文并排高亮：左栏标删除、右栏标新增，不丢段落 */
 export function buildInlineDiffViews(
   original: string,

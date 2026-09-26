@@ -6,8 +6,18 @@ import test from 'node:test';
  * ChapterList must emit writingOptimize (not optimize) for「章节优化」.
  */
 test('chapter optimize button event name matches parent listener', () => {
-  const listEmits = ['writingOptimize', 'pipelineOptimize', 'finalPolish'] as const;
-  const pageListeners = ['writing-optimize', 'pipeline-optimize', 'final-polish'] as const;
+  const listEmits = [
+    'writingOptimize',
+    'pipelineOptimize',
+    'finalPolish',
+    'sceneWorkbench',
+  ] as const;
+  const pageListeners = [
+    'writing-optimize',
+    'pipeline-optimize',
+    'final-polish',
+    'scene-workbench',
+  ] as const;
 
   function toKebab(name: string): string {
     return name.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
@@ -19,4 +29,6 @@ test('chapter optimize button event name matches parent listener', () => {
 
   assert.equal(toKebab('optimize'), 'optimize');
   assert.notEqual(toKebab('optimize'), 'writing-optimize');
+  assert.equal(toKebab('sceneWorkbench'), 'scene-workbench');
+  assert.notEqual(toKebab('writingOptimize'), 'scene-workbench');
 });

@@ -3,10 +3,30 @@
  */
 
 export type ProviderSseLineResult =
-  | { type: 'content'; content: string }
+  | { type: 'content'; content: string; finishReason?: string | null }
+  | { type: 'reasoning'; finishReason?: string | null }
   | { type: 'done' }
-  | { type: 'skip' }
+  | { type: 'skip'; finishReason?: string | null }
   | { type: 'malformed'; data: string; error: string };
+
+export function extractProviderChatText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((part) => extractProviderChatText(part)).join('');
+  }
+  if (value && typeof value === 'object') {
+    const record = value as { text?: unknown; content?: unknown };
+    if (typeof record.text === 'string') {
+      return record.text;
+    }
+    if (record.content !== undefined && record.content !== value) {
+      return extractProviderChatText(record.content);
+    }
+  }
+  return '';
+}
 
 export function splitProviderSseBuffer(buffer: string): {
   completeLines: string[];
@@ -36,11 +56,34 @@ export function parseProviderSseLine(line: string): ProviderSseLineResult {
 
   try {
     const parsed = JSON.parse(data) as {
-      choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }>;
+      choices?: Array<{
+        finish_reason?: string | null;
+        delta?: {
+          content?: unknown;
+          reasoning_content?: unknown;
+          reasoning?: unknown;
+          thinking?: unknown;
+        };
+        message?: { content?: unknown };
+      }>;
     };
-    const content = parsed.choices?.[0]?.delta?.content ?? '';
+    const choice = parsed.choices?.[0];
+    const finishReason =
+      typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
+    const deltaContent = extractProviderChatText(choice?.delta?.content);
+    const messageContent = extractProviderChatText(choice?.message?.content);
+    const content = deltaContent || messageContent;
+    const reasoning = extractProviderChatText(
+      choice?.delta?.reasoning_content ?? choice?.delta?.reasoning ?? choice?.delta?.thinking
+    );
     if (content) {
-      return { type: 'content', content };
+      return { type: 'content', content, finishReason };
+    }
+    if (reasoning) {
+      return { type: 'reasoning', finishReason };
+    }
+    if (finishReason) {
+      return { type: 'skip', finishReason };
     }
     return { type: 'skip' };
   } catch (error) {

@@ -54,13 +54,16 @@ import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import {
   buildEmbeddingRetrievalQuery,
-  isChapterOptimizeTemplateKey,
   resolveGenerateRetrievalQuery,
+  shouldIncludeNextChapterHead,
+  shouldIncludePriorChapterNarrative,
   WRITE_CHAPTER_DRAFT_TEMPLATE_KEY,
   DraftCitation,
   buildStructuredKnowledgeEvidence,
   resolveChapterScopedEmbeddingQuery,
   retrieveKnowledgeForDraft,
+  readFrozenRetrievedEvidence,
+  readProjectSystemPromptOverride,
 } from './retrieval/knowledge-retrieval';
 import { mergeTitleAndVectorEvidence } from './retrieval/hybrid-knowledge-merge';
 import { GenerationService, GenerationContext } from './generation/generation.service';
@@ -307,6 +310,9 @@ async function getGenerationContext(
   currentChapterNo?: number,
   options?: {
     includeNextChapterHead?: boolean;
+    includePriorChapterSummaries?: boolean;
+    includeChapterSummaryMemory?: boolean;
+    includeAppearingStaticCards?: boolean;
     appearingCharacters?: string[];
   }
 ): Promise<GenerationContext & { narrativeMeta?: NarrativeContextMeta }> {
@@ -335,6 +341,9 @@ async function getGenerationContext(
     appearingCharacters: options?.appearingCharacters,
     outlineMatchingQuery: chapter?.structuredMatchingText,
     includeNextChapterHead: options?.includeNextChapterHead,
+    includePriorChapterSummaries: options?.includePriorChapterSummaries,
+    includeChapterSummaryMemory: options?.includeChapterSummaryMemory,
+    includeAppearingStaticCards: options?.includeAppearingStaticCards,
   });
   return {
     systemPromptText: ctx.systemPromptText,
@@ -765,7 +774,7 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
 
   context.updatedAt = new Date().toISOString();
-  res.json(context);
+  res.json({ ok: true, projectId, updatedAt: context.updatedAt });
 });
 
 // ─── 检索预览 & 章节摘要向量索引 ─────────────────────────────────────
@@ -934,8 +943,11 @@ app.post('/api/generate', async (req, res) => {
     }
   };
 
-  // Step 2: 检索证据 — 合规检验等任务跳过 RAG
-  if (!isComplianceTask) {
+  // Step 2: 检索证据 — 合规检验等任务跳过 RAG；实验室重跑可冻住证据
+  const frozenRetrievedEvidence = readFrozenRetrievedEvidence(extra);
+  if (frozenRetrievedEvidence !== undefined) {
+    retrievedEvidence = frozenRetrievedEvidence;
+  } else if (!isComplianceTask) {
     ensureSseHeaders();
     writeGenerateSse({ event: 'stage', stage: 'retrieving' });
     try {
@@ -1063,7 +1075,10 @@ app.post('/api/generate', async (req, res) => {
     };
   } else {
     generationContext = await getGenerationContext(projectId, narrativeCurrentChapter, {
-      includeNextChapterHead: isChapterOptimizeTemplateKey(tk),
+      includeNextChapterHead: shouldIncludeNextChapterHead({ templateKey: tk, extra }),
+      includePriorChapterSummaries: shouldIncludePriorChapterNarrative(tk),
+      includeChapterSummaryMemory: shouldIncludePriorChapterNarrative(tk),
+      includeAppearingStaticCards: shouldIncludePriorChapterNarrative(tk),
       appearingCharacters: parseAppearingCharactersFromExtra(extra),
     });
   }
@@ -1080,6 +1095,12 @@ app.post('/api/generate', async (req, res) => {
 
   if (extra?.omitProjectSystemPrompt === true && !isComplianceTask) {
     generationContext.omitProjectSystemPrompt = true;
+  }
+
+  const projectSystemOverride = readProjectSystemPromptOverride(extra);
+  if (projectSystemOverride !== undefined) {
+    generationContext.systemPromptText = projectSystemOverride;
+    generationContext.omitProjectSystemPrompt = false;
   }
 
   generationContext.retrievedEvidence = isComplianceTask
@@ -1124,6 +1145,12 @@ app.post('/api/generate', async (req, res) => {
     ...(narrativeMeta || {}),
   };
 
+  const requestMaxTokensRaw = (req.body as { maxTokens?: unknown })?.maxTokens;
+  const requestMaxTokens =
+    typeof requestMaxTokensRaw === 'number' && Number.isFinite(requestMaxTokensRaw)
+      ? Math.trunc(requestMaxTokensRaw)
+      : undefined;
+
   const trace = await generationService.createTrace({
     prompt,
     projectId,
@@ -1132,6 +1159,9 @@ app.post('/api/generate', async (req, res) => {
     useSSE,
     model: resolvedProfile.model,
     temperature: resolvedProfile.temperature,
+    ...(typeof requestMaxTokens === 'number' && requestMaxTokens > 0
+      ? { maxTokens: requestMaxTokens }
+      : {}),
   });
 
   if (useSSE) {
@@ -1139,18 +1169,58 @@ app.post('/api/generate', async (req, res) => {
     writeGenerateSse({ event: 'start', traceId: trace.id });
     writeGenerateSse({ event: 'stage', stage: 'waiting_llm' });
 
+    const abortController = new AbortController();
+    const onClientClose = () => {
+      // 正常 res.end() 也会 close；仅客户端提前断开时取消上游 LLM
+      if (res.writableEnded || res.destroyed || abortController.signal.aborted) {
+        return;
+      }
+      abortController.abort();
+    };
+    req.on('close', onClientClose);
+    res.on('close', onClientClose);
+
+    const heartbeatTimer = setInterval(() => {
+      if (abortController.signal.aborted || res.writableEnded || res.destroyed) {
+        return;
+      }
+      try {
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+      } catch {
+        onClientClose();
+      }
+    }, 15_000);
+    if (typeof heartbeatTimer.unref === 'function') {
+      heartbeatTimer.unref();
+    }
+
     try {
-      for await (const chunk of generationService.generateStream(trace, generationContext)) {
+      for await (const chunk of generationService.generateStream(
+        trace,
+        generationContext,
+        abortController.signal
+      )) {
+        if (abortController.signal.aborted) {
+          break;
+        }
         const escaped = chunk.replace(/\n/g, '\\n');
         writeGenerateSse({ event: 'content', data: escaped, traceId: trace.id });
       }
 
-      writeGenerateSse({ event: 'end', traceId: trace.id });
+      if (!abortController.signal.aborted) {
+        writeGenerateSse({ event: 'end', traceId: trace.id, retrievedEvidence });
+      }
       res.end();
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Generation failed';
-      writeGenerateSse({ event: 'error', data: errorMsg, traceId: trace.id });
+      if (!abortController.signal.aborted) {
+        const errorMsg = error instanceof Error ? error.message : 'Generation failed';
+        writeGenerateSse({ event: 'error', data: errorMsg, traceId: trace.id });
+      }
       res.end();
+    } finally {
+      clearInterval(heartbeatTimer);
+      req.off('close', onClientClose);
+      res.off('close', onClientClose);
     }
   } else {
     try {
@@ -1160,6 +1230,7 @@ app.post('/api/generate', async (req, res) => {
         status: 'completed',
         content: result,
         usage: trace.usage,
+        retrievedEvidence,
       });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Generation failed';
@@ -1399,14 +1470,55 @@ app.post('/api/generate/draft', async (req, res) => {
 
   try {
     let generatingPhaseSent = false;
-    for await (const chunk of generationService.generateStream(trace, generationContext)) {
-      if (!generatingPhaseSent) {
-        writeSse({ event: 'generating', traceId: trace.id });
-        generatingPhaseSent = true;
+    const abortController = new AbortController();
+    const onClientClose = () => {
+      if (res.writableEnded || res.destroyed || abortController.signal.aborted) {
+        return;
       }
-      fullDraftText += chunk;
-      const escaped = chunk.replace(/\n/g, '\\n');
-      writeSse({ event: 'content', data: escaped, traceId: trace.id });
+      abortController.abort();
+    };
+    req.on('close', onClientClose);
+    res.on('close', onClientClose);
+    const heartbeatTimer = setInterval(() => {
+      if (abortController.signal.aborted || res.writableEnded || res.destroyed) {
+        return;
+      }
+      try {
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+      } catch {
+        onClientClose();
+      }
+    }, 15_000);
+    if (typeof heartbeatTimer.unref === 'function') {
+      heartbeatTimer.unref();
+    }
+    try {
+      for await (const chunk of generationService.generateStream(
+        trace,
+        generationContext,
+        abortController.signal
+      )) {
+        if (abortController.signal.aborted) {
+          break;
+        }
+        if (!generatingPhaseSent) {
+          writeSse({ event: 'generating', traceId: trace.id });
+          generatingPhaseSent = true;
+        }
+        fullDraftText += chunk;
+        const escaped = chunk.replace(/\n/g, '\\n');
+        writeSse({ event: 'content', data: escaped, traceId: trace.id });
+      }
+    } finally {
+      clearInterval(heartbeatTimer);
+      req.off('close', onClientClose);
+      res.off('close', onClientClose);
+    }
+
+    if (abortController.signal.aborted) {
+      endSpan(streamSpanId);
+      res.end();
+      return;
     }
 
     endSpan(streamSpanId);

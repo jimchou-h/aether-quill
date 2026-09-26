@@ -7,8 +7,8 @@
  *    invalidate → embed → Qdrant topK → rerank topN →（可选）按 document 聚合拉全文 enrich
  *
  * 2. **结构化路径** `buildStructuredKnowledgeEvidence`
- *    章节 `structuredMatchingText` ↔ 知识库文档标题打分 → 角色卡全文 + 其他文档段落裁剪
- *    → token 预算裁剪后输出 evidenceText（不经过 Qdrant）
+ *    章节 `structuredMatchingText` ↔ 知识库文档标题打分 → 命中角色卡全文（匹配即全量）
+ *    + 其他文档段落裁剪 → 其它文档走 token 预算，角色卡不截断
  *
  * Query 分层：
  * - `buildGenerationRetrievalQuery`：rerank/展示用，可含大纲摘要
@@ -28,7 +28,7 @@ import {
   assembleStructuredEvidenceText,
   formatKnowledgeEvidenceBlock,
 } from './persona-card-evidence';
-import { resolveEvidenceTokenBudget, trimTextsToTokenBudgetDetailed } from './token-budget';
+import { resolveEvidenceTokenBudget, trimEvidencePreferPersonaCards } from './token-budget';
 import { normalizeKnowledgeDocumentsForRetrieval } from './knowledge-doc-type';
 import { scoreTitleAgainstMatchingText } from './title-match-score';
 import { ChunkWithEmbedding } from './types';
@@ -88,8 +88,27 @@ export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
 export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY = 'chapter.optimize.direct-draft';
 export const CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY = 'chapter.optimize.typo-check';
 export const CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY = 'chapter.optimize.typo-fix';
+export const CHAPTER_OPTIMIZE_LOOP_PLAN_TEMPLATE_KEY = 'chapter.optimize.loop.plan';
+export const CHAPTER_OPTIMIZE_LOOP_DRAFT_TEMPLATE_KEY = 'chapter.optimize.loop.draft';
+export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_TEMPLATE_KEY =
+  'chapter.optimize.workbench-draft-sex';
+export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_TEMPLATE_KEY =
+  'chapter.optimize.workbench-draft-prose';
+export const CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY = 'chapter.optimize.workbench-review';
+export const CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY =
+  'chapter.optimize.workbench-fix-span';
 
-/** 章节优化全链路模板（plan / draft / direct-draft / typo），用于启用下章衔接等专用上下文 */
+export function isWorkbenchOptimizeTemplateKey(templateKey: string): boolean {
+  const tk = templateKey.trim();
+  return (
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY
+  );
+}
+
+/** 章节优化全链路模板（plan / draft / direct-draft / typo / auto-loop / workbench） */
 export function isChapterOptimizeTemplateKey(templateKey: string): boolean {
   const tk = templateKey.trim();
   return (
@@ -97,8 +116,57 @@ export function isChapterOptimizeTemplateKey(templateKey: string): boolean {
     tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY ||
-    tk === CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY
+    tk === CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_LOOP_PLAN_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_LOOP_DRAFT_TEMPLATE_KEY ||
+    isWorkbenchOptimizeTemplateKey(tk)
   );
+}
+
+function readPositiveInt(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+}
+
+/** 无窗号或只有一窗时视为整章/末窗。 */
+export function isLastOptimizeWindow(extra?: Record<string, unknown>): boolean {
+  const windowTotal = readPositiveInt(extra?.windowTotal);
+  if (windowTotal <= 1) {
+    return true;
+  }
+  const windowIndex = readPositiveInt(extra?.windowIndex);
+  return windowIndex > 0 && windowIndex === windowTotal;
+}
+
+/**
+ * 【下章衔接】只给「整章方案/正文」和「末窗改写」。
+ * 自动循环复诊必须只对当前窗 <indexed-chapter> 出条目；非末窗改写也不是章末，不能看下一章开头。
+ * extra.includeNextChapterHead 为显式布尔时优先生效。
+ */
+export function shouldIncludeNextChapterHead(input: {
+  templateKey: string;
+  extra?: Record<string, unknown>;
+}): boolean {
+  const extra = input.extra;
+  if (extra && Object.prototype.hasOwnProperty.call(extra, 'includeNextChapterHead')) {
+    return extra.includeNextChapterHead === true;
+  }
+  const tk = input.templateKey.trim();
+  if (tk === CHAPTER_OPTIMIZE_LOOP_PLAN_TEMPLATE_KEY) {
+    return false;
+  }
+  if (isWorkbenchOptimizeTemplateKey(tk)) {
+    return false;
+  }
+  if (tk === CHAPTER_OPTIMIZE_LOOP_DRAFT_TEMPLATE_KEY) {
+    return isLastOptimizeWindow(extra);
+  }
+  return isChapterOptimizeTemplateKey(tk);
+}
+
+/** 按场成稿不注入近期章节摘要 / 语义记忆：范围内原文 + 前后只读衔接已够。 */
+export function shouldIncludePriorChapterNarrative(templateKey: string): boolean {
+  return !isWorkbenchOptimizeTemplateKey(templateKey);
 }
 
 /** 写作工作台两阶段：大纲 / 正文（AQ-217~AQ-219） */
@@ -115,8 +183,32 @@ export function shouldUseChapterOptimizeRetrievalQuery(templateKey: string): boo
     tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_LOOP_PLAN_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_LOOP_DRAFT_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY ||
+    tk === CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY ||
     tk === WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY
   );
+}
+
+/** 实验室重跑：字段存在且为 string 时冻住检索，不再打向量库。 */
+export function readFrozenRetrievedEvidence(extra?: Record<string, unknown>): string | undefined {
+  if (!extra || !Object.prototype.hasOwnProperty.call(extra, 'frozenRetrievedEvidence')) {
+    return undefined;
+  }
+  const value = extra.frozenRetrievedEvidence;
+  return typeof value === 'string' ? value : '';
+}
+
+/** 实验室重跑：字段存在且为 string 时覆盖项目 systemPromptText，不改仓库全局默认。 */
+export function readProjectSystemPromptOverride(extra?: Record<string, unknown>): string | undefined {
+  if (!extra || !Object.prototype.hasOwnProperty.call(extra, 'projectSystemPromptOverride')) {
+    return undefined;
+  }
+  const value = extra.projectSystemPromptOverride;
+  return typeof value === 'string' ? value : '';
 }
 
 export function resolveGenerateRetrievalQuery(input: {
@@ -430,7 +522,7 @@ export interface KnowledgeDocumentForMatch {
 
 export const PERSONA_CARD_DOC_TYPE = 'persona_card';
 
-/** 标题匹配后角色卡 / 其他文档独立配额（默认各 10） */
+/** 标题匹配：角色卡按命中全量注入；其它文档仍走配额（默认 10） */
 export const TITLE_MATCHED_PERSONA_DOC_TOP_N = clampKnowledgeDocQuota(
   process.env.PERSONA_CARD_DOC_QUOTA
 );
@@ -535,13 +627,15 @@ export function buildStructuredKnowledgeEvidence(
     };
   }
 
-  const personaTopN = quotas?.personaTopN ?? TITLE_MATCHED_PERSONA_DOC_TOP_N;
   const otherTopN = quotas?.otherTopN ?? TITLE_MATCHED_OTHER_DOC_TOP_N;
-  const scanLimit = personaTopN + otherTopN + 20;
-
-  const ranked = pickTopTitleMatchedDocuments(matchingText, knowledgeDocuments, scanLimit);
-  const personaPicked = ranked.filter((d) => isPersonaCardDoc(d.docType)).slice(0, personaTopN);
-  const otherPicked = ranked.filter((d) => !isPersonaCardDoc(d.docType)).slice(0, otherTopN);
+  const personaDocs = knowledgeDocuments.filter((d) => isPersonaCardDoc(d.docType));
+  const otherDocs = knowledgeDocuments.filter((d) => !isPersonaCardDoc(d.docType));
+  const personaPicked = pickTopTitleMatchedDocuments(
+    matchingText,
+    personaDocs,
+    personaDocs.length
+  );
+  const otherPicked = pickTopTitleMatchedDocuments(matchingText, otherDocs, otherTopN);
   const picked = [...personaPicked, ...otherPicked];
 
   const fullDocuments: RetrievalFullDocument[] = [
@@ -565,7 +659,8 @@ export function buildStructuredKnowledgeEvidence(
   const evidenceBlocks = fullDocuments.map((d, index) => formatKnowledgeEvidenceBlock(d, index));
 
   const budget = resolveEvidenceTokenBudget();
-  const { texts: trimmedBlocks, includedIndices } = trimTextsToTokenBudgetDetailed(
+  const { texts: trimmedBlocks, includedIndices } = trimEvidencePreferPersonaCards(
+    fullDocuments,
     evidenceBlocks,
     budget
   );

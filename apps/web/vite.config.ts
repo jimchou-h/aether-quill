@@ -6,10 +6,11 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src')
-    }
+      '@': resolve(__dirname, 'src'),
+    },
   },
   server: {
+    hmr: false, // 彻底禁用 HMR
     host: '0.0.0.0',
     port: 5173,
     proxy: {
@@ -28,9 +29,9 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        // SSE 文笔优化 / 精修可能远超默认 120s，禁止代理空闲掐断
-        timeout: 0,
-        proxyTimeout: 0,
+        // http-proxy 把 0 当成未设置，会回落到默认 120s；thinking 首包经常超过
+        timeout: 1_800_000,
+        proxyTimeout: 1_800_000,
       },
     },
   },

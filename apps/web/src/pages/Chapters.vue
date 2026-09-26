@@ -12,6 +12,7 @@ import ChapterImportForm from '../components/chapters/ChapterImportForm.vue';
 import ChapterImportDialog from '../components/chapters/ChapterImportDialog.vue';
 import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
+import ChapterOptimizeWorkbenchDialog from '../components/chapters/ChapterOptimizeWorkbenchDialog.vue';
 import ChapterPipelineOptimizeDialog from '../components/chapters/ChapterPipelineOptimizeDialog.vue';
 import ChapterFinalPolishDialog from '../components/chapters/ChapterFinalPolishDialog.vue';
 import ChapterComplianceCheckDialog from '../components/chapters/ChapterComplianceCheckDialog.vue';
@@ -43,7 +44,6 @@ import {
   confirmChapterAfterSaveActions,
   formatChapterAfterSaveProgressMessage,
 } from '../utils/chapterAfterSave';
-
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
 
@@ -64,11 +64,13 @@ const parsingStructuredChapterNo = ref<number | null>(null);
 const showImportModal = ref(false);
 const showImportNovelModal = ref(false);
 const showWritingOptimizeModal = ref(false);
+const showWorkbenchModal = ref(false);
 const showPipelineOptimizeModal = ref(false);
 const showFinalPolishModal = ref(false);
 const showComplianceCheckModal = ref(false);
 const showBatchPipelineOptimizeModal = ref(false);
 const writingOptimizingChapter = ref<ChapterItem | null>(null);
+const workbenchChapter = ref<ChapterItem | null>(null);
 const pipelineOptimizingChapter = ref<ChapterItem | null>(null);
 const finalPolishingChapter = ref<ChapterItem | null>(null);
 const complianceCheckingChapter = ref<ChapterItem | null>(null);
@@ -552,6 +554,19 @@ function handleCloseWritingOptimizeDialog() {
   writingOptimizingChapter.value = null;
 }
 
+function handleOpenWorkbenchDialog(chapter: ChapterItem) {
+  if (!ensureAiActivityIdle()) {
+    return;
+  }
+  workbenchChapter.value = chapter;
+  showWorkbenchModal.value = true;
+}
+
+function handleCloseWorkbenchDialog() {
+  showWorkbenchModal.value = false;
+  workbenchChapter.value = null;
+}
+
 function handleOpenFinalPolishDialog(chapter: ChapterItem) {
   if (!ensureAiActivityIdle()) {
     return;
@@ -834,6 +849,7 @@ onUnmounted(() => {
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
       @writing-optimize="handleOpenWritingOptimizeDialog"
+      @scene-workbench="handleOpenWorkbenchDialog"
       @final-polish="handleOpenFinalPolishDialog"
       @compliance-check="handleOpenComplianceCheckDialog"
       @pipeline-optimize="handleOpenPipelineOptimizeDialog"
@@ -863,6 +879,14 @@ onUnmounted(() => {
       :project-id="projectId"
       :chapter="writingOptimizingChapter"
       @close="handleCloseWritingOptimizeDialog"
+      @applied="handleChapterContentApplied"
+    />
+
+    <ChapterOptimizeWorkbenchDialog
+      :visible="showWorkbenchModal"
+      :project-id="projectId"
+      :chapter="workbenchChapter"
+      @close="handleCloseWorkbenchDialog"
       @applied="handleChapterContentApplied"
     />
 

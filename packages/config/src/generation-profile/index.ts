@@ -242,6 +242,9 @@ export function isWritingTierTemplateKey(templateKey: string): boolean {
   if (key === 'chapter.pipeline.rules.fix') {
     return true;
   }
+  if (key === 'chapter.optimize.workbench-fix-span') {
+    return true;
+  }
   return false;
 }
 

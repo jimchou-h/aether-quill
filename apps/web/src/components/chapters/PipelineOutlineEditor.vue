@@ -1,23 +1,28 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, withDefaults } from 'vue';
 import type { PipelineOutlineItem } from '../../services/api';
 import { isPipelineOutlineEmpty } from '../../utils/pipelineOutline';
 
-const props = defineProps<{
-  title: string;
-  hint: string;
-  required: PipelineOutlineItem[];
-  suggested: PipelineOutlineItem[];
-  busy?: boolean;
-  revisionRound?: number;
-  generated?: boolean;
-  generateLabel?: string;
-  /** 大纲审阅时对照阅读的章节正文（只读） */
-  referenceText?: string;
-  referenceLabel?: string;
-  /** 为 false 时由外层 OutlineReviewLayout 展示正文对照 */
-  embedReference?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    title: string;
+    hint: string;
+    required: PipelineOutlineItem[];
+    suggested: PipelineOutlineItem[];
+    busy?: boolean;
+    revisionRound?: number;
+    generated?: boolean;
+    generateLabel?: string;
+    /** 大纲审阅时对照阅读的章节正文（只读） */
+    referenceText?: string;
+    referenceLabel?: string;
+    /** 为 false 时由外层 OutlineReviewLayout 展示正文对照 */
+    embedReference?: boolean;
+  }>(),
+  {
+    generated: true,
+  }
+);
 
 const emit = defineEmits<{
   'update:required': [items: PipelineOutlineItem[]];

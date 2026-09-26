@@ -14,4 +14,9 @@ describe('resolveChapterOptimizePrepProgress', () => {
     assert.ok(sync.percent < retrieve.percent);
     assert.ok(retrieve.percent <= wait.percent);
   });
+
+  it('maps frozen review to the waiting step', () => {
+    const review = resolveChapterOptimizePrepProgress('frozen_review');
+    assert.equal(review.currentStep, 3);
+  });
 });

@@ -1,0 +1,78 @@
+post:
+  tags:
+    - Projects
+  summary: Stream scene-workbench range draft (SSE)
+  description: |
+    Stream a writing-optimized draft for a user-drawn continuous range. The client sends a frozen
+    full-chapter `sourceText` plus UTF-16 `startOffset` / `endOffset`; the server slices that range
+    as the rewrite target and attaches up to 2000 UTF-16 units before/after as read-only stitch
+    context. The model MUST emit only the current rewrite window. A short range is one call.
+    A long range MAY be rewritten as sequential continuation windows of the same user-drawn
+    scene (not climax splits, and not `splitIntoSegments`). The client concatenates streamed
+    windows into one range draft.
+
+    `profile=sex` uses `chapter.optimize.workbench-draft-sex`. `profile=prose` uses
+    `chapter.optimize.workbench-draft-prose` and MUST NOT inject sex-thickening instructions.
+
+    This path is additive. It MUST NOT change `/optimize/draft` `rewriteMode` (`from-plan` | `direct`)
+    or cause `direct` to start reading `sourceText`.
+
+    SSE event sequence follows `/api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/draft`
+    prep stages:
+      - `data: {"event":"stage","stage":"syncing_context|retrieving|waiting_llm","segmentIndex":1,"segmentTotal":N}`
+      - `data: {"event":"start","traceId":"...","chapterNo":N,"optimizationMode":"single|segmented","segmentTotal":N}`
+      - `data: {"event":"content","data":"...","traceId":"..."}` (multiple; current window body only)
+      - `data: {"event":"end","traceId":"...","finalDraftText":"..."}` (full concatenated range)
+      - `data: {"event":"error","data":"...","traceId":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizeWorkbenchDraftRequest'
+  responses:
+    '200':
+      description: SSE stream of the range draft
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: Server-Sent Events stream of generation events
+    '400':
+      description: Invalid request (empty instruction, inverted offsets, or empty range)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Workbench draft generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

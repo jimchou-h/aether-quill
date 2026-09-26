@@ -8,10 +8,15 @@ import {
   buildStructuredKnowledgeEvidence,
   formatEvidence,
   isChapterOptimizeTemplateKey,
+  isLastOptimizeWindow,
   resolveChapterScopedEmbeddingQuery,
+  shouldIncludeNextChapterHead,
+  shouldIncludePriorChapterNarrative,
   resolveGenerateRetrievalQuery,
   resolveMemoryChapterSummaryEmbeddingQuery,
   resolveRetrievalMinScore,
+  readFrozenRetrievedEvidence,
+  readProjectSystemPromptOverride,
   shouldUseChapterOptimizeRetrievalQuery,
   MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS,
   MEMORY_CHAPTER_SUMMARY_FALLBACK_CHARS,
@@ -168,6 +173,85 @@ describe('resolveGenerateRetrievalQuery', () => {
     assert.equal(shouldUseChapterOptimizeRetrievalQuery('chapter.optimize.direct-draft'), true);
   });
 
+  it('treats auto-loop keys as chapter optimize retrieval so the dialog instruction is the query', () => {
+    assert.equal(isChapterOptimizeTemplateKey('chapter.optimize.loop.plan'), true);
+    assert.equal(isChapterOptimizeTemplateKey('chapter.optimize.loop.draft'), true);
+    assert.equal(shouldUseChapterOptimizeRetrievalQuery('chapter.optimize.loop.plan'), true);
+    assert.equal(shouldUseChapterOptimizeRetrievalQuery('chapter.optimize.loop.draft'), true);
+  });
+
+  it('treats workbench keys as chapter optimize retrieval without next-chapter head', () => {
+    assert.equal(isChapterOptimizeTemplateKey('chapter.optimize.workbench-draft-sex'), true);
+    assert.equal(isChapterOptimizeTemplateKey('chapter.optimize.workbench-draft-prose'), true);
+    assert.equal(isChapterOptimizeTemplateKey('chapter.optimize.workbench-review'), true);
+    assert.equal(isChapterOptimizeTemplateKey('chapter.optimize.workbench-fix-span'), true);
+    assert.equal(
+      shouldUseChapterOptimizeRetrievalQuery('chapter.optimize.workbench-draft-sex'),
+      true
+    );
+    assert.equal(
+      shouldIncludeNextChapterHead({ templateKey: 'chapter.optimize.workbench-draft-sex' }),
+      false
+    );
+    assert.equal(
+      shouldIncludeNextChapterHead({ templateKey: 'chapter.optimize.workbench-review' }),
+      false
+    );
+    assert.equal(
+      shouldIncludePriorChapterNarrative('chapter.optimize.workbench-draft-sex'),
+      false
+    );
+    assert.equal(shouldIncludePriorChapterNarrative('chapter.optimize.draft'), true);
+  });
+
+  it('does not inject next-chapter head into auto-loop diagnose', () => {
+    assert.equal(
+      shouldIncludeNextChapterHead({ templateKey: 'chapter.optimize.loop.plan' }),
+      false
+    );
+    assert.equal(
+      shouldIncludeNextChapterHead({
+        templateKey: 'chapter.optimize.loop.plan',
+        extra: { windowIndex: 3, windowTotal: 3 },
+      }),
+      false
+    );
+  });
+
+  it('injects next-chapter head only for the last auto-loop rewrite window', () => {
+    assert.equal(
+      shouldIncludeNextChapterHead({
+        templateKey: 'chapter.optimize.loop.draft',
+        extra: { windowIndex: 2, windowTotal: 3 },
+      }),
+      false
+    );
+    assert.equal(
+      shouldIncludeNextChapterHead({
+        templateKey: 'chapter.optimize.loop.draft',
+        extra: { windowIndex: 3, windowTotal: 3 },
+      }),
+      true
+    );
+    assert.equal(
+      shouldIncludeNextChapterHead({ templateKey: 'chapter.optimize.loop.draft' }),
+      true
+    );
+    assert.equal(isLastOptimizeWindow({ windowIndex: 1, windowTotal: 1 }), true);
+  });
+
+  it('keeps next-chapter head for whole-chapter optimize plan/draft', () => {
+    assert.equal(shouldIncludeNextChapterHead({ templateKey: 'chapter.optimize.plan' }), true);
+    assert.equal(shouldIncludeNextChapterHead({ templateKey: 'chapter.optimize.draft' }), true);
+    assert.equal(
+      shouldIncludeNextChapterHead({
+        templateKey: 'chapter.optimize.loop.draft',
+        extra: { includeNextChapterHead: false, windowIndex: 3, windowTotal: 3 },
+      }),
+      false
+    );
+  });
+
   it('direct-draft uses instruction and summary instead of chapter-original body', () => {
     const chapterBody = `<chapter-original>\n${'很长的章节正文内容'.repeat(80)}\n</chapter-original>`;
     const q = resolveGenerateRetrievalQuery({
@@ -185,6 +269,25 @@ describe('resolveGenerateRetrievalQuery', () => {
     assert.ok(q.includes('主角与反派首次对峙'));
     assert.ok(!q.includes('<chapter-original>'));
     assert.ok(!q.includes('很长的章节正文内容很长的章节正文内容'));
+  });
+
+  it('auto-loop uses the dialog instruction instead of the indexed chapter body', () => {
+    const indexedBody = `<indexed-chapter>\n${'带编号的章节正文内容'.repeat(80)}\n</indexed-chapter>`;
+    const q = resolveGenerateRetrievalQuery({
+      templateKey: 'chapter.optimize.loop.plan',
+      prompt: `【用户优化要求】\n收紧节奏\n${indexedBody}`,
+      projectCtx: project,
+      extra: {
+        retrievalInstruction: '收紧节奏，减少解释性叙述',
+        retrievalChapterTitle: '雨夜',
+        retrievalChapterSummary: '雨夜对峙。',
+        chapterNo: 12,
+      },
+    });
+    assert.ok(q.includes('收紧节奏，减少解释性叙述'));
+    assert.ok(q.includes('雨夜对峙'));
+    assert.ok(!q.includes('<indexed-chapter>'));
+    assert.ok(!q.includes('带编号的章节正文内容带编号的章节正文内容'));
   });
 });
 
@@ -283,6 +386,31 @@ describe('buildStructuredKnowledgeEvidence', () => {
       assert.ok(r.titleMatchedDocumentIds.includes(id));
     }
   });
+
+  it('injects all title-matched persona cards even when personaTopN is 10', () => {
+    const personaDocs = Array.from({ length: 15 }, (_, i) => ({
+      id: `p${i + 1}`,
+      title: `人物小传：角色${i + 1}`,
+      content: `角色${i + 1}设定全文`,
+      docType: 'persona_card',
+    }));
+    const r = buildStructuredKnowledgeEvidence(
+      1,
+      {
+        chapterNo: 1,
+        chapters: [
+          {
+            chapterNo: 1,
+            structuredMatchingText: Array.from({ length: 15 }, (_, i) => `角色${i + 1}`).join(' '),
+          },
+        ],
+        knowledgeDocuments: personaDocs,
+      },
+      { personaTopN: 10, otherTopN: 0 }
+    );
+    assert.equal(r.titleMatchedDocumentIds.length, 15);
+    assert.equal(r.evidenceDocumentIds.length, 15);
+  });
 });
 
 describe('buildRetrievalQuery', () => {
@@ -350,5 +478,34 @@ describe('resolveRetrievalMinScore', () => {
         process.env.RETRIEVAL_MIN_SCORE = prev;
       }
     }
+  });
+});
+
+describe('readFrozenRetrievedEvidence', () => {
+  it('returns undefined when the field is absent so live generate still retrieves', () => {
+    assert.equal(readFrozenRetrievedEvidence(undefined), undefined);
+    assert.equal(readFrozenRetrievedEvidence({ chapterNo: 3 }), undefined);
+  });
+
+  it('freezes empty string as a real snapshot, not as "please retrieve"', () => {
+    assert.equal(readFrozenRetrievedEvidence({ frozenRetrievedEvidence: '' }), '');
+  });
+
+  it('returns the frozen evidence text when present', () => {
+    assert.equal(
+      readFrozenRetrievedEvidence({ frozenRetrievedEvidence: '宴会厅陈设' }),
+      '宴会厅陈设'
+    );
+  });
+});
+
+describe('readProjectSystemPromptOverride', () => {
+  it('returns undefined when the field is absent so live generate keeps project system', () => {
+    assert.equal(readProjectSystemPromptOverride(undefined), undefined);
+    assert.equal(readProjectSystemPromptOverride({ chapterNo: 3 }), undefined);
+  });
+
+  it('accepts empty string as an explicit override', () => {
+    assert.equal(readProjectSystemPromptOverride({ projectSystemPromptOverride: '' }), '');
   });
 });

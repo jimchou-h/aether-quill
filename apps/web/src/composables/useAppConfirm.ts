@@ -6,6 +6,7 @@ export interface AppConfirmOptions {
   okText?: string;
   cancelText?: string;
   danger?: boolean;
+  zIndex?: number;
 }
 
 /** 统一确认框，替代 window.confirm */
@@ -17,6 +18,7 @@ export function confirmAction(options: AppConfirmOptions): Promise<boolean> {
       okText: options.okText ?? '确定',
       cancelText: options.cancelText ?? '取消',
       okType: options.danger ? 'danger' : 'primary',
+      zIndex: options.zIndex,
       onOk: () => resolve(true),
       onCancel: () => resolve(false),
     });

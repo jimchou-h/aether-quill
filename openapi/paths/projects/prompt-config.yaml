@@ -41,7 +41,10 @@ put:
   tags:
     - PromptConfig
   summary: Update prompt config
-  description: Update prompt configuration (save as draft)
+  description: >
+    Save the project system prompt. Identical text (ignoring CRLF vs LF) is a no-op and
+    keeps isPublished unchanged; only a real content change creates a new unpublished draft.
+    Empty or whitespace-only systemPromptText is rejected and MUST NOT clear the stored prompt.
   security:
     - BearerAuth: []
   parameters:

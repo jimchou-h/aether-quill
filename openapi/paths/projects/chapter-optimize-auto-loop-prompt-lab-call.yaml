@@ -1,0 +1,42 @@
+get:
+  tags:
+    - Projects
+  summary: Get one auto-loop prompt-lab snapshot
+  description: Return a frozen diagnose/rewrite call captured during the latest auto-loop session.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: callId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Snapshot
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/AutoLoopPromptLabCall'
+    '400':
+      description: Snapshot missing
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

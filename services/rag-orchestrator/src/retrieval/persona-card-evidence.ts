@@ -1,3 +1,5 @@
+import { applyHeadCharBudget, PERSONA_CARD_INJECT_MAX_CHARS } from '../context/narrative-budget';
+
 const PERSONA_TITLE_PATTERNS: RegExp[] = [
   /^人物小传[：:]\s*(.+)$/,
   /^角色卡[：:]\s*(.+)$/,
@@ -43,7 +45,12 @@ export function formatPersonaCardEvidenceBlock(input: {
   if (input.reason?.trim()) {
     lines.push(`命中理由：${input.reason.trim()}`);
   }
-  lines.push('', '【设定正文】', input.content.trim(), `---------- 角色卡·${name}·结束 ----------`);
+  lines.push(
+    '',
+    '【设定正文】',
+    applyHeadCharBudget(input.content, PERSONA_CARD_INJECT_MAX_CHARS),
+    `---------- 角色卡·${name}·结束 ----------`
+  );
   return lines.join('\n');
 }
 

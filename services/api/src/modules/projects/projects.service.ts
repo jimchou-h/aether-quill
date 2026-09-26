@@ -119,6 +119,7 @@ import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+  buildSegmentDiagnosisSystemPrompt,
   CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY,
   ChapterVersionConflictError,
@@ -127,11 +128,15 @@ import {
   assertInstruction,
   assertOptimizeDraftRequest,
   assertPlanText,
+  buildFrozenReviewUserPrompt,
+  CHAPTER_OPTIMIZE_FROZEN_REVIEW_SYSTEM_PROMPT,
+  parseFrozenReviewResult,
+  resolveDraftSplitSource,
   buildDirectDraftUserPrompt,
   buildDraftUserPrompt,
   buildPlanRevisionInstruction,
-  buildPlanUserPrompt,
   buildPlanSynthesisUserPrompt,
+  buildPlanUserPrompt,
   buildSegmentDiagnosisUserPrompt,
   buildSegmentPrompt,
   buildTypoCheckUserPrompt,
@@ -154,12 +159,27 @@ import {
   DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   splitIntoSegments,
   validateMergedChapterDraft,
+  measureChapterDraftChangeRate,
   type ChapterOptimizeSegmentRecovery,
   type ChapterOptimizeStage,
   type ChapterOptimizeUsedRelationEvent,
   type ChapterTypoIssueRecord,
   type Segment,
 } from './chapter-optimize.util';
+import {
+  CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
+  assertWorkbenchDraftRequest,
+  assertWorkbenchFixSpanRequest,
+  assertWorkbenchReviewRequest,
+  WORKBENCH_RANGE_CONTEXT_CHARS,
+  buildWorkbenchDraftUserPrompt,
+  buildWorkbenchFixSpanUserPrompt,
+  buildWorkbenchReviewUserPrompt,
+  parseWorkbenchReviewItems,
+  resolveWorkbenchDraftTemplateKey,
+  splitWorkbenchRewriteWindows,
+} from './chapter-optimize-workbench.util';
 import {
   WRITE_CHAPTER_OUTLINE_SYSTEM_PROMPT,
   WRITE_CHAPTER_OUTLINE_TEMPLATE_KEY,
@@ -927,6 +947,24 @@ export class ProjectsService implements OnModuleInit {
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
     return this.personasStore.get(projectId)!;
+  }
+
+  listPersonaCardDocuments(
+    projectId: string,
+    userId?: string
+  ): Array<{ personaId: string | null; title: string; content: string }> {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    this.getProjectOrThrow(projectId);
+    return this.documentsService
+      .findAll(projectId)
+      .filter((doc) => doc.docType === 'persona_card')
+      .map((doc) => ({
+        personaId: doc.personaId ?? null,
+        title: doc.title,
+        content: doc.content,
+      }));
   }
 
   async createPersona(
@@ -2725,6 +2763,10 @@ export class ProjectsService implements OnModuleInit {
       (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
 
     const optimizationMode = strategy.mode === 'segmented' ? 'segmented' : 'single';
+    const planStrategyLabel =
+      strategy.mode === 'segmented'
+        ? `分 ${strategy.segmentCount} 段扫描后整章统筹`
+        : '整章诊断生成方案';
     let traceId = '';
     let segmentDiagnoses: string[] | undefined;
 
@@ -2818,7 +2860,7 @@ export class ProjectsService implements OnModuleInit {
           instruction,
           inputChapterChars: strategy.inputChapterChars,
           optimizationMode,
-          segmentTotal: strategy.segmentCount,
+          segmentTotal: segments.length,
           task: 'chapter.optimize.plan-synthesis',
           appearingCharacters: payload.appearingCharacters,
           callbacks: {
@@ -2832,8 +2874,8 @@ export class ProjectsService implements OnModuleInit {
                   planId,
                   basis,
                   optimizationMode,
-                  segmentTotal: strategy.segmentCount,
-                  strategyLabel: strategy.strategyLabel,
+                  segmentTotal: segments.length,
+                  strategyLabel: planStrategyLabel,
                   inputChapterChars: strategy.inputChapterChars,
                 });
               }
@@ -2863,7 +2905,7 @@ export class ProjectsService implements OnModuleInit {
       if (!streamResult.ok) {
         callbacks.onError(lastSynthesisError, {
           segmentDiagnoses,
-          segmentTotal: strategy.segmentCount,
+          segmentTotal: segments.length,
           retryable: true,
         });
         return;
@@ -2877,8 +2919,8 @@ export class ProjectsService implements OnModuleInit {
           planId,
           basis,
           optimizationMode,
-          segmentTotal: strategy.segmentCount,
-          strategyLabel: strategy.strategyLabel,
+          segmentTotal: segments.length,
+          strategyLabel: planStrategyLabel,
           segmentDiagnoses,
         });
       } catch (error) {
@@ -2919,7 +2961,7 @@ export class ProjectsService implements OnModuleInit {
             basis,
             optimizationMode,
             segmentTotal: 1,
-            strategyLabel: strategy.strategyLabel,
+            strategyLabel: planStrategyLabel,
             inputChapterChars: strategy.inputChapterChars,
           });
         },
@@ -2944,7 +2986,7 @@ export class ProjectsService implements OnModuleInit {
         basis,
         optimizationMode,
         segmentTotal: 1,
-        strategyLabel: strategy.strategyLabel,
+        strategyLabel: planStrategyLabel,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : '优化方案生成失败：方案文本无效';
@@ -2964,6 +3006,7 @@ export class ProjectsService implements OnModuleInit {
       selectedEventIds?: string[];
       segmentDiagnoses?: string[];
       sourceText?: string;
+      reviewGaps?: string;
     },
     userId: string | undefined,
     callbacks: {
@@ -3009,7 +3052,8 @@ export class ProjectsService implements OnModuleInit {
       throw new BadRequestException(`第${normalizedChapterNo}章正文为空，无法优化`);
     }
 
-    const { rewriteMode, instruction, planText, sourceText } = assertOptimizeDraftRequest(payload);
+    const { rewriteMode, instruction, planText, sourceText, reviewGaps } =
+      assertOptimizeDraftRequest(payload);
 
     const settings = this.settingsStore.get(projectId)!;
     const personas = this.personasStore.get(projectId)!;
@@ -3045,8 +3089,9 @@ export class ProjectsService implements OnModuleInit {
       })
     );
 
+    const draftSplitSource = resolveDraftSplitSource(chapter.content, sourceText);
     const planStrategy = resolveChapterOptimizeLengthStrategy(
-      chapter.content.length,
+      draftSplitSource.length,
       this.resolveChapterOptimizeConfig(projectId)
     );
     const chapterSummaryForRetrieval =
@@ -3070,7 +3115,12 @@ export class ProjectsService implements OnModuleInit {
 
     const draftParts: string[] = [];
     if (execution.optimizationMode === 'segmented') {
-      const segments = splitIntoSegments(chapter.content, '', execution.segmentTotal);
+      const injectPlan = rewriteMode === 'from-plan';
+      const segments = splitIntoSegments(
+        draftSplitSource,
+        injectPlan ? planText : '',
+        execution.segmentTotal
+      );
       let previousTail: string | undefined;
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i]!;
@@ -3084,13 +3134,14 @@ export class ProjectsService implements OnModuleInit {
           segment,
           chapter: chapterRef,
           instruction,
-          planText: '',
-          omitOptimizationPlan: true,
+          planText: injectPlan ? planText : '',
+          omitOptimizationPlan: !injectPlan,
           appearingCharacters: payload.appearingCharacters,
           selectedRelationEvents: relationEventRefs,
           previousSegmentTail: previousTail,
           boundaryAnchors: buildSegmentBoundaryAnchors(segment, segments),
           totalSegments: segments.length,
+          reviewGaps: reviewGaps || undefined,
         });
         const draftResult = await this.generateOptimizeDraftSegment({
           projectId,
@@ -3112,6 +3163,7 @@ export class ProjectsService implements OnModuleInit {
           appearingCharacters: payload.appearingCharacters,
           streamToClient: true,
           onContent: callbacks.onContent,
+          onStage: (stage) => callbacks.onStage?.({ stage }),
           templateKey,
         });
         if (!draftResult.ok) {
@@ -3137,6 +3189,7 @@ export class ProjectsService implements OnModuleInit {
               instruction,
               planText,
               sourceText: sourceText || undefined,
+              reviewGaps: reviewGaps || undefined,
               appearingCharacters: payload.appearingCharacters,
               selectedRelationEvents: relationEventRefs,
             });
@@ -3161,6 +3214,7 @@ export class ProjectsService implements OnModuleInit {
         appearingCharacters: payload.appearingCharacters,
         streamToClient: true,
         onContent: callbacks.onContent,
+        onStage: (stage) => callbacks.onStage?.({ stage }),
         templateKey,
       });
       if (!draftResult.ok) {
@@ -3172,16 +3226,20 @@ export class ProjectsService implements OnModuleInit {
 
     const mergedDraft = mergeSegmentDraftTexts(draftParts);
     callbacks.onStage?.({ stage: 'merge_validation' });
-    const qualityCheck = validateMergedChapterDraft({
-      originalContent: chapter.content,
-      mergedDraft,
-      planText: rewriteMode === 'direct' ? instruction : planText,
-    });
+    const qualityCheck = validateMergedChapterDraft({ mergedDraft });
 
     if (!qualityCheck.passed) {
       callbacks.onError(qualityCheck.failures.join('；'));
       return;
     }
+
+    const changeRate = measureChapterDraftChangeRate(chapter.content, mergedDraft);
+    console.info(
+      `[chapter-optimize] trace_id=${traceId} 改动量：${changeRate.originalParagraphs} 段中 ` +
+        `${changeRate.unchangedParagraphs} 段一字未动（${Math.round(
+          changeRate.unchangedRatio * 100
+        )}%），字数 ${changeRate.originalChars} -> ${changeRate.draftChars}`
+    );
 
     let finalDraftText = mergedDraft;
     const safety = await this.runContentSafetyForText(
@@ -3211,6 +3269,412 @@ export class ProjectsService implements OnModuleInit {
       traceId,
       finalDraftText: finalDraftText !== mergedDraft ? finalDraftText : undefined,
       contentSafety: toContentSafetyScanPayload(safety),
+    });
+  }
+
+  async optimizeChapterReviewStream(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction?: string;
+      planText?: string;
+      draftText?: string;
+      planId?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: { traceId: string; chapterNo: number }) => void;
+      onStage?: (event: { stage: ChapterOptimizeStage }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: { traceId: string; reviewText: string; hasMaterialGaps: boolean }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const instruction = normalizeInstruction(payload.instruction);
+    assertInstruction(instruction);
+    const planText = typeof payload.planText === 'string' ? payload.planText.trim() : '';
+    assertPlanText(planText);
+    const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
+    assertDraftText(draftText);
+
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const usedRelationEvents = this.resolveSelectedRelationEvents(
+      projectId,
+      payload.selectedEventIds
+    );
+
+    callbacks.onStage?.({ stage: 'syncing_context' });
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      usedRelationEvents,
+      userId
+    );
+
+    const chapterRef = {
+      chapterNo: chapter.chapterNo,
+      title: chapter.title,
+      content: chapter.content,
+      updatedAt: chapter.updatedAt,
+    };
+    const traceId = makeOptimizationId('review');
+    callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
+    callbacks.onStage?.({ stage: 'frozen_review' });
+
+    try {
+      const reviewText = await this.callOrchestratorGeneratePlainText({
+        projectId,
+        prompt: buildFrozenReviewUserPrompt({
+          chapter: chapterRef,
+          instruction,
+          planText,
+          draftText,
+        }),
+        templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+        systemPromptOverride: CHAPTER_OPTIMIZE_FROZEN_REVIEW_SYSTEM_PROMPT,
+        maxTokens: 2048,
+        context: {
+          task: 'chapter.optimize.frozen-review',
+          chapterNo: normalizedChapterNo,
+          planId: payload.planId,
+          retrievalInstruction: instruction,
+          retrievalChapterTitle: chapter.title,
+          frozenRetrievedEvidence: '',
+        },
+      });
+      const verdict = parseFrozenReviewResult(reviewText);
+      if (verdict.reviewText) {
+        callbacks.onContent(verdict.reviewText);
+      }
+      callbacks.onEnd({
+        traceId,
+        reviewText: verdict.reviewText,
+        hasMaterialGaps: verdict.hasMaterialGaps,
+      });
+    } catch (error) {
+      callbacks.onError(error instanceof Error ? error.message : '冻结验收失败');
+    }
+  }
+
+  async optimizeChapterWorkbenchDraftStream(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction?: string;
+      profile?: string;
+      startOffset?: number;
+      endOffset?: number;
+      baseUpdatedAt?: string;
+      sourceText?: string;
+      appearingCharacters?: string[];
+    },
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: {
+        traceId: string;
+        chapterNo: number;
+        optimizationMode: 'single' | 'segmented';
+        segmentTotal: number;
+        strategyLabel: string;
+      }) => void;
+      onStage?: (event: {
+        stage: ChapterOptimizeStage;
+        segmentIndex?: number;
+        segmentTotal?: number;
+        message?: string;
+      }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: { traceId: string; finalDraftText?: string }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const request = assertWorkbenchDraftRequest(payload);
+    const windows = splitWorkbenchRewriteWindows(request.rangeText);
+    const windowTotal = windows.length;
+
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+
+    callbacks.onStage?.({ stage: 'syncing_context' });
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      [],
+      userId
+    );
+
+    const templateKey = resolveWorkbenchDraftTemplateKey(request.profile);
+    const traceId = makeOptimizationId('draft');
+    callbacks.onStart({
+      traceId,
+      chapterNo: normalizedChapterNo,
+      optimizationMode: windowTotal > 1 ? 'segmented' : 'single',
+      segmentTotal: windowTotal,
+      strategyLabel:
+        windowTotal > 1
+          ? `按场成稿·同场续写 ${windowTotal} 窗`
+          : '按场成稿·范围内一次生成',
+    });
+
+    const chapterSummaryForRetrieval =
+      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+    const draftParts: string[] = [];
+    let accumulated = '';
+
+    for (let index = 0; index < windows.length; index += 1) {
+      const window = windows[index]!;
+      const beforeContext =
+        index === 0
+          ? request.beforeContext
+          : accumulated.slice(-WORKBENCH_RANGE_CONTEXT_CHARS);
+      const afterFromRange = request.rangeText.slice(
+        window.end,
+        window.end + WORKBENCH_RANGE_CONTEXT_CHARS
+      );
+      const afterContext =
+        index === windows.length - 1
+          ? `${afterFromRange}${request.afterContext}`.slice(0, WORKBENCH_RANGE_CONTEXT_CHARS)
+          : afterFromRange;
+      const userPrompt = buildWorkbenchDraftUserPrompt({
+        chapterNo: normalizedChapterNo,
+        title: chapter.title,
+        instruction: request.instruction,
+        profile: request.profile,
+        rangeText: window.text,
+        beforeContext,
+        afterContext,
+        appearingCharacters: request.appearingCharacters,
+        windowIndex: index,
+        windowTotal,
+      });
+      const draftResult = await this.generateOptimizeDraftSegment({
+        projectId,
+        prompt: userPrompt,
+        chapterNo: normalizedChapterNo,
+        chapterTitle: chapter.title,
+        chapterSummaryForRetrieval,
+        instruction: request.instruction,
+        optimizationMode: windowTotal > 1 ? 'segmented' : 'single',
+        segmentIndex: index,
+        segmentTotal: windowTotal,
+        inputSegmentChars: window.text.length,
+        maxTokens: calculateSegmentMaxTokensForIndex(window.text, index, windowTotal),
+        appearingCharacters: request.appearingCharacters,
+        streamToClient: true,
+        onContent: callbacks.onContent,
+        onStage: (stage) =>
+          callbacks.onStage?.({
+            stage,
+            segmentIndex: index + 1,
+            segmentTotal: windowTotal,
+          }),
+        templateKey,
+      });
+      if (!draftResult.ok) {
+        callbacks.onError(draftResult.errorMessage || '按场成稿生成失败');
+        return;
+      }
+      draftParts.push(draftResult.segmentText);
+      accumulated += draftResult.segmentText;
+    }
+
+    const mergedDraft = draftParts.join('');
+    const qualityCheck = validateMergedChapterDraft({ mergedDraft });
+    if (!qualityCheck.passed) {
+      callbacks.onError(qualityCheck.failures.join('；'));
+      return;
+    }
+
+    callbacks.onEnd({
+      traceId,
+      finalDraftText: mergedDraft,
+    });
+  }
+
+  async optimizeChapterWorkbenchReview(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction?: string;
+      profile?: string;
+      rangeText?: string;
+      appearingCharacters?: string[];
+    },
+    userId?: string
+  ): Promise<{ items: ReturnType<typeof parseWorkbenchReviewItems>; traceId: string }> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const request = assertWorkbenchReviewRequest(payload);
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      [],
+      userId
+    );
+
+    const traceId = makeOptimizationId('review');
+    try {
+      const raw = await this.callOrchestratorGeneratePlainText({
+        projectId,
+        prompt: buildWorkbenchReviewUserPrompt({
+          chapterNo: normalizedChapterNo,
+          title: chapter.title,
+          instruction: request.instruction,
+          profile: request.profile,
+          rangeText: request.rangeText,
+          appearingCharacters: request.appearingCharacters,
+        }),
+        templateKey: CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
+        maxTokens: 2048,
+        context: {
+          task: CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
+          chapterNo: normalizedChapterNo,
+          retrievalInstruction: request.instruction,
+          retrievalChapterTitle: chapter.title,
+          retrievalChapterSummary:
+            (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160),
+          frozenRetrievedEvidence: '',
+          ...(request.appearingCharacters?.length
+            ? { appearingCharacters: request.appearingCharacters }
+            : {}),
+        },
+      });
+      return {
+        items: parseWorkbenchReviewItems(raw, request.profile),
+        traceId,
+      };
+    } catch (error) {
+      const message = await resolveUpstreamFailureMessage(error, '按场成稿检查失败');
+      throw new BadGatewayException({ code: 1502, msg: message });
+    }
+  }
+
+  async optimizeChapterWorkbenchFixSpanStream(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      spanText?: string;
+      instruction?: string;
+      profile?: string;
+      beforeContext?: string;
+      afterContext?: string;
+      appearingCharacters?: string[];
+    },
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: { traceId: string; chapterNo: number }) => void;
+      onStage?: (event: { stage: ChapterOptimizeStage }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: { traceId: string; finalDraftText?: string }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const request = assertWorkbenchFixSpanRequest(payload);
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+
+    callbacks.onStage?.({ stage: 'syncing_context' });
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      [],
+      userId
+    );
+
+    const traceId = makeOptimizationId('draft');
+    callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
+    callbacks.onStage?.({ stage: 'retrieving' });
+
+    const chapterSummaryForRetrieval =
+      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+    const draftResult = await this.generateOptimizeDraftSegment({
+      projectId,
+      prompt: buildWorkbenchFixSpanUserPrompt(request),
+      chapterNo: normalizedChapterNo,
+      chapterTitle: chapter.title,
+      chapterSummaryForRetrieval,
+      instruction: request.instruction,
+      optimizationMode: 'single',
+      segmentIndex: 0,
+      segmentTotal: 1,
+      inputSegmentChars: request.spanText.length,
+      maxTokens: calculateSegmentMaxTokensForIndex(request.spanText, 0, 1),
+      appearingCharacters: request.appearingCharacters,
+      streamToClient: true,
+      onContent: callbacks.onContent,
+      onStage: (stage) => callbacks.onStage?.({ stage }),
+      templateKey: CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY,
+    });
+    if (!draftResult.ok) {
+      callbacks.onError(draftResult.errorMessage || '点句修复失败');
+      return;
+    }
+    callbacks.onEnd({
+      traceId,
+      finalDraftText: draftResult.segmentText,
     });
   }
 
@@ -4893,7 +5357,7 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
-   * 分段诊断：失败时自动重试，最多 CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES 次。
+   * 对长章的一段做局部扫描；单段失败时按配置重试，并保留已完成诊断供断点续跑。
    */
   private async runSegmentDiagnosisWithRetry(input: {
     projectId: string;
@@ -4922,9 +5386,7 @@ export class ProjectsService implements OnModuleInit {
       segmentTotal?: number;
       retryCount?: number;
     }) => void;
-  }): Promise<
-    { ok: true; diagnosisText: string } | { ok: false; errorMessage: string }
-  > {
+  }): Promise<{ ok: true; diagnosisText: string } | { ok: false; errorMessage: string }> {
     const boundaryAnchors = buildSegmentBoundaryAnchors(input.segment, input.segments);
     const diagnosisPrompt = buildSegmentDiagnosisUserPrompt({
       chapter: input.chapterRef,
@@ -4935,6 +5397,12 @@ export class ProjectsService implements OnModuleInit {
       selectedRelationEvents: input.relationEventRefs,
       boundaryAnchors,
     });
+
+    const publishedPlan =
+      this.taskPromptsService.getEffectivePublishedTaskPromptsMap(input.projectId)[
+        CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY
+      ];
+    const diagnosisSystemPrompt = buildSegmentDiagnosisSystemPrompt(publishedPlan);
 
     let lastError = '未收到有效诊断';
     for (let retry = 0; retry <= CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES; retry++) {
@@ -4950,6 +5418,8 @@ export class ProjectsService implements OnModuleInit {
           projectId: input.projectId,
           prompt: diagnosisPrompt,
           templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+          systemPromptOverride: diagnosisSystemPrompt,
+          maxTokens: 1536,
           context: {
             task: 'chapter.optimize.segment-diagnosis',
             chapterNo: input.normalizedChapterNo,
@@ -4963,6 +5433,8 @@ export class ProjectsService implements OnModuleInit {
             retrievalInstruction: input.instruction,
             retrievalChapterSummary: input.chapterSummaryForRetrieval,
             retrievalChapterTitle: input.chapterTitle,
+            // 标准要带全；检索仍跳过，避免每段再打一遍向量库
+            frozenRetrievedEvidence: '',
           },
         });
 
@@ -4984,22 +5456,30 @@ export class ProjectsService implements OnModuleInit {
     templateKey: string;
     context: Record<string, unknown>;
     maxTokens?: number;
+    systemPromptOverride?: string;
   }): Promise<string> {
-    const { data } = await axios.post(
+    // 诊断也走 SSE：非流式整包等满 180s 会被 axios/供应商掐断，错误常显示成 stream has been aborted
+    const response = await axios.post(
       `${this.getRagOrchestratorUrl()}/api/generate`,
       {
         projectId: input.projectId,
         prompt: input.prompt,
-        useSSE: false,
+        useSSE: true,
         templateKey: input.templateKey,
         maxTokens: input.maxTokens,
+        systemPromptOverride: input.systemPromptOverride,
         context: input.context,
       },
-      { timeout: 180000 }
+      { responseType: 'stream', timeout: 0 }
     );
 
-    const content = typeof data?.content === 'string' ? data.content : '';
-    return content.trim();
+    const sseResult = await this.readOrchestratorGenerateSseStream(
+      response.data as NodeJS.ReadableStream
+    );
+    if (sseResult.errorMessage) {
+      throw new Error(sseResult.errorMessage);
+    }
+    return sseResult.accumulated.trim();
   }
 
   private async streamOrchestratorPlanGeneration(input: {
@@ -5161,6 +5641,7 @@ export class ProjectsService implements OnModuleInit {
     streamToClient: boolean;
     retryCount?: number;
     onContent?: (text: string) => void;
+    onStage?: (stage: ChapterOptimizeStage) => void;
     templateKey?: string;
   }): Promise<{ ok: boolean; segmentText: string; errorMessage?: string }> {
     let response;
@@ -5211,6 +5692,7 @@ export class ProjectsService implements OnModuleInit {
           onStreamContent: input.streamToClient
             ? (piece) => input.onContent?.(piece)
             : undefined,
+          onStage: input.onStage,
         }
       );
 
@@ -5236,7 +5718,10 @@ export class ProjectsService implements OnModuleInit {
 
   private readOrchestratorGenerateSseStream(
     stream: NodeJS.ReadableStream,
-    options?: { onStreamContent?: (piece: string) => void }
+    options?: {
+      onStreamContent?: (piece: string) => void;
+      onStage?: (stage: ChapterOptimizeStage) => void;
+    }
   ): Promise<{
     accumulated: string;
     orchestratorTraceId: string;
@@ -5265,7 +5750,7 @@ export class ProjectsService implements OnModuleInit {
           if (!dataPart) {
             continue;
           }
-          let event: { event?: string; data?: string; traceId?: string };
+          let event: { event?: string; data?: string; traceId?: string; stage?: string };
           try {
             event = JSON.parse(dataPart);
           } catch {
@@ -5273,9 +5758,20 @@ export class ProjectsService implements OnModuleInit {
           }
 
           switch (event.event) {
+            case 'stage': {
+              if (
+                event.stage === 'retrieving' ||
+                event.stage === 'waiting_llm' ||
+                event.stage === 'syncing_context'
+              ) {
+                options?.onStage?.(event.stage);
+              }
+              break;
+            }
             case 'start': {
               orchestratorTraceId =
                 typeof event.traceId === 'string' ? event.traceId : orchestratorTraceId;
+              options?.onStage?.('waiting_llm');
               break;
             }
             case 'content': {
@@ -5475,7 +5971,7 @@ export class ProjectsService implements OnModuleInit {
         ...item,
       })),
         },
-        { timeout: 30_000 }
+        { timeout: 120_000 }
       );
     } catch (error) {
       const code = axios.isAxiosError(error) ? error.code : undefined;

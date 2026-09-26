@@ -12,6 +12,7 @@ import type {
   ChapterAutoLoopRound,
   ChapterAutoLoopSession,
   ChapterAutoLoopStoppedReason,
+  AutoLoopPromptLabCall,
 } from '../services/api';
 
 export type AutoLoopItemTone = 'neutral' | 'success' | 'warning' | 'danger';
@@ -27,6 +28,7 @@ const ITEM_STATUS_VIEWS: Record<ChapterAutoLoopItemStatus, AutoLoopItemStatusVie
   pending: { label: '待处理', tone: 'neutral', terminal: false },
   applied: { label: '已改写', tone: 'success', terminal: true },
   relocated: { label: '按引文改写', tone: 'warning', terminal: true },
+  deleted: { label: '已删除', tone: 'success', terminal: true },
   skipped_unlocatable: { label: '未能定位·已跳过', tone: 'warning', terminal: true },
   deferred: { label: '超出本轮上限·留待下轮', tone: 'neutral', terminal: true },
   rolled_back: { label: '未通过校验·已还原', tone: 'danger', terminal: true },
@@ -63,7 +65,7 @@ export function summarizeAutoLoopRound(round: ChapterAutoLoopRound): string {
     parts.push(`${round.discardedCount} 条格式不合法已丢弃（本轮诊断不完整）`);
   }
   if (round.converged) {
-    parts.push('未发现严重问题，可以收工');
+    parts.push('未发现明显未落实或改坏，可以收工');
   }
   return parts.length > 0 ? parts.join('，') : '本轮没有产生改动';
 }
@@ -115,6 +117,15 @@ export interface AutoLoopSessionView {
   finalDraft: string;
   stoppedReason: ChapterAutoLoopStoppedReason | null;
   errorMessage: string;
+  resumable: boolean;
+  resumeStage: 'diagnose' | 'rewrite' | null;
+  resumeRoundIndex: number;
+  resumeSegmentIndex: number;
+  resumeSegmentTotal: number;
+  resumeWindowIndex: number;
+  resumeWindowTotal: number;
+  inProgressItems: ChapterAutoLoopItem[];
+  promptLabCalls: AutoLoopPromptLabCall[];
 }
 
 const EMPTY_SESSION_VIEW: AutoLoopSessionView = {
@@ -127,6 +138,15 @@ const EMPTY_SESSION_VIEW: AutoLoopSessionView = {
   finalDraft: '',
   stoppedReason: null,
   errorMessage: '',
+  resumable: false,
+  resumeStage: null,
+  resumeRoundIndex: 0,
+  resumeSegmentIndex: 0,
+  resumeSegmentTotal: 0,
+  resumeWindowIndex: 0,
+  resumeWindowTotal: 0,
+  inProgressItems: [],
+  promptLabCalls: [],
 };
 
 /** 会话缺失（未跑过 / TTL 过期 / API 重启）静默退回全新开始，不弹错。 */
@@ -150,17 +170,143 @@ export function restoreAutoLoopSessionView(
     finalDraft,
     stoppedReason: session.stoppedReason ?? null,
     errorMessage: session.errorMessage ?? '',
+    resumable: session.resumable === true,
+    resumeStage: session.resumeStage ?? null,
+    resumeRoundIndex: session.resumeRoundIndex ?? 0,
+    resumeSegmentIndex: session.resumeSegmentIndex ?? 0,
+    resumeSegmentTotal: session.resumeSegmentTotal ?? 0,
+    resumeWindowIndex: session.resumeWindowIndex ?? 0,
+    resumeWindowTotal: session.resumeWindowTotal ?? 0,
+    inProgressItems: Array.isArray(session.inProgressItems) ? session.inProgressItems : [],
+    promptLabCalls: Array.isArray(session.promptLabCalls) ? session.promptLabCalls : [],
   };
 }
 
 const STOPPED_REASON_TEXT: Record<ChapterAutoLoopStoppedReason, string> = {
-  converged: '已收敛：最后一轮未发现严重问题，提前结束',
+  converged: '已收敛：最后一轮未发现明显未落实或改坏，提前结束',
   budget: '已达轮数上限，按设定停止',
   aborted: '已按你的操作停止，保留最近完成轮的成稿',
   round_rolled_back: '最后一轮越过整章闸门已回滚，循环终止',
-  plan_parse_failed: '复诊输出无法解析（或全部条目格式不合法），循环终止，正文保持原样',
+  plan_parse_failed: '复诊输出无法解析（或全部条目格式不合法），已保留当前稿，可从失败处继续',
 };
 
 export function describeAutoLoopStoppedReason(reason: ChapterAutoLoopStoppedReason): string {
   return STOPPED_REASON_TEXT[reason] ?? '循环已结束';
+}
+
+export function formatAutoLoopWindowPrefix(windowIndex?: number, windowTotal?: number): string {
+  if ((windowTotal ?? 0) > 1 && (windowIndex ?? 0) > 0) {
+    return `第 ${windowIndex}/${windowTotal} 窗`;
+  }
+  return '';
+}
+
+export function autoLoopRoundKey(round: {
+  roundIndex: number;
+  windowIndex?: number;
+}): string {
+  return `${round.windowIndex ?? 1}:${round.roundIndex}`;
+}
+
+export function upsertAutoLoopTimelineRound(
+  rounds: ChapterAutoLoopRound[],
+  incoming: ChapterAutoLoopRound
+): ChapterAutoLoopRound[] {
+  const key = autoLoopRoundKey(incoming);
+  const index = rounds.findIndex((round) => autoLoopRoundKey(round) === key);
+  if (index < 0) {
+    return [...rounds, incoming];
+  }
+  const next = [...rounds];
+  next[index] = incoming;
+  return next;
+}
+
+export function formatAutoLoopTimelineLabel(round: {
+  roundIndex: number;
+  windowIndex?: number;
+  windowTotal?: number;
+}): string {
+  const windowLabel = formatAutoLoopWindowPrefix(round.windowIndex, round.windowTotal);
+  const roundLabel = `第 ${round.roundIndex} 轮`;
+  return windowLabel ? `${windowLabel} · ${roundLabel}` : roundLabel;
+}
+
+export const AUTO_LOOP_PARAGRAPH_MISMATCH_HINT =
+  '以下条目对应该轮当时的正文，段号可能对不上当前预览。';
+
+export function resolveAutoLoopTimelineLatestKey(input: {
+  rounds: ChapterAutoLoopRound[];
+  running: boolean;
+  liveWindowIndex: number;
+  liveRoundIndex: number;
+}): string | null {
+  if (input.running && input.liveRoundIndex > 0) {
+    return `${input.liveWindowIndex > 0 ? input.liveWindowIndex : 1}:${input.liveRoundIndex}`;
+  }
+  const last = input.rounds.at(-1);
+  return last ? autoLoopRoundKey(last) : null;
+}
+
+export function resolveAutoLoopSelectedRoundKey(input: {
+  lockedKey: string | null;
+  rounds: ChapterAutoLoopRound[];
+  running: boolean;
+  liveWindowIndex: number;
+  liveRoundIndex: number;
+}): string | null {
+  const latest = resolveAutoLoopTimelineLatestKey(input);
+  if (input.lockedKey && input.lockedKey !== latest) {
+    const stillPresent = input.rounds.some((round) => autoLoopRoundKey(round) === input.lockedKey);
+    if (stillPresent) {
+      return input.lockedKey;
+    }
+  }
+  return latest;
+}
+
+export function resolveAutoLoopTimelineItems(input: {
+  selectedKey: string | null;
+  latestKey: string | null;
+  rounds: ChapterAutoLoopRound[];
+  liveItems: ChapterAutoLoopItem[];
+  running: boolean;
+}): ChapterAutoLoopItem[] {
+  if (!input.selectedKey || input.selectedKey === input.latestKey) {
+    if (input.running || input.rounds.length === 0) {
+      return input.liveItems;
+    }
+    return input.rounds.at(-1)?.items ?? [];
+  }
+  return input.rounds.find((round) => autoLoopRoundKey(round) === input.selectedKey)?.items ?? [];
+}
+
+export function shouldShowAutoLoopParagraphMismatchHint(input: {
+  selectedKey: string | null;
+  latestKey: string | null;
+}): boolean {
+  return Boolean(input.selectedKey && input.latestKey && input.selectedKey !== input.latestKey);
+}
+
+export function describeAutoLoopResumeAction(input: {
+  resumeStage: 'diagnose' | 'rewrite' | null;
+  resumeRoundIndex: number;
+  resumeSegmentIndex?: number;
+  resumeSegmentTotal?: number;
+  resumeWindowIndex?: number;
+  resumeWindowTotal?: number;
+}): string {
+  const windowPrefix = formatAutoLoopWindowPrefix(input.resumeWindowIndex, input.resumeWindowTotal);
+  const lead = windowPrefix ? `${windowPrefix}，` : '';
+  if (
+    input.resumeStage === 'rewrite' &&
+    (input.resumeSegmentIndex ?? 0) > 0 &&
+    (input.resumeSegmentTotal ?? 0) > 0
+  ) {
+    return `${lead}从第 ${input.resumeRoundIndex} 轮第 ${input.resumeSegmentIndex}/${input.resumeSegmentTotal} 段继续`;
+  }
+  if (input.resumeRoundIndex > 0) {
+    return `${lead}从第 ${input.resumeRoundIndex} 轮复诊继续`;
+  }
+  return windowPrefix ? `从${windowPrefix}失败处继续` : '从失败处继续';
 }

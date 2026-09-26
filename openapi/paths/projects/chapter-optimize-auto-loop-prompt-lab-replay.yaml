@@ -1,0 +1,54 @@
+post:
+  tags:
+    - Projects
+  summary: Replay a frozen auto-loop prompt-lab call
+  description: |
+    Re-run one captured diagnose or rewrite call with a new task Prompt.
+    Uses the frozen user prompt and retrieved evidence. Does not write the chapter.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - callId
+            - taskPromptText
+          properties:
+            callId:
+              type: string
+            taskPromptText:
+              type: string
+            projectSystemPromptText:
+              type: string
+  responses:
+    '200':
+      description: Replay output
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    required:
+                      - output
+                    properties:
+                      output:
+                        type: string

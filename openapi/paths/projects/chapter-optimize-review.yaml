@@ -1,0 +1,66 @@
+post:
+  tags:
+    - Projects
+  summary: Stream frozen-contract review of an optimized draft (SSE)
+  description: |
+    Review a from-plan first draft against the locked contract (user instruction + confirmed plan +
+    project systemPrompt). The model MUST only judge material gaps or regressions, not invent a new
+    polish wishlist.
+
+    SSE event sequence:
+      - `data: {"event":"stage","stage":"syncing_context|frozen_review"}`
+      - `data: {"event":"start","traceId":"...","chapterNo":N}`
+      - `data: {"event":"content","data":"..."}` (newlines escaped as `\\n`)
+      - `data: {"event":"end","traceId":"...","reviewText":"...","hasMaterialGaps":true|false}`
+      - `data: {"event":"error","data":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizationReviewRequest'
+  responses:
+    '200':
+      description: SSE stream of review chunks and verdict
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Invalid request (empty instruction, planText, or draftText)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Review generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

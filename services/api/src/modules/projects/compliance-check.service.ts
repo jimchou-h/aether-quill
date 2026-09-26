@@ -60,6 +60,7 @@ import {
   COMPLIANCE_ERROR,
   COMPLIANCE_GENERATION_CONTEXT,
   COMPLIANCE_OUTLINE_REVISE_FEEDBACK_MAX_CHARS,
+  finalizeComplianceOutline,
   createEmptyComplianceOutlineState,
   makeComplianceTraceId,
   type ComplianceCheckSession,
@@ -258,10 +259,12 @@ export class ComplianceCheckService {
 
     try {
       const parsed = parsePipelineOutlineJson(raw);
-      const sanitized = sanitizeSensoryOutlineWithContentScan(
+      const sanitized = finalizeComplianceOutline(
         parsed,
+        session.sourceText,
         rules,
-        settings.contentSafetyScanEnabled !== false
+        settings.contentSafetyScanEnabled !== false,
+        personaBlock
       );
       const previous = session.outline ?? createEmptyComplianceOutlineState();
       const revisionRound = (previous.revisionRound ?? 0) + 1;
@@ -358,10 +361,12 @@ export class ComplianceCheckService {
 
     try {
       const parsed = parsePipelineOutlineJson(raw);
-      const sanitized = sanitizeSensoryOutlineWithContentScan(
+      const sanitized = finalizeComplianceOutline(
         parsed,
+        session.sourceText,
         rules,
-        settings.contentSafetyScanEnabled !== false
+        settings.contentSafetyScanEnabled !== false,
+        personaBlock
       );
       session.outline = {
         ...sanitized,
@@ -512,7 +517,11 @@ export class ComplianceCheckService {
       );
       selectedPersonaNames = pipelineSession?.selectedPersonaNames;
     }
-    return buildCompliancePersonaBlock(personas, selectedPersonaNames);
+    const cards = this.projectsService.listPersonaCardDocuments(session.projectId, userId);
+    return buildCompliancePersonaBlock(personas, selectedPersonaNames, {
+      cards,
+      sourceText: session.sourceText,
+    });
   }
 
   private runPreScanIssues(

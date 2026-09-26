@@ -52,7 +52,8 @@ const emit = defineEmits<{
 const sessionId = ref('');
 const session = ref<ComplianceCheckSessionView | null>(null);
 const step = ref<DialogStep>('ready');
-const running = ref(false);
+const generating = ref(false);
+const mutating = ref(false);
 const applying = ref(false);
 const errorMessage = ref('');
 const streamingText = ref('');
@@ -64,7 +65,6 @@ const { interruptStream, beginStream, handleStreamError, endStream } =
 function bindActivityInterrupt() {
   if (activityInterruptHandler) {
     activityInterruptHandler.value = () => interruptStream();
-    clearActivityInterrupt();
   }
 }
 
@@ -98,7 +98,9 @@ const showComplianceCoverageChecklist = computed(() => {
 const coverageRequired = computed(() => complianceOutline.value?.required ?? []);
 const coverageSuggested = computed(() => complianceOutline.value?.suggested ?? []);
 
-const isBusy = computed(() => running.value || applying.value);
+const isBusy = computed(() => generating.value || mutating.value || applying.value);
+/** 大纲已展示后不再被生成中的 SSE 锁死；仅在用户点重新检查/修订/确认时禁用。 */
+const outlineEditorBusy = computed(() => mutating.value);
 
 const originalText = computed(() => session.value?.sourceText ?? props.chapter?.content ?? '');
 
@@ -125,7 +127,7 @@ const inlineDiff = computed(() => buildInlineDiffViews(originalText.value, final
 
 const applyBlocked = computed(() => qualityStatus.value === 'blocked');
 
-const modalWidth = computed(() => (step.value === 'outline' ? 1080 : 920));
+const modalWidth = 1080;
 
 const qualityStatusLabel = computed(() => {
   switch (qualityStatus.value) {
@@ -144,7 +146,8 @@ function resetState() {
   sessionId.value = '';
   session.value = null;
   step.value = 'ready';
-  running.value = false;
+  generating.value = false;
+  mutating.value = false;
   applying.value = false;
   errorMessage.value = '';
   streamingText.value = '';
@@ -234,15 +237,16 @@ async function runComplianceCoverageVerify(showToastOnComplete = true) {
     }
   } finally {
     coverageVerifying.value = false;
+    clearActivityInterrupt();
   }
 }
 
 async function handleFixComplianceCoverageItems(itemIds: string[]) {
-  if (!props.chapter || !sessionId.value || running.value || !itemIds.length) {
+  if (!props.chapter || !sessionId.value || mutating.value || !itemIds.length) {
     return;
   }
 
-  running.value = true;
+  mutating.value = true;
   streamingText.value = '';
   errorMessage.value = '';
   bindActivityInterrupt();
@@ -312,8 +316,9 @@ async function handleFixComplianceCoverageItems(itemIds: string[]) {
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
     presentErrorFromCaught(error, '合规按项补修失败');
   } finally {
-    running.value = false;
+    mutating.value = false;
     endStream();
+    clearActivityInterrupt();
   }
 }
 
@@ -384,12 +389,28 @@ async function runCompliancePhase(
           message: formatPipelineStageLabel(event.stage, event.segmentIndex, event.segmentTotal),
         });
       },
-      onEnd: async () => {
-        const refreshed = await apiClient.getComplianceCheckSession(
-          props.projectId,
-          props.chapter!.chapterNo
-        );
-        session.value = refreshed;
+      onEnd: async (event) => {
+        const endEvent = event as {
+          outline?: ComplianceCheckSessionView['outline'];
+          preScanIssues?: PipelineRuleIssue[];
+        };
+        if (session.value) {
+          session.value = {
+            ...session.value,
+            ...(endEvent.preScanIssues ? { preScanIssues: endEvent.preScanIssues } : {}),
+            ...(endEvent.outline ? { outline: endEvent.outline } : {}),
+          };
+        }
+        try {
+          session.value = await apiClient.getComplianceCheckSession(
+            props.projectId,
+            props.chapter!.chapterNo
+          );
+        } catch (refreshError) {
+          if (!session.value) {
+            throw refreshError;
+          }
+        }
         if (onEnd) {
           await onEnd();
         }
@@ -404,12 +425,13 @@ async function runCompliancePhase(
 }
 
 async function startComplianceFlow() {
-  if (!props.chapter || running.value) {
+  if (!props.chapter || generating.value || mutating.value) {
     return;
   }
-  running.value = true;
+  generating.value = true;
   errorMessage.value = '';
   streamingText.value = '';
+  let outlineReady = false;
 
   try {
     const started = await apiClient.startComplianceCheck(props.projectId, props.chapter.chapterNo);
@@ -423,9 +445,14 @@ async function startComplianceFlow() {
     await runCompliancePhase('outline', '生成合规大纲…', signal, async () => {
       syncOutlineFromSession();
       step.value = 'outline';
+      outlineReady = true;
+      generating.value = false;
       completeAiTaskProgress(aiTaskProgress, '合规大纲已生成，请确认');
     });
   } catch (error) {
+    if (outlineReady) {
+      return;
+    }
     if (handleStreamError(error)) {
       return;
     }
@@ -433,13 +460,16 @@ async function startComplianceFlow() {
     failAiTaskProgress(aiTaskProgress, errorMessage.value);
     presentErrorFromCaught(error, '合规检验失败');
   } finally {
-    running.value = false;
-    endStream();
+    generating.value = false;
+    if (!outlineReady) {
+      endStream();
+      clearActivityInterrupt();
+    }
   }
 }
 
 async function confirmOutline() {
-  if (!props.chapter || !sessionId.value || running.value) {
+  if (!props.chapter || !sessionId.value || mutating.value) {
     return;
   }
   if (isPipelineOutlineEmpty(outlineRequired.value, outlineSuggested.value)) {
@@ -452,7 +482,7 @@ async function confirmOutline() {
       return;
     }
   }
-  running.value = true;
+  mutating.value = true;
   errorMessage.value = '';
   try {
     session.value = await apiClient.patchComplianceOutline(
@@ -469,7 +499,7 @@ async function confirmOutline() {
   } catch (error) {
     presentErrorFromCaught(error, '确认大纲失败');
   } finally {
-    running.value = false;
+    mutating.value = false;
   }
 }
 
@@ -538,14 +568,15 @@ async function runRewrite() {
     throw error;
   } finally {
     endStream();
+    clearActivityInterrupt();
   }
 }
 
 async function handleRecheckOutline() {
-  if (!props.chapter || !sessionId.value || running.value) {
+  if (!props.chapter || !sessionId.value || mutating.value) {
     return;
   }
-  running.value = true;
+  mutating.value = true;
   try {
     const result = await apiClient.reviseComplianceOutline(
       props.projectId,
@@ -565,15 +596,15 @@ async function handleRecheckOutline() {
   } catch (error) {
     presentErrorFromCaught(error, 'AI 重新检查失败');
   } finally {
-    running.value = false;
+    mutating.value = false;
   }
 }
 
 async function handleReviseOutline(feedback: string) {
-  if (!props.chapter || !sessionId.value || running.value) {
+  if (!props.chapter || !sessionId.value || mutating.value) {
     return;
   }
-  running.value = true;
+  mutating.value = true;
   try {
     const result = await apiClient.reviseComplianceOutline(
       props.projectId,
@@ -594,7 +625,7 @@ async function handleReviseOutline(feedback: string) {
   } catch (error) {
     presentErrorFromCaught(error, 'AI 修订大纲失败');
   } finally {
-    running.value = false;
+    mutating.value = false;
   }
 }
 
@@ -656,10 +687,11 @@ async function applyResult() {
 }
 
 function handleClose() {
-  if (running.value) {
+  if (generating.value || mutating.value) {
     interruptStream();
     clearActivityInterrupt();
-    running.value = false;
+    generating.value = false;
+    mutating.value = false;
   }
   if (applying.value) {
     return;
@@ -672,6 +704,7 @@ function handleClose() {
   <a-modal
     :open="props.visible"
     :width="modalWidth"
+    wrap-class-name="compliance-check-modal"
     :title="`终稿合规检验${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
     :footer="null"
     :mask-closable="true"
@@ -686,9 +719,9 @@ function handleClose() {
       已选角色：{{ selectedPersonaNames.join('、') }}
     </p>
 
-    <div v-if="running" class="stream-actions">
+    <div v-if="generating || mutating" class="stream-actions">
       <SseInterruptButton @interrupt="() => { interruptStream();
-    clearActivityInterrupt(); running = false; }" />
+    clearActivityInterrupt(); generating = false; mutating = false; }" />
     </div>
     <AiTaskProgressPanel :progress="aiTaskProgress" show-trace-on-error />
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
@@ -702,7 +735,7 @@ function handleClose() {
       </p>
       <div class="step-actions">
         <button type="button" class="primary-button" :disabled="isBusy" @click="startComplianceFlow">
-          {{ running ? '启动中…' : '开始合规检验' }}
+          {{ generating ? '启动中…' : '开始合规检验' }}
         </button>
       </div>
     </section>
@@ -727,7 +760,8 @@ function handleClose() {
           hint="必须项须落实后再进入改写；可在设置页维护「终稿合规 · 大纲/改写」任务 Prompt。"
           :required="outlineRequired"
           :suggested="outlineSuggested"
-          :busy="isBusy"
+          :busy="outlineEditorBusy"
+          :generated="true"
           :revision-round="outlineRevisionRound"
           :embed-reference="false"
           @update:required="outlineRequired = $event"
@@ -1071,5 +1105,12 @@ function handleClose() {
   justify-content: flex-end;
   gap: 0.6rem;
   margin-top: 0.5rem;
+}
+</style>
+
+<style>
+.compliance-check-modal .ant-modal-body {
+  max-height: min(78vh, 820px);
+  overflow: auto;
 }
 </style>

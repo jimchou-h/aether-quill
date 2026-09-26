@@ -12,7 +12,7 @@ import {
   resolveEffectiveStructuredMatchingText,
   resolveWorkbenchStructuredInfo,
 } from '../utils/structured-matching';
-import { readSseLines, readSseSegments } from '../utils/sseStream';
+import { readSseLines, readSseSegments, type SseDataLineHandler } from '../utils/sseStream';
 
 // Type helpers
 type PathMethod<T extends keyof paths> = {
@@ -137,7 +137,7 @@ async function requestAuthorizedSse(
   url: string,
   init: { method: string; body?: string; signal?: AbortSignal },
   parseMode: 'segments' | 'lines',
-  onDataLine: (dataLine: string) => void
+  onDataLine: SseDataLineHandler
 ): Promise<void> {
   const token = await ensureAuthToken();
   const response = await fetch(url, {
@@ -1313,6 +1313,72 @@ export const apiClient = {
     );
   },
 
+  async optimizeChapterReviewSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterOptimizationReviewRequest,
+    callbacks: {
+      onStart?: (event: { traceId: string; chapterNo: number }) => void;
+      onStage?: (event: { stage: ChapterOptimizeStage }) => void;
+      onContent?: (text: string) => void;
+      onEnd?: (event: { traceId: string; reviewText: string; hasMaterialGaps: boolean }) => void;
+      onError?: (message: string) => void;
+    },
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/review`;
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'stage' | 'content' | 'end' | 'error';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            stage?: ChapterOptimizeStage;
+            reviewText?: string;
+            hasMaterialGaps?: boolean;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({ stage: event.stage });
+              }
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId ?? '',
+                reviewText: event.reviewText?.trim() ?? '',
+                hasMaterialGaps: event.hasMaterialGaps === true,
+              });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data ?? '冻结验收失败');
+              break;
+          }
+        } catch {
+          // 忽略不完整 SSE 分片
+        }
+      }
+    );
+  },
+
   async applyChapterOptimization(
     projectId: string,
     chapterNo: number,
@@ -1323,6 +1389,164 @@ export const apiClient = {
       payload
     );
     return this.unwrapPayload<{ chapter: ChapterItem }>(response.data);
+  },
+
+  async optimizeWorkbenchDraftSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterOptimizeWorkbenchDraftRequest,
+    callbacks: ChapterOptimizeDraftCallbacks,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/workbench/draft`;
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as ChapterOptimizeDraftSseEvent & {
+            draftText?: string;
+            spanText?: string;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                strategyLabel: event.strategyLabel,
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
+              break;
+            case 'progress':
+              if (event.taskKey && event.stage && event.message) {
+                callbacks.onProgress?.({
+                  traceId: event.traceId ?? '',
+                  taskKey: event.taskKey,
+                  stage: event.stage,
+                  message: event.message,
+                });
+              }
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'content_replace':
+              callbacks.onContentReplace?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId ?? '',
+                finalDraftText: event.finalDraftText ?? event.draftText ?? event.spanText,
+                contentSafety: event.contentSafety,
+              });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data ?? '按场成稿生成失败');
+              break;
+          }
+        } catch {
+          // 忽略不完整 SSE 分片
+        }
+      }
+    );
+  },
+
+  async reviewWorkbenchRange(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterOptimizeWorkbenchReviewRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/workbench/review`,
+      payload
+    );
+    return this.unwrapPayload<ChapterOptimizeWorkbenchReviewResult>(response.data);
+  },
+
+  async optimizeWorkbenchFixSpanSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterOptimizeWorkbenchFixSpanRequest,
+    callbacks: ChapterOptimizeDraftCallbacks,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/workbench/fix-span`;
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as ChapterOptimizeDraftSseEvent & {
+            draftText?: string;
+            spanText?: string;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+                strategyLabel: event.strategyLabel,
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
+              break;
+            case 'progress':
+              if (event.taskKey && event.stage && event.message) {
+                callbacks.onProgress?.({
+                  traceId: event.traceId ?? '',
+                  taskKey: event.taskKey,
+                  stage: event.stage,
+                  message: event.message,
+                });
+              }
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'content_replace':
+              callbacks.onContentReplace?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId ?? '',
+                finalDraftText: event.finalDraftText ?? event.draftText ?? event.spanText,
+                contentSafety: event.contentSafety,
+              });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data ?? '点句修复失败');
+              break;
+          }
+        } catch {
+          // 忽略不完整 SSE 分片
+        }
+      }
+    );
   },
 
   async autoLoopChapterSSE(
@@ -1361,6 +1585,8 @@ export const apiClient = {
                   paragraphIndex: event.paragraphIndex,
                   segmentIndex: event.segmentIndex,
                   segmentTotal: event.segmentTotal,
+                  windowIndex: event.windowIndex,
+                  windowTotal: event.windowTotal,
                 });
               }
               break;
@@ -1373,6 +1599,12 @@ export const apiClient = {
                   message: event.message,
                 });
               }
+              break;
+            case 'loop_window_start':
+              callbacks.onWindowStart?.({
+                windowIndex: event.windowIndex ?? 1,
+                windowTotal: event.windowTotal ?? 1,
+              });
               break;
             case 'loop_round_start':
               callbacks.onRoundStart?.({
@@ -1401,10 +1633,23 @@ export const apiClient = {
               break;
             case 'loop_round_end':
               if (event.round) {
+                const windowIndex = event.round.windowIndex ?? event.windowIndex;
+                const windowTotal = event.round.windowTotal ?? event.windowTotal;
                 callbacks.onRoundEnd?.({
                   roundIndex: event.roundIndex ?? event.round.roundIndex,
-                  round: event.round,
+                  round: {
+                    ...event.round,
+                    ...(windowIndex ? { windowIndex } : {}),
+                    ...(windowTotal ? { windowTotal } : {}),
+                  },
+                  windowIndex,
+                  windowTotal,
                 });
+              }
+              break;
+            case 'loop_prompt_lab_call':
+              if (event.call) {
+                callbacks.onPromptLabCall?.(event.call);
               }
               break;
             case 'end':
@@ -1414,6 +1659,13 @@ export const apiClient = {
                 stoppedReason: event.stoppedReason ?? 'budget',
                 roundCount: event.roundCount ?? 0,
                 baseUpdatedAt: event.baseUpdatedAt ?? '',
+                resumable: event.resumable === true,
+                resumeStage: event.resumeStage,
+                resumeRoundIndex: event.resumeRoundIndex,
+                resumeSegmentIndex: event.resumeSegmentIndex,
+                resumeSegmentTotal: event.resumeSegmentTotal,
+                resumeWindowIndex: event.resumeWindowIndex,
+                resumeWindowTotal: event.resumeWindowTotal,
               });
               break;
             case 'error':
@@ -1432,6 +1684,48 @@ export const apiClient = {
       `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/auto-loop/session`
     );
     return this.unwrapPayload<ChapterAutoLoopSession | null>(response.data);
+  },
+
+  async getAutoLoopPromptLabCall(projectId: string, chapterNo: number, callId: string) {
+    const response = await http.get(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/auto-loop/prompt-lab/calls/${encodeURIComponent(callId)}`
+    );
+    return this.unwrapPayload<AutoLoopPromptLabCall>(response.data);
+  },
+
+  async replayAutoLoopPromptLab(
+    projectId: string,
+    chapterNo: number,
+    payload: { callId: string; taskPromptText: string; projectSystemPromptText?: string }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/auto-loop/prompt-lab/replay`,
+      payload
+    );
+    return this.unwrapPayload<{ output: string }>(response.data);
+  },
+
+  async adviseAutoLoopPromptLab(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      callId: string;
+      taskPromptText: string;
+      projectSystemText?: string;
+      message: string;
+      latestReplayOutput?: string;
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    }
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/auto-loop/prompt-lab/advise`,
+      payload
+    );
+    return this.unwrapPayload<{
+      suggestedLayer: 'project_system' | 'diagnose';
+      suggestedText: string;
+      rationale?: string;
+    }>(response.data);
   },
 
   async startChapterPipeline(
@@ -1894,53 +2188,55 @@ export const apiClient = {
         signal: options?.signal,
       },
       'segments',
-      (dataPart) => {
+      async (dataPart) => {
+        let event: {
+          event?: 'start' | 'content' | 'end' | 'error' | 'stage';
+          data?: string;
+          traceId?: string;
+          chapterNo?: number;
+          stage?: ChapterPipelineStage;
+          segmentIndex?: number;
+          segmentTotal?: number;
+          versionText?: string;
+          qualityStatus?: FinalPolishQualityStatus;
+          residualIssues?: PipelineRuleIssue[];
+          outline?: ComplianceOutlineState;
+          code?: number;
+        };
         try {
-          const event = JSON.parse(dataPart) as {
-            event?: 'start' | 'content' | 'end' | 'error' | 'stage';
-            data?: string;
-            traceId?: string;
-            chapterNo?: number;
-            stage?: ChapterPipelineStage;
-            segmentIndex?: number;
-            segmentTotal?: number;
-            versionText?: string;
-            qualityStatus?: FinalPolishQualityStatus;
-            residualIssues?: PipelineRuleIssue[];
-            outline?: ComplianceOutlineState;
-            code?: number;
-          };
-
-          switch (event.event) {
-            case 'start':
-              callbacks.onStart?.({
-                traceId: event.traceId || '',
-                chapterNo: event.chapterNo ?? chapterNo,
-                stage: event.stage || 'compliance_outline',
-              });
-              break;
-            case 'stage':
-              callbacks.onStage?.({
-                stage: event.stage || 'compliance_outline',
-                segmentIndex: event.segmentIndex,
-                segmentTotal: event.segmentTotal,
-              });
-              break;
-            case 'content': {
-              const piece = (event.data || '').replace(/\\n/g, '\n');
-              callbacks.onContent?.(piece);
-              break;
-            }
-            case 'end':
-              callbacks.onEnd?.(event);
-              break;
-            case 'error':
-              callbacks.onError?.(event.data || '合规检验失败');
-              break;
-          }
+          event = JSON.parse(dataPart) as typeof event;
         } catch {
-          // ignore malformed SSE chunk
+          return false;
         }
+
+        switch (event.event) {
+          case 'start':
+            callbacks.onStart?.({
+              traceId: event.traceId || '',
+              chapterNo: event.chapterNo ?? chapterNo,
+              stage: event.stage || 'compliance_outline',
+            });
+            break;
+          case 'stage':
+            callbacks.onStage?.({
+              stage: event.stage || 'compliance_outline',
+              segmentIndex: event.segmentIndex,
+              segmentTotal: event.segmentTotal,
+            });
+            break;
+          case 'content': {
+            const piece = (event.data || '').replace(/\\n/g, '\n');
+            callbacks.onContent?.(piece);
+            break;
+          }
+          case 'end':
+            await Promise.resolve(callbacks.onEnd?.(event));
+            return true;
+          case 'error':
+            callbacks.onError?.(event.data || '合规检验失败');
+            return true;
+        }
+        return false;
       }
     );
   },
@@ -2595,7 +2891,7 @@ export interface ChapterPipelineRunCallbacks {
     segmentTotal?: number;
   }) => void;
   onContent?: (text: string) => void;
-  onEnd?: (event: Record<string, unknown>) => void;
+  onEnd?: (event: Record<string, unknown>) => void | Promise<void>;
   onError?: (message: string) => void;
 }
 
@@ -2717,6 +3013,16 @@ export interface ChapterOptimizationDraftRequest {
   selectedEventIds?: string[];
   segmentDiagnoses?: string[];
   sourceText?: string;
+  reviewGaps?: string;
+}
+
+export interface ChapterOptimizationReviewRequest {
+  instruction: string;
+  planText: string;
+  draftText: string;
+  planId?: string;
+  appearingCharacters?: string[];
+  selectedEventIds?: string[];
 }
 
 export interface ChapterOptimizationApplyRequest {
@@ -2724,6 +3030,46 @@ export interface ChapterOptimizationApplyRequest {
   expectedChapterUpdatedAt: string;
   planId?: string;
   preserveSummary?: boolean;
+}
+
+export type ChapterOptimizeWorkbenchProfile = 'sex' | 'prose';
+
+export interface ChapterOptimizeWorkbenchDraftRequest {
+  instruction: string;
+  profile: ChapterOptimizeWorkbenchProfile;
+  startOffset: number;
+  endOffset: number;
+  baseUpdatedAt: string;
+  sourceText: string;
+  appearingCharacters?: string[];
+}
+
+export interface ChapterOptimizeWorkbenchReviewRequest {
+  profile: ChapterOptimizeWorkbenchProfile;
+  rangeText: string;
+  instruction?: string;
+  appearingCharacters?: string[];
+}
+
+export interface ChapterOptimizeWorkbenchFixSpanRequest {
+  spanText: string;
+  instruction: string;
+  profile: ChapterOptimizeWorkbenchProfile;
+  beforeContext?: string;
+  afterContext?: string;
+  appearingCharacters?: string[];
+}
+
+export interface ChapterOptimizeWorkbenchReviewResult {
+  items: Array<{
+    id: string;
+    kind: string;
+    severity?: string;
+    anchorQuote: string;
+    issue: string;
+    instruction: string;
+  }>;
+  traceId?: string;
 }
 
 export interface ChapterOptimizationPlanResult {
@@ -2746,7 +3092,8 @@ export type ChapterOptimizeStage =
   | 'draft_segment'
   | 'merge_validation'
   | 'content_safety_scan'
-  | 'content_safety_rewrite';
+  | 'content_safety_rewrite'
+  | 'frozen_review';
 
 interface ChapterOptimizePlanSseEvent {
   event?: 'start' | 'stage' | 'content' | 'end' | 'error';
@@ -2818,6 +3165,7 @@ export type ChapterAutoLoopItemStatus =
   | 'pending'
   | 'applied'
   | 'relocated'
+  | 'deleted'
   | 'skipped_unlocatable'
   | 'deferred'
   | 'rolled_back'
@@ -2833,6 +3181,7 @@ export interface ChapterAutoLoopItem {
   status: ChapterAutoLoopItemStatus;
   resolvedParagraphIndex?: number;
   note?: string;
+  promptLabCallId?: string;
 }
 
 export interface ChapterAutoLoopRound {
@@ -2847,6 +3196,26 @@ export interface ChapterAutoLoopRound {
   converged: boolean;
   rolledBack: boolean;
   rollbackReason?: string;
+  windowIndex?: number;
+  windowTotal?: number;
+  promptLabCallId?: string;
+}
+
+export type AutoLoopPromptLabKind = 'diagnose' | 'rewrite';
+
+export interface AutoLoopPromptLabCall {
+  id: string;
+  kind: AutoLoopPromptLabKind;
+  templateKey: string;
+  roundIndex: number;
+  windowIndex?: number;
+  windowTotal?: number;
+  paragraphIndex?: number;
+  userPrompt: string;
+  taskPromptText: string;
+  output: string;
+  frozenRetrievedEvidence: string;
+  createdAt: string;
 }
 
 export type ChapterAutoLoopStoppedReason =
@@ -2867,6 +3236,15 @@ export interface ChapterAutoLoopSession {
   finalDraft: string;
   stoppedReason: ChapterAutoLoopStoppedReason;
   errorMessage?: string;
+  resumable?: boolean;
+  resumeStage?: 'diagnose' | 'rewrite';
+  resumeRoundIndex?: number;
+  resumeSegmentIndex?: number;
+  resumeSegmentTotal?: number;
+  resumeWindowIndex?: number;
+  resumeWindowTotal?: number;
+  inProgressItems?: ChapterAutoLoopItem[];
+  promptLabCalls?: AutoLoopPromptLabCall[];
   createdAt: string;
   updatedAt: string;
 }
@@ -2875,6 +3253,7 @@ export interface ChapterAutoLoopRequest {
   instruction: string;
   roundBudget?: number;
   appearingCharacters?: string[];
+  resume?: boolean;
 }
 
 export type ChapterAutoLoopStage =
@@ -2889,9 +3268,11 @@ interface ChapterAutoLoopSseEvent {
     | 'stage'
     | 'progress'
     | 'loop_round_start'
+    | 'loop_window_start'
     | 'loop_plan_items'
     | 'loop_item_status'
     | 'loop_round_end'
+    | 'loop_prompt_lab_call'
     | 'end'
     | 'error';
   data?: string;
@@ -2904,6 +3285,8 @@ interface ChapterAutoLoopSseEvent {
   paragraphIndex?: number;
   segmentIndex?: number;
   segmentTotal?: number;
+  windowIndex?: number;
+  windowTotal?: number;
   paragraphCount?: number;
   taskKey?: string;
   message?: string;
@@ -2914,9 +3297,17 @@ interface ChapterAutoLoopSseEvent {
   discardedCount?: number;
   item?: ChapterAutoLoopItem;
   round?: ChapterAutoLoopRound;
+  call?: AutoLoopPromptLabCall;
   finalDraftText?: string;
   stoppedReason?: ChapterAutoLoopStoppedReason;
   roundCount?: number;
+  resumable?: boolean;
+  resumeStage?: 'diagnose' | 'rewrite';
+  resumeRoundIndex?: number;
+  resumeSegmentIndex?: number;
+  resumeSegmentTotal?: number;
+  resumeWindowIndex?: number;
+  resumeWindowTotal?: number;
 }
 
 export interface ChapterAutoLoopCallbacks {
@@ -2932,8 +3323,11 @@ export interface ChapterAutoLoopCallbacks {
     paragraphIndex?: number;
     segmentIndex?: number;
     segmentTotal?: number;
+    windowIndex?: number;
+    windowTotal?: number;
   }) => void;
   onProgress?: (event: AiTaskProgressEvent) => void;
+  onWindowStart?: (event: { windowIndex: number; windowTotal: number }) => void;
   onRoundStart?: (event: {
     roundIndex: number;
     roundBudget: number;
@@ -2948,13 +3342,26 @@ export interface ChapterAutoLoopCallbacks {
     discardedCount: number;
   }) => void;
   onItemStatus?: (event: { roundIndex: number; item: ChapterAutoLoopItem }) => void;
-  onRoundEnd?: (event: { roundIndex: number; round: ChapterAutoLoopRound }) => void;
+  onRoundEnd?: (event: {
+    roundIndex: number;
+    round: ChapterAutoLoopRound;
+    windowIndex?: number;
+    windowTotal?: number;
+  }) => void;
+  onPromptLabCall?: (call: AutoLoopPromptLabCall) => void;
   onEnd?: (event: {
     traceId: string;
     finalDraftText: string;
     stoppedReason: ChapterAutoLoopStoppedReason;
     roundCount: number;
     baseUpdatedAt: string;
+    resumable?: boolean;
+    resumeStage?: 'diagnose' | 'rewrite';
+    resumeRoundIndex?: number;
+    resumeSegmentIndex?: number;
+    resumeSegmentTotal?: number;
+    resumeWindowIndex?: number;
+    resumeWindowTotal?: number;
   }) => void;
   onError?: (message: string) => void;
 }
@@ -2979,6 +3386,8 @@ export function formatChapterOptimizeStageLabel(
         : `分段诊断${retry}`;
     case 'plan_synthesis':
       return `方案汇总${retry}`;
+    case 'frozen_review':
+      return `对照合同验收${retry}`;
     case 'draft_segment':
       return segmentIndex && segmentTotal
         ? `正文生成 ${segmentIndex}/${segmentTotal}`

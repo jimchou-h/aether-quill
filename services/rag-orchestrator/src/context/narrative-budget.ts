@@ -16,6 +16,8 @@ export function clampNarrativeBlockMaxChars(
 export const DEFAULT_OUTLINE_MAX_CHARS = 4000;
 export const DEFAULT_PERSONA_PROFILE_MAX_CHARS = 2000;
 export const DEFAULT_RELATION_MEMO_MAX_CHARS = 2000;
+/** 出场人物静态角色卡按匹配注入全文；99999 只挡住极端超大文档 */
+export const PERSONA_CARD_INJECT_MAX_CHARS = 99999;
 
 export function applyHeadCharBudget(text: string, maxChars: number): string {
   const trimmed = text.trim();

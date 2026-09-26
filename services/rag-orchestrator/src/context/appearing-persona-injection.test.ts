@@ -44,6 +44,46 @@ describe('buildAppearingPersonaInjection', () => {
     assert.deepEqual(result.injectedNames, ['林策']);
   });
 
+  it('can omit the static card when retrieval already carries the full card', () => {
+    const result = buildAppearingPersonaInjection({
+      appearingNames: ['林策'],
+      currentChapterNo: 5,
+      includeStaticCard: false,
+      personas: [
+        {
+          id: 'p1',
+          name: '林策',
+          profile: '简介备用',
+          state: '待更新',
+          status: 'published',
+          chapterStates: [
+            {
+              chapterNo: 4,
+              appeared: true,
+              snapshot: { clothing: '黑袍', status: '冷静' },
+              summaryLine: '着装：黑袍；状态：冷静',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+      knowledgeDocuments: [
+        {
+          id: 'd1',
+          title: '林策角色卡',
+          content: '静态设定：港口走私客。'.repeat(5),
+          docType: 'persona_card',
+          personaId: 'p1',
+        },
+      ],
+    });
+
+    assert.equal(result.text.includes('【静态设定卡】'), false);
+    assert.equal(result.text.includes('港口走私客'), false);
+    assert.ok(result.text.includes('【动态快照】'));
+    assert.ok(result.text.includes('黑袍'));
+  });
+
   it('falls back to profile when no linked card', () => {
     const result = buildAppearingPersonaInjection({
       appearingNames: ['阿宁'],
@@ -63,5 +103,28 @@ describe('buildAppearingPersonaInjection', () => {
     assert.ok(result.text.includes('【人物简介】'));
     assert.ok(result.text.includes('短发少女'));
     assert.ok(result.text.includes('【当前状态】'));
+  });
+
+  it('injects matched static persona cards in full, ignoring the 2k profile budget', () => {
+    const cardBody = '静态设定：港口走私客。'.repeat(200);
+    assert.ok(cardBody.length > 2000);
+    const result = buildAppearingPersonaInjection({
+      appearingNames: ['林策'],
+      staticCardMaxChars: 2000,
+      personas: [
+        { id: 'p1', name: '林策', profile: '简介备用', state: '待更新', status: 'published' },
+      ],
+      knowledgeDocuments: [
+        {
+          id: 'd1',
+          title: '林策角色卡',
+          content: cardBody,
+          docType: 'persona_card',
+          personaId: 'p1',
+        },
+      ],
+    });
+    assert.ok(result.text.includes(cardBody.trim()));
+    assert.ok(!result.text.includes('已按预算截断'));
   });
 });

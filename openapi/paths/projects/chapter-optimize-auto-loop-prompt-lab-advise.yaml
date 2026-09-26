@@ -1,0 +1,79 @@
+post:
+  tags:
+    - Projects
+  summary: Advise a task Prompt from a frozen auto-loop call
+  description: |
+    Author critiques the frozen diagnose output. The advisor returns which layer to
+    edit (`project_system` or `diagnose`), a full replacement text, and a short rationale.
+    Does not write editors, generate chapter prose, publish, or replay.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - callId
+            - taskPromptText
+            - message
+          properties:
+            callId:
+              type: string
+            taskPromptText:
+              type: string
+            projectSystemText:
+              type: string
+            message:
+              type: string
+            latestReplayOutput:
+              type: string
+            history:
+              type: array
+              items:
+                type: object
+                required:
+                  - role
+                  - content
+                properties:
+                  role:
+                    type: string
+                    enum: [user, assistant]
+                  content:
+                    type: string
+  responses:
+    '200':
+      description: Suggested task Prompt
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    required:
+                      - suggestedLayer
+                      - suggestedText
+                    properties:
+                      suggestedLayer:
+                        type: string
+                        enum: [project_system, diagnose]
+                      suggestedText:
+                        type: string
+                      rationale:
+                        type: string

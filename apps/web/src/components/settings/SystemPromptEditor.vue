@@ -29,7 +29,9 @@ async function handleRollback() {
 <template>
   <section class="panel">
     <h3 class="panel-title">系统提示词（systemPromptText）</h3>
-    <p class="field-hint">设置该项目的全局写作约束和风格指导，保存后生成链路将使用此文本。</p>
+    <p class="field-hint">
+      设置该项目的全局写作约束和风格指导。保存草稿不会改发布状态；点发布后生成链路才用新稿。
+    </p>
 
     <div class="version-bar">
       <span
@@ -52,7 +54,11 @@ async function handleRollback() {
     />
 
     <div class="action-bar">
-      <button class="secondary-button" :disabled="store.saving" @click="handleSave">
+      <button
+        class="secondary-button"
+        :disabled="store.saving || !store.hasDraft"
+        @click="handleSave"
+      >
         {{ store.saving ? '保存中...' : '保存草稿' }}
       </button>
       <button

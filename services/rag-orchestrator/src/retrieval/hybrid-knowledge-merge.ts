@@ -6,10 +6,9 @@ import type {
 import {
   PERSONA_CARD_DOC_TYPE,
   TITLE_MATCHED_OTHER_DOC_TOP_N,
-  TITLE_MATCHED_PERSONA_DOC_TOP_N,
 } from './knowledge-retrieval';
 import { aggregateChunksByDocument, buildDocumentHitReason } from './doc-aggregator';
-import { resolveEvidenceTokenBudget, trimTextsToTokenBudgetDetailed } from './token-budget';
+import { resolveEvidenceTokenBudget, trimEvidencePreferPersonaCards } from './token-budget';
 import {
   assembleStructuredEvidenceText,
   formatKnowledgeEvidenceBlock,
@@ -119,7 +118,6 @@ export function mergeTitleAndVectorEvidence(
   vector: KnowledgeRetrievalResult | null,
   quotas?: { personaTopN?: number; otherTopN?: number }
 ): HybridMergeResult {
-  const personaTopN = quotas?.personaTopN ?? TITLE_MATCHED_PERSONA_DOC_TOP_N;
   const otherTopN = quotas?.otherTopN ?? TITLE_MATCHED_OTHER_DOC_TOP_N;
 
   const titleDocs = structured?.fullDocuments ?? [];
@@ -157,10 +155,7 @@ export function mergeTitleAndVectorEvidence(
   const personaFromVector = vectorOnly.filter((d) => isPersona(d.docType));
   const otherFromVector = vectorOnly.filter((d) => !isPersona(d.docType));
 
-  const personas = [
-    ...personaFromTitle,
-    ...personaFromVector.slice(0, Math.max(0, personaTopN - personaFromTitle.length)),
-  ].slice(0, personaTopN);
+  const personas = [...personaFromTitle, ...personaFromVector];
   const others = [
     ...otherFromTitle,
     ...otherFromVector.slice(0, Math.max(0, otherTopN - otherFromTitle.length)),
@@ -169,7 +164,8 @@ export function mergeTitleAndVectorEvidence(
   const fullDocuments = [...personas, ...others];
   const evidenceBlocks = fullDocuments.map((d, index) => formatKnowledgeEvidenceBlock(d, index));
   const budget = resolveEvidenceTokenBudget();
-  const { texts: trimmedBlocks, includedIndices } = trimTextsToTokenBudgetDetailed(
+  const { texts: trimmedBlocks, includedIndices } = trimEvidencePreferPersonaCards(
+    fullDocuments,
     evidenceBlocks,
     budget
   );

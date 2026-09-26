@@ -1,0 +1,70 @@
+post:
+  tags:
+    - Projects
+  summary: Stream scene-workbench span fix (SSE)
+  description: |
+    Rewrite only the selected span of a workbench range draft. The model MUST output the replacement
+    span only. `beforeContext` / `afterContext` are read-only and MUST NOT appear in the output.
+
+    Used both for a user-drawn sentence selection and for a review item whose `anchorQuote` uniquely
+    locates in the current range draft. Locating 0 or >1 matches is a client concern
+    (`skipped_unlocatable`); this endpoint only rewrites the provided `spanText`.
+
+    SSE event sequence follows single-mode optimize draft prep:
+      - `data: {"event":"stage","stage":"syncing_context|retrieving|waiting_llm"}`
+      - `data: {"event":"start","traceId":"...","chapterNo":N}`
+      - `data: {"event":"content","data":"..."}` (replacement span only)
+      - `data: {"event":"end","traceId":"...","finalDraftText":"..."}`
+      - `data: {"event":"error","data":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizeWorkbenchFixSpanRequest'
+  responses:
+    '200':
+      description: SSE stream of the replacement span
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: Server-Sent Events stream of generation events
+    '400':
+      description: Invalid request (empty spanText or empty instruction)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Workbench span-fix generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

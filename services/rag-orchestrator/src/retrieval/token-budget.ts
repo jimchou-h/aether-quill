@@ -54,3 +54,51 @@ export function trimTextsToTokenBudgetDetailed(
 export function trimTextsToTokenBudget(texts: string[], maxTokens: number): string[] {
   return trimTextsToTokenBudgetDetailed(texts, maxTokens).texts;
 }
+
+function isPersonaCardDocType(docType: string | undefined): boolean {
+  return (docType || '').trim() === 'persona_card';
+}
+
+/**
+ * 角色卡按匹配全量保留，不受证据 token 预算截断；其它文档仍走预算。
+ */
+export function trimEvidencePreferPersonaCards(
+  docs: Array<{ docType?: string }>,
+  blocks: string[],
+  maxTokens: number
+): TrimTextsToTokenBudgetResult {
+  let personaTokens = 0;
+  for (let index = 0; index < docs.length; index += 1) {
+    if (!isPersonaCardDocType(docs[index]?.docType)) {
+      continue;
+    }
+    const trimmed = blocks[index]?.trim() ?? '';
+    if (trimmed) {
+      personaTokens += countEvidenceTokens(trimmed);
+    }
+  }
+  const otherBudget = Math.max(0, maxTokens - personaTokens);
+
+  const textsOut: string[] = [];
+  const includedIndices: number[] = [];
+  let otherUsed = 0;
+  for (let index = 0; index < docs.length; index += 1) {
+    const trimmed = blocks[index]?.trim() ?? '';
+    if (!trimmed) {
+      continue;
+    }
+    if (isPersonaCardDocType(docs[index]?.docType)) {
+      textsOut.push(trimmed);
+      includedIndices.push(index);
+      continue;
+    }
+    const cost = countEvidenceTokens(trimmed);
+    if (otherUsed + cost > otherBudget) {
+      break;
+    }
+    textsOut.push(trimmed);
+    includedIndices.push(index);
+    otherUsed += cost;
+  }
+  return { texts: textsOut, includedIndices };
+}

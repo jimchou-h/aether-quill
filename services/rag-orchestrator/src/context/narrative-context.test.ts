@@ -92,6 +92,30 @@ test('buildNarrativeContextText includes persona snapshot section', async () => 
   assert.equal(result.meta.persona_snapshot_as_of_chapter, 2);
 });
 
+test('buildNarrativeContextText can omit prior summaries and memory for workbench', async () => {
+  const result = await buildNarrativeContextText({
+    projectId: 'p1',
+    personaProfile: '未配置人物设定',
+    outlineSummary: '',
+    chapters: [
+      { chapterNo: 1, title: '一', summary: '第一章摘要不该出现', content: 'c1' },
+      { chapterNo: 2, title: '二', summary: '第二章摘要不该出现', content: 'c2上一章结尾' },
+    ],
+    chapterSummaryPromptCount: 3,
+    chapterSummaryMemoryCount: 3,
+    priorChapterTailChars: 800,
+    contextExcerptMaxChars: 400,
+    currentChapterNo: 2,
+    includePriorChapterSummaries: false,
+    includeChapterSummaryMemory: false,
+  });
+
+  assert.equal(result.text.includes('【近期章节摘要】'), false);
+  assert.equal(result.text.includes('【语义记忆章节】'), false);
+  assert.equal(result.text.includes('第一章摘要不该出现'), false);
+  assert.ok(result.text.includes('【前章衔接】'));
+});
+
 test('buildNarrativeContextText omits next chapter head without optimize flag', async () => {
   const result = await buildNarrativeContextText({
     projectId: 'p1',
@@ -129,6 +153,54 @@ test('buildNarrativeContextText includes identity relation memory block', async 
 
   assert.ok(result.text.includes('【人物身份关系】'));
   assert.ok(result.text.includes('沈镜川 → 叶清歌：师父'));
+});
+
+test('buildNarrativeContextText can omit appearing static cards for workbench', async () => {
+  const result = await buildNarrativeContextText({
+    projectId: 'p1',
+    personaProfile: '未配置人物设定',
+    outlineSummary: '',
+    chapters: [{ chapterNo: 3, title: '三', summary: 's', content: 'c' }],
+    chapterSummaryPromptCount: 0,
+    chapterSummaryMemoryCount: 0,
+    priorChapterTailChars: 0,
+    contextExcerptMaxChars: 400,
+    currentChapterNo: 3,
+    appearingCharacters: ['林策'],
+    includeAppearingStaticCards: false,
+    personas: [
+      {
+        id: 'p1',
+        name: '林策',
+        profile: '简介备用',
+        state: '待更新',
+        status: 'published',
+        chapterStates: [
+          {
+            chapterNo: 2,
+            appeared: true,
+            snapshot: { clothing: '黑袍' },
+            summaryLine: '着装：黑袍',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    ],
+    knowledgeDocuments: [
+      {
+        id: 'd1',
+        title: '林策卡',
+        content: '静态设定很长不应再灌一遍。',
+        docType: 'persona_card',
+        personaId: 'p1',
+      },
+    ],
+  });
+
+  assert.equal(result.text.includes('【静态设定卡】'), false);
+  assert.equal(result.text.includes('静态设定很长不应再灌一遍'), false);
+  assert.ok(result.text.includes('【动态快照】'));
+  assert.ok(result.text.includes('黑袍'));
 });
 
 test('buildNarrativeContextText applies outline budget and appearing persona injection', async () => {

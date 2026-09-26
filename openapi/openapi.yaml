@@ -105,12 +105,26 @@ paths:
     $ref: './paths/projects/chapter-optimize-plan.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/draft:
     $ref: './paths/projects/chapter-optimize-draft.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/review:
+    $ref: './paths/projects/chapter-optimize-review.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/draft:
+    $ref: './paths/projects/chapter-optimize-workbench-draft.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/review:
+    $ref: './paths/projects/chapter-optimize-workbench-review.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/fix-span:
+    $ref: './paths/projects/chapter-optimize-workbench-fix-span.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/apply:
     $ref: './paths/projects/chapter-optimize-apply.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop:
     $ref: './paths/projects/chapter-optimize-auto-loop.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop/session:
     $ref: './paths/projects/chapter-optimize-auto-loop-session.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop/prompt-lab/calls/{callId}:
+    $ref: './paths/projects/chapter-optimize-auto-loop-prompt-lab-call.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop/prompt-lab/replay:
+    $ref: './paths/projects/chapter-optimize-auto-loop-prompt-lab-replay.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop/prompt-lab/advise:
+    $ref: './paths/projects/chapter-optimize-auto-loop-prompt-lab-advise.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-check:
     $ref: './paths/projects/chapter-optimize-typo-check.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-fix:
@@ -2077,7 +2091,7 @@ components:
         instruction:
           type: string
           minLength: 1
-          maxLength: 2000
+          maxLength: 20000
           description: User-provided optimization request for the chapter.
         currentPlanText:
           type: string
@@ -2182,6 +2196,7 @@ components:
             - merge_validation
             - content_safety_scan
             - content_safety_rewrite
+            - frozen_review
             - pipeline_character_outline
             - pipeline_character
             - pipeline_character_traits_outline
@@ -2223,7 +2238,7 @@ components:
         instruction:
           type: string
           minLength: 1
-          maxLength: 2000
+          maxLength: 20000
         planId:
           type: string
           description: Optional plan id from the plan step, for trace correlation.
@@ -2250,6 +2265,190 @@ components:
             Previous-pass optimized draft used as `<chapter-original>` for a follow-up from-plan
             rewrite. Ignored when `rewriteMode` is `direct`. Length/reduction validation still
             compares the result to the stored chapter body, not this field.
+        reviewGaps:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: |
+            Frozen-review gap list injected as 【冻结合同未落实缺口】 on a from-plan refine pass.
+            Ignored when `rewriteMode` is `direct`.
+    ChapterOptimizationReviewRequest:
+      type: object
+      required:
+        - instruction
+        - planText
+        - draftText
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        planText:
+          type: string
+          minLength: 1
+          description: Frozen plan from the current from-plan run.
+        draftText:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          description: First-pass optimized draft to review against the frozen contract.
+        planId:
+          type: string
+          description: Optional plan id from the plan step, for trace correlation.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+        selectedEventIds:
+          type: array
+          items:
+            type: string
+    ChapterOptimizeWorkbenchProfile:
+      type: string
+      enum: [sex, prose]
+      description: |
+        `sex`: thicken intimacy within the drawn range. `prose`: everyday prose polish;
+        MUST NOT inject sex-thickening, pose close-ups, or vocab-swap checks.
+    ChapterOptimizeWorkbenchDraftRequest:
+      type: object
+      required:
+        - instruction
+        - profile
+        - startOffset
+        - endOffset
+        - baseUpdatedAt
+        - sourceText
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        profile:
+          $ref: '#/components/schemas/ChapterOptimizeWorkbenchProfile'
+        startOffset:
+          type: integer
+          minimum: 0
+          description: Inclusive UTF-16 code unit offset into `sourceText` (same as JavaScript String).
+        endOffset:
+          type: integer
+          minimum: 1
+          description: |
+            Exclusive UTF-16 code unit offset into `sourceText`. MUST be greater than `startOffset`.
+            The sliced range MUST be non-empty.
+        baseUpdatedAt:
+          type: string
+          format: date-time
+          description: |
+            ISO timestamp of the chapter when the workbench session opened. Round-tripped to apply;
+            draft generation does not overwrite the stored chapter.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+        sourceText:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          description: |
+            Frozen full-chapter snapshot taken when the workbench opened. The server slices
+            `[startOffset, endOffset)` as the rewrite target, and also attaches up to 2000
+            UTF-16 units immediately before and after as read-only stitch context. Those
+            neighbors MUST NOT be rewritten or emitted. A long sliced range MAY be rewritten
+            as sequential continuation windows of the same scene; the client still receives
+            one concatenated range draft.
+    ChapterOptimizeWorkbenchReviewRequest:
+      type: object
+      required:
+        - profile
+        - rangeText
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: Original user instruction, injected as review context when provided.
+        profile:
+          $ref: '#/components/schemas/ChapterOptimizeWorkbenchProfile'
+        rangeText:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          description: Current range draft to review (not the full chapter).
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+    ChapterOptimizeWorkbenchReviewItem:
+      type: object
+      required:
+        - id
+        - kind
+        - severity
+        - anchorQuote
+        - issue
+        - instruction
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [pose, vocab, regression]
+        severity:
+          type: string
+          enum: [high, medium, low]
+        anchorQuote:
+          type: string
+          minLength: 1
+          description: Continuous excerpt from the current range draft used to locate the span.
+        issue:
+          type: string
+        instruction:
+          type: string
+          description: |
+            Concrete rewrite instruction. MUST NOT be additive thickening
+            (加深 / 写细 / 补接吻 / 更色).
+    ChapterOptimizeWorkbenchReviewResult:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterOptimizeWorkbenchReviewItem'
+          description: Empty list is a successful review with nothing to fix.
+        traceId:
+          type: string
+    ChapterOptimizeWorkbenchFixSpanRequest:
+      type: object
+      required:
+        - spanText
+        - instruction
+        - profile
+      properties:
+        spanText:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: Selected span (or uniquely located anchorQuote) to rewrite.
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        profile:
+          $ref: '#/components/schemas/ChapterOptimizeWorkbenchProfile'
+        beforeContext:
+          type: string
+          maxLength: 2000
+          description: Read-only preceding context (~400 characters). MUST NOT be rewritten.
+        afterContext:
+          type: string
+          maxLength: 2000
+          description: Read-only following context (~400 characters). MUST NOT be rewritten.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
     ChapterOptimizationApplyRequest:
       type: object
       required:
@@ -2291,14 +2490,14 @@ components:
         instruction:
           type: string
           minLength: 1
-          maxLength: 2000
+          maxLength: 20000
           description: |
             The optimization brief. Restated to the model on every round as the invariant
             north star, so later rounds cannot drift away from the original ask.
         roundBudget:
           type: integer
           minimum: 1
-          maximum: 3
+          maximum: 5
           default: 2
           description: |
             Hard upper bound on rounds. Always enforced even when a round still reports `high`
@@ -2308,7 +2507,19 @@ components:
           type: array
           items:
             type: string
-          description: Persona names to inject as character cards for voice consistency.
+          description: |
+            Persona names whose character cards (profile, state, and linked 角色卡 documents)
+            are injected into diagnose and rewrite prompts. If omitted or empty, the server
+            injects cards for names appearing in the chapter plus this chapter's latest
+            创作精修 selection if any; if none match, all published personas.
+        resume:
+          type: boolean
+          default: false
+          description: |
+            Continue from the saved session checkpoint instead of starting from the stored
+            chapter. Use after `plan_parse_failed` or a mid-round abort so completed rounds
+            and already-applied segments are kept. When no resumable session exists the
+            request MUST be rejected rather than silently starting over.
     ChapterAutoLoopItem:
       type: object
       required:
@@ -2343,16 +2554,18 @@ components:
             - pending
             - applied
             - relocated
+            - deleted
             - skipped_unlocatable
             - deferred
             - rolled_back
             - failed
           description: |
             `relocated` means the index was wrong but the quote rescued the location and the
-            rewrite landed. `skipped_unlocatable` means the item was surfaced but deliberately
-            not applied. `deferred` means the per-round paragraph cap pushed it to a later round.
-            `rolled_back` means the segment gate rejected the rewrite and the original paragraph
-            was restored.
+            rewrite landed. `deleted` means the paragraph slot was dropped so neighbors join,
+            without calling the rewrite model. `skipped_unlocatable` means the item was surfaced
+            but deliberately not applied. `deferred` means the per-round paragraph cap pushed it
+            to a later round. `rolled_back` means the segment gate rejected the rewrite and the
+            original paragraph was restored.
         resolvedParagraphIndex:
           type: integer
           minimum: 1
@@ -2360,6 +2573,9 @@ components:
         note:
           type: string
           description: Human-readable reason for a downgrade or rollback.
+        promptLabCallId:
+          type: string
+          description: Rewrite snapshot id for the prompt lab, when this item was rewritten.
     ChapterAutoLoopRound:
       type: object
       required:
@@ -2403,6 +2619,17 @@ components:
             chapter, never the previous round, so per-round growth cannot accumulate unnoticed.
         rollbackReason:
           type: string
+        windowIndex:
+          type: integer
+          minimum: 1
+          description: Character window this round belongs to (1-based). Omit or 1 for a single-window run.
+        windowTotal:
+          type: integer
+          minimum: 1
+          description: Total character windows in this run. Omit or 1 for a single-window run.
+        promptLabCallId:
+          type: string
+          description: Diagnose snapshot id for the prompt lab.
     ChapterAutoLoopSession:
       type: object
       required:
@@ -2425,7 +2652,7 @@ components:
         roundBudget:
           type: integer
           minimum: 1
-          maximum: 3
+          maximum: 5
         baseUpdatedAt:
           type: string
           format: date-time
@@ -2451,10 +2678,88 @@ components:
             - plan_parse_failed
         errorMessage:
           type: string
+        resumable:
+          type: boolean
+          description: |
+            True when the caller can POST the same endpoint with `resume: true` to continue
+            from the failure point (retry that round's diagnosis, or finish remaining
+            segment rewrites) instead of starting over from the stored chapter.
+        resumeStage:
+          type: string
+          enum:
+            - diagnose
+            - rewrite
+          description: Where the next resume request will pick up.
+        resumeRoundIndex:
+          type: integer
+          minimum: 1
+        resumeSegmentIndex:
+          type: integer
+          minimum: 1
+          description: Next segment to rewrite when `resumeStage` is `rewrite` (1-based).
+        resumeSegmentTotal:
+          type: integer
+          minimum: 1
+        resumeWindowIndex:
+          type: integer
+          minimum: 1
+          description: Current character window (1-based) when the chapter was split by segment char size.
+        resumeWindowTotal:
+          type: integer
+          minimum: 1
+          description: Total character windows for this run. Omitted when the chapter is a single window.
+        inProgressItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChapterAutoLoopItem'
+          description: Live items of the unfinished round, if rewrite was interrupted mid-round.
+        promptLabCalls:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutoLoopPromptLabCall'
         createdAt:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+    AutoLoopPromptLabCall:
+      type: object
+      required:
+        - id
+        - kind
+        - templateKey
+        - roundIndex
+        - userPrompt
+        - taskPromptText
+        - output
+        - frozenRetrievedEvidence
+        - createdAt
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [diagnose, rewrite]
+        templateKey:
+          type: string
+        roundIndex:
+          type: integer
+        windowIndex:
+          type: integer
+        windowTotal:
+          type: integer
+        paragraphIndex:
+          type: integer
+        userPrompt:
+          type: string
+        taskPromptText:
+          type: string
+        output:
+          type: string
+        frozenRetrievedEvidence:
+          type: string
+        createdAt:
           type: string
           format: date-time
     ChapterTypoIssue:

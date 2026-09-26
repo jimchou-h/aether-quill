@@ -9,30 +9,36 @@ post:
     untouched paragraphs are reassembled byte-for-byte without passing through the model.
 
     The whole loop runs inside a single SSE request (`runAllModules` sets the precedent for
-    multiple LLM calls per stream). Aborting the request stops the loop; the most recently
+    multiple LLM calls per stream).     Aborting the request stops the loop; the most recently
     completed round already reached the client via `loop_round_end`, so the caller can apply it
-    through `optimize/apply` without re-running anything.
+    through `optimize/apply` without re-running anything. Sending `resume: true` continues from
+    the session checkpoint: retry the failed diagnosis round, or finish remaining segment
+    rewrites, without discarding completed rounds or already-applied paragraphs.
 
-    Rounds are capped by `roundBudget` (1-3, default 2) and exit early when a round produces no
-    `high` severity item. Per-round paragraph hits are capped at
-    `min(12, max(3, floor(paragraphCount * 0.35)))` so the loop cannot degenerate into a full
-    chapter rewrite.
+    Rounds are capped by `roundBudget` (1-5, default 2) **per character window** and exit early when a round produces no
+    `high` severity item. Long chapters split by `chapterOptimizeSegmentCharSize` run a full inner loop
+    in each window. Intermediate rounds cap paragraph hits at
+    `min(12, max(3, floor(paragraphCount * 0.35)))` and mark overflow `deferred`. The last round
+    lifts that cap so locatable items (including carried deferred) are all rewritten before the loop ends.
 
     SSE event sequence:
       - `data: {"event":"stage","stage":"syncing_context"}`
       - `data: {"event":"start","traceId":"...","chapterNo":N,"roundBudget":N,"baseUpdatedAt":"..."}`
+      - `data: {"event":"loop_window_start","windowIndex":i,"windowTotal":M}` (only when char-windowed)
       - `data: {"event":"loop_round_start","roundIndex":N,"roundBudget":N,"paragraphCount":N}`
-      - `data: {"event":"stage","stage":"loop_diagnose","roundIndex":N}`
+      - `data: {"event":"stage","stage":"loop_diagnose","roundIndex":N,"windowIndex":i,"windowTotal":M}`
       - `data: {"event":"loop_plan_items","roundIndex":N,"items":[...],"targetCount":N,"unlocatableCount":N,"deferredCount":N,"discardedCount":N}`
       - `data: {"event":"stage","stage":"loop_segment_rewrite","roundIndex":N,"paragraphIndex":N,"segmentIndex":N,"segmentTotal":N}`
       - `data: {"event":"loop_item_status","roundIndex":N,"item":{...}}` (one per item)
       - `data: {"event":"stage","stage":"loop_round_gate","roundIndex":N}`
-      - `data: {"event":"loop_round_end","roundIndex":N,"round":{...}}`
-      - `data: {"event":"end","traceId":"...","finalDraftText":"...","stoppedReason":"...","roundCount":N,"baseUpdatedAt":"..."}`
+      - `data: {"event":"loop_round_end","roundIndex":N,"round":{...},"windowIndex":i,"windowTotal":M}`
+      - `data: {"event":"end","traceId":"...","finalDraftText":"...","stoppedReason":"...","roundCount":N,"baseUpdatedAt":"...","resumable":true,"resumeStage":"diagnose|rewrite","resumeRoundIndex":N,"resumeSegmentIndex":N,"resumeSegmentTotal":N,"resumeWindowIndex":i,"resumeWindowTotal":M}`
       - `data: {"event":"error","data":"..."}`
 
     Items are always pushed before any rewrite of that round, and every item eventually receives a
     terminal status: locating failures surface as `skipped_unlocatable` rather than being dropped.
+    Whole-paragraph deletion (`删除整段` / `删除整句` / `删除[n]整句`) drops the slot without
+    calling the rewrite model; the item status is `deleted`.
   security:
     - BearerAuth: []
   parameters:
@@ -62,7 +68,7 @@ post:
             type: string
             description: Server-Sent Events stream of auto-loop events
     '400':
-      description: Invalid request (empty instruction, or chapter content empty)
+      description: Invalid request (empty instruction, chapter content empty, or resume with no checkpoint)
       content:
         application/json:
           schema:

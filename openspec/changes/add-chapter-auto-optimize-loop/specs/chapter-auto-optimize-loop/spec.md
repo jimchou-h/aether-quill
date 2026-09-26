@@ -2,7 +2,7 @@
 
 ### Requirement: Auto-loop mode entry and round budget
 
-文笔优化 MUST 提供第三种改写模�?`auto-loop`，与 `from-plan` / `direct` 并列。用�?MUST 能设置轮数上限，范围 1�?，默�?2；浏览器 MUST 记住上次选择。选择 `auto-loop` MUST NOT 改变 `from-plan` / `direct` 两条路径的任何行为�?
+文笔优化 MUST 提供第三种改写模式 `auto-loop`，与 `from-plan` / `direct` 并列。用户 MUST 能设置轮数上限，范围 1～5，默认 2；浏览器 MUST 记住上次选择。选择 `auto-loop` MUST NOT 改变 `from-plan` / `direct` 两条路径的任何行为。
 #### Scenario: Default round budget is two
 
 - **WHEN** 用户在未保存过偏好的浏览器首次切�?`auto-loop`
@@ -36,6 +36,8 @@
 
 ### Requirement: Local segment rewrite only
 
+改写提示 MUST 提供目标段之前与之后各约 2000 字的只读原文，供判断前后情节；MUST NOT 把这些只读块当作可改写正文。扩写 MUST 只加深本段已有动作、感官与情绪，MUST NOT 提前写下后文情节。
+
 正文�?MUST 只重写被命中的段落；未命中段�?MUST 原样保留�?MUST NOT 经过模型。同一段落被多条命中时 MUST 合并为一次改写。一个段落槽�?MAY 产出多个段落，但 MUST NOT 跨槽位合并。单轮命中段落数 MUST NOT 超过 `min(12, max(3, floor(总段�?× 0.35)))`；超出部�?MUST �?`severity` 降序、`paragraphIndex` 升序截断，被截断条目状�?MUST �?`deferred`�?
 #### Scenario: Untouched paragraphs are byte-identical
 
@@ -45,33 +47,68 @@
 - **WHEN** 正文�?10 段而方案给�?9 条分布在 9 个不同段落的条目
 - **THEN** 本轮实际改写段落�?MUST NOT 超过 3，其余条目状�?MUST �?`deferred`
 
+#### Scenario: Rewrite sees about two thousand characters on each side
+
+- **WHEN** 自动循环改写第 2 段，且其后还有第 3、第 4 段
+- **THEN** 改写提示 MUST 包含第 2 段之前与之后合计各不超过约 2000 字的只读原文，且 MUST 包含第 3 段之后仍在预算内的后文
+
 #### Scenario: Multiple items on one paragraph merge into one rewrite
 
-- **WHEN** 两条条目都指向第 5 �?- **THEN** 系统 MUST 对第 5 段只发起一次改写，且该次改�?MUST 同时包含两条指令
+- **WHEN** 两条条目都指向第 5 段
+- **THEN** 系统 MUST 对第 5 段只发起一次改写，且该次改写 MUST 同时包含两条指令
+
+#### Scenario: Whole-paragraph deletion drops the slot without calling rewrite
+
+- **WHEN** 命中段的全部条目指令为删除整段/整句（如「删除[183]整句，使[182]衔接[184]」或「删除第36段整段」）
+- **THEN** 系统 MUST 抽掉该段槽位使前后段直接衔接，MUST NOT 调用改写模型，MUST NOT 将空输出报成「模型未返回正文」，条目状态 MUST 为 `deleted`
+
+#### Scenario: Merge-into-neighbor instruction drops the source slot
+
+- **WHEN** 命中段第 3 段的指令为「将3段与2段合并，删除本段比喻」
+- **THEN** 系统 MUST 抽掉第 3 段槽位、MUST NOT 调用改写模型，第 2 段 MUST 保持原文，条目状态 MUST 为 `deleted`
+
+#### Scenario: Merge instruction on the keeper still rewrites
+
+- **WHEN** 命中段第 2 段的指令为「将3段与2段合并，2段保留现有触感」
+- **THEN** 系统 MUST 仍走第 2 段改写，MUST NOT 抽掉第 2 段
+
+#### Scenario: Partial deletion still rewrites
+
+- **WHEN** 条目指令是「删除这句里的成语」而非删除整段
+- **THEN** 系统 MUST 仍走段落改写，MUST NOT 抽槽
 
 ### Requirement: Layered quality gate
 
-段级校验 MUST 检查替换段字数处于原段 50%�?50% 之间，且 MUST 拒绝含占位语、Markdown 包裹或说明性开头的输出；失败时 MUST 只把该段回滚为原文、状态为 `rolled_back`，MUST NOT 影响同轮其他段落。章级校�?MUST �?*入库原文**为基准，要求本轮成稿总字数处�?90%�?50%（`instruction` 明确允许删减时下限放宽至 60%）；越界�?MUST 整轮回滚到上一轮成稿并终止循环�?
+段级校验 MUST 拒绝空输出、占位语、Markdown 包裹或说明性开头；MUST NOT 因替换段比原段更长或更短而失败。失败时 MUST 只把该段回滚为原文、状态为 `rolled_back`，MUST NOT 影响同轮其他段落。章级校验 MUST 以入库原文为基准，只检查下限（默认 80%，`instruction` 明确允许删减时放宽至 60%）；MUST NOT 因成稿长于原文而整轮回滚。
+
 #### Scenario: One bad segment does not sink the round
 
-- **WHEN** �?3 段替换文本以「以下是修改后的段落：」开�?- **THEN** �?3 �?MUST 回滚为原文且状态为 `rolled_back`，第 7 段的改写 MUST 保留
+- **WHEN** 第 3 段替换文本以「以下是修改后的段落：」开头
+- **THEN** 第 3 段 MUST 回滚为原文且状态为 `rolled_back`，第 7 段的改写 MUST 保留
 
-#### Scenario: Chapter-level drift rolls back the whole round
+#### Scenario: Expansion is accepted at both gates
 
-- **WHEN** 本轮成稿总字数达到入库原文的 160% �?`instruction` 未允许扩写至�?- **THEN** 本轮 MUST 整轮回滚到上一轮成稿，`rolledBack` MUST �?true，且循环 MUST 终止
+- **WHEN** 某段从 65 字扩写到 195 字，或本轮成稿达到入库原文的 200%
+- **THEN** 段级与章级校验 MUST 通过，MUST NOT 因此回滚
 
-#### Scenario: Chapter-level baseline is the stored chapter
+#### Scenario: Chapter-level floor still blocks accidental wipe
 
-- **WHEN** 已跑�?2 轮，每轮相对上一轮各增长 20%
-- **THEN** 章级校验 MUST 以入库原文而非上一轮成稿为基准，因�?MUST 判定越界
+- **WHEN** 本轮成稿总字数低于入库原文的 80%，且 `instruction` 未允许删减
+- **THEN** 本轮 MUST 整轮回滚到上一轮成稿，`rolledBack` MUST 为 true
 
 ### Requirement: Convergence and early exit
 
-方案每一条目 MUST �?`severity`，取�?`high` / `medium` / `low`；`severity` 解析 MUST 容忍常见中文档位与大小写差异。当某轮复诊未产出任�?`high` 条目**且该轮无任何条目被丢弃**时，系统 MUST NOT 再进入下一轮，�?MUST 标记 `converged`——收敛结论只在整份诊断被完整读懂时才成立。轮数上�?MUST 始终作为硬上界生效，即使仍有 `high` 条目�?MUST 停止�?
-#### Scenario: No high severity items ends the loop early
+方案每一条目 MUST 带 `severity`，取值 `high` / `medium` / `low`；`severity` 解析 MUST 容忍常见中文档位与大小写差异。当某轮复诊未产出任何 `high` 或 `medium` 条目**且该轮无任何条目被丢弃**时，系统 MUST NOT 再进入下一轮，并 MUST 标记 `converged`——仅剩 `low`（轻微）或空条目才可收工。轮数上限 MUST 始终作为硬上界生效，即使仍有 `high` 或 `medium` 条目也 MUST 停止。
 
-- **WHEN** 轮数上限�?3，第 2 轮复诊只产出 `medium` �?`low` 条目
-- **THEN** 系统 MUST NOT 发起�?3 轮，`converged` MUST �?true
+#### Scenario: Only low severity items ends the loop early
+
+- **WHEN** 轮数上限为 3，第 2 轮复诊只产出 `low` 条目
+- **THEN** 系统 MUST NOT 发起第 3 轮，`converged` MUST 为 true
+
+#### Scenario: Medium severity items continue the loop
+
+- **WHEN** 轮数上限为 3，第 1 轮复诊产出 `medium` 条目
+- **THEN** 系统 MUST 发起第 2 轮，`converged` MUST 为 false
 
 #### Scenario: Budget caps an unconverged loop
 
@@ -109,6 +146,32 @@
 
 - **WHEN** 会话已过 TTL
 - **THEN** 查询 MUST 返回空会话语义，前端 MUST 呈现为可全新开始，MUST NOT 展示错误
+
+### Requirement: Resume from failure without discarding progress
+
+当循环因复诊无法解析、改写中途中断或用户停止而结束时，系统 MUST 在会话中保留可续跑断点：已完成轮次的成稿 MUST 保留；若中断发生在逐段改写中，MUST 记住尚未改写的段落。一轮改写全部完成并进入下一轮复诊前，会话 MUST 已包含该轮成稿，MUST NOT 把刚完成的一轮写成未发生。前端 MUST 提供从该断点继续的入口，且文案 MUST 区分「下一轮复诊」与「本轮剩余段落」。带 `resume: true` 的请求 MUST 从断点继续，MUST NOT 从入库原文重跑已完成轮次，MUST NOT 重做已经改写成功的段落。没有可续跑会话时，`resume: true` MUST 被拒绝，MUST NOT 静默当成全新开始。
+
+复诊 JSON 部分损坏时，解析器 MUST 尽量救出仍合法的条目并继续本轮，MUST NOT 因单条字段漏引号而把整份方案判死。
+
+#### Scenario: Broken item id does not sink the round
+
+- **WHEN** 复诊 JSON 中某条 `id` 漏了收尾引号，但其余条目合法
+- **THEN** 系统 MUST 解析出其余合法条目并继续改写，MUST NOT 以 `plan_parse_failed` 结束整轮
+
+#### Scenario: Parse failure can retry the same diagnose round
+
+- **WHEN** 第 2 轮复诊两次都无法解析，而第 1 轮已产出成稿
+- **THEN** 会话 MUST 标记可从第 2 轮复诊继续，且 MUST 保留第 1 轮成稿
+
+#### Scenario: Mid-round abort resumes remaining segments
+
+- **WHEN** 用户在第 5 轮改写到第 9/10 段时停止
+- **THEN** 再次 `resume` MUST 从第 9 或第 10 段继续改写，MUST NOT 重做本轮已成功的段落，MUST NOT 丢弃第 1～4 轮成稿
+
+#### Scenario: Completed round is persisted before next diagnose
+
+- **WHEN** 第 1 轮改写已完成、第 2 轮复诊尚未返回
+- **THEN** 查询会话 MUST 包含第 1 轮成稿，MUST NOT 把最终稿写成入库原文
 
 ### Requirement: Configurable loop task prompts
 

@@ -89,7 +89,9 @@ export function isWritingStyleInjectionTemplateKey(templateKey: string): boolean
     key === 'chapter.optimize.draft' ||
     key === 'chapter.optimize.direct-draft' ||
     key === 'chapter.optimize.loop.draft' ||
-    key === 'chapter.optimize.typo-fix'
+    key === 'chapter.optimize.typo-fix' ||
+    key === 'chapter.optimize.workbench-draft-sex' ||
+    key === 'chapter.optimize.workbench-draft-prose'
   ) {
     return true;
   }
@@ -128,6 +130,9 @@ export function resolveSceneTypesForTemplateKey(
   }
   if (key.includes('homogenization.rewrite')) {
     return ['dialogue', 'action', 'atmosphere'];
+  }
+  if (key === 'chapter.optimize.workbench-draft-sex') {
+    return ['intimate'];
   }
   return null;
 }

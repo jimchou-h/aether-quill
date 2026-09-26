@@ -46,18 +46,32 @@ import type {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { ProjectContentSafetyRule } from '@aether-quill/config';
 import { createSseStreamContext } from '../../common/sse-stream.util';
+import {
+  assertWorkbenchDraftRequest,
+  assertWorkbenchFixSpanRequest,
+  assertWorkbenchReviewRequest,
+} from './chapter-optimize-workbench.util';
 
 interface AuthenticatedRequest extends ExpressRequest {
   user?: { userId: string; email: string; name: string };
 }
 
 /** 只有会真正耗时的两个阶段进活动条，同步上下文与整章校验一闪而过，报了反而抖。 */
-function resolveAutoLoopProgressMessage(stage: string, roundIndex?: number): string | null {
+function resolveAutoLoopProgressMessage(
+  stage: string,
+  roundIndex?: number,
+  windowIndex?: number,
+  windowTotal?: number
+): string | null {
+  const windowLabel =
+    (windowTotal ?? 0) > 1 && (windowIndex ?? 0) > 0 ? `第 ${windowIndex}/${windowTotal} 窗` : '';
+  const roundLabel = roundIndex ? `第 ${roundIndex} 轮` : '';
+  const head = [windowLabel, roundLabel].filter(Boolean).join('');
   if (stage === 'loop_diagnose') {
-    return `正在复诊第 ${roundIndex ?? 1} 轮…`;
+    return head ? `正在复诊${head}…` : '正在复诊…';
   }
   if (stage === 'loop_segment_rewrite') {
-    return '正在逐段改写…';
+    return windowLabel ? `正在逐段改写${windowLabel}…` : '正在逐段改写…';
   }
   return null;
 }
@@ -428,6 +442,7 @@ export class ProjectsController {
       selectedEventIds?: string[];
       segmentDiagnoses?: string[];
       sourceText?: string;
+      reviewGaps?: string;
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
@@ -502,6 +517,227 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/workbench/draft')
+  async optimizeChapterWorkbenchDraft(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      instruction?: string;
+      profile?: string;
+      startOffset?: number;
+      endOffset?: number;
+      baseUpdatedAt?: string;
+      sourceText?: string;
+      appearingCharacters?: string[];
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    try {
+      assertWorkbenchDraftRequest(data);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : '请求无效');
+    }
+
+    const userId = req.user?.userId;
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.projectsService.optimizeChapterWorkbenchDraftStream(
+        id,
+        Number(chapterNo),
+        data,
+        userId,
+        {
+          onStart: ({
+            traceId,
+            chapterNo: currentChapterNo,
+            optimizationMode,
+            segmentTotal,
+            strategyLabel,
+          }) => {
+            writeEvent({
+              event: 'start',
+              traceId,
+              chapterNo: currentChapterNo,
+              optimizationMode,
+              segmentTotal,
+              strategyLabel,
+            });
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal }) => {
+            writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (event) => {
+            writeEvent({ event: 'end', ...event });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '按场成稿生成失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/workbench/review')
+  async optimizeChapterWorkbenchReview(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      instruction?: string;
+      profile?: string;
+      rangeText?: string;
+      appearingCharacters?: string[];
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    try {
+      assertWorkbenchReviewRequest(data);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : '请求无效');
+    }
+    return this.projectsService.optimizeChapterWorkbenchReview(
+      id,
+      Number(chapterNo),
+      data,
+      req.user?.userId
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/workbench/fix-span')
+  async optimizeChapterWorkbenchFixSpan(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      spanText?: string;
+      instruction?: string;
+      profile?: string;
+      beforeContext?: string;
+      afterContext?: string;
+      appearingCharacters?: string[];
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    try {
+      assertWorkbenchFixSpanRequest(data);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : '请求无效');
+    }
+
+    const userId = req.user?.userId;
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.projectsService.optimizeChapterWorkbenchFixSpanStream(
+        id,
+        Number(chapterNo),
+        data,
+        userId,
+        {
+          onStart: ({ traceId, chapterNo: currentChapterNo }) => {
+            writeEvent({ event: 'start', traceId, chapterNo: currentChapterNo });
+          },
+          onStage: ({ stage }) => {
+            writeEvent({ event: 'stage', stage });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (event) => {
+            writeEvent({ event: 'end', ...event });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '点句修复失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/review')
+  async optimizeChapterReview(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      instruction?: string;
+      planText?: string;
+      draftText?: string;
+      planId?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.projectsService.optimizeChapterReviewStream(id, Number(chapterNo), data, userId, {
+        onStart: ({ traceId, chapterNo: currentChapterNo }) => {
+          writeEvent({ event: 'start', traceId, chapterNo: currentChapterNo });
+        },
+        onStage: ({ stage }) => {
+          writeEvent({ event: 'stage', stage });
+        },
+        onContent: (text) => {
+          writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+        },
+        onEnd: (event) => {
+          writeEvent({ event: 'end', ...event });
+        },
+        onError: (message) => {
+          writeEvent({ event: 'error', data: message });
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '冻结验收失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/optimize/apply')
   applyChapterOptimization(
     @Param('id') id: string,
@@ -531,6 +767,71 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get(':id/knowledge/chapters/:chapterNo/optimize/auto-loop/prompt-lab/calls/:callId')
+  getAutoLoopPromptLabCall(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Param('callId') callId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.chapterAutoLoopService.getPromptLabCall(
+      id,
+      Number(chapterNo),
+      callId,
+      req.user?.userId
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/auto-loop/prompt-lab/replay')
+  replayAutoLoopPromptLab(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body() body: { callId?: string; taskPromptText?: string; projectSystemPromptText?: string },
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.chapterAutoLoopService.replayPromptLab(
+      id,
+      Number(chapterNo),
+      body.callId ?? '',
+      body.taskPromptText ?? '',
+      req.user?.userId,
+      body.projectSystemPromptText
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/auto-loop/prompt-lab/advise')
+  adviseAutoLoopPromptLab(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    body: {
+      callId?: string;
+      taskPromptText?: string;
+      projectSystemText?: string;
+      message?: string;
+      latestReplayOutput?: string;
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.chapterAutoLoopService.advisePromptLab(
+      id,
+      Number(chapterNo),
+      {
+        callId: body.callId ?? '',
+        taskPromptText: body.taskPromptText ?? '',
+        projectSystemText: body.projectSystemText,
+        message: body.message ?? '',
+        latestReplayOutput: body.latestReplayOutput,
+        history: body.history,
+      },
+      req.user?.userId
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/optimize/auto-loop')
   async runChapterAutoLoop(
     @Param('id') id: string,
@@ -540,6 +841,7 @@ export class ProjectsController {
       instruction?: string;
       roundBudget?: number;
       appearingCharacters?: string[];
+      resume?: boolean;
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse
@@ -563,9 +865,14 @@ export class ProjectsController {
           onStart: (event) => {
             writeEvent({ event: 'start', ...event });
           },
-          onStage: ({ stage, roundIndex }) => {
-            writeEvent({ event: 'stage', stage, roundIndex });
-            const progressMessage = resolveAutoLoopProgressMessage(stage, roundIndex);
+          onStage: ({ stage, roundIndex, windowIndex, windowTotal }) => {
+            writeEvent({ event: 'stage', stage, roundIndex, windowIndex, windowTotal });
+            const progressMessage = resolveAutoLoopProgressMessage(
+              stage,
+              roundIndex,
+              windowIndex,
+              windowTotal
+            );
             if (progressMessage) {
               writeEvent({
                 event: 'progress',
@@ -577,12 +884,21 @@ export class ProjectsController {
           },
           onEngineEvent: (event) => {
             switch (event.type) {
+              case 'window_start':
+                writeEvent({
+                  event: 'loop_window_start',
+                  windowIndex: event.windowIndex,
+                  windowTotal: event.windowTotal,
+                });
+                break;
               case 'round_start':
                 writeEvent({
                   event: 'loop_round_start',
                   roundIndex: event.roundIndex,
                   roundBudget: event.roundBudget,
                   paragraphCount: event.paragraphCount,
+                  windowIndex: event.windowIndex,
+                  windowTotal: event.windowTotal,
                 });
                 break;
               case 'plan_items':
@@ -594,6 +910,8 @@ export class ProjectsController {
                   unlocatableCount: event.unlocatableCount,
                   deferredCount: event.deferredCount,
                   discardedCount: event.discardedCount,
+                  windowIndex: event.windowIndex,
+                  windowTotal: event.windowTotal,
                 });
                 break;
               case 'segment_start':
@@ -604,6 +922,8 @@ export class ProjectsController {
                   paragraphIndex: event.paragraphIndex,
                   segmentIndex: event.segmentIndex,
                   segmentTotal: event.segmentTotal,
+                  windowIndex: event.windowIndex,
+                  windowTotal: event.windowTotal,
                 });
                 break;
               case 'item_status':
@@ -611,6 +931,8 @@ export class ProjectsController {
                   event: 'loop_item_status',
                   roundIndex: event.roundIndex,
                   item: event.item,
+                  windowIndex: event.windowIndex,
+                  windowTotal: event.windowTotal,
                 });
                 break;
               case 'round_end':
@@ -618,9 +940,14 @@ export class ProjectsController {
                   event: 'loop_round_end',
                   roundIndex: event.roundIndex,
                   round: event.round,
+                  windowIndex: event.windowIndex,
+                  windowTotal: event.windowTotal,
                 });
                 break;
             }
+          },
+          onPromptLabCall: (call) => {
+            writeEvent({ event: 'loop_prompt_lab_call', call });
           },
           onEnd: (event) => {
             writeEvent({ event: 'end', ...event });
@@ -629,7 +956,8 @@ export class ProjectsController {
             writeEvent({ event: 'error', data: message });
           },
         },
-        () => sse.isAborted()
+        () => sse.isAborted(),
+        sse.abortSignal
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : '章节自动优化失败';
@@ -1360,7 +1688,7 @@ export class ProjectsController {
         writeEvent({ event: 'error', data: message });
       }
     } finally {
-      res.end();
+      sse.end();
     }
   }
 

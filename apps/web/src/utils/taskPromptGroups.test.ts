@@ -34,6 +34,13 @@ test('auto-loop prompts land in the existing writing group', () => {
   assert.equal(resolveTaskPromptGroupId('chapter.optimize.loop.draft'), 'writing');
 });
 
+test('workbench prompts land in the existing writing group', () => {
+  assert.equal(resolveTaskPromptGroupId('chapter.optimize.workbench-draft-sex'), 'writing');
+  assert.equal(resolveTaskPromptGroupId('chapter.optimize.workbench-draft-prose'), 'writing');
+  assert.equal(resolveTaskPromptGroupId('chapter.optimize.workbench-review'), 'writing');
+  assert.equal(resolveTaskPromptGroupId('chapter.optimize.workbench-fix-span'), 'writing');
+});
+
 test('groupTaskPromptItems buckets list items', () => {
   const grouped = groupTaskPromptItems([
     item('chapter.optimize.draft'),
