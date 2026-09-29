@@ -27,7 +27,7 @@ export interface WorkbenchReviewItem {
 }
 
 const WORKBENCH_REVIEW_KINDS = new Set<WorkbenchReviewKind>(['pose', 'vocab', 'regression']);
-const ADDITIVE_REVIEW_INSTRUCTION = /加深|写细|补接吻|更色/;
+const ADDITIVE_REVIEW_INSTRUCTION = /加深|写细|更浓|再补细节|补接吻|更色/;
 const SOURCE_TEXT_MAX = 200000;
 const INSTRUCTION_MAX = 20000;
 const RANGE_TEXT_MAX = 200000;
@@ -39,9 +39,9 @@ export const WORKBENCH_RANGE_CONTEXT_CHARS = 2000;
 export const WORKBENCH_REWRITE_WINDOW_CHARS = 5200;
 
 export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_SYSTEM_PROMPT = [
-  '你是一位资深小说写作助手，正在对用户划定的连续范围内正文做性爱加料改写。',
+  '你是一位资深小说写作助手，正在对用户划定的连续范围内正文做感官加料改写。',
   'ONLY：输出该范围内改写后的正文；禁止输出范围外文字、方案、说明、Markdown 标题或代码块。',
-  '工作方式：按【用户优化要求】在范围内从头到尾加料重写，加深感官与动作节奏；一场可含多次性爱，须保持范围内时序与空间连续，禁止按高潮次数拆写或省略中间过程。',
+  '工作方式：按【用户优化要求】在范围内从头到尾加料重写，加深感官、节奏与场面细节；须保持范围内时序与空间连续，禁止跳写或省略中间过程。',
   '硬约束：',
   '1) 只改写 <range-original> 中的内容，禁止输出范围前后的原文；',
   '2) 以范围内情节与信息为基础，禁止凭空另起无关剧情；',
@@ -55,13 +55,13 @@ export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_SYSTEM_PROMPT = [
 export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_SYSTEM_PROMPT = [
   '你是一位资深小说写作助手，正在对用户划定的连续范围内正文做日常文笔润色。',
   'ONLY：输出该范围内改写后的正文；禁止输出范围外文字、方案、说明、Markdown 标题或代码块。',
-  '工作方式：按【用户优化要求】理顺节奏、对白与衔接；禁止按性爱加料要求增色、增动作或加体位特写。',
+  '工作方式：按【用户优化要求】理顺节奏、对白与衔接；禁止按感官加料要求增色、堆砌特写或无必要地夸张动作。',
   '硬约束：',
   '1) 只改写 <range-original> 中的内容，禁止输出范围前后的原文；',
   '2) 以范围内情节与信息为基础，禁止凭空另起无关剧情；',
   '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；禁止大段照抄原文；禁止原样输出 <range-original>；',
   '4) 人称、时态、人物名称须与原文一致，除非用户要求明确修改；句式必须重写，不得逐句复述；',
-  '5) 禁止把过场改写成性爱场面。',
+  '5) 禁止把过场无端改写成高潮冲突场面。',
   '6) <before-context> 与 <after-context> 只读，禁止复述或并入输出；改写后的开头须能接在 before 之后，结尾须能接到 after 之前。',
   '7) 必须做出可见的节奏、对白或衔接改动。原文原样交回视为失败。',
 ].join('\n');
@@ -73,11 +73,11 @@ export const CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_SYSTEM_PROMPT = [
   '硬约束：',
   '1) 没有问题必须返回 {"items":[]}，禁止凑数。',
   '2) kind 只允许 pose、vocab、regression。',
-  '3) regression 仅描述：缩写、并段、当拍接触被删、比喻被砍残。不得把「还能更色 / 加深 / 写细 / 补接吻」写成条目。',
-  '4) 若档位为日常文笔（prose）：只允许 regression（可含衔接接不上）；禁止 pose / vocab，禁止要求补体位特写或词表替换。',
-  '5) 若档位为性爱加料（sex）：pose 查体位/空间穿帮，vocab 查用词问题，regression 查改差。',
+  '3) regression 仅描述：缩写、并段、当拍接触被删、比喻被砍残。不得把「还能更浓 / 加深 / 写细 / 再补细节」写成条目。',
+  '4) 若档位为日常文笔（prose）：只允许 regression（可含衔接接不上）；禁止 pose / vocab，禁止要求补动作特写或词表替换。',
+  '5) 若档位为感官加料（sex）：pose 查动作/空间穿帮，vocab 查用词问题，regression 查改差。',
   '6) anchorQuote 必须是成稿中连续出现的原文片段，至少 8 字，不得改写。',
-  '7) instruction 必须写明要改成什么，禁止「加深」「写细」「补接吻」「更色」及同类加料指令。',
+  '7) instruction 必须写明要改成什么，禁止「加深」「写细」「更浓」「再补细节」及同类加料指令。',
   '8) 禁止把用户私有词表写进条目。',
 ].join('\n');
 
@@ -441,7 +441,7 @@ export function buildWorkbenchDraftUserPrompt(input: {
   windowTotal?: number;
 }): string {
   const sections: string[] = [];
-  const profileLabel = input.profile === 'prose' ? '日常文笔' : '性爱加料';
+  const profileLabel = input.profile === 'prose' ? '日常文笔' : '感官加料';
   const windowTotal = input.windowTotal && input.windowTotal > 1 ? input.windowTotal : 0;
   const windowIndex = windowTotal ? (input.windowIndex ?? 0) + 1 : 0;
   sections.push(
@@ -457,7 +457,7 @@ export function buildWorkbenchDraftUserPrompt(input: {
     sections.push(`【本章出场角色】${input.appearingCharacters.join('、')}`);
   }
   if (input.profile === 'prose') {
-    sections.push('【档位约束】本档为日常文笔。禁止按性爱加料要求增色、增动作或加体位特写。');
+    sections.push('【档位约束】本档为日常文笔。禁止按感官加料要求增色、堆砌特写或无必要地夸张动作。');
   }
   if (input.beforeContext) {
     sections.push(`<before-context>\n${input.beforeContext}\n</before-context>`);
@@ -472,7 +472,7 @@ export function buildWorkbenchDraftUserPrompt(input: {
       '必须基于 <range-original> 从头到尾重写；禁止输出范围外原文。',
       '禁止大段照抄原文；禁止「前半改写、后半原样粘贴」；禁止原样输出 <range-original>。',
       input.profile === 'sex'
-        ? '性爱加料：必须有可见加料。原文原样交回视为失败。'
+        ? '感官加料：必须有可见加料。原文原样交回视为失败。'
         : '日常文笔：必须有可见的节奏、对白或衔接改动；禁止原样交回；禁止增色。',
       '若有 <before-context> / <after-context>：只读，用来把头尾接上；不要复述或改写它们。',
     ].join('\n')
@@ -513,7 +513,7 @@ export function buildWorkbenchReviewUserPrompt(input: {
   appearingCharacters?: string[];
 }): string {
   const sections: string[] = [];
-  const profileLabel = input.profile === 'prose' ? '日常文笔' : '性爱加料';
+  const profileLabel = input.profile === 'prose' ? '日常文笔' : '感官加料';
   sections.push(
     `【检查目标】第${input.chapterNo}章「${input.title}」范围内成稿检查（档位：${profileLabel}）`
   );
@@ -525,11 +525,11 @@ export function buildWorkbenchReviewUserPrompt(input: {
   }
   if (input.profile === 'prose') {
     sections.push(
-      '【档位约束】日常文笔：只允许 regression（可含衔接接不上）。禁止 pose / vocab，禁止要求补体位或词表替换。'
+      '【档位约束】日常文笔：只允许 regression（可含衔接接不上）。禁止 pose / vocab，禁止要求补动作特写或词表替换。'
     );
   } else {
     sections.push(
-      '【档位约束】性爱加料：pose=体位/空间穿帮，vocab=用词问题，regression=改差。没有问题返回空列表。'
+      '【档位约束】感官加料：pose=动作/空间穿帮，vocab=用词问题，regression=改差。没有问题返回空列表。'
     );
   }
   sections.push(`<range-draft>\n${input.rangeText}\n</range-draft>`);
@@ -545,7 +545,7 @@ export function buildWorkbenchFixSpanUserPrompt(input: {
   afterContext: string;
 }): string {
   const sections: string[] = [];
-  const profileLabel = input.profile === 'prose' ? '日常文笔' : '性爱加料';
+  const profileLabel = input.profile === 'prose' ? '日常文笔' : '感官加料';
   sections.push(`【改写档位】${profileLabel}`);
   sections.push(`【改写指令】\n${input.instruction}`);
   if (input.beforeContext) {

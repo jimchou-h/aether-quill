@@ -2307,8 +2307,8 @@ components:
       type: string
       enum: [sex, prose]
       description: |
-        `sex`: thicken intimacy within the drawn range. `prose`: everyday prose polish;
-        MUST NOT inject sex-thickening, pose close-ups, or vocab-swap checks.
+        `sex`: sensory thickening within the drawn range (warehouse default is non-erotic).
+        `prose`: everyday prose polish; MUST NOT inject sensory-thickening, action close-ups, or vocab-swap checks.
     ChapterOptimizeWorkbenchDraftRequest:
       type: object
       required:

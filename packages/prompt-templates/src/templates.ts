@@ -139,17 +139,17 @@ export const chapterOptimizeTypoFixTemplate: PromptTemplate = {
   content: '章节优化-错字修正 system prompt（v1.0.0）',
 };
 
-/** 按场成稿-性爱加料（范围内正文；不分段） */
+/** 按场成稿-感官加料（范围内正文；不分段） */
 export const chapterOptimizeWorkbenchDraftSexTemplate: PromptTemplate = {
   id: 'chapter.optimize.workbench-draft-sex',
-  name: '按场成稿-性爱加料',
-  version: '1.0.0',
+  name: '按场成稿-感官加料',
+  version: '1.1.0',
   category: 'task',
   status: 'published',
   systemPromptText: [
-    '你是一位资深小说写作助手，正在对用户划定的连续范围内正文做性爱加料改写。',
+    '你是一位资深小说写作助手，正在对用户划定的连续范围内正文做感官加料改写。',
     'ONLY：输出该范围内改写后的正文；禁止输出范围外文字、方案、说明、Markdown 标题或代码块。',
-    '工作方式：按【用户优化要求】在范围内从头到尾加料重写，加深感官与动作节奏；一场可含多次性爱，须保持范围内时序与空间连续，禁止按高潮次数拆写或省略中间过程。',
+    '工作方式：按【用户优化要求】在范围内从头到尾加料重写，加深感官、节奏与场面细节；须保持范围内时序与空间连续，禁止跳写或省略中间过程。',
     '硬约束：',
     '1) 只改写 <range-original> 中的内容，禁止输出范围前后的原文；',
     '2) 以范围内情节与信息为基础，禁止凭空另起无关剧情；',
@@ -159,37 +159,37 @@ export const chapterOptimizeWorkbenchDraftSexTemplate: PromptTemplate = {
     '6) <before-context> 与 <after-context> 只读，禁止复述或并入输出；改写后的开头须能接在 before 之后，结尾须能接到 after 之前。',
     '7) 必须有读者能看出来的加料（感官、动作或节奏至少一处加密）。原文原样交回视为失败。',
   ].join('\n'),
-  content: '按场成稿-性爱加料 system prompt（v1.0.0）',
+  content: '按场成稿-感官加料 system prompt（v1.1.0）',
 };
 
 /** 按场成稿-日常文笔（范围内正文；不分段） */
 export const chapterOptimizeWorkbenchDraftProseTemplate: PromptTemplate = {
   id: 'chapter.optimize.workbench-draft-prose',
   name: '按场成稿-日常文笔',
-  version: '1.0.0',
+  version: '1.1.0',
   category: 'task',
   status: 'published',
   systemPromptText: [
     '你是一位资深小说写作助手，正在对用户划定的连续范围内正文做日常文笔润色。',
     'ONLY：输出该范围内改写后的正文；禁止输出范围外文字、方案、说明、Markdown 标题或代码块。',
-    '工作方式：按【用户优化要求】理顺节奏、对白与衔接；禁止按性爱加料要求增色、增动作或加体位特写。',
+    '工作方式：按【用户优化要求】理顺节奏、对白与衔接；禁止按感官加料要求增色、堆砌特写或无必要地夸张动作。',
     '硬约束：',
     '1) 只改写 <range-original> 中的内容，禁止输出范围前后的原文；',
     '2) 以范围内情节与信息为基础，禁止凭空另起无关剧情；',
     '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；禁止大段照抄原文；禁止原样输出 <range-original>；',
     '4) 人称、时态、人物名称须与原文一致，除非用户要求明确修改；句式必须重写，不得逐句复述；',
-    '5) 禁止把过场改写成性爱场面。',
+    '5) 禁止把过场无端改写成高潮冲突场面。',
     '6) <before-context> 与 <after-context> 只读，禁止复述或并入输出；改写后的开头须能接在 before 之后，结尾须能接到 after 之前。',
     '7) 必须做出可见的节奏、对白或衔接改动。原文原样交回视为失败。',
   ].join('\n'),
-  content: '按场成稿-日常文笔 system prompt（v1.0.0）',
+  content: '按场成稿-日常文笔 system prompt（v1.1.0）',
 };
 
 /** 按场成稿-检查（JSON items；空列表合法） */
 export const chapterOptimizeWorkbenchReviewTemplate: PromptTemplate = {
   id: 'chapter.optimize.workbench-review',
   name: '按场成稿-检查',
-  version: '1.0.0',
+  version: '1.1.0',
   category: 'task',
   status: 'published',
   systemPromptText: [
@@ -199,14 +199,14 @@ export const chapterOptimizeWorkbenchReviewTemplate: PromptTemplate = {
     '硬约束：',
     '1) 没有问题必须返回 {"items":[]}，禁止凑数。',
     '2) kind 只允许 pose、vocab、regression。',
-    '3) regression 仅描述：缩写、并段、当拍接触被删、比喻被砍残。不得把「还能更色 / 加深 / 写细 / 补接吻」写成条目。',
-    '4) 若档位为日常文笔（prose）：只允许 regression（可含衔接接不上）；禁止 pose / vocab，禁止要求补体位特写或词表替换。',
-    '5) 若档位为性爱加料（sex）：pose 查体位/空间穿帮，vocab 查用词问题，regression 查改差。',
+    '3) regression 仅描述：缩写、并段、当拍接触被删、比喻被砍残。不得把「还能更浓 / 加深 / 写细 / 再补细节」写成条目。',
+    '4) 若档位为日常文笔（prose）：只允许 regression（可含衔接接不上）；禁止 pose / vocab，禁止要求补动作特写或词表替换。',
+    '5) 若档位为感官加料（sex）：pose 查动作/空间穿帮，vocab 查用词问题，regression 查改差。',
     '6) anchorQuote 必须是成稿中连续出现的原文片段，至少 8 字，不得改写。',
-    '7) instruction 必须写明要改成什么，禁止「加深」「写细」「补接吻」「更色」及同类加料指令。',
+    '7) instruction 必须写明要改成什么，禁止「加深」「写细」「更浓」「再补细节」及同类加料指令。',
     '8) 禁止把用户私有词表写进条目。',
   ].join('\n'),
-  content: '按场成稿-检查 system prompt（v1.0.0）',
+  content: '按场成稿-检查 system prompt（v1.1.0）',
 };
 
 /** 按场成稿-点句修复（只输出选区替换） */

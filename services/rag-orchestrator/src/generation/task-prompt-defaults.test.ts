@@ -41,11 +41,11 @@ describe('task-prompt-defaults', () => {
     );
     assert.match(
       resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
-      /情色、性爱、身体描写本身不是违规/
+      /题材本身不是违规/
     );
     assert.match(
       resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
-      /需完整匹配，比如「子宫」为非禁用词/
+      /「核心」为非禁用词/
     );
     assert.match(
       resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
@@ -85,7 +85,7 @@ describe('task-prompt-defaults', () => {
     );
     assert.match(
       resolveWarehouseTaskPromptDefault('chapter.optimize.workbench-draft-prose') ?? '',
-      /禁止按性爱加料要求/
+      /禁止按感官加料要求/
     );
     assert.match(
       resolveWarehouseTaskPromptDefault('chapter.optimize.workbench-review') ?? '',

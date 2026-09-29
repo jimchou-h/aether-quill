@@ -40,7 +40,7 @@ test('spliceChapterRange keeps text outside the UTF-16 range', () => {
 });
 
 test('locateUniqueAnchor returns null for 0 or 2 matches', () => {
-  assert.equal(locateUniqueAnchor('走廊里只剩脚步。', '囊袋拍打着她臀肉'), null);
+  assert.equal(locateUniqueAnchor('走廊里只剩脚步。', '钥匙掉在地毯上'), null);
   const quote = '她低声说好。';
   assert.equal(locateUniqueAnchor(`${quote}过场。${quote}`, quote), null);
   assert.deepEqual(locateUniqueAnchor(`开头${quote}结尾`, quote), {
@@ -52,11 +52,11 @@ test('locateUniqueAnchor returns null for 0 or 2 matches', () => {
 test('filterWorkbenchReviewItems drops illegal kind and additive instructions', () => {
   const kept = filterWorkbenchReviewItems([
     { kind: 'pose', instruction: '改成背靠墙' },
-    { kind: 'tension', instruction: '补体位' },
+    { kind: 'tension', instruction: '补动作' },
     { kind: 'regression', instruction: '再加深这段' },
     { kind: 'vocab', instruction: '写细水声' },
-    { kind: 'regression', instruction: '补接吻再继续' },
-    { kind: 'regression', instruction: '这段再更色一点' },
+    { kind: 'regression', instruction: '再补细节再继续' },
+    { kind: 'regression', instruction: '这段再更浓一点' },
     { kind: 'regression', instruction: '恢复被删的拍打接触' },
   ]);
   assert.deepEqual(
@@ -188,7 +188,7 @@ test('workbench continuation prompt names the rewrite window', () => {
   assert.match(prompt, /禁止把后窗原文提前写完/);
 });
 
-test('prose draft prompt does not inject sex-thickening requirements', () => {
+test('prose draft prompt does not inject sensory-thickening requirements', () => {
   const prompt = buildWorkbenchDraftUserPrompt({
     chapterNo: 2,
     title: '过场',
@@ -197,8 +197,8 @@ test('prose draft prompt does not inject sex-thickening requirements', () => {
     rangeText: '两人走出浴室，走廊灯还亮着。',
   });
   assert.match(prompt, /日常文笔/);
-  assert.match(prompt, /禁止按性爱加料要求/);
-  assert.doesNotMatch(prompt, /加料、加深感官/);
+  assert.match(prompt, /禁止按感官加料要求/);
+  assert.doesNotMatch(prompt, /性爱|体位/);
 });
 
 test('parseWorkbenchReviewItems drops illegal kinds, additive instructions, and prose pose/vocab', () => {
@@ -208,21 +208,21 @@ test('parseWorkbenchReviewItems drops illegal kinds, additive instructions, and 
         id: 'w1',
         kind: 'pose',
         severity: 'high',
-        anchorQuote: '她抬起左腿环住他腰',
-        issue: '体位穿帮',
+        anchorQuote: '她抬起左腿跨过门槛',
+        issue: '动作穿帮',
         instruction: '改成背靠墙',
       },
       {
         kind: 'regression',
-        anchorQuote: '囊袋拍打着她臀肉',
+        anchorQuote: '钥匙掉在地毯上',
         issue: '当拍接触被删',
         instruction: '加深这段拍打',
       },
       {
         kind: 'tension',
         anchorQuote: '走廊灯还亮着',
-        issue: '还能更色',
-        instruction: '补接吻',
+        issue: '还能更浓',
+        instruction: '再补细节',
       },
       {
         kind: 'regression',
@@ -245,26 +245,26 @@ test('parseWorkbenchReviewItems drops illegal kinds, additive instructions, and 
 
 test('assertWorkbenchFixSpanRequest requires span and instruction', () => {
   assert.throws(
-    () => assertWorkbenchFixSpanRequest({ spanText: '', instruction: '改拍会阴', profile: 'sex' }),
+    () => assertWorkbenchFixSpanRequest({ spanText: '', instruction: '改拍打节奏', profile: 'sex' }),
     /spanText/
   );
   assert.throws(
     () =>
       assertWorkbenchFixSpanRequest({
-        spanText: '囊袋拍打着她臀肉',
+        spanText: '钥匙掉在地毯上',
         instruction: ' ',
         profile: 'sex',
       }),
     /instruction/
   );
   const parsed = assertWorkbenchFixSpanRequest({
-    spanText: '囊袋拍打着她臀肉',
-    instruction: '改为拍会阴',
+    spanText: '钥匙掉在地毯上',
+    instruction: '改为拍打桌面',
     profile: 'sex',
     beforeContext: '前文',
     afterContext: '后文',
   });
-  assert.equal(parsed.spanText, '囊袋拍打着她臀肉');
+  assert.equal(parsed.spanText, '钥匙掉在地毯上');
 });
 
 test('assertWorkbenchReviewRequest rejects empty rangeText', () => {

@@ -8,11 +8,11 @@ import {
   buildCompliancePersonaBlock,
   buildCompliancePreScanSummary,
   buildForbiddenWordsSummary,
-    capComplianceOutlineItems,
-    dropFalseMissingCardConsistencyItems,
-    dropFalseSequentialOccupancyItems,
-    dropUnmatchedForbiddenOutlineItems,
-    listComplianceForbiddenTerms,
+  capComplianceOutlineItems,
+  dropFalseMissingCardConsistencyItems,
+  dropFalseSequentialOccupancyItems,
+  dropUnmatchedForbiddenOutlineItems,
+  listComplianceForbiddenTerms,
 } from './compliance-check.util';
 
 describe('compliance-check.util', () => {
@@ -20,13 +20,14 @@ describe('compliance-check.util', () => {
     assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /动作合理性、空间合理性/);
     assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /action_space/);
     assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /【禁用词】/);
-    assert.match(CHAPTER_COMPLIANCE_OUTLINE_FORBIDDEN_WORDS, /阴道壁/);
-    assert.match(CHAPTER_COMPLIANCE_OUTLINE_FORBIDDEN_WORDS, /大屌/);
-    assert.match(CHAPTER_COMPLIANCE_OUTLINE_FORBIDDEN_WORDS, /活塞式/);
+    assert.match(CHAPTER_COMPLIANCE_OUTLINE_FORBIDDEN_WORDS, /核心肌群/);
+    assert.match(CHAPTER_COMPLIANCE_OUTLINE_FORBIDDEN_WORDS, /灌水/);
+    assert.match(CHAPTER_COMPLIANCE_OUTLINE_FORBIDDEN_WORDS, /扭矩/);
     assert.ok(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT.includes(CHAPTER_COMPLIANCE_OUTLINE_FORBIDDEN_WORDS));
     assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /最多 12 条/);
-    assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /情色、性爱、身体描写本身不是违规/);
-    assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /需完整匹配，比如「子宫」为非禁用词/);
+    assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /题材本身不是违规/);
+    assert.match(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /「核心」为非禁用词/);
+    assert.doesNotMatch(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /情色|性爱|肉棒|小穴/);
     assert.doesNotMatch(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /擦边表述/);
     assert.doesNotMatch(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /平台禁用表达/);
     assert.doesNotMatch(CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT, /拆字、谐音硬凑/);
@@ -46,8 +47,8 @@ describe('compliance-check.util', () => {
     assert.match(prompt, /required/);
     assert.match(prompt, /最多 12 条/);
     assert.match(prompt, /禁止按段落抄写/);
-    assert.match(prompt, /情色\/性爱描写本身不是违规/);
-    assert.match(prompt, /「子宫」不是禁用词/);
+    assert.match(prompt, /题材本身不是违规/);
+    assert.match(prompt, /「核心」不是禁用词/);
     assert.match(prompt, /已记载的外观\/籍贯不得标「未记载」/);
     assert.match(prompt, /先后动作、一只手离开后再做，一律不标/);
     assert.doesNotMatch(prompt, /平台禁用表达/);
@@ -109,21 +110,21 @@ describe('compliance-check.util', () => {
     assert.doesNotMatch(block, /乙/);
   });
 
-  it('listComplianceForbiddenTerms includes 子宫腔 but not 子宫', () => {
+  it('listComplianceForbiddenTerms includes 核心肌群 but not 核心', () => {
     const terms = listComplianceForbiddenTerms();
-    assert.ok(terms.includes('子宫腔'));
-    assert.ok(terms.includes('宫颈口'));
-    assert.equal(terms.includes('子宫'), false);
+    assert.ok(terms.includes('核心肌群'));
+    assert.ok(terms.includes('扭矩'));
+    assert.equal(terms.includes('核心'), false);
   });
 
-  it('dropUnmatchedForbiddenOutlineItems removes 子宫 false positives', () => {
-    const sourceText = '精液灌入子宫，小腹发胀。他握住她的腰。';
+  it('dropUnmatchedForbiddenOutlineItems removes 核心 false positives', () => {
+    const sourceText = '他把核心稳住，小腹发力。他握住她的腰。';
     const filtered = dropUnmatchedForbiddenOutlineItems(
       {
         required: [
           {
             id: 'r1',
-            text: '【forbidden_expression】正文出现解剖词「子宫」，须替换为非清单用语。',
+            text: '【forbidden_expression】正文出现出戏词「核心」，须替换为非清单用语。',
             priority: 'required',
           },
           {
@@ -147,14 +148,14 @@ describe('compliance-check.util', () => {
     assert.equal(filtered.suggested.some((item) => item.id === 's1'), true);
   });
 
-  it('dropUnmatchedForbiddenOutlineItems keeps complete listed hits such as 子宫腔', () => {
-    const sourceText = '精液灌满子宫腔，小腹发胀。';
+  it('dropUnmatchedForbiddenOutlineItems keeps complete listed hits such as 核心肌群', () => {
+    const sourceText = '他把核心肌群绷紧，小腹发胀。';
     const filtered = dropUnmatchedForbiddenOutlineItems(
       {
         required: [
           {
             id: 'r1',
-            text: '【forbidden_expression】正文出现解剖词「子宫腔」，替换该词即可。',
+            text: '【forbidden_expression】正文出现出戏词「核心肌群」，替换该词即可。',
             priority: 'required',
           },
         ],
@@ -184,19 +185,19 @@ describe('compliance-check.util', () => {
     assert.equal(filtered.required.length, 1);
   });
 
-  it('dropUnmatchedForbiddenOutlineItems drops unlisted expansions such as 龟头', () => {
+  it('dropUnmatchedForbiddenOutlineItems drops unlisted expansions such as 力矩', () => {
     const filtered = dropUnmatchedForbiddenOutlineItems(
       {
         required: [
           {
             id: 'r1',
-            text: '【forbidden_expression】解剖词「龟头」须替换。',
+            text: '【forbidden_expression】出戏词「力矩」须替换。',
             priority: 'required',
           },
         ],
         suggested: [],
       },
-      '他的龟头抵着入口。'
+      '他的力矩顶着门框。'
     );
     assert.equal(filtered.required.length, 0);
   });
@@ -319,15 +320,15 @@ describe('compliance-check.util', () => {
 
   it('dropFalseSequentialOccupancyItems drops sequential two-hand then one-hand false conflicts', () => {
     const sourceText = [
-      '她的双手环住林默的脖子，身体微微前倾，饱满的胸脯压上他的胸膛。',
-      '田曦薇低头，调整姿势。一只手向下探去，指尖触到那根粗硬滚烫的肉棒时，她小腹不自觉收紧了一下。',
+      '她的双手环住林默的脖子，身体微微前倾，外套蹭上他的肩。',
+      '田曦薇低头，调整姿势。一只手向下探去，指尖触到口袋里的钥匙时，她肩线不自觉收紧了一下。',
     ].join('\n');
     const filtered = dropFalseSequentialOccupancyItems(
       {
         required: [
           {
             id: 'r1',
-            text: '动作/空间矛盾：客厅骑乘段落中，田曦薇「双手环住林默的脖子，身体微微前倾」的同时「一只手向下探去，指尖触到那根粗硬滚烫的肉棒」——双手环颈与单手向下探取存在占用冲突。修改方向：明确先单手扶入再双手环颈，或改为单手环颈、另一手扶入。',
+            text: '动作/空间矛盾：客厅过场中，田曦薇「双手环住林默的脖子，身体微微前倾」的同时「一只手向下探去，指尖触到口袋里的钥匙」——双手环颈与单手向下探取存在占用冲突。修改方向：明确先单手再双手环颈，或改为单手环颈、另一手取钥匙。',
             priority: 'required',
           },
         ],

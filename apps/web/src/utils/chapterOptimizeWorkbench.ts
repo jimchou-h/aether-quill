@@ -13,7 +13,7 @@ export interface WorkbenchReviewItem {
 export const WORKBENCH_SPAN_CONTEXT_CHARS = 400;
 
 const WORKBENCH_REVIEW_KINDS = new Set<WorkbenchReviewKind>(['pose', 'vocab', 'regression']);
-const ADDITIVE_REVIEW_INSTRUCTION = /加深|写细|补接吻|更色/;
+const ADDITIVE_REVIEW_INSTRUCTION = /加深|写细|更浓|再补细节|补接吻|更色/;
 
 /** UTF-16 splice, matching JavaScript `String.prototype.slice`. */
 export function spliceChapterRange(

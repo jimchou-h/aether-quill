@@ -36,13 +36,13 @@ describe('spliceChapterRange', () => {
 
 describe('locateUniqueAnchor', () => {
   it('returns the unique span', () => {
-    const haystack = '囊袋拍打着她臀肉，水声更响。';
-    const quote = '囊袋拍打着她臀肉';
+    const haystack = '钥匙掉在地毯上，水声更响。';
+    const quote = '钥匙掉在地毯上';
     assert.deepEqual(locateUniqueAnchor(haystack, quote), { start: 0, end: quote.length });
   });
 
   it('returns null when the quote is missing', () => {
-    assert.equal(locateUniqueAnchor('走廊里只剩脚步。', '囊袋拍打着她臀肉'), null);
+    assert.equal(locateUniqueAnchor('走廊里只剩脚步。', '钥匙掉在地毯上'), null);
   });
 
   it('returns null when the quote matches twice', () => {
@@ -58,8 +58,8 @@ function item(overrides: Partial<WorkbenchReviewItem> = {}): WorkbenchReviewItem
     kind: 'pose',
     severity: 'high',
     anchorQuote: '她抬起左腿',
-    issue: '体位与空间对不上',
-    instruction: '改成背靠墙、左腿仍环在他腰上',
+    issue: '动作与空间对不上',
+    instruction: '改成背靠墙、左腿仍跨在门槛上',
     ...overrides,
   };
 }
@@ -74,12 +74,13 @@ describe('filterWorkbenchReviewItems', () => {
     assert.equal(kept[0]?.id, 'ok');
   });
 
-  it('drops additive instructions matching 加深|写细|补接吻|更色', () => {
+  it('drops additive instructions matching thicken patterns', () => {
     const kept = filterWorkbenchReviewItems([
       item({ id: 'deepen', instruction: '再加深这段感官' }),
       item({ id: 'detail', instruction: '写细她的反应' }),
       item({ id: 'kiss', instruction: '补接吻再继续' }),
       item({ id: 'thicken', instruction: '这段再更色一点' }),
+      item({ id: 'richer', instruction: '这段再更浓一点' }),
       item({ id: 'ok', kind: 'regression', instruction: '恢复被删的拍打接触' }),
     ]);
     assert.deepEqual(

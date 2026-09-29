@@ -12,7 +12,7 @@ post:
     windows into one range draft.
 
     `profile=sex` uses `chapter.optimize.workbench-draft-sex`. `profile=prose` uses
-    `chapter.optimize.workbench-draft-prose` and MUST NOT inject sex-thickening instructions.
+    `chapter.optimize.workbench-draft-prose` and MUST NOT inject sensory-thickening instructions.
 
     This path is additive. It MUST NOT change `/optimize/draft` `rewriteMode` (`from-plan` | `direct`)
     or cause `direct` to start reading `sourceText`.

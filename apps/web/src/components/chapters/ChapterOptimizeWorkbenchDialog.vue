@@ -58,14 +58,14 @@ const STEPPER_STEPS: Array<{ key: WorkbenchStep; label: string }> = [
 ];
 
 const KIND_LABEL: Record<string, string> = {
-  pose: '体位',
+  pose: '动作',
   vocab: '用词',
   regression: '改差',
 };
 
 const INSTRUCTION_PLACEHOLDER: Record<ChapterOptimizeWorkbenchProfile, string> = {
-  sex: '例如：在划选范围内加料，保持时序与空间连续，不要省略中间过程。',
-  prose: '例如：理顺划选范围内的节奏、对白与衔接，不要增色或加动作。',
+  sex: '例如：在划选范围内加深感官与节奏，保持时序与空间连续，不要省略中间过程。',
+  prose: '例如：理顺划选范围内的节奏、对白与衔接，不要增色或堆砌特写。',
 };
 
 const props = defineProps<{
@@ -80,7 +80,7 @@ const emit = defineEmits<{
 }>();
 
 const step = shallowRef<WorkbenchStep>('range');
-const profile = shallowRef<ChapterOptimizeWorkbenchProfile>('sex');
+const profile = shallowRef<ChapterOptimizeWorkbenchProfile>('prose');
 const instruction = shallowRef('');
 const spanInstruction = shallowRef('');
 const baseText = shallowRef('');
@@ -199,7 +199,7 @@ function clearInterruptHandler() {
 
 function resetState() {
   step.value = 'range';
-  profile.value = 'sex';
+  profile.value = 'prose';
   instruction.value = '';
   spanInstruction.value = '';
   baseText.value = props.chapter?.content ?? '';
@@ -715,7 +715,7 @@ async function applyDraft() {
           <div class="profile-row" role="radiogroup" aria-label="成稿档位">
             <label class="profile-option">
               <input v-model="profile" type="radio" value="sex" :disabled="isBusy" />
-              性爱加料
+              感官加料
             </label>
             <label class="profile-option">
               <input v-model="profile" type="radio" value="prose" :disabled="isBusy" />
@@ -770,7 +770,7 @@ async function applyDraft() {
                 class="span-input"
                 type="text"
                 :disabled="isBusy || !rangeDraft"
-                placeholder="例如：把拍打改成拍会阴，只改这一句。"
+                placeholder="例如：把拍打改成拍桌沿，只改这一句。"
               />
               <button
                 class="secondary-button"

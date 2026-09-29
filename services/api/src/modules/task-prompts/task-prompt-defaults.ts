@@ -100,7 +100,7 @@ export const TASK_PROMPT_DEFINITIONS: TaskPromptDefinition[] = [
   },
   {
     templateKey: CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_TEMPLATE_KEY,
-    name: '文笔优化 · 按场成稿（性爱加料）',
+    name: '文笔优化 · 按场成稿（感官加料）',
     defaultText: CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_SYSTEM_PROMPT,
   },
   {
