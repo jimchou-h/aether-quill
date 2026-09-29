@@ -20,7 +20,6 @@ const emit = defineEmits<{
   generateRelationEvents: [chapterNo: number];
   writingOptimize: [chapter: ChapterItem];
   sceneWorkbench: [chapter: ChapterItem];
-  batchOptimize: [chapters: ChapterItem[]];
   save: [payload: { chapterNo: number; title: string; content: string }];
   parseStructured: [chapterNo: number];
   delete: [chapterNo: number];
@@ -56,41 +55,6 @@ const showMoreActions = ref(false);
 const searchQuery = ref('');
 const jumpToChapterNo = ref('');
 const chapterTabsRef = ref<HTMLElement | null>(null);
-const selectedForBatch = ref<Set<number>>(new Set());
-
-const selectedBatchCount = computed(() => selectedForBatch.value.size);
-
-function isBatchSelected(chapterNo: number) {
-  return selectedForBatch.value.has(chapterNo);
-}
-
-function toggleBatchSelect(chapterNo: number) {
-  const next = new Set(selectedForBatch.value);
-  if (next.has(chapterNo)) {
-    next.delete(chapterNo);
-  } else {
-    next.add(chapterNo);
-  }
-  selectedForBatch.value = next;
-}
-
-function selectAllForBatch() {
-  selectedForBatch.value = new Set(props.chapters.map((chapter) => chapter.chapterNo));
-}
-
-function clearBatchSelection() {
-  selectedForBatch.value = new Set();
-}
-
-function emitBatchOptimize() {
-  if (selectedBatchCount.value < 2) {
-    return;
-  }
-  const selected = props.chapters
-    .filter((chapter) => selectedForBatch.value.has(chapter.chapterNo))
-    .sort((a, b) => a.chapterNo - b.chapterNo);
-  emit('batchOptimize', selected);
-}
 
 const selectedChapter = computed(
   () => props.chapters.find((chapter) => chapter.chapterNo === props.selectedChapterNo) ?? null
@@ -260,7 +224,7 @@ watch(
   }
 );
 
-defineExpose({ clearEditing, clearBatchSelection });
+defineExpose({ clearEditing });
 </script>
 
 <template>
@@ -303,45 +267,20 @@ defineExpose({ clearEditing, clearBatchSelection });
           找到 {{ filteredChapters.length }} 个匹配章节
         </p>
 
-        <div v-if="props.chapters.length >= 2" class="batch-select-bar">
-          <button class="link-button" type="button" @click="selectAllForBatch">全选</button>
-          <button class="link-button" type="button" @click="clearBatchSelection">清除</button>
-          <button
-            class="secondary-button batch-optimize-button"
-            type="button"
-            :disabled="selectedBatchCount < 2"
-            @click="emitBatchOptimize"
-          >
-            批量优化{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
-          </button>
-        </div>
-
         <div ref="chapterTabsRef" class="chapter-tabs" role="tablist" aria-label="章节列表">
-          <div
+          <button
             v-for="chapter in filteredChapters"
             :key="chapter.chapterNo"
-            class="chapter-tab-row"
+            type="button"
+            class="chapter-tab"
+            :class="{ active: chapter.chapterNo === props.selectedChapterNo }"
+            role="tab"
+            :aria-selected="chapter.chapterNo === props.selectedChapterNo"
+            @click="emit('select', chapter.chapterNo)"
           >
-            <label class="chapter-tab-checkbox" @click.stop>
-              <input
-                type="checkbox"
-                :checked="isBatchSelected(chapter.chapterNo)"
-                :aria-label="`选择第${chapter.chapterNo}章用于批量优化`"
-                @change="toggleBatchSelect(chapter.chapterNo)"
-              />
-            </label>
-            <button
-              type="button"
-              class="chapter-tab"
-              :class="{ active: chapter.chapterNo === props.selectedChapterNo }"
-              role="tab"
-              :aria-selected="chapter.chapterNo === props.selectedChapterNo"
-              @click="emit('select', chapter.chapterNo)"
-            >
-              <span class="chapter-tab-no">第{{ chapter.chapterNo }}章</span>
-              <span class="chapter-tab-title">{{ chapter.title }}</span>
-            </button>
-          </div>
+            <span class="chapter-tab-no">第{{ chapter.chapterNo }}章</span>
+            <span class="chapter-tab-title">{{ chapter.title }}</span>
+          </button>
         </div>
       </template>
     </aside>
@@ -834,47 +773,6 @@ defineExpose({ clearEditing, clearBatchSelection });
   margin-bottom: 0.5rem;
   font-size: 0.78rem;
   color: #4b5563;
-}
-
-.batch-select-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.65rem;
-}
-
-.batch-optimize-button {
-  margin-left: auto;
-  font-size: 0.85rem;
-  padding: 0.35rem 0.65rem;
-}
-
-.link-button {
-  border: none;
-  background: none;
-  color: #2563eb;
-  cursor: pointer;
-  font-size: 0.85rem;
-  padding: 0;
-}
-
-.chapter-tab-row {
-  display: flex;
-  align-items: stretch;
-  gap: 0.35rem;
-}
-
-.chapter-tab-checkbox {
-  display: flex;
-  align-items: center;
-  padding: 0 0.15rem;
-  cursor: pointer;
-}
-
-.chapter-tab-row .chapter-tab {
-  flex: 1;
-  min-width: 0;
 }
 
 .chapter-tabs {
