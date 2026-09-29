@@ -54,6 +54,7 @@ import { VectorStore } from './retrieval/vector-store';
 import { Reranker } from './retrieval/reranker';
 import {
   buildEmbeddingRetrievalQuery,
+  buildRetrievalQuery,
   resolveGenerateRetrievalQuery,
   shouldIncludeNextChapterHead,
   shouldIncludePriorChapterNarrative,
@@ -128,16 +129,6 @@ const vectorStore = new VectorStore();
 const reranker = new Reranker();
 const generationService = new GenerationService();
 const consistencyChecker = new ConsistencyChecker();
-
-const CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY = 'chapter.compliance.outline';
-const CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY = 'chapter.compliance.rewrite';
-
-function isComplianceTemplateKey(templateKey: string): boolean {
-  return (
-    templateKey === CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY ||
-    templateKey === CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY
-  );
-}
 
 function buildTargetWordsRequirement(targetWords: unknown): string {
   const parsed = Number(targetWords);
@@ -874,7 +865,7 @@ app.post('/api/generate', async (req, res) => {
   const extra = extraContext as Record<string, unknown> | undefined;
   const tk = typeof templateKey === 'string' ? templateKey.trim() : '';
   const isComplianceTask =
-    isComplianceTemplateKey(tk) || extra?.omitProjectSystemPrompt === true;
+    extra?.omitProjectSystemPrompt === true;
   const chapterNoRaw = extra?.chapterNo;
   const chapterNo =
     typeof chapterNoRaw === 'number' && Number.isFinite(chapterNoRaw)

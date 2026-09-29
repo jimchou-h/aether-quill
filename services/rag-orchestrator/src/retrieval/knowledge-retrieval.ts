@@ -86,8 +86,6 @@ export function buildGenerationRetrievalQuery(
 export const CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY = 'chapter.optimize.plan';
 export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
 export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY = 'chapter.optimize.direct-draft';
-export const CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY = 'chapter.optimize.typo-check';
-export const CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY = 'chapter.optimize.typo-fix';
 export const CHAPTER_OPTIMIZE_LOOP_PLAN_TEMPLATE_KEY = 'chapter.optimize.loop.plan';
 export const CHAPTER_OPTIMIZE_LOOP_DRAFT_TEMPLATE_KEY = 'chapter.optimize.loop.draft';
 export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_TEMPLATE_KEY =
@@ -108,15 +106,13 @@ export function isWorkbenchOptimizeTemplateKey(templateKey: string): boolean {
   );
 }
 
-/** 章节优化全链路模板（plan / draft / direct-draft / typo / auto-loop / workbench） */
+/** 章节优化全链路模板（plan / draft / direct-draft / auto-loop / workbench） */
 export function isChapterOptimizeTemplateKey(templateKey: string): boolean {
   const tk = templateKey.trim();
   return (
     tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY ||
-    tk === CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY ||
-    tk === CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_LOOP_PLAN_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_LOOP_DRAFT_TEMPLATE_KEY ||
     isWorkbenchOptimizeTemplateKey(tk)

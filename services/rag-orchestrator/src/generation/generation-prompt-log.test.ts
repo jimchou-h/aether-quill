@@ -59,9 +59,9 @@ test('resolveGenerationPromptLogKind 识别写作工作台与章节优化', () =
   );
   assert.equal(
     resolveGenerationPromptLogKind(
-      trace({ context: { templateKey: 'chapter.pipeline.character-traits.outline' } })
+      trace({ context: { templateKey: 'chapter.optimize.workbench-review' } })
     ),
-    'pipeline'
+    null
   );
   assert.equal(resolveWriteChapterPromptKind, resolveGenerationPromptLogKind);
 });

@@ -20,13 +20,13 @@ function item(templateKey: string): TaskPromptListItem {
   };
 }
 
-test('resolveTaskPromptGroupId maps writing, pipeline and compliance keys', () => {
+test('resolveTaskPromptGroupId maps writing keys only', () => {
   assert.equal(resolveTaskPromptGroupId('chapter.optimize.plan'), 'writing');
   assert.equal(resolveTaskPromptGroupId('chapter.optimize.direct-draft'), 'writing');
-  assert.equal(resolveTaskPromptGroupId('chapter.pipeline.sensory.rewrite'), 'pipeline');
-  assert.equal(resolveTaskPromptGroupId('chapter.compliance.outline'), 'compliance');
-  assert.equal(resolveTaskPromptGroupId('chapter.pipeline.rules.fix'), 'compliance');
-  assert.equal(resolveTaskPromptGroupId('chapter.pipeline.character'), 'pipeline');
+  assert.equal(resolveTaskPromptGroupId('chapter.pipeline.sensory.rewrite'), null);
+  assert.equal(resolveTaskPromptGroupId('chapter.compliance.outline'), null);
+  assert.equal(resolveTaskPromptGroupId('chapter.pipeline.rules.fix'), null);
+  assert.equal(resolveTaskPromptGroupId('chapter.pipeline.character'), null);
 });
 
 test('auto-loop prompts land in the existing writing group', () => {
@@ -41,7 +41,7 @@ test('workbench prompts land in the existing writing group', () => {
   assert.equal(resolveTaskPromptGroupId('chapter.optimize.workbench-fix-span'), 'writing');
 });
 
-test('groupTaskPromptItems buckets list items', () => {
+test('groupTaskPromptItems buckets writing items and drops cut-stack keys', () => {
   const grouped = groupTaskPromptItems([
     item('chapter.optimize.draft'),
     item('chapter.optimize.direct-draft'),
@@ -52,10 +52,10 @@ test('groupTaskPromptItems buckets list items', () => {
   ]);
   assert.equal(grouped.writing.length, 2);
   assert.ok(grouped.writing.some((entry) => entry.templateKey === 'chapter.optimize.direct-draft'));
-  assert.equal(grouped.pipeline.length, 2);
-  assert.equal(grouped.compliance.length, 2);
 });
 
-test('TASK_PROMPT_GROUP_DEFINITIONS includes three groups', () => {
-  assert.equal(TASK_PROMPT_GROUP_DEFINITIONS.length, 3);
+test('TASK_PROMPT_GROUP_DEFINITIONS includes only writing', () => {
+  assert.equal(TASK_PROMPT_GROUP_DEFINITIONS.length, 1);
+  assert.equal(TASK_PROMPT_GROUP_DEFINITIONS[0]?.id, 'writing');
+  assert.equal(TASK_PROMPT_GROUP_DEFINITIONS[0]?.title, '文笔优化');
 });

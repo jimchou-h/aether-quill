@@ -230,16 +230,13 @@ export function clampUtilityGenerationTemperature(value: number): number {
   return Math.min(2, Math.max(0, value));
 }
 
-/** 写作级 templateKey：续写、优化 draft/typo-fix、pipeline 改写/revise/fix-items、同质化改写、规则修复 */
+/** 写作级 templateKey：续写、优化 draft、auto-loop draft、workbench draft/fix-span */
 export function isWritingTierTemplateKey(templateKey: string): boolean {
   const key = templateKey.trim();
   if (!key) {
     return false;
   }
   if (isWritingStyleInjectionTemplateKey(key)) {
-    return true;
-  }
-  if (key === 'chapter.pipeline.rules.fix') {
     return true;
   }
   if (key === 'chapter.optimize.workbench-fix-span') {

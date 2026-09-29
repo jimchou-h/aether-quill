@@ -13,8 +13,7 @@ export type GenerationPromptLogKind =
   | 'outline'
   | 'draft'
   | 'optimize-plan'
-  | 'optimize-draft'
-  | 'pipeline';
+  | 'optimize-draft';
 
 /** @deprecated 使用 GenerationPromptLogKind */
 export type WriteChapterPromptKind = GenerationPromptLogKind;
@@ -47,9 +46,6 @@ export function resolveGenerationPromptLogKind(
     templateKey === 'chapter.optimize.workbench-fix-span'
   ) {
     return 'optimize-draft';
-  }
-  if (templateKey.startsWith('chapter.pipeline.')) {
-    return 'pipeline';
   }
   return null;
 }
@@ -89,7 +85,6 @@ const KIND_LABEL: Record<GenerationPromptLogKind, string> = {
   draft: '生成正文',
   'optimize-plan': '优化生成方案',
   'optimize-draft': '优化生成正文',
-  pipeline: '分步精修',
 };
 
 /**

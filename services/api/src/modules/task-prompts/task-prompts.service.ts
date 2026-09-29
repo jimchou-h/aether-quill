@@ -104,6 +104,9 @@ export class TaskPromptsService {
       return existing;
     }
     const def = getTaskPromptDefinition(templateKey);
+    if (!def) {
+      throw new BadRequestException(`不支持的 templateKey: ${templateKey}`);
+    }
     const now = new Date().toISOString();
     const record: ProjectTaskPromptRecord = {
       projectId,
@@ -153,6 +156,9 @@ export class TaskPromptsService {
     this.projectsService.findOne(projectId);
     this.assertAllowedKey(templateKey);
     const def = getTaskPromptDefinition(templateKey);
+    if (!def) {
+      throw new BadRequestException(`不支持的 templateKey: ${templateKey}`);
+    }
     const record = this.records.get(this.recordKey(projectId, templateKey)) ?? null;
     return this.toListItem(record, def);
   }

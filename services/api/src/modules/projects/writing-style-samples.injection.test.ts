@@ -9,15 +9,16 @@ import {
 const sampleText =
   '这是一段足够长的文风样本，强调对白节奏与句长变化，不复用具体情节意象，只学语感与用词密度。';
 
-test('pipeline rewrite template keys are eligible for style injection', () => {
+test('cut pipeline template keys are not eligible for style injection', () => {
   assert.equal(
     isWritingStyleInjectionTemplateKey('chapter.pipeline.sensory.rewrite.fix-items'),
-    true
+    false
   );
   assert.equal(
     isWritingStyleInjectionTemplateKey('chapter.pipeline.sensory.coverage.verify'),
     false
   );
+  assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.draft'), true);
 });
 
 test('selectWritingStyleSamplesForTask degrades when no scene match', () => {
@@ -33,7 +34,7 @@ test('selectWritingStyleSamplesForTask degrades when no scene match', () => {
   ];
   const picked = selectWritingStyleSamplesForTask({
     samples,
-    templateKey: 'chapter.pipeline.character',
+    templateKey: 'chapter.optimize.draft',
     chapterNo: 1,
   });
   assert.equal(picked.length, 1);

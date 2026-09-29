@@ -89,26 +89,9 @@ export function isWritingStyleInjectionTemplateKey(templateKey: string): boolean
     key === 'chapter.optimize.draft' ||
     key === 'chapter.optimize.direct-draft' ||
     key === 'chapter.optimize.loop.draft' ||
-    key === 'chapter.optimize.typo-fix' ||
     key === 'chapter.optimize.workbench-draft-sex' ||
     key === 'chapter.optimize.workbench-draft-prose'
   ) {
-    return true;
-  }
-  if (key === 'chapter.pipeline.homogenization.rewrite') {
-    return true;
-  }
-  if (
-    key === 'chapter.pipeline.character' ||
-    key === 'chapter.pipeline.character-traits' ||
-    key === 'chapter.pipeline.sensory.rewrite'
-  ) {
-    return true;
-  }
-  if (key.endsWith('.rewrite.revise') && key.startsWith('chapter.pipeline.')) {
-    return true;
-  }
-  if (key.endsWith('.rewrite.fix-items') && key.startsWith('chapter.pipeline.')) {
     return true;
   }
   return false;
@@ -119,18 +102,6 @@ export function resolveSceneTypesForTemplateKey(
   templateKey: string
 ): WritingStyleSampleSceneType[] | null {
   const key = templateKey.trim();
-  if (key.includes('character-traits')) {
-    return ['intimate', 'atmosphere'];
-  }
-  if (key.includes('sensory')) {
-    return ['intimate', 'atmosphere'];
-  }
-  if (key.startsWith('chapter.pipeline.character')) {
-    return ['dialogue', 'intimate'];
-  }
-  if (key.includes('homogenization.rewrite')) {
-    return ['dialogue', 'action', 'atmosphere'];
-  }
   if (key === 'chapter.optimize.workbench-draft-sex') {
     return ['intimate'];
   }

@@ -22,48 +22,6 @@ import {
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
 } from '../projects/chapter-optimize-workbench.util';
-import {
-  CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT,
-  CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY,
-  CHAPTER_COMPLIANCE_REWRITE_SYSTEM_PROMPT,
-  CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY,
-  CHAPTER_COMPLIANCE_COVERAGE_VERIFY_TEMPLATE_KEY,
-  CHAPTER_COMPLIANCE_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-} from '../projects/compliance-check.util';
-import {
-  CHAPTER_PIPELINE_CHARACTER_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_CHARACTER_OUTLINE_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_CHARACTER_TRAITS_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_RULES_FIX_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_SENSORY_OUTLINE_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_SENSORY_REWRITE_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_OUTLINE_COVERAGE_VERIFY_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_REWRITE_FIX_ITEMS_SYSTEM_PROMPT,
-  CHAPTER_PIPELINE_CHARACTER_COVERAGE_VERIFY_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_CHARACTER_TRAITS_COVERAGE_VERIFY_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_SENSORY_COVERAGE_VERIFY_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_CHARACTER_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_CHARACTER_TRAITS_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_SENSORY_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_TEMPLATE_KEY,
-  CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_SYSTEM_PROMPT,
-} from '../projects/chapter-pipeline.util';
 
 export interface TaskPromptDefinition {
   templateKey: string;
@@ -71,7 +29,7 @@ export interface TaskPromptDefinition {
   defaultText: string;
 }
 
-/** 项目 task prompt 白名单（文笔优化 + 创作精修 + 终稿合规） */
+/** 项目 task prompt 白名单（文笔优化三模式 + 按场成稿） */
 export const TASK_PROMPT_DEFINITIONS: TaskPromptDefinition[] = [
   {
     templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
@@ -118,135 +76,24 @@ export const TASK_PROMPT_DEFINITIONS: TaskPromptDefinition[] = [
     name: '文笔优化 · 按场成稿点句修复',
     defaultText: CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_SYSTEM_PROMPT,
   },
-  {
-    templateKey: CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY,
-    name: '终稿合规 · 大纲',
-    defaultText: CHAPTER_COMPLIANCE_OUTLINE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY,
-    name: '终稿合规 · 改写',
-    defaultText: CHAPTER_COMPLIANCE_REWRITE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_OUTLINE_TEMPLATE_KEY,
-    name: '分步精修 · 角色调整大纲',
-    defaultText: CHAPTER_PIPELINE_CHARACTER_OUTLINE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_TEMPLATE_KEY,
-    name: '分步精修 · 角色调整',
-    defaultText: CHAPTER_PIPELINE_CHARACTER_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_TEMPLATE_KEY,
-    name: '分步精修 · 角色调整按意见再改',
-    defaultText: CHAPTER_PIPELINE_CHARACTER_REWRITE_REVISE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_TEMPLATE_KEY,
-    name: '分步精修 · 角色特征润色大纲',
-    defaultText: CHAPTER_PIPELINE_CHARACTER_TRAITS_OUTLINE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_TEMPLATE_KEY,
-    name: '分步精修 · 角色特征润色',
-    defaultText: CHAPTER_PIPELINE_CHARACTER_TRAITS_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_SENSORY_OUTLINE_TEMPLATE_KEY,
-    name: '分步精修 · 感官大纲',
-    defaultText: CHAPTER_PIPELINE_SENSORY_OUTLINE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_SENSORY_REWRITE_TEMPLATE_KEY,
-    name: '分步精修 · 感官改写',
-    defaultText: CHAPTER_PIPELINE_SENSORY_REWRITE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_TEMPLATE_KEY,
-    name: '分步精修 · 感官改写按意见再改',
-    defaultText: CHAPTER_PIPELINE_SENSORY_REWRITE_REVISE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_COVERAGE_VERIFY_TEMPLATE_KEY,
-    name: '分步精修 · 角色调整落实验收',
-    defaultText: CHAPTER_PIPELINE_OUTLINE_COVERAGE_VERIFY_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_COVERAGE_VERIFY_TEMPLATE_KEY,
-    name: '分步精修 · 特征润色落实验收',
-    defaultText: CHAPTER_PIPELINE_OUTLINE_COVERAGE_VERIFY_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_SENSORY_COVERAGE_VERIFY_TEMPLATE_KEY,
-    name: '分步精修 · 感官改写落实验收',
-    defaultText: CHAPTER_PIPELINE_OUTLINE_COVERAGE_VERIFY_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-    name: '分步精修 · 角色调整按项补修',
-    defaultText: CHAPTER_PIPELINE_REWRITE_FIX_ITEMS_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_CHARACTER_TRAITS_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-    name: '分步精修 · 特征润色按项补修',
-    defaultText: CHAPTER_PIPELINE_REWRITE_FIX_ITEMS_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_SENSORY_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-    name: '分步精修 · 感官改写按项补修',
-    defaultText: CHAPTER_PIPELINE_REWRITE_FIX_ITEMS_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_COMPLIANCE_COVERAGE_VERIFY_TEMPLATE_KEY,
-    name: '终稿合规 · 落实验收',
-    defaultText: CHAPTER_PIPELINE_OUTLINE_COVERAGE_VERIFY_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_COMPLIANCE_REWRITE_FIX_ITEMS_TEMPLATE_KEY,
-    name: '终稿合规 · 按项补修',
-    defaultText: CHAPTER_PIPELINE_REWRITE_FIX_ITEMS_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_RULES_FIX_TEMPLATE_KEY,
-    name: '终稿合规 · 规则修复',
-    defaultText: CHAPTER_PIPELINE_RULES_FIX_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_TEMPLATE_KEY,
-    name: '分步精修 · 同质化检测',
-    defaultText: CHAPTER_PIPELINE_HOMOGENIZATION_SCAN_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_TEMPLATE_KEY,
-    name: '分步精修 · 同质化改写',
-    defaultText: CHAPTER_PIPELINE_HOMOGENIZATION_REWRITE_SYSTEM_PROMPT,
-  },
-  {
-    templateKey: CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_TEMPLATE_KEY,
-    name: '分步精修 · 编辑意向书合成',
-    defaultText: CHAPTER_PIPELINE_BRIEF_SYNTHESIZE_SYSTEM_PROMPT,
-  },
 ];
 
-const DEFINITION_BY_KEY = new Map(
-  TASK_PROMPT_DEFINITIONS.map((item) => [item.templateKey, item] as const)
-);
-
-export function isAllowedTaskPromptKey(templateKey: string): boolean {
-  return DEFINITION_BY_KEY.has(templateKey.trim());
+export function listTaskPromptTemplateKeys(): string[] {
+  return TASK_PROMPT_DEFINITIONS.map((item) => item.templateKey);
 }
 
-export function getTaskPromptDefinition(templateKey: string): TaskPromptDefinition {
-  const key = templateKey.trim();
-  const def = DEFINITION_BY_KEY.get(key);
-  if (!def) {
-    throw new Error(`不支持的 task prompt templateKey: ${templateKey}`);
-  }
-  return def;
+export function isAllowedTaskPromptKey(templateKey: string): boolean {
+  return TASK_PROMPT_DEFINITIONS.some((item) => item.templateKey === templateKey);
+}
+
+export function getTaskPromptDefinition(templateKey: string): TaskPromptDefinition | undefined {
+  return TASK_PROMPT_DEFINITIONS.find((item) => item.templateKey === templateKey);
 }
 
 export function getWarehouseDefaultTaskPromptText(templateKey: string): string {
-  return getTaskPromptDefinition(templateKey).defaultText;
+  const found = getTaskPromptDefinition(templateKey);
+  if (!found) {
+    throw new Error(`Unknown task prompt templateKey: ${templateKey}`);
+  }
+  return found.defaultText;
 }

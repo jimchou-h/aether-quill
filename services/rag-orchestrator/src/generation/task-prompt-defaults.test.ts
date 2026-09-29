@@ -35,30 +35,9 @@ describe('task-prompt-defaults', () => {
       resolveWarehouseTaskPromptDefault('chapter.optimize.draft') ?? '',
       /实质性重写/
     );
-    assert.match(
-      resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
-      /动作合理性、空间合理性/
-    );
-    assert.match(
-      resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
-      /题材本身不是违规/
-    );
-    assert.match(
-      resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
-      /「核心」为非禁用词/
-    );
-    assert.match(
-      resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
-      /不得标「未记载」/
-    );
-    assert.match(
-      resolveWarehouseTaskPromptDefault('chapter.compliance.rewrite') ?? '',
-      /先后动作保持原文顺序/
-    );
-    assert.doesNotMatch(
-      resolveWarehouseTaskPromptDefault('chapter.compliance.outline') ?? '',
-      /擦边表述/
-    );
+    assert.equal(resolveWarehouseTaskPromptDefault('chapter.compliance.outline'), undefined);
+    assert.equal(resolveWarehouseTaskPromptDefault('chapter.pipeline.character'), undefined);
+    assert.equal(resolveWarehouseTaskPromptDefault('chapter.optimize.typo-check'), undefined);
     assert.doesNotMatch(
       resolveWarehouseTaskPromptDefault('chapter.optimize.draft') ?? '',
       /不是待勾选的句级清单/
@@ -72,10 +51,6 @@ describe('task-prompt-defaults', () => {
       }),
       undefined
     );
-  });
-
-  it('includes typo-check warehouse default', () => {
-    assert.match(resolveWarehouseTaskPromptDefault('chapter.optimize.typo-check') ?? '', /JSON/);
   });
 
   it('includes workbench warehouse defaults', () => {

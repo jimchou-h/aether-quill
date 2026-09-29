@@ -568,7 +568,7 @@ onMounted(() => {
         </label>
       </div>
       <p class="field-hint inline-hint">
-        以上开关仅控制「手动编辑保存」是否弹出后处理确认；创作精修 / 一键终稿 / 合规应用会静默更新人物状态，不会重复弹窗。
+        以上开关仅控制「手动编辑保存」是否弹出后处理确认。
       </p>
 
       <div class="toggle-row">

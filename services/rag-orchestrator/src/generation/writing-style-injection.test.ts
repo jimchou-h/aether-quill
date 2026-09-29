@@ -55,7 +55,7 @@ describe('AQ-339 writing style injection regression', () => {
   it('writing task assembles 【文风参照】 block into user message with at most 2 samples', () => {
     const { block, ids } = resolveInjectedBlock({
       samples,
-      templateKey: 'chapter.pipeline.character',
+      templateKey: 'chapter.optimize.draft',
       chapterNo: 1,
     });
     assert.ok(block);
@@ -81,7 +81,7 @@ describe('AQ-339 writing style injection regression', () => {
         makeSample({ id: 'self', sceneType: 'dialogue', sourceChapterNo: 7 }),
         makeSample({ id: 'other', sceneType: 'intimate', sourceChapterNo: 8 }),
       ],
-      templateKey: 'chapter.pipeline.character',
+      templateKey: 'chapter.optimize.draft',
       chapterNo: 7,
     });
     assert.ok(!ids.includes('self'));
@@ -100,10 +100,8 @@ describe('AQ-339 writing style injection regression', () => {
 
   it('never injects for non-writing (tool) tasks', () => {
     for (const templateKey of [
-      'chapter.pipeline.sensory.outline',
-      'chapter.pipeline.sensory.coverage.verify',
-      'chapter.pipeline.brief.synthesize',
       'chapter.optimize.plan',
+      'chapter.optimize.workbench-review',
       'write.chapter.outline',
     ]) {
       const { block, ids } = resolveInjectedBlock({ samples, templateKey, chapterNo: 1 });

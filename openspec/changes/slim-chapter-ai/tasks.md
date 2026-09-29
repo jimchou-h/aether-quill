@@ -5,9 +5,9 @@
 
 ## 2. 竖切删除砍除栈
 
-- [ ] 2.1 删除创作精修 + 一键终稿 + 批量精修：前端入口/Dialog/专用 utils/设置偏好，以及 API `/pipeline/*`、pipeline service/session 产品实现与仓库 `chapter.pipeline.*` 默认 prompt；保留路径回归测试仍绿（验收：章节菜单测/事件接线测无精修事件；api 无 pipeline 路由注册；相关单测删除或改写后套件绿）
-- [ ] 2.2 删除终稿合规 + 独立错字：前端合规入口/Dialog，API `/compliance-check/*` 与 `optimize/typo-*`，合规服务与 typo 仓库默认；taskPrompt 分组不再含「创作精修」「终稿合规」（验收：对应单测更新；web/api typecheck 通过；grep 无产品入口字符串暴露给用户）
+- [x] 2.1 删除创作精修 + 一键终稿 + 批量精修：前端入口/Dialog/专用 utils/设置偏好，以及 API `/pipeline/*`、pipeline service/session 产品实现与仓库 `chapter.pipeline.*` 默认 prompt；保留路径回归测试仍绿（验收：章节菜单测/事件接线测无精修事件；api 无 pipeline 路由注册；相关单测删除或改写后套件绿）
+- [x] 2.2 删除终稿合规 + 独立错字：前端合规入口/Dialog，API `/compliance-check/*` 与 `optimize/typo-*`，合规服务与 typo 仓库默认；taskPrompt 分组不再含「创作精修」「终稿合规」（验收：对应单测更新；web/api typecheck 通过；grep 无产品入口字符串暴露给用户）
 
 ## 3. 保留路径冒烟
 
-- [ ] 3.1 跑文笔优化（含 auto-loop）与按场成稿相关自动化测试，并做一次最小手工确认：章节页仅剩两套入口且可打开 Dialog（验收：相关 test 绿；手工清单勾选）
+- [x] 3.1 跑文笔优化（含 auto-loop）与按场成稿相关自动化测试，并做一次最小手工确认：章节页仅剩两套入口且可打开 Dialog（验收：相关 test 绿；手工清单勾选）

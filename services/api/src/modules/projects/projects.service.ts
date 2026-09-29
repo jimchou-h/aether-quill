@@ -120,8 +120,6 @@ import {
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
   buildSegmentDiagnosisSystemPrompt,
-  CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY,
-  CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY,
   ChapterVersionConflictError,
   CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES,
   assertDraftText,
@@ -139,8 +137,6 @@ import {
   buildPlanUserPrompt,
   buildSegmentDiagnosisUserPrompt,
   buildSegmentPrompt,
-  buildTypoCheckUserPrompt,
-  buildTypoFixUserPrompt,
   buildSegmentBoundaryAnchors,
   calculateSegmentMaxTokensForIndex,
   ensureChapterVersionMatches,
@@ -150,7 +146,6 @@ import {
   normalizeInstruction,
   parseExpectedUpdatedAt,
   parseSegmentOutput,
-  parseTypoCheckIssues,
   resolveChapterOptimizeLengthStrategy,
   resolveChapterOptimizeConfigWithProjectOverride,
   resolveOptimizeDraftExecution,
@@ -163,7 +158,6 @@ import {
   type ChapterOptimizeSegmentRecovery,
   type ChapterOptimizeStage,
   type ChapterOptimizeUsedRelationEvent,
-  type ChapterTypoIssueRecord,
   type Segment,
 } from './chapter-optimize.util';
 import {
@@ -226,7 +220,7 @@ import {
   PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS,
   serializeProjectSettingsForJsonMirror,
 } from './project-settings.extensions';
-import { migratePipelineSettingsFromPreset } from './chapter-pipeline.util';
+import { migratePipelineSettingsFromPreset } from './legacy-pipeline-settings.util';
 import {
   createWritingStyleSampleRecord,
   sanitizeWritingStyleSamples,
@@ -3794,273 +3788,6 @@ export class ProjectsService implements OnModuleInit {
     };
   }
 
-  async checkChapterOptimizationTypos(
-    projectId: string,
-    chapterNo: number,
-    payload: { draftText?: string },
-    userId?: string
-  ) {
-    if (userId) {
-      this.checkAccess(projectId, userId, ['owner', 'editor']);
-    }
-    this.getProjectOrThrow(projectId);
-    this.ensureProjectState(projectId);
-
-    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
-    const knowledge = this.knowledgeStore.get(projectId)!;
-    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
-    if (!chapter) {
-      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
-    }
-
-    const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
-    assertDraftText(draftText);
-
-    const settings = this.settingsStore.get(projectId)!;
-    const personas = this.personasStore.get(projectId)!;
-    await this.syncProjectContextToOrchestrator(
-      projectId,
-      settings,
-      personas,
-      knowledge,
-      [],
-      userId
-    );
-
-    const userPrompt = buildTypoCheckUserPrompt(draftText);
-    const traceId = makeOptimizationId('typo-check');
-
-    try {
-      const { data } = await axios.post(
-        `${this.getRagOrchestratorUrl()}/api/generate`,
-        {
-          projectId,
-          prompt: userPrompt,
-          useSSE: false,
-          templateKey: CHAPTER_OPTIMIZE_TYPO_CHECK_TEMPLATE_KEY,
-          context: {
-            task: 'chapter.optimize.typo-check',
-            chapterNo: normalizedChapterNo,
-            traceId,
-          },
-        },
-        { timeout: 120000 }
-      );
-
-      const issues = parseTypoCheckIssues(data?.content ?? data);
-      return {
-        issues,
-        traceId,
-        issueCount: issues.length,
-      };
-    } catch (error) {
-      const message = await resolveUpstreamFailureMessage(error, '错字检查失败');
-      throw new BadGatewayException({
-        code: 1314,
-        msg: message,
-      });
-    }
-  }
-
-  async fixChapterOptimizationTyposStream(
-    projectId: string,
-    chapterNo: number,
-    payload: { draftText?: string; issues?: ChapterTypoIssueRecord[] },
-    userId: string | undefined,
-    callbacks: {
-      onStart: (event: { traceId: string }) => void;
-      onContent: (text: string) => void;
-      onStage?: (event: { stage: ContentSafetyProgressStage; message?: string }) => void;
-      onEnd: (event: {
-        traceId: string;
-        appliedIssueCount: number;
-        autoCorrected: boolean;
-        finalDraftText?: string;
-        contentSafety?: ReturnType<typeof toContentSafetyScanPayload>;
-      }) => void;
-      onError: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
-      onContentReplace?: (text: string) => void;
-    }
-  ): Promise<void> {
-    if (userId) {
-      this.checkAccess(projectId, userId, ['owner', 'editor']);
-    }
-    this.getProjectOrThrow(projectId);
-    this.ensureProjectState(projectId);
-
-    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
-    const knowledge = this.knowledgeStore.get(projectId)!;
-    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
-    if (!chapter) {
-      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
-    }
-
-    const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
-    assertDraftText(draftText);
-
-    let issues = Array.isArray(payload.issues) ? payload.issues : [];
-    if (issues.length === 0) {
-      const checkResult = await this.checkChapterOptimizationTypos(
-        projectId,
-        normalizedChapterNo,
-        { draftText },
-        userId
-      );
-      issues = checkResult.issues;
-    }
-
-    const traceId = makeOptimizationId('typo-fix');
-    const userPrompt = buildTypoFixUserPrompt(draftText, issues);
-
-    const settings = this.settingsStore.get(projectId)!;
-    const personas = this.personasStore.get(projectId)!;
-    await this.syncProjectContextToOrchestrator(
-      projectId,
-      settings,
-      personas,
-      knowledge,
-      [],
-      userId
-    );
-
-    let response;
-    try {
-      response = await axios.post(
-        `${this.getRagOrchestratorUrl()}/api/generate`,
-        {
-          projectId,
-          prompt: userPrompt,
-          useSSE: true,
-          templateKey: CHAPTER_OPTIMIZE_TYPO_FIX_TEMPLATE_KEY,
-          context: {
-            task: 'chapter.optimize.typo-fix',
-            chapterNo: normalizedChapterNo,
-            traceId,
-            appliedIssueCount: issues.length,
-          },
-        },
-        { responseType: 'stream' }
-      );
-    } catch (error) {
-      const message = await resolveUpstreamFailureMessage(error, '错字自动修正失败');
-      throw new BadGatewayException({
-        code: 1315,
-        msg: message,
-      });
-    }
-
-    let firstStartEmitted = false;
-    let buffer = '';
-    let accumulatedDraft = '';
-
-    await new Promise<void>((resolveStream, rejectStream) => {
-      let streamResolved = false;
-      const completeStream = () => {
-        if (streamResolved) {
-          return;
-        }
-        streamResolved = true;
-        resolveStream();
-      };
-
-      const stream = response.data as NodeJS.ReadableStream;
-      const utf8 = createUtf8StreamDecoder();
-
-      stream.on('data', (chunk: Buffer) => {
-        buffer += utf8.decode(chunk);
-        const segments = buffer.split('\n\n');
-        buffer = segments.pop() || '';
-
-        for (const segment of segments) {
-          const trimmedSegment = segment.trim();
-          if (!trimmedSegment.startsWith('data:')) {
-            continue;
-          }
-          const dataPart = trimmedSegment.replace(/^data:\s*/, '');
-          if (!dataPart) {
-            continue;
-          }
-          let event: { event?: string; data?: string; traceId?: string };
-          try {
-            event = JSON.parse(dataPart);
-          } catch {
-            continue;
-          }
-
-          switch (event.event) {
-            case 'start': {
-              const eventTraceId = typeof event.traceId === 'string' ? event.traceId : traceId;
-              if (!firstStartEmitted) {
-                callbacks.onStart({ traceId: eventTraceId });
-                firstStartEmitted = true;
-              }
-              break;
-            }
-            case 'content': {
-              const raw = typeof event.data === 'string' ? event.data : '';
-              const piece = raw.replace(/\\n/g, '\n');
-              accumulatedDraft += piece;
-              callbacks.onContent(piece);
-              break;
-            }
-            case 'end': {
-              const eventTraceId = typeof event.traceId === 'string' ? event.traceId : traceId;
-              void (async () => {
-                try {
-                  const safety = await this.runContentSafetyForText(
-                    projectId,
-                    accumulatedDraft,
-                    eventTraceId,
-                    'chapter.optimize.typo-fix',
-                    (progress) => {
-                      callbacks.onStage?.({
-                        stage: progress.stage,
-                        message: progress.message,
-                      });
-                    }
-                  );
-                  if (safety.blocked) {
-                    callbacks.onError(
-                      formatContentSafetyBlockMessage(safety.blockReason, safety.hits)
-                    );
-                    resolveStream();
-                    return;
-                  }
-                  if (safety.text !== accumulatedDraft) {
-                    callbacks.onContentReplace?.(safety.text);
-                  }
-                  callbacks.onEnd({
-                    traceId: eventTraceId,
-                    appliedIssueCount: issues.length,
-                    autoCorrected: true,
-                    finalDraftText:
-                      safety.text !== accumulatedDraft ? safety.text : undefined,
-                    contentSafety: toContentSafetyScanPayload(safety),
-                  });
-                } catch (error) {
-                  const message =
-                    error instanceof Error ? error.message : '内容安全扫描失败';
-                  callbacks.onError(message);
-                } finally {
-                  completeStream();
-                }
-              })();
-              break;
-            }
-            case 'error': {
-              const message = typeof event.data === 'string' ? event.data : '错字自动修正失败';
-              callbacks.onError(message);
-              completeStream();
-              break;
-            }
-          }
-        }
-      });
-
-      stream.on('end', () => completeStream());
-      stream.on('error', (error: unknown) => rejectStream(error));
-    });
-  }
 
   exportProjectChaptersTxt(projectId: string, userId?: string) {
     if (userId) {

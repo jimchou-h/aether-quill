@@ -21,14 +21,8 @@ test('isWritingStyleInjectionTemplateKey whitelists writing tasks only', () => {
   assert.equal(isWritingStyleInjectionTemplateKey('write.chapter'), true);
   assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.draft'), true);
   assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.direct-draft'), true);
-  assert.equal(isWritingStyleInjectionTemplateKey('chapter.pipeline.sensory.rewrite'), true);
-  assert.equal(isWritingStyleInjectionTemplateKey('chapter.pipeline.sensory.rewrite.revise'), true);
-  assert.equal(isWritingStyleInjectionTemplateKey('chapter.pipeline.sensory.outline'), false);
-  assert.equal(
-    isWritingStyleInjectionTemplateKey('chapter.pipeline.sensory.coverage.verify'),
-    false
-  );
-  assert.equal(isWritingStyleInjectionTemplateKey('chapter.pipeline.brief.synthesize'), false);
+  assert.equal(isWritingStyleInjectionTemplateKey('chapter.pipeline.sensory.rewrite'), false);
+  assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.plan'), false);
 });
 
 test('auto-loop injects into segment rewrite but not into diagnosis', () => {
@@ -49,7 +43,7 @@ test('workbench injects style samples only into the two draft keys', () => {
   assert.equal(isWritingStyleInjectionTemplateKey('chapter.optimize.workbench-fix-span'), false);
 });
 
-test('selectWritingStyleSamplesForTask excludes current chapter and prefers scene match', () => {
+test('selectWritingStyleSamplesForTask excludes current chapter', () => {
   const samples = [
     baseSample({
       id: 'a',
@@ -67,19 +61,18 @@ test('selectWritingStyleSamplesForTask excludes current chapter and prefers scen
   ];
   const picked = selectWritingStyleSamplesForTask({
     samples,
-    templateKey: 'chapter.pipeline.character',
+    templateKey: 'chapter.optimize.draft',
     chapterNo: 3,
     limit: 2,
   });
   assert.equal(picked.length, 2);
   assert.ok(picked.every((item) => item.sourceChapterNo !== 3));
-  assert.equal(picked[0]?.sceneType, 'dialogue');
 });
 
 test('resolveWritingStyleSampleBlock returns undefined for non-writing tasks', () => {
   const block = resolveWritingStyleSampleBlock({
     samples: [baseSample({})],
-    templateKey: 'chapter.pipeline.sensory.outline',
+    templateKey: 'chapter.optimize.plan',
     chapterNo: 1,
   });
   assert.equal(block, undefined);

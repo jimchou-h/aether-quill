@@ -5,11 +5,11 @@ import {
   clampChapterOptimizeSegmentCharSize,
   DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
 } from './chapter-optimize.util';
-import type { ChapterPipelineConfig, ChapterPipelineRulesFixMode, ProtagonistUnlockRule } from './chapter-pipeline.util';
+import type { ChapterPipelineConfig, ChapterPipelineRulesFixMode, ProtagonistUnlockRule } from './legacy-pipeline-settings.util';
 import {
   DEFAULT_PIPELINE_CONFIG,
   DEFAULT_PROTAGONIST_PROGRESS_RULES,
-} from './chapter-pipeline.util';
+} from './legacy-pipeline-settings.util';
 import type { WritingStyleSample } from './writing-style-samples.util';
 import { sanitizeWritingStyleSamples } from './writing-style-samples.util';
 import {

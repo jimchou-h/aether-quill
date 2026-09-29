@@ -10,8 +10,6 @@ const props = defineProps<{
   summarizingChapterNo: number | null;
   generatingRelationChapterNo: number | null;
   optimizingChapterNo?: number | null;
-  finalPolishingChapterNo: number | null;
-  complianceCheckingChapterNo: number | null;
   savingChapterNo: number | null;
   parsingStructuredChapterNo: number | null;
 }>();
@@ -22,11 +20,7 @@ const emit = defineEmits<{
   generateRelationEvents: [chapterNo: number];
   writingOptimize: [chapter: ChapterItem];
   sceneWorkbench: [chapter: ChapterItem];
-  finalPolish: [chapter: ChapterItem];
-  complianceCheck: [chapter: ChapterItem];
-  pipelineOptimize: [chapter: ChapterItem];
   batchOptimize: [chapters: ChapterItem[]];
-  batchPipelineOptimize: [chapters: ChapterItem[]];
   save: [payload: { chapterNo: number; title: string; content: string }];
   parseStructured: [chapterNo: number];
   delete: [chapterNo: number];
@@ -98,16 +92,6 @@ function emitBatchOptimize() {
   emit('batchOptimize', selected);
 }
 
-function emitBatchPipelineOptimize() {
-  if (selectedBatchCount.value < 2) {
-    return;
-  }
-  const selected = props.chapters
-    .filter((chapter) => selectedForBatch.value.has(chapter.chapterNo))
-    .sort((a, b) => a.chapterNo - b.chapterNo);
-  emit('batchPipelineOptimize', selected);
-}
-
 const selectedChapter = computed(
   () => props.chapters.find((chapter) => chapter.chapterNo === props.selectedChapterNo) ?? null
 );
@@ -167,8 +151,6 @@ function isBusy(chapterNo: number) {
     props.summarizingChapterNo === chapterNo ||
     props.generatingRelationChapterNo === chapterNo ||
     props.optimizingChapterNo === chapterNo ||
-    props.finalPolishingChapterNo === chapterNo ||
-    props.complianceCheckingChapterNo === chapterNo ||
     props.savingChapterNo === chapterNo ||
     props.parsingStructuredChapterNo === chapterNo ||
     (editingChapterNo.value !== null && editingChapterNo.value !== chapterNo)
@@ -332,14 +314,6 @@ defineExpose({ clearEditing, clearBatchSelection });
           >
             批量优化{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
           </button>
-          <button
-            class="secondary-button batch-optimize-button"
-            type="button"
-            :disabled="selectedBatchCount < 2"
-            @click="emitBatchPipelineOptimize"
-          >
-            批量创作精修{{ selectedBatchCount > 0 ? ` (${selectedBatchCount})` : '' }}
-          </button>
         </div>
 
         <div ref="chapterTabsRef" class="chapter-tabs" role="tablist" aria-label="章节列表">
@@ -451,17 +425,6 @@ defineExpose({ clearEditing, clearBatchSelection });
                 }}
               </button>
               <button
-                class="primary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('finalPolish', selectedChapter)"
-              >
-                {{
-                  props.finalPolishingChapterNo === selectedChapter.chapterNo
-                    ? '终稿化中...'
-                    : '一键终稿'
-                }}
-              </button>
-              <button
                 class="secondary-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
                 @click="emit('writingOptimize', selectedChapter)"
@@ -501,26 +464,6 @@ defineExpose({ clearEditing, clearBatchSelection });
                   </svg>
                 </button>
                 <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">
-                  <button
-                    class="dropdown-item"
-                    title="发布前硬规则：预扫描 → 合规大纲 → 改写 → 复扫"
-                    :disabled="isBusy(selectedChapter.chapterNo)"
-                    @click="emit('complianceCheck', selectedChapter)"
-                  >
-                    {{
-                      props.complianceCheckingChapterNo === selectedChapter.chapterNo
-                        ? '合规检验中...'
-                        : '终稿合规检验'
-                    }}
-                  </button>
-                  <button
-                    class="dropdown-item"
-                    title="分步执行特征润色与感官优化；可人工确认大纲"
-                    :disabled="isBusy(selectedChapter.chapterNo)"
-                    @click="emit('pipelineOptimize', selectedChapter)"
-                  >
-                    创作精修（分步）
-                  </button>
                   <button
                     class="dropdown-item"
                     :disabled="isBusy(selectedChapter.chapterNo)"

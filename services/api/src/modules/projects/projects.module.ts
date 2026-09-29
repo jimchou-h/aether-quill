@@ -6,8 +6,6 @@ import { PromptTemplatesModule } from '../prompt-templates/prompt-templates.modu
 import { TaskPromptsModule } from '../task-prompts/task-prompts.module';
 import { ProjectsController } from './projects.controller';
 import { ChapterAutoLoopService } from './chapter-auto-loop.service';
-import { ChapterPipelineService } from './chapter-pipeline.service';
-import { ComplianceCheckService } from './compliance-check.service';
 import { ProjectsService } from './projects.service';
 
 @Module({
@@ -19,17 +17,7 @@ import { ProjectsService } from './projects.service';
     forwardRef(() => TaskPromptsModule),
   ],
   controllers: [ProjectsController],
-  providers: [
-    ProjectsService,
-    ChapterPipelineService,
-    ComplianceCheckService,
-    ChapterAutoLoopService,
-  ],
-  exports: [
-    ProjectsService,
-    ChapterPipelineService,
-    ComplianceCheckService,
-    ChapterAutoLoopService,
-  ],
+  providers: [ProjectsService, ChapterAutoLoopService],
+  exports: [ProjectsService, ChapterAutoLoopService],
 })
 export class ProjectsModule {}

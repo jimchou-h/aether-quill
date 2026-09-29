@@ -165,7 +165,7 @@ onMounted(() => {
       <div>
         <h3 class="panel-title">文风样本库</h3>
         <p class="panel-subtitle">
-          标记满意段落作 few-shot 参照；续写、优化与创作精修改写时会按场景自动注入最多 2 条。
+          标记满意段落作 few-shot 参照；续写与文笔优化改写时会按场景自动注入最多 2 条。
         </p>
       </div>
       <button class="primary-button" type="button" :disabled="atCapacity" @click="openCreateModal">

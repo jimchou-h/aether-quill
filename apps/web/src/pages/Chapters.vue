@@ -13,10 +13,6 @@ import ChapterImportDialog from '../components/chapters/ChapterImportDialog.vue'
 import ChapterList from '../components/chapters/ChapterList.vue';
 import ChapterOptimizeDialog from '../components/chapters/ChapterOptimizeDialog.vue';
 import ChapterOptimizeWorkbenchDialog from '../components/chapters/ChapterOptimizeWorkbenchDialog.vue';
-import ChapterPipelineOptimizeDialog from '../components/chapters/ChapterPipelineOptimizeDialog.vue';
-import ChapterFinalPolishDialog from '../components/chapters/ChapterFinalPolishDialog.vue';
-import ChapterComplianceCheckDialog from '../components/chapters/ChapterComplianceCheckDialog.vue';
-import ChapterBatchPipelineOptimizeDialog from '../components/chapters/ChapterBatchPipelineOptimizeDialog.vue';
 import AiTaskProgressPanel from '../components/common/AiTaskProgressPanel.vue';
 import {
   applyAiTaskProgressEvent,
@@ -54,8 +50,6 @@ const savingChapterNo = ref<number | null>(null);
 const batchSummarizing = ref(false);
 const summarizingChapterNo = ref<number | null>(null);
 const generatingRelationChapterNo = ref<number | null>(null);
-const finalPolishingChapterNo = ref<number | null>(null);
-const complianceCheckingChapterNo = ref<number | null>(null);
 const latestSummaryJob = ref<SummaryJob | null>(null);
 const message = ref('');
 const errorMessage = ref('');
@@ -65,16 +59,8 @@ const showImportModal = ref(false);
 const showImportNovelModal = ref(false);
 const showWritingOptimizeModal = ref(false);
 const showWorkbenchModal = ref(false);
-const showPipelineOptimizeModal = ref(false);
-const showFinalPolishModal = ref(false);
-const showComplianceCheckModal = ref(false);
-const showBatchPipelineOptimizeModal = ref(false);
 const writingOptimizingChapter = ref<ChapterItem | null>(null);
 const workbenchChapter = ref<ChapterItem | null>(null);
-const pipelineOptimizingChapter = ref<ChapterItem | null>(null);
-const finalPolishingChapter = ref<ChapterItem | null>(null);
-const complianceCheckingChapter = ref<ChapterItem | null>(null);
-const batchPipelineChapters = ref<ChapterItem[]>([]);
 const afterSaveSse = useAbortableSse();
 const aiTaskProgress = createAiTaskProgressState();
 const activityInterruptHandler = ref<(() => void) | null>(null);
@@ -533,14 +519,6 @@ function ensureAiActivityIdle(): boolean {
   return false;
 }
 
-function handleOpenPipelineOptimizeDialog(chapter: ChapterItem) {
-  if (!ensureAiActivityIdle()) {
-    return;
-  }
-  pipelineOptimizingChapter.value = chapter;
-  showPipelineOptimizeModal.value = true;
-}
-
 function handleOpenWritingOptimizeDialog(chapter: ChapterItem) {
   if (!ensureAiActivityIdle()) {
     return;
@@ -567,65 +545,10 @@ function handleCloseWorkbenchDialog() {
   workbenchChapter.value = null;
 }
 
-function handleOpenFinalPolishDialog(chapter: ChapterItem) {
-  if (!ensureAiActivityIdle()) {
-    return;
-  }
-  finalPolishingChapter.value = chapter;
-  finalPolishingChapterNo.value = chapter.chapterNo;
-  showFinalPolishModal.value = true;
-}
-
-function handleOpenComplianceCheckDialog(chapter: ChapterItem) {
-  if (!ensureAiActivityIdle()) {
-    return;
-  }
-  complianceCheckingChapter.value = chapter;
-  complianceCheckingChapterNo.value = chapter.chapterNo;
-  showComplianceCheckModal.value = true;
-}
-
-function handleCloseComplianceCheckDialog() {
-  showComplianceCheckModal.value = false;
-  complianceCheckingChapter.value = null;
-  complianceCheckingChapterNo.value = null;
-}
-
-function handleCloseFinalPolishDialog() {
-  showFinalPolishModal.value = false;
-  finalPolishingChapter.value = null;
-  finalPolishingChapterNo.value = null;
-}
-
-function handleClosePipelineOptimizeDialog() {
-  showPipelineOptimizeModal.value = false;
-  pipelineOptimizingChapter.value = null;
-}
-
-function handleOpenBatchPipelineOptimizeDialog(chapters: ChapterItem[]) {
-  if (!ensureAiActivityIdle()) {
-    return;
-  }
-  batchPipelineChapters.value = chapters;
-  showBatchPipelineOptimizeModal.value = true;
-}
-
-function handleCloseBatchPipelineOptimizeDialog() {
-  showBatchPipelineOptimizeModal.value = false;
-  batchPipelineChapters.value = [];
-  chapterListRef.value?.clearBatchSelection();
-}
-
 async function handleChapterContentApplied(updated: ChapterItem) {
   message.value = presentSuccess(`第${updated.chapterNo}章正文已更新`);
   await loadWorkspace();
   selectedChapterNo.value = updated.chapterNo;
-}
-
-async function handleBatchPipelineApplied() {
-  message.value = presentSuccess('批量创作精修正文已应用');
-  await loadWorkspace();
-  handleCloseBatchPipelineOptimizeDialog();
 }
 
 async function handleDeleteChapter(chapterNo: number) {
@@ -835,14 +758,11 @@ onUnmounted(() => {
 
     <ChapterList
       ref="chapterListRef"
-      :project-id="projectId"
       :chapters="chapters"
       :loading="loading"
       :selected-chapter-no="selectedChapterNo"
       :summarizing-chapter-no="summarizingChapterNo"
       :generating-relation-chapter-no="generatingRelationChapterNo"
-      :final-polishing-chapter-no="finalPolishingChapterNo"
-      :compliance-checking-chapter-no="complianceCheckingChapterNo"
       :saving-chapter-no="savingChapterNo"
       :parsing-structured-chapter-no="parsingStructuredChapterNo"
       @select="selectedChapterNo = $event"
@@ -850,10 +770,6 @@ onUnmounted(() => {
       @generate-relation-events="handleGenerateChapterRelationEvents"
       @writing-optimize="handleOpenWritingOptimizeDialog"
       @scene-workbench="handleOpenWorkbenchDialog"
-      @final-polish="handleOpenFinalPolishDialog"
-      @compliance-check="handleOpenComplianceCheckDialog"
-      @pipeline-optimize="handleOpenPipelineOptimizeDialog"
-      @batch-pipeline-optimize="handleOpenBatchPipelineOptimizeDialog"
       @save="handleSaveChapter"
       @parse-structured="handleParseStructuredChapter"
       @delete="handleDeleteChapter"
@@ -864,14 +780,6 @@ onUnmounted(() => {
       :project-id="projectId"
       @imported="handleImportNovelDone"
       @close="closeImportNovelModal"
-    />
-
-    <ChapterFinalPolishDialog
-      :visible="showFinalPolishModal"
-      :project-id="projectId"
-      :chapter="finalPolishingChapter"
-      @close="handleCloseFinalPolishDialog"
-      @applied="handleChapterContentApplied"
     />
 
     <ChapterOptimizeDialog
@@ -888,30 +796,6 @@ onUnmounted(() => {
       :chapter="workbenchChapter"
       @close="handleCloseWorkbenchDialog"
       @applied="handleChapterContentApplied"
-    />
-
-    <ChapterComplianceCheckDialog
-      :visible="showComplianceCheckModal"
-      :project-id="projectId"
-      :chapter="complianceCheckingChapter"
-      @close="handleCloseComplianceCheckDialog"
-      @applied="handleChapterContentApplied"
-    />
-
-    <ChapterPipelineOptimizeDialog
-      :visible="showPipelineOptimizeModal"
-      :project-id="projectId"
-      :chapter="pipelineOptimizingChapter"
-      @close="handleClosePipelineOptimizeDialog"
-      @applied="handleChapterContentApplied"
-    />
-
-    <ChapterBatchPipelineOptimizeDialog
-      :visible="showBatchPipelineOptimizeModal"
-      :project-id="projectId"
-      :chapters="batchPipelineChapters"
-      @close="handleCloseBatchPipelineOptimizeDialog"
-      @applied="handleBatchPipelineApplied"
     />
 
     <div

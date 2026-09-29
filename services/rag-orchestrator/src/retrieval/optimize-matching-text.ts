@@ -10,8 +10,6 @@ const CHAPTER_OPTIMIZE_TEMPLATE_KEYS = new Set([
   'chapter.optimize.plan',
   'chapter.optimize.draft',
   'chapter.optimize.direct-draft',
-  'chapter.optimize.typo-check',
-  'chapter.optimize.typo-fix',
 ]);
 
 /** 默认开启；设 `CHAPTER_OPTIMIZE_PERSONA_MATCH=0` 可回退为仅本章结构化文本 */

@@ -115,30 +115,6 @@ export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
   content: '章节优化-直接正文 system prompt（v1.1.1）',
 };
 
-/** 章节优化-错字检查（AQ-250 登记；运行时默认见 API `chapter-optimize.util`） */
-export const chapterOptimizeTypoCheckTemplate: PromptTemplate = {
-  id: 'chapter.optimize.typo-check',
-  name: '章节优化-错字检查',
-  version: '1.0.0',
-  category: 'task',
-  status: 'published',
-  systemPromptText:
-    '你是一位资深中文小说校对编辑。本步骤只输出 JSON issues 数组，不要 Markdown。',
-  content: '章节优化-错字检查 system prompt（v1.0.0）',
-};
-
-/** 章节优化-错字修正（AQ-250 登记） */
-export const chapterOptimizeTypoFixTemplate: PromptTemplate = {
-  id: 'chapter.optimize.typo-fix',
-  name: '章节优化-错字修正',
-  version: '1.0.0',
-  category: 'task',
-  status: 'published',
-  systemPromptText:
-    '你是一位资深中文小说校对编辑。本步骤直接输出修正后的完整正文纯文本。',
-  content: '章节优化-错字修正 system prompt（v1.0.0）',
-};
-
 /** 按场成稿-感官加料（范围内正文；不分段） */
 export const chapterOptimizeWorkbenchDraftSexTemplate: PromptTemplate = {
   id: 'chapter.optimize.workbench-draft-sex',
@@ -279,8 +255,6 @@ export const templateRegistry: Record<string, PromptTemplate> = {
   [chapterOptimizePlanTemplate.id]: chapterOptimizePlanTemplate,
   [chapterOptimizeDraftTemplate.id]: chapterOptimizeDraftTemplate,
   [chapterOptimizeDirectDraftTemplate.id]: chapterOptimizeDirectDraftTemplate,
-  [chapterOptimizeTypoCheckTemplate.id]: chapterOptimizeTypoCheckTemplate,
-  [chapterOptimizeTypoFixTemplate.id]: chapterOptimizeTypoFixTemplate,
   [chapterOptimizeWorkbenchDraftSexTemplate.id]: chapterOptimizeWorkbenchDraftSexTemplate,
   [chapterOptimizeWorkbenchDraftProseTemplate.id]: chapterOptimizeWorkbenchDraftProseTemplate,
   [chapterOptimizeWorkbenchReviewTemplate.id]: chapterOptimizeWorkbenchReviewTemplate,

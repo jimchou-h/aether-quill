@@ -41,7 +41,7 @@ function buildTraceContextFields(profile: ReturnType<typeof resolveGenerationCal
 }
 
 test('writing templateKey uses built-in defaults and env frequency_penalty', () => {
-  const profile = resolveProfileForProject('chapter.pipeline.sensory.rewrite');
+  const profile = resolveProfileForProject('chapter.optimize.direct-draft');
   const traceFields = buildTraceContextFields(profile);
 
   assert.equal(profile.tier, 'writing');
@@ -54,7 +54,7 @@ test('writing templateKey uses built-in defaults and env frequency_penalty', () 
 });
 
 test('utility templateKey uses built-in defaults without frequency_penalty', () => {
-  const profile = resolveProfileForProject('chapter.pipeline.sensory.outline');
+  const profile = resolveProfileForProject('chapter.optimize.plan');
   const traceFields = buildTraceContextFields(profile);
 
   assert.equal(profile.tier, 'utility');
@@ -75,7 +75,7 @@ test('project settings override env models per tier', () => {
   assert.equal(writing.model, 'project-writing');
   assert.equal(writing.temperature, 0.88);
 
-  const utility = resolveProfileForProject('chapter.pipeline.brief.synthesize', {
+  const utility = resolveProfileForProject('chapter.optimize.plan', {
     generationWritingModel: 'project-writing',
     generationUtilityModel: 'project-utility',
     generationTemperature: 0.25,
@@ -138,10 +138,10 @@ test('without user prefs, built-in defaults ignore PROVIDER_MODEL env for call p
     process.env.PROVIDER_TEMPERATURE = '0.65';
 
     const writing = resolveGenerationCallProfile({
-      templateKey: 'chapter.pipeline.sensory.rewrite',
+      templateKey: 'chapter.optimize.direct-draft',
     });
     const utility = resolveGenerationCallProfile({
-      templateKey: 'chapter.pipeline.sensory.outline',
+      templateKey: 'chapter.optimize.plan',
     });
 
     assert.equal(writing.model, 'deepseek-v4-flash');
@@ -184,7 +184,7 @@ test('user preferences select different providers per tier', () => {
   assert.equal(writing.temperature, 0.85);
 
   const utility = resolveGenerationCallProfile({
-    templateKey: 'chapter.pipeline.sensory.outline',
+    templateKey: 'chapter.optimize.plan',
     userPreferences: {
       writing: { provider: 'siliconflow', model: 'Qwen/Qwen2.5-7B-Instruct', temperature: 0.85 },
       utility: { provider: 'deepseek', model: 'deepseek-chat', temperature: 0.4 },

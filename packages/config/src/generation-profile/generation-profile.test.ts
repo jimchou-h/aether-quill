@@ -91,10 +91,9 @@ test('clampWritingGenerationTemperature clamps to [0, 2]', () => {
 
 test('resolveGenerationTierForTemplateKey maps writing vs utility tasks', () => {
   assert.equal(resolveGenerationTierForTemplateKey('write.chapter'), 'writing');
-  assert.equal(resolveGenerationTierForTemplateKey('chapter.pipeline.sensory.rewrite'), 'writing');
-  assert.equal(resolveGenerationTierForTemplateKey('chapter.pipeline.rules.fix'), 'writing');
-  assert.equal(resolveGenerationTierForTemplateKey('chapter.pipeline.sensory.outline'), 'utility');
-  assert.equal(resolveGenerationTierForTemplateKey('chapter.pipeline.brief.synthesize'), 'utility');
+  assert.equal(resolveGenerationTierForTemplateKey('chapter.optimize.direct-draft'), 'writing');
+  assert.equal(resolveGenerationTierForTemplateKey('chapter.optimize.plan'), 'utility');
+  assert.equal(resolveGenerationTierForTemplateKey('chapter.optimize.workbench-review'), 'utility');
   assert.equal(resolveGenerationTierForTemplateKey(''), 'utility');
   assert.equal(isWritingTierTemplateKey('chapter.optimize.plan'), false);
   assert.equal(isWritingTierTemplateKey('chapter.optimize.direct-draft'), true);
@@ -114,7 +113,7 @@ test('resolveGenerationCallProfile uses built-in defaults; project overrides whe
     writingFrequencyPenalty: 0.3,
   };
   const writing = resolveGenerationCallProfile({
-    templateKey: 'chapter.pipeline.sensory.rewrite',
+    templateKey: 'chapter.optimize.direct-draft',
     env,
   });
   assert.equal(writing.tier, 'writing');
@@ -123,7 +122,7 @@ test('resolveGenerationCallProfile uses built-in defaults; project overrides whe
   assert.equal(writing.frequencyPenalty, 0.3);
 
   const utility = resolveGenerationCallProfile({
-    templateKey: 'chapter.pipeline.sensory.outline',
+    templateKey: 'chapter.optimize.plan',
     env,
     projectOverrides: {
       generationUtilityModel: 'project-utility',
