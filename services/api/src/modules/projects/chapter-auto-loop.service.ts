@@ -12,7 +12,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { streamPipelineGeneration, generatePipelinePlainText } from './chapter-pipeline-orchestrator.client';
+import { streamPipelineGeneration, generatePipelinePlainText } from './chapter-generation-stream.client';
 import { resolveUpstreamFailureMessage } from './orchestrator-error.util';
 import {
   CHAPTER_AUTO_LOOP_DRAFT_TEMPLATE_KEY,
@@ -24,8 +24,7 @@ import {
   resolveAutoLoopSegmentMaxTokens,
   appendAutoLoopDiagnoseRetryHint,
 } from './chapter-auto-loop.util';
-import { findLatestPipelineSessionForChapter } from './chapter-pipeline-session.store';
-import { buildCompliancePersonaBlock } from './compliance-check.util';
+import { buildChapterPersonaPromptBlock } from './chapter-persona-prompt.util';
 import {
   composeAutoLoopResumeDraft,
   composeAutoLoopTimelineRounds,
@@ -595,16 +594,11 @@ export class ChapterAutoLoopService {
     userId?: string;
   }): { names: string[]; block: string } {
     const personas = this.projectsService.getPersonas(input.projectId, input.userId);
-    const pipelineNames = findLatestPipelineSessionForChapter(
-      input.projectId,
-      input.chapterNo
-    )?.selectedPersonaNames;
     const requested = (input.requestedNames ?? []).map((name) => name.trim()).filter(Boolean);
     const names = resolveAutoLoopPersonaNames({
       sourceText: input.sourceText,
       personas,
       requestedNames: requested,
-      fallbackNames: pipelineNames,
     });
     if (names.length === 0) {
       return { names: [], block: '' };
@@ -612,7 +606,7 @@ export class ChapterAutoLoopService {
     const cards = this.projectsService.listPersonaCardDocuments(input.projectId, input.userId);
     return {
       names,
-      block: buildCompliancePersonaBlock(personas, names, {
+      block: buildChapterPersonaPromptBlock(personas, names, {
         cards,
         ...(requested.length > 0 ? {} : { sourceText: input.sourceText }),
       }),

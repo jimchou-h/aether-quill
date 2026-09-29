@@ -125,58 +125,6 @@ paths:
     $ref: './paths/projects/chapter-optimize-auto-loop-prompt-lab-replay.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop/prompt-lab/advise:
     $ref: './paths/projects/chapter-optimize-auto-loop-prompt-lab-advise.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-check:
-    $ref: './paths/projects/chapter-optimize-typo-check.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/typo-fix:
-    $ref: './paths/projects/chapter-optimize-typo-fix.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/start:
-    $ref: './paths/projects/chapter-pipeline-start.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}:
-    $ref: './paths/projects/chapter-pipeline-session.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/sensory-outline:
-    $ref: './paths/projects/chapter-pipeline-sensory-outline.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline:
-    $ref: './paths/projects/chapter-pipeline-outline.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/revise:
-    $ref: './paths/projects/chapter-pipeline-outline-revise.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/rewrite/revise:
-    $ref: './paths/projects/chapter-pipeline-rewrite-revise.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/rewrite/fix-items:
-    $ref: './paths/projects/chapter-pipeline-rewrite-fix-items.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/coverage-verify:
-    $ref: './paths/projects/chapter-pipeline-outline-coverage-verify.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/brief/synthesize:
-    $ref: './paths/projects/chapter-pipeline-outline-brief-synthesize.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/brief:
-    $ref: './paths/projects/chapter-pipeline-outline-brief.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/outline/coverage:
-    $ref: './paths/projects/chapter-pipeline-outline-coverage.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/version:
-    $ref: './paths/projects/chapter-pipeline-version.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/run/{module}:
-    $ref: './paths/projects/chapter-pipeline-run.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/pipeline/{sessionId}/apply:
-    $ref: './paths/projects/chapter-pipeline-apply.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/start:
-    $ref: './paths/projects/compliance-check-start.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/session:
-    $ref: './paths/projects/compliance-check-session-active.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}:
-    $ref: './paths/projects/compliance-check-session.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline:
-    $ref: './paths/projects/compliance-check-outline.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline/revise:
-    $ref: './paths/projects/compliance-check-outline-revise.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline/coverage-verify:
-    $ref: './paths/projects/compliance-check-outline-coverage-verify.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/outline/coverage:
-    $ref: './paths/projects/compliance-check-outline-coverage.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/rewrite/fix-items:
-    $ref: './paths/projects/compliance-check-rewrite-fix-items.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/run/{phase}:
-    $ref: './paths/projects/compliance-check-run.yaml'
-  /api/projects/{id}/knowledge/chapters/{chapterNo}/compliance-check/{sessionId}/apply:
-    $ref: './paths/projects/compliance-check-apply.yaml'
   /api/projects/{id}/knowledge/chapters/import/preview:
     $ref: './paths/projects/chapter-import-preview.yaml'
   /api/projects/{id}/knowledge/chapters/import/confirm:

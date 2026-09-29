@@ -6,13 +6,11 @@ import { randomUUID } from 'node:crypto';
 import type { ContentSafetyRule } from '@aether-quill/config';
 import {
   PIPELINE_OUTLINE_JSON_OUTPUT_RULE,
-  filterPipelinePersonas,
   sanitizeSensoryOutlineWithContentScan,
   type FinalPolishQualityStatus,
   type PipelineOutlineItem,
   type PipelineRuleIssue,
 } from './chapter-pipeline.util';
-import { extractCardDisplayName } from '../documents/persona-card-link.util';
 
 export const CHAPTER_COMPLIANCE_OUTLINE_TEMPLATE_KEY = 'chapter.compliance.outline';
 export const CHAPTER_COMPLIANCE_REWRITE_TEMPLATE_KEY = 'chapter.compliance.rewrite';
@@ -453,98 +451,12 @@ export function buildCompliancePreScanSummary(issues: PipelineRuleIssue[]): stri
 }
 
 /** 角色卡按匹配全量注入；99999 只挡住极端超大文档，不当日常上限 */
-export const COMPLIANCE_PERSONA_CARD_MAX_CHARS = 99999;
-
-export type CompliancePersonaCardDoc = {
-  personaId?: string | null;
-  title: string;
-  content: string;
-};
-
-function clipPersonaCardContent(content: string): string {
-  const trimmed = content.trim();
-  if (trimmed.length <= COMPLIANCE_PERSONA_CARD_MAX_CHARS) {
-    return trimmed;
-  }
-  return `${trimmed.slice(0, COMPLIANCE_PERSONA_CARD_MAX_CHARS)}\n…（角色卡过长，已截断）`;
-}
-
-function matchPersonaCard(
-  persona: { id?: string; name: string },
-  cards: CompliancePersonaCardDoc[]
-): CompliancePersonaCardDoc | undefined {
-  if (persona.id) {
-    const byId = cards.find((card) => card.personaId === persona.id);
-    if (byId?.content.trim()) {
-      return byId;
-    }
-  }
-  return cards.find((card) => extractCardDisplayName(card.title) === persona.name);
-}
-
-export function resolveCompliancePersonaNames(
-  personas: Array<{ name: string; status: string }>,
-  sourceText: string,
-  selectedPersonaNames?: string[]
-): string[] | undefined {
-  const appearing = personas
-    .filter((persona) => persona.name && sourceText.includes(persona.name))
-    .map((persona) => persona.name);
-  const selected = (selectedPersonaNames ?? []).map((name) => name.trim()).filter(Boolean);
-  const names = [...new Set([...appearing, ...selected])];
-  return names.length > 0 ? names : undefined;
-}
-
-/** 合规用人设：正文出场或检索勾选的角色含草稿；无名单时回退已发布人物。 */
-function filterCompliancePersonas<T extends { name: string; status: string }>(
-  personas: T[],
-  names?: string[]
-): T[] {
-  const selected = (names ?? []).map((name) => name.trim()).filter(Boolean);
-  if (selected.length === 0) {
-    return filterPipelinePersonas(personas);
-  }
-  const wanted = new Set(selected);
-  return personas.filter((persona) => wanted.has(persona.name));
-}
-
-export function buildCompliancePersonaBlock(
-  personas: Array<{ id?: string; name: string; profile: string; state: string; status: string }>,
-  selectedPersonaNames?: string[],
-  options?: { cards?: CompliancePersonaCardDoc[]; sourceText?: string }
-): string {
-  const names = options?.sourceText
-    ? resolveCompliancePersonaNames(personas, options.sourceText, selectedPersonaNames)
-    : selectedPersonaNames;
-  const selected = filterCompliancePersonas(personas, names);
-  const usedNames = new Set(selected.map((persona) => persona.name));
-  const cards = options?.cards ?? [];
-  const blocks = selected.map((persona) => {
-    const card = matchPersonaCard(persona, cards);
-    const lines = [`${persona.name}：${persona.profile}`];
-    if (card?.content.trim()) {
-      lines.push(`角色卡《${card.title}》`, clipPersonaCardContent(card.content));
-    }
-    lines.push(`状态：${persona.state}`);
-    return lines.join('\n');
-  });
-  if (options?.sourceText) {
-    for (const card of cards) {
-      const displayName = extractCardDisplayName(card.title);
-      if (!displayName || usedNames.has(displayName) || !options.sourceText.includes(displayName)) {
-        continue;
-      }
-      if (!card.content.trim()) {
-        continue;
-      }
-      usedNames.add(displayName);
-      blocks.push(
-        `${displayName}：\n角色卡《${card.title}》\n${clipPersonaCardContent(card.content)}`
-      );
-    }
-  }
-  return blocks.join('\n\n');
-}
+export {
+  CHAPTER_PERSONA_CARD_MAX_CHARS as COMPLIANCE_PERSONA_CARD_MAX_CHARS,
+  buildChapterPersonaPromptBlock as buildCompliancePersonaBlock,
+  resolveChapterPersonaNames as resolveCompliancePersonaNames,
+  type ChapterPersonaCardDoc as CompliancePersonaCardDoc,
+} from './chapter-persona-prompt.util';
 
 export function buildComplianceOutlineUserPrompt(input: {
   sourceText: string;
