@@ -68,7 +68,7 @@ export const chapterOptimizePlanTemplate: PromptTemplate = {
 export const chapterOptimizeDraftTemplate: PromptTemplate = {
   id: 'chapter.optimize.draft',
   name: '章节优化-正文',
-  version: '1.2.0',
+  version: '1.2.1',
   category: 'task',
   status: 'published',
   systemPromptText: [
@@ -81,11 +81,11 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
     '1) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
     '2) 语言、人称、时态、人物名称须与原文一致，除非方案明确要求修改；',
     '3) 输出风格须与项目 systemPrompt 与人物设定保持一致；',
-    '4) 若提示中含【边界锚点】/【前段末文】：只锁情节起止边界，不锁措辞与密度；禁止提前写入下段情节；',
+    '4) 若提示中含【前段末文】，那是上一段已经写成的正文，须承接其中刚发生的位置、衣着与动作，不得重复，也不得回到已被改掉的状态；【边界锚点】只锁本段情节起止，禁止提前写入下段情节；',
     '5) 若【叙事上下文】含【下章衔接】，章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
     '6) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
   ].join('\n'),
-  content: '章节优化-正文 system prompt（v1.2.0）',
+  content: '章节优化-正文 system prompt（v1.2.1）',
 };
 
 /**
@@ -95,7 +95,7 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
 export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
   id: 'chapter.optimize.direct-draft',
   name: '章节优化-直接正文',
-  version: '1.1.0',
+  version: '1.1.1',
   category: 'task',
   status: 'published',
   systemPromptText: [
@@ -108,11 +108,11 @@ export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
     '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
     '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非用户要求明确修改；',
     '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
-    '6) 若提示中含【边界锚点】/【前段末文】：只锁情节起止边界，不锁措辞与密度；禁止提前写入下段情节；',
+    '6) 若提示中含【前段末文】，那是上一段已经写成的正文，须承接其中刚发生的位置、衣着与动作，不得重复，也不得回到已被改掉的状态；【边界锚点】只锁本段情节起止，禁止提前写入下段情节；',
     '7) 若【叙事上下文】含【下章衔接】，本章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
     '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
   ].join('\n'),
-  content: '章节优化-直接正文 system prompt（v1.1.0）',
+  content: '章节优化-直接正文 system prompt（v1.1.1）',
 };
 
 /** 章节优化-错字检查（AQ-250 登记；运行时默认见 API `chapter-optimize.util`） */

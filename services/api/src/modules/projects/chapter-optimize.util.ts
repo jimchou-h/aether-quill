@@ -54,7 +54,7 @@ export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
   '1) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
   '2) 语言、人称、时态、人物名称须与原文一致，除非方案明确要求修改；',
   '3) 输出风格须与项目 systemPrompt 与人物设定保持一致；',
-  '4) 若提示中含【边界锚点】/【前段末文】：只锁情节起止边界，不锁措辞与密度；禁止提前写入下段情节；',
+  '4) 若提示中含【前段末文】，那是上一段已经写成的正文，须承接其中刚发生的位置、衣着与动作，不得重复，也不得回到已被改掉的状态；【边界锚点】只锁本段情节起止，禁止提前写入下段情节；',
   '5) 若【叙事上下文】含【下章衔接】，章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
   '6) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
 ].join('\n');
@@ -69,7 +69,7 @@ export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_SYSTEM_PROMPT = [
   '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
   '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非用户要求明确修改；',
   '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
-  '6) 若提示中含【边界锚点】/【前段末文】：只锁情节起止边界，不锁措辞与密度；禁止提前写入下段情节；',
+  '6) 若提示中含【前段末文】，那是上一段已经写成的正文，须承接其中刚发生的位置、衣着与动作，不得重复，也不得回到已被改掉的状态；【边界锚点】只锁本段情节起止，禁止提前写入下段情节；',
   '7) 若【叙事上下文】含【下章衔接】，本章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
   '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
 ].join('\n');
@@ -249,7 +249,8 @@ export function resolveChapterOptimizeLengthStrategy(
     strategyLabel: `${segmentCount} 段优化（约 ${config.segmentCharSize} 字/段）`,
   };
 }
-export const SEGMENT_TAIL_CONTEXT_CHARS = 400;
+/** 上一段成稿末尾带入下一段的字数。按句号回退，至少保留最后一句，可略超此值。 */
+export const SEGMENT_TAIL_CONTEXT_CHARS = 1200;
 export const SEGMENT_LEAD_CONTEXT_CHARS = 200;
 /**
  * 中段 maxTokens 相对原文字符的余量倍率。
@@ -1048,7 +1049,22 @@ export function extractSegmentTailText(
   if (trimmed.length <= maxChars) {
     return trimmed;
   }
-  return trimmed.slice(-maxChars);
+
+  const cut = trimmed.length - maxChars;
+  const head = trimmed.slice(0, cut);
+  const boundaryRe = /[。！？…]["”』」]*/g;
+  let lastEnd = -1;
+  let match: RegExpExecArray | null;
+  while ((match = boundaryRe.exec(head)) !== null) {
+    lastEnd = match.index + match[0].length;
+  }
+  if (lastEnd > 0) {
+    const tail = trimmed.slice(lastEnd).trim();
+    if (tail.length > 0) {
+      return tail;
+    }
+  }
+  return trimmed.slice(cut);
 }
 
 export function extractSegmentLeadText(
@@ -1188,7 +1204,7 @@ function formatBoundaryAnchorsBlock(anchors: SegmentBoundaryAnchors, segmentInde
   ];
   if (anchors.previousOriginalLastSentence) {
     lines.push(
-      `- 上段原文末句：「${anchors.previousOriginalLastSentence}」（本段须从此句之后自然承接，不得重复该句）`
+      `- 上段原文末句：「${anchors.previousOriginalLastSentence}」（情节不得退回此句之前；若已给出前段成稿，人物现状以成稿末尾为准，不得重复成稿末尾）`
     );
   } else if (segmentIndex > 0) {
     lines.push('- 上段原文末句：（无，本段为章节后续部分）');
@@ -1285,7 +1301,11 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
 
   if (previousSegmentTail) {
     sections.push(
-      `【前段末文（语气参考，不要照抄；情节边界以上方「边界锚点」为准）】\n${previousSegmentTail}`
+      [
+        '【前段末文】',
+        '以下是上一段已经写成的正文，是刚发生的事。本段从这里接着写，承接其中的位置、衣着、动作和刚用过的说法。不要重复这段文字，也不要回到上一段原文里已经被改掉的状态。',
+        previousSegmentTail,
+      ].join('\n')
     );
   }
 

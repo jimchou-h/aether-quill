@@ -734,6 +734,8 @@ test('buildSegmentPrompt includes boundary anchors and middle-segment constraint
   assert.match(prompt, /下段原文首句：「第三段开始了。」/);
   assert.match(prompt, /【中段专用】/);
   assert.match(prompt, /【前段末文/);
+  assert.match(prompt, /是刚发生的事/);
+  assert.doesNotMatch(prompt, /语气参考/);
   assert.ok(!prompt.includes('【下段原文起笔'));
 });
 
@@ -793,9 +795,24 @@ test('shouldRetrySegmentForLength 只在跑飞时触发，不拦截正常扩写'
   assert.equal(shouldRetrySegmentForLength('a'.repeat(100), 'b'.repeat(140)), false);
 });
 
-test('extractSegmentTailText keeps trailing characters', () => {
+test('extractSegmentTailText keeps trailing characters when no sentence boundary exists', () => {
   const tail = extractSegmentTailText('abcdefghij', 4);
   assert.equal(tail, 'ghij');
+});
+
+test('extractSegmentTailText starts after the last sentence boundary before the cut', () => {
+  const earlier = `${'甲'.repeat(30)}。`;
+  const middle = `${'乙'.repeat(40)}。`;
+  const last = `${'丙'.repeat(50)}。`;
+  const tail = extractSegmentTailText(`${earlier}${middle}${last}`, 80);
+  assert.equal(tail, `${middle}${last}`);
+});
+
+test('extractSegmentTailText keeps a last sentence longer than the budget', () => {
+  const earlier = `${'甲'.repeat(20)}。`;
+  const last = `${'乙'.repeat(150)}。`;
+  const tail = extractSegmentTailText(`${earlier}${last}`, 80);
+  assert.equal(tail, last);
 });
 
 test('extractSegmentLeadText uses first paragraph', () => {

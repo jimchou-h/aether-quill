@@ -56,9 +56,9 @@ test('withDeepSeekNonThinkingChatBody disables thinking per vendor', () => {
   assert.equal('enable_thinking' in qwen, false);
 });
 
-test('shouldEnableChatThinking only opens direct-draft', () => {
+test('shouldEnableChatThinking opens plan draft and direct draft', () => {
   assert.equal(shouldEnableChatThinking('chapter.optimize.direct-draft'), true);
-  assert.equal(shouldEnableChatThinking('chapter.optimize.draft'), false);
+  assert.equal(shouldEnableChatThinking('chapter.optimize.draft'), true);
   assert.equal(shouldEnableChatThinking('chapter.optimize.plan'), false);
   assert.equal(shouldEnableChatThinking(''), false);
 });

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { buildChapterDiffLines, buildInlineDiffViews } from '../../utils/chapterOptimizeDiff';
+import { computed, nextTick, shallowRef, watch } from 'vue';
+import { buildOptimizeDiffBundle } from '../../utils/chapterOptimizeDiff';
 
 const props = withDefaults(
   defineProps<{
@@ -18,23 +18,64 @@ const props = withDefaults(
 
 const draft = defineModel<string>({ required: true });
 
+/** 流式生成中用只读 pre，避免 textarea 每个合批都重绑整章 value。 */
+const showStreamPreview = computed(() => props.draftDisabled === true && props.showDiff === false);
+
+/** 流式预览只渲染末尾，布局成本与章长脱钩；完整正文仍在 model 里，结束后进可编辑框。 */
+const STREAM_PREVIEW_CHARS = 3000;
+const streamPreviewText = computed(() => {
+  const text = draft.value;
+  if (text.length <= STREAM_PREVIEW_CHARS) {
+    return text;
+  }
+  return `…\n${text.slice(-STREAM_PREVIEW_CHARS)}`;
+});
+
 const diffReady = computed(() => props.showDiff);
-const inlineDiff = computed(() =>
-  diffReady.value
-    ? buildInlineDiffViews(props.original, draft.value)
-    : { originalSegments: [], draftSegments: [] }
+/** 等一帧再算对照，先让「生成完成」状态画出来，避免结束瞬间卡死。 */
+const diffComputeReady = shallowRef(false);
+let diffComputeToken = 0;
+
+watch(
+  () => [props.showDiff, props.original, draft.value] as const,
+  async ([ready]) => {
+    const token = ++diffComputeToken;
+    if (!ready) {
+      diffComputeReady.value = false;
+      return;
+    }
+    diffComputeReady.value = false;
+    await nextTick();
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+    if (token !== diffComputeToken || !props.showDiff) {
+      return;
+    }
+    diffComputeReady.value = true;
+  },
+  { immediate: true }
 );
-const diffLines = computed(() =>
-  diffReady.value ? buildChapterDiffLines(props.original, draft.value) : []
+
+const diffBundle = computed(() => {
+  if (!diffReady.value || !diffComputeReady.value) {
+    return null;
+  }
+  return buildOptimizeDiffBundle(props.original, draft.value);
+});
+
+const inlineDiff = computed(
+  () => diffBundle.value?.inline ?? { originalSegments: [], draftSegments: [] }
 );
-const addedCount = computed(() => diffLines.value.filter((row) => row.type === 'added').length);
-const removedCount = computed(() => diffLines.value.filter((row) => row.type === 'removed').length);
-const modifiedCount = computed(
-  () => diffLines.value.filter((row) => row.type === 'modified').length
-);
+const addedCount = computed(() => diffBundle.value?.addedCount ?? 0);
+const removedCount = computed(() => diffBundle.value?.removedCount ?? 0);
+const modifiedCount = computed(() => diffBundle.value?.modifiedCount ?? 0);
 const hasDiff = computed(() =>
   Boolean(
-    diffReady.value && props.original.trim() && draft.value.trim() && diffLines.value.length > 0
+    diffBundle.value &&
+      props.original.trim() &&
+      draft.value.trim() &&
+      diffBundle.value.lines.length > 0
   )
 );
 </script>
@@ -48,10 +89,14 @@ const hasDiff = computed(() =>
       </div>
       <div class="compare-panel">
         <h4 class="panel-title">{{ draftTitle ?? '成稿（可编辑）' }}</h4>
-        <textarea v-model="draft" class="draft-input" :disabled="draftDisabled" />
+        <pre v-if="showStreamPreview" class="draft-input draft-stream-preview">{{
+          streamPreviewText
+        }}</pre>
+        <textarea v-else v-model="draft" class="draft-input" :disabled="draftDisabled" />
       </div>
     </div>
     <p v-if="!diffReady" class="diff-pending">生成完成后显示对照</p>
+    <p v-else-if="!diffComputeReady" class="diff-pending">正在生成对照…</p>
     <div v-else-if="hasDiff" class="diff-block">
       <div class="diff-summary">
         <span class="diff-badge diff-removed">-{{ removedCount }} 删除</span>
@@ -153,6 +198,9 @@ const hasDiff = computed(() =>
   width: 100%;
   font-family: inherit;
   resize: none;
+}
+.draft-stream-preview {
+  background: #fff;
 }
 .diff-pending {
   margin: 0;

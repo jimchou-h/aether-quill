@@ -12,12 +12,24 @@ export interface DiffLineResult {
   type: 'unchanged' | 'added' | 'removed' | 'modified';
 }
 
-export function buildChapterDiffLines(original: string, draft: string): DiffLineResult[] {
-  if (!original && !draft) {
-    return [];
-  }
+export interface InlineDiffSegment {
+  text: string;
+  removed?: boolean;
+  added?: boolean;
+}
 
-  const changes: Change[] = computeDiff(original, draft);
+export interface OptimizeDiffBundle {
+  inline: {
+    originalSegments: InlineDiffSegment[];
+    draftSegments: InlineDiffSegment[];
+  };
+  lines: DiffLineResult[];
+  addedCount: number;
+  removedCount: number;
+  modifiedCount: number;
+}
+
+function buildChapterDiffLinesFromChanges(changes: Change[]): DiffLineResult[] {
   const origLines: DiffSegment[][] = [];
   const draftLines: DiffSegment[][] = [];
 
@@ -27,15 +39,15 @@ export function buildChapterDiffLines(original: string, draft: string): DiffLine
   function flushOrigLine() {
     if (currentOrigLine.length > 0) {
       origLines.push(currentOrigLine);
-      currentOrigLine = [];
     }
+    currentOrigLine = [];
   }
 
   function flushDraftLine() {
     if (currentDraftLine.length > 0) {
       draftLines.push(currentDraftLine);
-      currentDraftLine = [];
     }
+    currentDraftLine = [];
   }
 
   for (const change of changes) {
@@ -142,27 +154,10 @@ export function buildChapterDiffLines(original: string, draft: string): DiffLine
   return results;
 }
 
-export interface InlineDiffSegment {
-  text: string;
-  removed?: boolean;
-  added?: boolean;
-}
-
-/** SSE / 自动循环未结束时不算、不渲染红绿对照，避免每条流式增量重跑整章 diff。 */
-export function shouldRenderOptimizeDiff(isGenerating: boolean): boolean {
-  return !isGenerating;
-}
-
-/** 全文并排高亮：左栏标删除、右栏标新增，不丢段落 */
-export function buildInlineDiffViews(
-  original: string,
-  draft: string
-): { originalSegments: InlineDiffSegment[]; draftSegments: InlineDiffSegment[] } {
-  if (!original && !draft) {
-    return { originalSegments: [], draftSegments: [] };
-  }
-
-  const changes: Change[] = computeDiff(original, draft);
+function buildInlineDiffViewsFromChanges(changes: Change[]): {
+  originalSegments: InlineDiffSegment[];
+  draftSegments: InlineDiffSegment[];
+} {
   const originalSegments: InlineDiffSegment[] = [];
   const draftSegments: InlineDiffSegment[] = [];
 
@@ -178,4 +173,50 @@ export function buildInlineDiffViews(
   }
 
   return { originalSegments, draftSegments };
+}
+
+export function buildChapterDiffLines(original: string, draft: string): DiffLineResult[] {
+  if (!original && !draft) {
+    return [];
+  }
+  return buildChapterDiffLinesFromChanges(computeDiff(original, draft));
+}
+
+/** SSE / 自动循环未结束时不算、不渲染红绿对照，避免每条流式增量重跑整章 diff。 */
+export function shouldRenderOptimizeDiff(isGenerating: boolean): boolean {
+  return !isGenerating;
+}
+
+/** 全文并排高亮：左栏标删除、右栏标新增，不丢段落 */
+export function buildInlineDiffViews(
+  original: string,
+  draft: string
+): { originalSegments: InlineDiffSegment[]; draftSegments: InlineDiffSegment[] } {
+  if (!original && !draft) {
+    return { originalSegments: [], draftSegments: [] };
+  }
+  return buildInlineDiffViewsFromChanges(computeDiff(original, draft));
+}
+
+/** 一次字级 diff，同时产出高亮与行统计，避免结束瞬间跑两遍。 */
+export function buildOptimizeDiffBundle(original: string, draft: string): OptimizeDiffBundle {
+  if (!original && !draft) {
+    return {
+      inline: { originalSegments: [], draftSegments: [] },
+      lines: [],
+      addedCount: 0,
+      removedCount: 0,
+      modifiedCount: 0,
+    };
+  }
+
+  const changes = computeDiff(original, draft);
+  const lines = buildChapterDiffLinesFromChanges(changes);
+  return {
+    inline: buildInlineDiffViewsFromChanges(changes),
+    lines,
+    addedCount: lines.filter((row) => row.type === 'added').length,
+    removedCount: lines.filter((row) => row.type === 'removed').length,
+    modifiedCount: lines.filter((row) => row.type === 'modified').length,
+  };
 }

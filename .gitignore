@@ -43,9 +43,14 @@ temp/
 .agents
 .docs
 
-services/api/data/project-workspaces.json
-services/api/data/prompt-templates.json
-services/api/data/documents.json
-services/api/data/auth-sessions.json
-services/api/data/.backup/
+# Local scratch / agent tooling (may contain private chapter text & prompts)
+.scratch/
+.codegraph/
+
+# Runtime API data & backups (local prompts, documents, sessions)
+services/api/data/
+services/api/data.backup-*/
+
+# Orchestrator traces (may contain full prompts / chapter drafts)
 services/rag-orchestrator/data/traces.json
+services/rag-orchestrator/data/traces.json.*

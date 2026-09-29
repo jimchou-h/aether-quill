@@ -3,7 +3,7 @@
  * 官方 DeepSeek：V4 默认 thinking，与 content 共享 max_tokens，长输出会被想干。
  * SiliconFlow：DeepSeek-V3.1/V3.2 等默认 `enable_thinking=true`，复诊会空转数分钟才出 content。
  * 官方 `thinking` 字段不能打到带 `/` 的 SiliconFlow 模型 id 上。
- * 直接改写（无已确认方案）显式打开思维链；其余任务默认关闭。
+ * 方案改写正文与直接改写显式打开思维链；方案、复诊等其余任务默认关闭。
  */
 export function isOfficialDeepSeekChatModel(model: string): boolean {
   const normalized = model.trim().toLowerCase();
@@ -38,9 +38,10 @@ export function withDeepSeekNonThinkingChatBody(
   return withChatThinkingMode(body, 'disabled');
 }
 
-/** 直接改写没有已确认方案，需要模型先想再写；其余任务默认关思维链。 */
+/** 方案改写正文、直接改写先想再写；出方案和复诊默认关思维链。 */
 export function shouldEnableChatThinking(templateKey?: string): boolean {
-  return (templateKey ?? '').trim() === 'chapter.optimize.direct-draft';
+  const key = (templateKey ?? '').trim();
+  return key === 'chapter.optimize.draft' || key === 'chapter.optimize.direct-draft';
 }
 
 /** 思维链与正文共享 max_tokens；开思考时预留一段，避免长改写被想干。 */

@@ -30,6 +30,7 @@ import {
 } from '../../utils/writingOptimizeStepVisual';
 import { resolveChapterOptimizePrepProgress } from '../../utils/chapterOptimizePrepProgress';
 import { shouldRenderOptimizeDiff } from '../../utils/chapterOptimizeDiff';
+import { createThrottledTextSink } from '../../utils/throttledTextSink';
 import { formatWritingOptimizePassLabel } from '../../utils/writingOptimizeMultiPass';
 import {
   formatFromPlanClosedRunStatus,
@@ -464,6 +465,7 @@ async function runSinglePlanPass(input: {
   const signal = planStream.begin();
   bindInterruptHandler();
   let outcome: PassOutcome = 'error';
+  const planSink = createThrottledTextSink(streamedPlanText);
 
   try {
     await apiClient.optimizeChapterPlanSSE(
@@ -503,9 +505,10 @@ async function runSinglePlanPass(input: {
           });
         },
         onContent: (text) => {
-          streamedPlanText.value += text;
+          planSink.append(text);
         },
         onEnd: (result) => {
+          planSink.dispose();
           plan.value = result;
           editablePlanText.value = result.planText;
           if (input.revision) {
@@ -544,6 +547,7 @@ async function runSinglePlanPass(input: {
       failAiTaskProgress(aiTaskProgress, errorMessage.value);
     }
   } finally {
+    planSink.dispose();
     planStream.abort();
     streamedPlanText.value = '';
     clearInterruptHandler();
@@ -662,6 +666,7 @@ async function runSingleDraftPass(input: {
   const signal = draftStream.begin();
   bindInterruptHandler();
   let outcome: PassOutcome = 'error';
+  const draftSink = createThrottledTextSink(draftText);
 
   try {
     await apiClient.optimizeChapterDraftSSE(
@@ -714,14 +719,15 @@ async function runSingleDraftPass(input: {
           });
         },
         onContent: (text) => {
-          draftText.value += text;
+          draftSink.append(text);
         },
         onContentReplace: (text) => {
-          draftText.value = text;
+          draftSink.replace(text);
         },
         onEnd: (event) => {
+          draftSink.flush();
           if (event.finalDraftText?.trim()) {
-            draftText.value = event.finalDraftText;
+            draftSink.replace(event.finalDraftText);
           }
           outcome = draftText.value.trim() ? 'ok' : 'error';
           statusText.value =
@@ -751,6 +757,8 @@ async function runSingleDraftPass(input: {
       failAiTaskProgress(aiTaskProgress, errorMessage.value);
     }
   } finally {
+    draftSink.flush();
+    draftSink.dispose();
     draftStream.abort();
     clearInterruptHandler();
   }

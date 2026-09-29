@@ -278,7 +278,7 @@ test('GenerationService.resolveCallOptionsForTrace uses trace model and frequenc
       model: 'Pro/deepseek-ai/DeepSeek-V3.2',
       context: { templateKey: 'chapter.optimize.draft' },
     });
-    assert.equal(fromPlan.enableThinking, false);
+    assert.equal(fromPlan.enableThinking, true);
   } finally {
     if (prevKey === undefined) {
       delete process.env.DEEPSEEK_API_KEY;

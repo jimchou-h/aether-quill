@@ -23,6 +23,7 @@ import { isSseAbortError } from '../../utils/sseStream';
 import { presentErrorFromCaught, presentInfo, presentSuccess } from '../../utils/pageFeedback';
 import { resolveChapterOptimizePrepProgress } from '../../utils/chapterOptimizePrepProgress';
 import { shouldRenderOptimizeDiff } from '../../utils/chapterOptimizeDiff';
+import { createThrottledTextSink } from '../../utils/throttledTextSink';
 import {
   describeInvalidWorkbenchRange,
   describeWorkbenchRangeBinding,
@@ -330,6 +331,7 @@ async function generateRangeDraft() {
   step.value = 'generate';
   const signal = sseStream.begin();
   bindInterruptHandler();
+  const draftSink = createThrottledTextSink(rangeDraft);
 
   try {
     await apiClient.optimizeWorkbenchDraftSSE(
@@ -380,12 +382,13 @@ async function generateRangeDraft() {
           });
         },
         onContent: (text) => {
-          rangeDraft.value += text;
+          draftSink.append(text);
         },
         onContentReplace: (text) => {
-          rangeDraft.value = text;
+          draftSink.replace(text);
         },
         onEnd: (event) => {
+          draftSink.flush();
           rangeDraft.value = applyWorkbenchSseEndText(
             rangeDraft.value,
             resolveWorkbenchSseEndText(event)
@@ -418,6 +421,8 @@ async function generateRangeDraft() {
       failAiTaskProgress(aiTaskProgress, errorMessage.value);
     }
   } finally {
+    draftSink.flush();
+    draftSink.dispose();
     generating.value = false;
     sseStream.abort();
     clearInterruptHandler();
