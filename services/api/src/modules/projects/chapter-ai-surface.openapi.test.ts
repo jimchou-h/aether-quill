@@ -12,6 +12,16 @@ const CUT_PATH_MARKERS = [
   '/compliance-check/',
 ];
 
+const CUT_SCHEMA_MARKERS = [
+  'ChapterTypoIssue:',
+  'ChapterOptimizationTypoCheckRequest:',
+  'ChapterOptimizationTypoFixRequest:',
+  'PipelineOutlineItem:',
+  'FinalPolishResult:',
+  'pipeline_character_outline',
+  'pipeline_homogenization_rewrite',
+];
+
 const KEEP_PATH_MARKERS = [
   '/optimize/plan',
   '/optimize/draft',
@@ -28,7 +38,18 @@ test('openapi root no longer registers cut chapter AI product paths', () => {
       `openapi.yaml must not retain cut path marker: ${marker}`
     );
   }
+  for (const marker of CUT_SCHEMA_MARKERS) {
+    assert.equal(
+      text.includes(marker),
+      false,
+      `openapi.yaml must not retain cut schema/stage marker: ${marker}`
+    );
+  }
   for (const marker of KEEP_PATH_MARKERS) {
     assert.ok(text.includes(marker), `openapi.yaml must keep path marker: ${marker}`);
   }
+  assert.ok(
+    text.includes('content_safety_scan'),
+    'openapi.yaml must keep content_safety_scan stage'
+  );
 });
