@@ -5,6 +5,7 @@ import {
   cancelAiTaskProgress,
   completeAiTaskProgress,
   createAiTaskProgressState,
+  dismissIdleAiTaskProgress,
   failAiTaskProgress,
   resolveAiTaskProgressMessage,
   tryStartAiTaskProgress,
@@ -144,5 +145,30 @@ describe('tryStartAiTaskProgress', () => {
     assert.equal(cancelled.value.active, false);
     assert.equal(cancelled.value.cancelled, true);
     assert.equal(cancelled.value.stage, 'cancelled');
+  });
+
+  it('dismissIdleAiTaskProgress clears completed banners but keeps active work', () => {
+    const idle = createAiTaskProgressState();
+    tryStartAiTaskProgress(idle, {
+      taskKey: 'chapter.optimize.plan',
+      message: '正在生成优化方案…',
+      source: 'dialog:optimize',
+      chapterNo: 1,
+    });
+    completeAiTaskProgress(idle, '优化方案已生成');
+    dismissIdleAiTaskProgress(idle);
+    assert.equal(idle.value.message, null);
+    assert.equal(idle.value.stage, null);
+
+    const active = createAiTaskProgressState();
+    tryStartAiTaskProgress(active, {
+      taskKey: 'chapter.optimize.plan',
+      message: '正在生成优化方案…',
+      source: 'dialog:optimize',
+      chapterNo: 1,
+    });
+    dismissIdleAiTaskProgress(active);
+    assert.equal(active.value.active, true);
+    assert.equal(active.value.message, '正在生成优化方案…');
   });
 });

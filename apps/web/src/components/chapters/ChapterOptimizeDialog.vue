@@ -13,6 +13,7 @@ import {
   applyAiTaskProgressEvent,
   cancelAiTaskProgress,
   completeAiTaskProgress,
+  dismissIdleAiTaskProgress,
   failAiTaskProgress,
   tryStartAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
@@ -318,7 +319,11 @@ watch(
   (visible) => {
     closePromptLab();
     if (visible) {
+      // Drop completed banners from prior page/dialog work so they don't sit under this modal.
+      dismissIdleAiTaskProgress(aiTaskProgress);
       resetState();
+    } else {
+      dismissIdleAiTaskProgress(aiTaskProgress);
     }
   },
   { immediate: true }

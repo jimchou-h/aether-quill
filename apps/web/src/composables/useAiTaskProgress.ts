@@ -165,6 +165,13 @@ export function resetAiTaskProgress(state: Ref<AiTaskProgressState>) {
   state.value = emptyAiTaskProgressState();
 }
 
+/** Clear completed/failed/cancelled banners so the next dialog does not inherit stale page chrome. */
+export function dismissIdleAiTaskProgress(state: Ref<AiTaskProgressState>) {
+  if (!state.value.active) {
+    resetAiTaskProgress(state);
+  }
+}
+
 const TASK_PROGRESS_MESSAGES: Record<string, string> = {
   'write.chapter.outline': '正在生成章节大纲…',
   'write.chapter.draft': '正在生成章节正文…',

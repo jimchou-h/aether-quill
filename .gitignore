@@ -35,6 +35,12 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Playwright
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/e2e-artifacts/
+apps/web/blob-report/
+
 # Temporary files
 tmp/
 temp/

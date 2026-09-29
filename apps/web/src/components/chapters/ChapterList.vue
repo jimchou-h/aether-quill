@@ -2,6 +2,7 @@
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import type { ChapterItem, ChapterStructuredInfo } from '../../services/api';
 import { isPersonaKeywordSupplement } from '../../utils/structured-matching';
+import { formatChapterTabTitle } from '../../utils/chapterTabLabel';
 
 const props = defineProps<{
   chapters: ChapterItem[];
@@ -70,6 +71,10 @@ const filteredChapters = computed(() => {
       chapter.title.toLowerCase().includes(query) || chapter.chapterNo.toString().includes(query)
   );
 });
+
+function chapterTabSubtitle(chapter: ChapterItem) {
+  return formatChapterTabTitle(chapter.chapterNo, chapter.title);
+}
 
 function formatTime(value: string) {
   return new Date(value).toLocaleString();
@@ -279,7 +284,9 @@ defineExpose({ clearEditing });
             @click="emit('select', chapter.chapterNo)"
           >
             <span class="chapter-tab-no">第{{ chapter.chapterNo }}章</span>
-            <span class="chapter-tab-title">{{ chapter.title }}</span>
+            <span v-if="chapterTabSubtitle(chapter)" class="chapter-tab-title">{{
+              chapterTabSubtitle(chapter)
+            }}</span>
           </button>
         </div>
       </template>
@@ -342,7 +349,7 @@ defineExpose({ clearEditing });
                 编辑
               </button>
               <button
-                class="primary-button"
+                class="secondary-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
                 @click="emit('summarize', selectedChapter.chapterNo)"
               >

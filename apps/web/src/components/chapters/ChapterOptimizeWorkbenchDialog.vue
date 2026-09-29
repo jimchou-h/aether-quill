@@ -12,6 +12,7 @@ import {
   applyAiTaskProgressEvent,
   cancelAiTaskProgress,
   completeAiTaskProgress,
+  dismissIdleAiTaskProgress,
   failAiTaskProgress,
   tryStartAiTaskProgress,
 } from '../../composables/useAiTaskProgress';
@@ -227,7 +228,10 @@ watch(
   () => props.visible,
   (visible) => {
     if (visible) {
+      dismissIdleAiTaskProgress(aiTaskProgress);
       resetState();
+    } else {
+      dismissIdleAiTaskProgress(aiTaskProgress);
     }
   },
   { immediate: true }
@@ -858,7 +862,12 @@ async function applyDraft() {
         <button class="secondary-button" type="button" :disabled="!canReview" @click="runReview">
           {{ reviewing ? '检查中…' : '检查' }}
         </button>
-        <button class="primary-button" type="button" :disabled="!canApply" @click="applyDraft">
+        <button
+          :class="canApply ? 'primary-button' : 'secondary-button'"
+          type="button"
+          :disabled="!canApply"
+          @click="applyDraft"
+        >
           {{ applying ? '应用中…' : '应用整章' }}
         </button>
       </footer>
