@@ -193,8 +193,7 @@ test('删除并整合进邻段时先改写保留段再删源段', async () => {
           index: 3,
           quote: '院子里的老槐树落了满地叶子',
           severity: 'high',
-          instruction:
-            '删除[3]整句，使[2]直接衔接[4]。将老槐树与落叶细节整合进[2]段。',
+          instruction: '删除[3]整句，使[2]直接衔接[4]。将老槐树与落叶细节整合进[2]段。',
         },
       ]),
     ],
@@ -238,8 +237,7 @@ test('保留段改写失败时不删除源段，避免内容丢失', async () =>
   assert.ok(
     items.some(
       (item) =>
-        (item.resolvedParagraphIndex ?? item.paragraphIndex) === 3 &&
-        item.status === 'rolled_back'
+        (item.resolvedParagraphIndex ?? item.paragraphIndex) === 3 && item.status === 'rolled_back'
     ),
     '源段应跳过删除'
   );

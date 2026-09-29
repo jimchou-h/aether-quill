@@ -84,7 +84,9 @@ export function buildWriteOutlineUserPrompt(input: {
   sections.push(`【叙事视角】${task.pov.trim()}`);
 
   if (task.mustInclude.length > 0) {
-    sections.push(`【必须包含】\n${task.mustInclude.map((item, i) => `${i + 1}. ${item}`).join('\n')}`);
+    sections.push(
+      `【必须包含】\n${task.mustInclude.map((item, i) => `${i + 1}. ${item}`).join('\n')}`
+    );
   }
   if (task.avoid.length > 0) {
     sections.push(`【避免内容】\n${task.avoid.map((item, i) => `${i + 1}. ${item}`).join('\n')}`);

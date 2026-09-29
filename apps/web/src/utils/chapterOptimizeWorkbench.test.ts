@@ -199,7 +199,10 @@ describe('isNearCopyWorkbenchDraft', () => {
     assert.equal(isNearCopyWorkbenchDraft(original, original), true);
     assert.equal(isNearCopyWorkbenchDraft(original, `${original}尾补一句。`), true);
     assert.equal(
-      isNearCopyWorkbenchDraft(original, original.replace(/甲段原文/g, '甲段重写').replace(/乙段原文/g, '乙段重写')),
+      isNearCopyWorkbenchDraft(
+        original,
+        original.replace(/甲段原文/g, '甲段重写').replace(/乙段原文/g, '乙段重写')
+      ),
       false
     );
   });

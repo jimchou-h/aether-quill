@@ -25,7 +25,10 @@ describe('persona-card-link.util', () => {
   });
 
   it('marks orphan when no persona matches', () => {
-    assert.equal(decidePersonaCardLink('世界观：旧港口', [{ id: 'p1', name: '林策' }]).status, 'orphan');
+    assert.equal(
+      decidePersonaCardLink('世界观：旧港口', [{ id: 'p1', name: '林策' }]).status,
+      'orphan'
+    );
   });
 
   it('scores exact names highest', () => {

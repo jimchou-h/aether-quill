@@ -50,9 +50,7 @@ export function renderMarkdownToSafeHtml(source: string): string {
     if (heading) {
       closeLists();
       const level = heading[1].length;
-      parts.push(
-        `<h${level}>${renderInlineMarkdown(escapeHtml(heading[2]))}</h${level}>`
-      );
+      parts.push(`<h${level}>${renderInlineMarkdown(escapeHtml(heading[2]))}</h${level}>`);
       continue;
     }
 

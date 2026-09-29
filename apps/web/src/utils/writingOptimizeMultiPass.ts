@@ -80,7 +80,10 @@ export function formatWritingOptimizePassLabel(
   return `${noun}第 ${passIndex} / ${passTotal} 轮`;
 }
 
-export function resolveDraftSourceText(passIndex: number, previousDraft: string): string | undefined {
+export function resolveDraftSourceText(
+  passIndex: number,
+  previousDraft: string
+): string | undefined {
   if (passIndex <= 1) {
     return undefined;
   }

@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  isUpstreamAbortError,
-  streamPipelineGeneration,
-} from './chapter-generation-stream.client';
+import { isUpstreamAbortError, streamPipelineGeneration } from './chapter-generation-stream.client';
 
 test('isUpstreamAbortError 识别 axios 取消与 AbortError', () => {
   assert.equal(

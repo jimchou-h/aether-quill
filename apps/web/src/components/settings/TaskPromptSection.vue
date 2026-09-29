@@ -27,9 +27,7 @@ const store = useTaskPromptConfigStore();
       >
         <summary class="task-group-summary">
           <span class="task-group-title">{{ group.title }}</span>
-          <span class="task-group-count">
-            {{ store.groupedItems[group.id].length }} 项
-          </span>
+          <span class="task-group-count"> {{ store.groupedItems[group.id].length }} 项 </span>
         </summary>
         <p class="task-group-hint">{{ group.hint }}</p>
         <div v-if="store.groupedItems[group.id].length" class="task-list">

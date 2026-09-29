@@ -18,7 +18,10 @@ export type PersonaStatusViewResult = {
   sourceChapterNo: number | null;
 };
 
-function displayFromRecord(record: PersonaStatusChapterRecord, fallbackState?: string | null): string {
+function displayFromRecord(
+  record: PersonaStatusChapterRecord,
+  fallbackState?: string | null
+): string {
   const summary = record.summaryLine?.trim();
   if (summary) {
     return summary;

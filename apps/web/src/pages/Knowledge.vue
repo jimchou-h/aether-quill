@@ -47,9 +47,7 @@ const docTypeOptions: Array<{ value: DocType; label: string }> = [
 const showPersonaLink = computed(() => formDocType.value === 'persona_card');
 
 const orphanPersonaCards = computed(() =>
-  documents.value.filter(
-    (doc) => (doc.docType ?? 'other') === 'persona_card' && !doc.personaId
-  )
+  documents.value.filter((doc) => (doc.docType ?? 'other') === 'persona_card' && !doc.personaId)
 );
 
 const filteredDocuments = computed(() => {
@@ -154,8 +152,12 @@ async function loadDocuments() {
   errorMessage.value = '';
   try {
     const [response, personaList] = await Promise.all([
-      apiClient.documents.list(projectId.value) as Promise<{ data?: DocumentItem[] } | DocumentItem[]>,
-      apiClient.getPersonas(projectId.value).catch(() => [] as Array<{ id: string; name: string; status: string }>),
+      apiClient.documents.list(projectId.value) as Promise<
+        { data?: DocumentItem[] } | DocumentItem[]
+      >,
+      apiClient
+        .getPersonas(projectId.value)
+        .catch(() => [] as Array<{ id: string; name: string; status: string }>),
     ]);
     documents.value = Array.isArray(response)
       ? response
@@ -372,11 +374,9 @@ onMounted(() => {
       </div>
 
       <p v-if="loading" class="message">正在加载文档...</p>
-      <p
-        v-if="!loading && orphanPersonaCards.length > 0"
-        class="message message-warn"
-      >
-        有 {{ orphanPersonaCards.length }} 张角色卡尚未关联人物；生成时可能无法按人物精确注入静态设定。
+      <p v-if="!loading && orphanPersonaCards.length > 0" class="message message-warn">
+        有
+        {{ orphanPersonaCards.length }} 张角色卡尚未关联人物；生成时可能无法按人物精确注入静态设定。
       </p>
 
       <div v-if="!loading && documents.length === 0" class="empty-state">
@@ -399,11 +399,7 @@ onMounted(() => {
                   class="doc-type-tag"
                   :class="doc.personaId ? 'persona-linked' : 'persona-orphan'"
                 >
-                  {{
-                    doc.personaId
-                      ? `关联：${personaNameById(doc.personaId)}`
-                      : '未关联人物'
-                  }}
+                  {{ doc.personaId ? `关联：${personaNameById(doc.personaId)}` : '未关联人物' }}
                 </span>
                 <span class="doc-version">v{{ doc.version }}</span>
                 <span :class="['doc-status', getStatusClass(doc.indexStatus)]">

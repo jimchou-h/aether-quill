@@ -101,8 +101,7 @@ async function handleLogin() {
   padding: var(--aq-space-lg);
   background:
     radial-gradient(circle at 12% 18%, rgb(13 148 136 / 10%), transparent 42%),
-    radial-gradient(circle at 88% 82%, rgb(234 88 12 / 6%), transparent 38%),
-    var(--aq-bg);
+    radial-gradient(circle at 88% 82%, rgb(234 88 12 / 6%), transparent 38%), var(--aq-bg);
 }
 
 .login-card {

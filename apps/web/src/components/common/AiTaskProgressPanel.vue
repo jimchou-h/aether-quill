@@ -51,9 +51,7 @@ const chapterLabel = computed(() => {
   return `第 ${props.progress.chapterNo} 章`;
 });
 
-const showInterrupt = computed(
-  () => props.progress.active && props.progress.interruptible
-);
+const showInterrupt = computed(() => props.progress.active && props.progress.interruptible);
 
 const showDismiss = computed(
   () =>

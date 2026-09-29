@@ -39,9 +39,12 @@ test('as-of chapter picks latest chapterStates with chapterNo <= N', () => {
 });
 
 test('empty chapterStates falls back to persona.state', () => {
-  const result = resolvePersonaStatusForView({ state: '手工状态', chapterStates: [] }, {
-    asOfChapterNo: 4,
-  });
+  const result = resolvePersonaStatusForView(
+    { state: '手工状态', chapterStates: [] },
+    {
+      asOfChapterNo: 4,
+    }
+  );
   assert.equal(result.text, '手工状态');
   assert.equal(result.sourceChapterNo, null);
 });

@@ -51,7 +51,8 @@ test('resolvePersonaStateText converts snapshot json to summary line', () => {
 });
 
 test('parseChapterPersonaStatesFromModelContent parses fenced json array', () => {
-  const raw = '```json\n[{"name":"叶辰","appeared":true,"state":"重伤昏迷"},{"name":"清歌","appeared":false,"state":"未出场"}]\n```';
+  const raw =
+    '```json\n[{"name":"叶辰","appeared":true,"state":"重伤昏迷"},{"name":"清歌","appeared":false,"state":"未出场"}]\n```';
   const items = parseChapterPersonaStatesFromModelContent(raw);
   assert.equal(items.length, 2);
   assert.deepEqual(items[0], {

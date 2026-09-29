@@ -330,7 +330,9 @@ function phaseStatus(phase: GenerationPhase): 'done' | 'active' | 'pending' {
   border: none;
   background: var(--wb-primary, #0d9488);
   color: #fff;
-  transition: background var(--aq-transition-fast), transform var(--aq-transition-fast);
+  transition:
+    background var(--aq-transition-fast),
+    transform var(--aq-transition-fast);
 }
 
 .wb-btn--primary:hover:not(:disabled) {

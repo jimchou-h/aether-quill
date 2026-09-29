@@ -13,6 +13,7 @@ const props = withDefaults(
   }>(),
   {
     zIndex: 1200,
+    errorMessage: '',
   }
 );
 
@@ -173,5 +174,4 @@ function handleConfirm() {
   color: #4b5563;
   white-space: pre-wrap;
 }
-
 </style>

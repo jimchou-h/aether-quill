@@ -401,10 +401,7 @@ describe('auto-loop history timeline', () => {
       running: true,
     });
     assert.equal(items[0]?.id, 'a');
-    assert.equal(
-      shouldShowAutoLoopParagraphMismatchHint({ selectedKey, latestKey }),
-      true
-    );
+    assert.equal(shouldShowAutoLoopParagraphMismatchHint({ selectedKey, latestKey }), true);
     assert.ok(AUTO_LOOP_PARAGRAPH_MISMATCH_HINT.includes('段号'));
   });
 

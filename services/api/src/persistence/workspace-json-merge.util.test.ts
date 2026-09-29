@@ -68,8 +68,5 @@ test('shouldMergeOutlineFromJson 在 JSON 章节不旧于 PG 时合并大纲', (
   const jsonChapters = [
     { chapterNo: 1, title: 't', content: 'c', updatedAt: '2026-07-11T10:00:00.000Z' },
   ];
-  assert.equal(
-    shouldMergeOutlineFromJson('旧大纲', '新大纲', loadedChapters, jsonChapters),
-    true
-  );
+  assert.equal(shouldMergeOutlineFromJson('旧大纲', '新大纲', loadedChapters, jsonChapters), true);
 });

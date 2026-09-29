@@ -1,5 +1,4 @@
 import type { UserDocType } from './documents-type.util';
-import { DEFAULT_USER_DOC_TYPE } from './documents-type.util';
 
 export type IndexStatus = 'pending' | 'indexing' | 'completed' | 'failed' | 'stale';
 

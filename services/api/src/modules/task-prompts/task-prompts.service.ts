@@ -1,10 +1,4 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  NotFoundException,
-  forwardRef,
-} from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, forwardRef } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -120,15 +114,16 @@ export class TaskPromptsService {
     return record;
   }
 
-  private toListItem(record: ProjectTaskPromptRecord | null, def: {
-    templateKey: string;
-    name: string;
-    defaultText: string;
-  }): TaskPromptListItem {
+  private toListItem(
+    record: ProjectTaskPromptRecord | null,
+    def: {
+      templateKey: string;
+      name: string;
+      defaultText: string;
+    }
+  ): TaskPromptListItem {
     const draftText = record?.draftText?.trim() ? record.draftText : def.defaultText;
-    const publishedText = record?.publishedText?.trim()
-      ? record.publishedText
-      : def.defaultText;
+    const publishedText = record?.publishedText?.trim() ? record.publishedText : def.defaultText;
     return {
       templateKey: def.templateKey,
       name: def.name,

@@ -108,11 +108,7 @@ async function runChapterAfterSaveIfConfirmed(
           applyAiTaskProgressEvent(aiTaskProgress, {
             taskKey: `chapter.after-save.${event.action}`,
             stage: event.status,
-            message: formatChapterAfterSaveProgressMessage(
-              event.action,
-              event.status,
-              chapterNo
-            ),
+            message: formatChapterAfterSaveProgressMessage(event.action, event.status, chapterNo),
           });
           aiTaskProgress.value = {
             ...aiTaskProgress.value,
@@ -264,7 +260,10 @@ async function handleImportChapter(payload: { chapterNo: number; title: string; 
   try {
     const result = await apiClient.insertChapter(projectId.value, payload);
     if (result.pendingActions && result.pendingActions.length > 0) {
-      const outcome = await runChapterAfterSaveIfConfirmed(payload.chapterNo, result.pendingActions);
+      const outcome = await runChapterAfterSaveIfConfirmed(
+        payload.chapterNo,
+        result.pendingActions
+      );
       if (outcome === 'ran') {
         message.value = presentSuccess(`第${payload.chapterNo}章已插入，后处理已完成`);
       } else if (outcome === 'declined') {
@@ -295,7 +294,10 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
     if (result.contentChanged === false) {
       message.value = presentSuccess(`第${payload.chapterNo}章无内容变更，已跳过自动处理`);
     } else if (result.pendingActions && result.pendingActions.length > 0) {
-      const outcome = await runChapterAfterSaveIfConfirmed(payload.chapterNo, result.pendingActions);
+      const outcome = await runChapterAfterSaveIfConfirmed(
+        payload.chapterNo,
+        result.pendingActions
+      );
       if (outcome === 'ran') {
         message.value = presentSuccess(`第${payload.chapterNo}章后处理已完成`);
       } else if (outcome === 'declined') {
@@ -500,9 +502,7 @@ async function handleGenerateChapterRelationEvents(chapterNo: number) {
     }
 
     completeAiTaskProgress(aiTaskProgress, '关系事件抽取完成（无新增）');
-    message.value = presentInfo(
-      `第${chapterNo}章未识别到可写入的关系事件${removedHint}`
-    );
+    message.value = presentInfo(`第${chapterNo}章未识别到可写入的关系事件${removedHint}`);
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '生成关系事件失败');
     failAiTaskProgress(aiTaskProgress, '生成关系事件失败');

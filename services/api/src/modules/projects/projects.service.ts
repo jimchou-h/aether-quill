@@ -110,10 +110,7 @@ import { PromptTemplatesService } from '../prompt-templates/prompt-templates.ser
 import { TaskPromptsService } from '../task-prompts/task-prompts.service';
 import { AuthService } from '../auth/auth.service';
 import { buildChaptersExportFilename, buildChaptersTxtExport } from './chapter-export.util';
-import {
-  isMissingLlmProviderKeyMessage,
-  resolveUpstreamFailureMessage,
-} from './orchestrator-error.util';
+import { resolveUpstreamFailureMessage } from './orchestrator-error.util';
 import { createUtf8StreamDecoder } from '../../common/utf8-stream-decoder';
 import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
@@ -215,8 +212,6 @@ import {
   sliceContentTail,
 } from './project-settings.util';
 import {
-  applyProjectSettingsJsonExtensions,
-  pickProjectSettingsJsonExtensions,
   PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS,
   serializeProjectSettingsForJsonMirror,
 } from './project-settings.extensions';
@@ -228,14 +223,6 @@ import {
   type WritingStyleSample,
 } from './writing-style-samples.util';
 import { buildWriteContextReadiness } from './write-context-readiness.util';
-
-function buildTargetWordsInstruction(targetWords?: number): string {
-  const parsed = Number(targetWords);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return `目标字数约 ${parsed} 字。`;
-  }
-  return '不设字数上限，在情节完整的前提下尽量充实详尽。';
-}
 
 type PersonaStatus = 'draft' | 'published';
 type IndexMode = 'full' | 'incremental';
@@ -878,7 +865,6 @@ export class ProjectsService implements OnModuleInit {
       }
       settings.contentSafetyCustomRules = validated.rules;
     }
-
 
     settings.updatedAt = new Date();
     this.patchSettingsDefaults(settings);
@@ -1724,9 +1710,7 @@ export class ProjectsService implements OnModuleInit {
       const structuredInfo: ChapterStructuredInfoPersisted = {
         matchingText,
         keywords,
-        ...(personaKeywordSupplements?.length
-          ? { personaKeywordSupplements }
-          : {}),
+        ...(personaKeywordSupplements?.length ? { personaKeywordSupplements } : {}),
         narrativeSummary: narrativeSummary || undefined,
         parseSource: body.mode,
         parsedAt: new Date().toISOString(),
@@ -2718,9 +2702,8 @@ export class ProjectsService implements OnModuleInit {
 
     if (strategy.mode === 'segmented') {
       const segments = splitIntoSegments(chapter.content, '', strategy.segmentCount);
-      segmentDiagnoses = (Array.isArray(payload.existingSegmentDiagnoses)
-        ? payload.existingSegmentDiagnoses
-        : []
+      segmentDiagnoses = (
+        Array.isArray(payload.existingSegmentDiagnoses) ? payload.existingSegmentDiagnoses : []
       )
         .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
         .map((item) => item.trim());
@@ -2729,11 +2712,7 @@ export class ProjectsService implements OnModuleInit {
       const resumeFrom = payload.resumeFromSegmentIndex;
       if (segmentDiagnoses.length >= segments.length) {
         startIndex = segments.length;
-      } else if (
-        typeof resumeFrom === 'number' &&
-        resumeFrom > 1 &&
-        segmentDiagnoses.length > 0
-      ) {
+      } else if (typeof resumeFrom === 'number' && resumeFrom > 1 && segmentDiagnoses.length > 0) {
         startIndex = Math.min(resumeFrom - 1, segments.length - 1);
         segmentDiagnoses = segmentDiagnoses.slice(0, startIndex);
       }
@@ -2870,8 +2849,7 @@ export class ProjectsService implements OnModuleInit {
           segmentDiagnoses,
         });
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : '优化方案生成失败：方案文本无效';
+        const message = error instanceof Error ? error.message : '优化方案生成失败：方案文本无效';
         callbacks.onError(message);
       }
       return;
@@ -3101,11 +3079,7 @@ export class ProjectsService implements OnModuleInit {
           segmentIndex: i,
           segmentTotal: segments.length,
           inputSegmentChars: segment.originalText.length,
-          maxTokens: calculateSegmentMaxTokensForIndex(
-            segment.originalText,
-            i,
-            segments.length
-          ),
+          maxTokens: calculateSegmentMaxTokensForIndex(segment.originalText, i, segments.length),
           appearingCharacters: payload.appearingCharacters,
           streamToClient: true,
           onContent: callbacks.onContent,
@@ -3152,11 +3126,7 @@ export class ProjectsService implements OnModuleInit {
         segmentIndex: 0,
         segmentTotal: 1,
         inputSegmentChars: promptBasisChars,
-        maxTokens: calculateSegmentMaxTokensForIndex(
-          sourceText || chapter.content,
-          0,
-          1
-        ),
+        maxTokens: calculateSegmentMaxTokensForIndex(sourceText || chapter.content, 0, 1),
         appearingCharacters: payload.appearingCharacters,
         streamToClient: true,
         onContent: callbacks.onContent,
@@ -3390,9 +3360,7 @@ export class ProjectsService implements OnModuleInit {
       optimizationMode: windowTotal > 1 ? 'segmented' : 'single',
       segmentTotal: windowTotal,
       strategyLabel:
-        windowTotal > 1
-          ? `按场成稿·同场续写 ${windowTotal} 窗`
-          : '按场成稿·范围内一次生成',
+        windowTotal > 1 ? `按场成稿·同场续写 ${windowTotal} 窗` : '按场成稿·范围内一次生成',
     });
 
     const chapterSummaryForRetrieval =
@@ -3403,9 +3371,7 @@ export class ProjectsService implements OnModuleInit {
     for (let index = 0; index < windows.length; index += 1) {
       const window = windows[index]!;
       const beforeContext =
-        index === 0
-          ? request.beforeContext
-          : accumulated.slice(-WORKBENCH_RANGE_CONTEXT_CHARS);
+        index === 0 ? request.beforeContext : accumulated.slice(-WORKBENCH_RANGE_CONTEXT_CHARS);
       const afterFromRange = request.rangeText.slice(
         window.end,
         window.end + WORKBENCH_RANGE_CONTEXT_CHARS
@@ -3740,7 +3706,6 @@ export class ProjectsService implements OnModuleInit {
     };
   }
 
-
   exportProjectChaptersTxt(projectId: string, userId?: string) {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor', 'viewer']);
@@ -3898,16 +3863,11 @@ export class ProjectsService implements OnModuleInit {
             if (!knowledge) {
               break;
             }
-            await syncProjectChaptersToPostgres(
-              this.prisma,
-              scope.projectId,
-              knowledge.chapters,
-              {
-                outlineSummary: knowledge.outlineSummary,
-                indexVersion: knowledge.indexVersion,
-                lastIndexedAt: knowledge.lastIndexedAt ?? null,
-              }
-            );
+            await syncProjectChaptersToPostgres(this.prisma, scope.projectId, knowledge.chapters, {
+              outlineSummary: knowledge.outlineSummary,
+              indexVersion: knowledge.indexVersion,
+              lastIndexedAt: knowledge.lastIndexedAt ?? null,
+            });
             break;
           }
           case 'outline': {
@@ -4858,9 +4818,7 @@ export class ProjectsService implements OnModuleInit {
   private resolveChapterOptimizeConfig(projectId: string) {
     this.ensureProjectState(projectId);
     const settings = this.settingsStore.get(projectId)!;
-    return resolveChapterOptimizeConfigWithProjectOverride(
-      settings.chapterOptimizeSegmentCharSize
-    );
+    return resolveChapterOptimizeConfigWithProjectOverride(settings.chapterOptimizeSegmentCharSize);
   }
 
   private ensureWorkbenchStructuredDrafts(
@@ -5010,10 +4968,9 @@ export class ProjectsService implements OnModuleInit {
       boundaryAnchors,
     });
 
-    const publishedPlan =
-      this.taskPromptsService.getEffectivePublishedTaskPromptsMap(input.projectId)[
-        CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY
-      ];
+    const publishedPlan = this.taskPromptsService.getEffectivePublishedTaskPromptsMap(
+      input.projectId
+    )[CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY];
     const diagnosisSystemPrompt = buildSegmentDiagnosisSystemPrompt(publishedPlan);
 
     let lastError = '未收到有效诊断';
@@ -5301,9 +5258,7 @@ export class ProjectsService implements OnModuleInit {
       const sseResult = await this.readOrchestratorGenerateSseStream(
         response.data as NodeJS.ReadableStream,
         {
-          onStreamContent: input.streamToClient
-            ? (piece) => input.onContent?.(piece)
-            : undefined,
+          onStreamContent: input.streamToClient ? (piece) => input.onContent?.(piece) : undefined,
           onStage: input.onStage,
         }
       );
@@ -5533,55 +5488,57 @@ export class ProjectsService implements OnModuleInit {
       await axios.post(
         `${this.getRagOrchestratorUrl()}/api/projects/${projectId}/context`,
         {
-      systemPromptText: this.promptTemplatesService.resolveProjectSystemPromptText(projectId),
-      taskPrompts: this.taskPromptsService.getEffectivePublishedTaskPromptsMap(projectId),
-      personaProfile: activePersona
-        ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
-        : '未配置人物设定',
-      outlineSummary: knowledge.outlineSummary,
-      chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
-      chapterSummaryMemoryCount: settings.chapterSummaryMemoryCount,
-      priorChapterTailChars: settings.priorChapterTailChars,
-      contextExcerptMaxChars: settings.contextExcerptMaxChars,
-      outlineMaxChars: settings.outlineMaxChars,
-      personaProfileMaxChars: settings.personaProfileMaxChars,
-      relationMemoMaxChars: settings.relationMemoMaxChars,
-      generationTemperature: settings.generationTemperature,
-      contentSafetyScanEnabled: settings.contentSafetyScanEnabled !== false,
-      contentSafetyCustomRules: settings.contentSafetyCustomRules,
-      generationWritingModel: settings.generationWritingModel ?? null,
-      generationUtilityModel: settings.generationUtilityModel ?? null,
-      writingGenerationTemperature: settings.writingGenerationTemperature ?? null,
-      ...(userGenerationPreferences ? { userGenerationPreferences } : {}),
-      chapters: this.buildOrchestratorChapterContexts(knowledge, settings),
-      knowledgeDocuments: docs.map((doc) => ({
-        id: doc.id,
-        title: doc.title,
-        content: doc.content,
-        docType: doc.docType,
-        personaId: doc.personaId ?? null,
-      })),
-      selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
-      identityRelationMemory,
-      usedRelationEvents,
-      personaConsistencyNotes,
-      personas: personas.map((persona) => ({
-        id: persona.id,
-        name: persona.name,
-        profile: persona.profile,
-        state: persona.state,
-        status: persona.status,
-        chapterStates: persona.chapterStates?.map((record) => ({
-          chapterNo: record.chapterNo,
-          appeared: record.appeared,
-          snapshot: record.snapshot,
-          summaryLine: record.summaryLine,
-          updatedAt: record.updatedAt,
-        })),
-      })),
-      writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map((item) => ({
-        ...item,
-      })),
+          systemPromptText: this.promptTemplatesService.resolveProjectSystemPromptText(projectId),
+          taskPrompts: this.taskPromptsService.getEffectivePublishedTaskPromptsMap(projectId),
+          personaProfile: activePersona
+            ? `${activePersona.name}\n人物设定：${activePersona.profile}\n当前状态：${activePersona.state}`
+            : '未配置人物设定',
+          outlineSummary: knowledge.outlineSummary,
+          chapterSummaryPromptCount: settings.chapterSummaryPromptCount,
+          chapterSummaryMemoryCount: settings.chapterSummaryMemoryCount,
+          priorChapterTailChars: settings.priorChapterTailChars,
+          contextExcerptMaxChars: settings.contextExcerptMaxChars,
+          outlineMaxChars: settings.outlineMaxChars,
+          personaProfileMaxChars: settings.personaProfileMaxChars,
+          relationMemoMaxChars: settings.relationMemoMaxChars,
+          generationTemperature: settings.generationTemperature,
+          contentSafetyScanEnabled: settings.contentSafetyScanEnabled !== false,
+          contentSafetyCustomRules: settings.contentSafetyCustomRules,
+          generationWritingModel: settings.generationWritingModel ?? null,
+          generationUtilityModel: settings.generationUtilityModel ?? null,
+          writingGenerationTemperature: settings.writingGenerationTemperature ?? null,
+          ...(userGenerationPreferences ? { userGenerationPreferences } : {}),
+          chapters: this.buildOrchestratorChapterContexts(knowledge, settings),
+          knowledgeDocuments: docs.map((doc) => ({
+            id: doc.id,
+            title: doc.title,
+            content: doc.content,
+            docType: doc.docType,
+            personaId: doc.personaId ?? null,
+          })),
+          selectedRelationMemory: buildRelationMemoryBlock(usedRelationEvents),
+          identityRelationMemory,
+          usedRelationEvents,
+          personaConsistencyNotes,
+          personas: personas.map((persona) => ({
+            id: persona.id,
+            name: persona.name,
+            profile: persona.profile,
+            state: persona.state,
+            status: persona.status,
+            chapterStates: persona.chapterStates?.map((record) => ({
+              chapterNo: record.chapterNo,
+              appeared: record.appeared,
+              snapshot: record.snapshot,
+              summaryLine: record.summaryLine,
+              updatedAt: record.updatedAt,
+            })),
+          })),
+          writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map(
+            (item) => ({
+              ...item,
+            })
+          ),
         },
         { timeout: 120_000 }
       );
@@ -5590,7 +5547,10 @@ export class ProjectsService implements OnModuleInit {
       if (code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
         throw new BadGatewayException('无法连接编排服务，请确认 rag-orchestrator 已启动');
       }
-      if (code === 'ECONNABORTED' || (error instanceof Error && /timeout of \d+ms exceeded/i.test(error.message))) {
+      if (
+        code === 'ECONNABORTED' ||
+        (error instanceof Error && /timeout of \d+ms exceeded/i.test(error.message))
+      ) {
         throw new BadGatewayException('同步项目上下文超时，请确认编排服务可访问');
       }
       throw new BadGatewayException(
@@ -5608,7 +5568,8 @@ export class ProjectsService implements OnModuleInit {
     if (!goal) {
       throw new BadRequestException('goal 不能为空');
     }
-    const pov = typeof payload.pov === 'string' && payload.pov.trim() ? payload.pov.trim() : '第三人称';
+    const pov =
+      typeof payload.pov === 'string' && payload.pov.trim() ? payload.pov.trim() : '第三人称';
     return {
       chapterNo,
       goal,
@@ -5842,14 +5803,12 @@ export class ProjectsService implements OnModuleInit {
     this.ensureProjectState(projectId);
     const settings = this.settingsStore.get(projectId)!;
     const allPersonas = this.personasStore.get(projectId)!;
-    const personas =
-      options?.appearingCharacters?.length
-        ? allPersonas.filter(
-            (persona) =>
-              persona.status === 'published' &&
-              options.appearingCharacters!.includes(persona.name)
-          )
-        : allPersonas;
+    const personas = options?.appearingCharacters?.length
+      ? allPersonas.filter(
+          (persona) =>
+            persona.status === 'published' && options.appearingCharacters!.includes(persona.name)
+        )
+      : allPersonas;
     const knowledge = this.knowledgeStore.get(projectId)!;
     await this.syncProjectContextToOrchestrator(
       projectId,
@@ -5865,10 +5824,7 @@ export class ProjectsService implements OnModuleInit {
     return this.getRagOrchestratorUrl();
   }
 
-  getChapterRecordForPipeline(
-    projectId: string,
-    chapterNo: number
-  ): ChapterRecord | undefined {
+  getChapterRecordForPipeline(projectId: string, chapterNo: number): ChapterRecord | undefined {
     this.ensureProjectState(projectId);
     const knowledge = this.knowledgeStore.get(projectId)!;
     return knowledge.chapters.find((item) => item.chapterNo === chapterNo);

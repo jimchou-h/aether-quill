@@ -256,14 +256,14 @@ function buildPreviewProjectCtx(
       summary: ch.summary || '',
       content: ch.content,
       contentTail:
-        ch.content.trim().length <= tailK
-          ? ch.content.trim()
-          : ch.content.trim().slice(-tailK),
+        ch.content.trim().length <= tailK ? ch.content.trim() : ch.content.trim().slice(-tailK),
       structuredMatchingText: resolveEffectiveStructuredMatchingText(structured),
     });
   }
 
-  for (const [key, draft] of Object.entries(workspace.knowledge.workbenchStructuredByChapter ?? {})) {
+  for (const [key, draft] of Object.entries(
+    workspace.knowledge.workbenchStructuredByChapter ?? {}
+  )) {
     const chapterNo = Number(key);
     if (!Number.isFinite(chapterNo) || chapterNo <= 0 || chapterCtxByNo.has(chapterNo)) {
       continue;

@@ -44,6 +44,7 @@ const isEmpty = computed(() => !props.source.trim());
   <div v-if="isEmpty" class="markdown-content markdown-content--empty">
     <slot name="empty">暂无内容</slot>
   </div>
+  <!-- eslint-disable-next-line vue/no-v-html -- sanitized via renderMarkdownToSafeHtml -->
   <div v-else class="markdown-content" v-html="renderedHtml" />
 </template>
 

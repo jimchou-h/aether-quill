@@ -55,10 +55,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Put('generation-preferences')
-  updateGenerationPreferences(
-    @Request() req: AuthenticatedRequest,
-    @Body() body: unknown
-  ) {
+  updateGenerationPreferences(@Request() req: AuthenticatedRequest, @Body() body: unknown) {
     const userId = req.user?.userId;
     if (!userId) {
       throw new UnauthorizedException('Unauthorized');

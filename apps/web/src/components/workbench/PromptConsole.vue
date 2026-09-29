@@ -33,6 +33,7 @@ const props = withDefaults(
   {
     knowledgeChapters: () => [],
     personas: () => [],
+    workbenchStructuredByChapter: () => ({}),
   }
 );
 
@@ -652,7 +653,9 @@ defineExpose({ resetForm });
   font-size: 0.92rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background var(--aq-transition-fast), transform var(--aq-transition-fast);
+  transition:
+    background var(--aq-transition-fast),
+    transform var(--aq-transition-fast);
 }
 
 .wb-btn--primary:hover:not(:disabled) {

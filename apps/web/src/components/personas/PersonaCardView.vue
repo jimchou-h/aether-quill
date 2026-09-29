@@ -166,7 +166,9 @@ function jumpToChapter(chapterNo: number) {
             </button>
             · 只读预览（编辑请前往知识库）
           </p>
-          <pre class="card-preview">{{ linkedPersonaCard.content?.slice(0, 1200) || '（无内容）' }}</pre>
+          <pre class="card-preview">{{
+            linkedPersonaCard.content?.slice(0, 1200) || '（无内容）'
+          }}</pre>
         </template>
         <p v-else class="empty-hint">
           尚未关联知识库角色卡。请在知识库创建/编辑 persona_card 并选择本人物。
@@ -247,7 +249,9 @@ function jumpToChapter(chapterNo: number) {
   background: var(--aq-surface);
   cursor: pointer;
   text-align: left;
-  transition: border-color var(--aq-transition-fast), background var(--aq-transition-fast);
+  transition:
+    border-color var(--aq-transition-fast),
+    background var(--aq-transition-fast);
 }
 
 .persona-list-item.active {

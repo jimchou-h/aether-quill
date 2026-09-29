@@ -65,7 +65,10 @@ test('已发布模板运行时用当前正文；草稿态回退最近一份已�
 test('多个已发布标记时取最后一份非空稿，跳过空稿和早期默认稿', () => {
   assert.equal(
     pickLatestPublishedContent([
-      { content: '你是一位专业的小说写作助手。请帮助用户进行小说创作，保持逻辑连贯和设定一致性。', isPublished: true },
+      {
+        content: '你是一位专业的小说写作助手。请帮助用户进行小说创作，保持逻辑连贯和设定一致性。',
+        isPublished: true,
+      },
       { content: '', isPublished: true },
       { content: '长稿角色声明', isPublished: true },
       { content: '未发布草稿', isPublished: false },

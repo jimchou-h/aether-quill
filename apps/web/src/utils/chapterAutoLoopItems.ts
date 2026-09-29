@@ -201,10 +201,7 @@ export function formatAutoLoopWindowPrefix(windowIndex?: number, windowTotal?: n
   return '';
 }
 
-export function autoLoopRoundKey(round: {
-  roundIndex: number;
-  windowIndex?: number;
-}): string {
+export function autoLoopRoundKey(round: { roundIndex: number; windowIndex?: number }): string {
   return `${round.windowIndex ?? 1}:${round.roundIndex}`;
 }
 

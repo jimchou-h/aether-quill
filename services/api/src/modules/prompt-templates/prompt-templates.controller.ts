@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, BadRequestException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  BadRequestException,
+} from '@nestjs/common';
 import { PromptTemplatesService } from './prompt-templates.service';
 import { TemplateCategory } from './prompt-templates.entity';
 import { isBlankPromptText, pickSystemTemplate } from './prompt-template-draft.util';
@@ -68,7 +77,10 @@ export class PromptTemplatesController {
   }
 
   @Get('api/projects/:projectId/prompt-templates/:templateId/versions')
-  async getVersions(@Param('projectId') projectId: string, @Param('templateId') templateId: string) {
+  async getVersions(
+    @Param('projectId') projectId: string,
+    @Param('templateId') templateId: string
+  ) {
     await this.service.whenReady;
     return this.service.getVersions(projectId, templateId);
   }
@@ -85,8 +97,7 @@ export class PromptTemplatesController {
 
     return {
       systemPromptText:
-        systemTemplate?.content?.trim() ||
-        this.service.resolveProjectSystemPromptText(projectId),
+        systemTemplate?.content?.trim() || this.service.resolveProjectSystemPromptText(projectId),
       activePersonaId: null,
       templates,
     };

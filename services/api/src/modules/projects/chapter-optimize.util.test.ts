@@ -229,7 +229,10 @@ test('buildDraftUserPrompt uses sourceText as chapter-original and adds refine c
 
 test('parseFrozenReviewResult reads CLOSED and GAPS markers', () => {
   assert.equal(parseFrozenReviewResult('【验收结论】CLOSED').hasMaterialGaps, false);
-  assert.equal(parseFrozenReviewResult('【验收结论】GAPS\n【缺口说明】章末虚').hasMaterialGaps, true);
+  assert.equal(
+    parseFrozenReviewResult('【验收结论】GAPS\n【缺口说明】章末虚').hasMaterialGaps,
+    true
+  );
   assert.equal(parseFrozenReviewResult('无实质缺口，可以收口').hasMaterialGaps, false);
   assert.equal(parseFrozenReviewResult('x'.repeat(80)).hasMaterialGaps, true);
   assert.equal(parseFrozenReviewResult('短').hasMaterialGaps, false);
@@ -563,7 +566,10 @@ test('clampChapterOptimizeSegmentCharSize allows 0 and clamps upper bound', () =
   assert.equal(clampChapterOptimizeSegmentCharSize(0), 0);
   assert.equal(clampChapterOptimizeSegmentCharSize('0'), 0);
   assert.equal(clampChapterOptimizeSegmentCharSize(25000), MAX_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
-  assert.equal(clampChapterOptimizeSegmentCharSize(undefined), DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE);
+  assert.equal(
+    clampChapterOptimizeSegmentCharSize(undefined),
+    DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
+  );
 });
 
 test('detectPlaceholderText flags common placeholder phrases', () => {
@@ -822,7 +828,5 @@ test('calculateSegmentMaxTokens returns proportional value for mid-length', () =
   const text = 'x'.repeat(3000);
   const tokens = calculateSegmentMaxTokens(text);
   assert.equal(tokens, Math.ceil(3000 * 2.5));
-  assert.ok(
-    tokens >= CHAPTER_OPTIMIZE_MIN_MAX_TOKENS && tokens <= CHAPTER_OPTIMIZE_MAX_MAX_TOKENS
-  );
+  assert.ok(tokens >= CHAPTER_OPTIMIZE_MIN_MAX_TOKENS && tokens <= CHAPTER_OPTIMIZE_MAX_MAX_TOKENS);
 });

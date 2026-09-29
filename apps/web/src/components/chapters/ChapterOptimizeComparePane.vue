@@ -13,7 +13,7 @@ const props = withDefaults(
     /** 只看红绿对照时关掉上下两栏编辑器，避免和工作台自己的成稿框重复 */
     showEditors?: boolean;
   }>(),
-  { showDiff: true, showEditors: true }
+  { showDiff: true, showEditors: true, originalTitle: '原文', draftTitle: '成稿（可编辑）' }
 );
 
 const draft = defineModel<string>({ required: true });
@@ -73,9 +73,9 @@ const modifiedCount = computed(() => diffBundle.value?.modifiedCount ?? 0);
 const hasDiff = computed(() =>
   Boolean(
     diffBundle.value &&
-      props.original.trim() &&
-      draft.value.trim() &&
-      diffBundle.value.lines.length > 0
+    props.original.trim() &&
+    draft.value.trim() &&
+    diffBundle.value.lines.length > 0
   )
 );
 </script>

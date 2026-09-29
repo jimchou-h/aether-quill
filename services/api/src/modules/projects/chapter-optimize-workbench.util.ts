@@ -251,7 +251,10 @@ export function sliceWorkbenchRangeNeighborhood(
 ): { beforeContext: string; afterContext: string } {
   return {
     beforeContext: sourceText.slice(Math.max(0, startOffset - contextChars), startOffset),
-    afterContext: sourceText.slice(endOffset, Math.min(sourceText.length, endOffset + contextChars)),
+    afterContext: sourceText.slice(
+      endOffset,
+      Math.min(sourceText.length, endOffset + contextChars)
+    ),
   };
 }
 
@@ -457,7 +460,9 @@ export function buildWorkbenchDraftUserPrompt(input: {
     sections.push(`【本章出场角色】${input.appearingCharacters.join('、')}`);
   }
   if (input.profile === 'prose') {
-    sections.push('【档位约束】本档为日常文笔。禁止按感官加料要求增色、堆砌特写或无必要地夸张动作。');
+    sections.push(
+      '【档位约束】本档为日常文笔。禁止按感官加料要求增色、堆砌特写或无必要地夸张动作。'
+    );
   }
   if (input.beforeContext) {
     sections.push(`<before-context>\n${input.beforeContext}\n</before-context>`);

@@ -50,7 +50,11 @@ export function decidePersonaCardLink(
   minScore = 80
 ): PersonaCardLinkDecision {
   const scored = personas
-    .map((p) => ({ personaId: p.id, name: p.name, score: scorePersonaNameMatch(cardTitle, p.name) }))
+    .map((p) => ({
+      personaId: p.id,
+      name: p.name,
+      score: scorePersonaNameMatch(cardTitle, p.name),
+    }))
     .filter((row) => row.score >= minScore)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 

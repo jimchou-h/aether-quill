@@ -2,10 +2,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { apiClient, type TaskPromptListItem } from '../services/api';
 import { presentErrorFromCaught, presentSuccess } from '../utils/pageFeedback';
-import {
-  groupTaskPromptItems,
-  TASK_PROMPT_GROUP_DEFINITIONS,
-} from '../utils/taskPromptGroups';
+import { groupTaskPromptItems, TASK_PROMPT_GROUP_DEFINITIONS } from '../utils/taskPromptGroups';
 
 export const useTaskPromptConfigStore = defineStore('taskPromptConfig', () => {
   const items = ref<TaskPromptListItem[]>([]);
@@ -91,9 +88,7 @@ export const useTaskPromptConfigStore = defineStore('taskPromptConfig', () => {
         templateKey,
         draftFor(templateKey)
       );
-      items.value = items.value.map((item) =>
-        item.templateKey === templateKey ? updated : item
-      );
+      items.value = items.value.map((item) => (item.templateKey === templateKey ? updated : item));
       setDraft(templateKey, updated.draftText);
       message.value = presentSuccess(`${updated.name} 草稿已保存`);
     } catch (error) {

@@ -23,7 +23,8 @@ export function buildWriteContextReadiness(
 
   const prior = chapters.filter((ch) => ch.chapterNo < normalized);
   const priorChapterExists =
-    normalized > 1 && prior.some((ch) => ch.chapterNo === normalized - 1 && Boolean(ch.content?.trim()));
+    normalized > 1 &&
+    prior.some((ch) => ch.chapterNo === normalized - 1 && Boolean(ch.content?.trim()));
 
   const missingSummary = prior
     .filter((ch) => !ch.summary?.trim() && Boolean(ch.content?.trim()))

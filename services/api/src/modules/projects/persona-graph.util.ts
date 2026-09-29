@@ -308,8 +308,9 @@ export function countChapterAppearancesForName(
   if (!target.name.trim()) {
     return 0;
   }
-  return chapters.filter((chapter) => personaAppearsInChapterContent(target, roster, chapter.content))
-    .length;
+  return chapters.filter((chapter) =>
+    personaAppearsInChapterContent(target, roster, chapter.content)
+  ).length;
 }
 
 export function findSimilarPersonaNameConflicts(

@@ -140,11 +140,7 @@ function updateRule<K extends keyof ProjectContentSafetyRule>(
         placeholder="例如：违禁词甲, 违禁词乙, 违禁词丙"
       />
       <div class="batch-actions">
-        <select
-          v-model="batchImportSeverity"
-          class="severity-select"
-          :disabled="disabled"
-        >
+        <select v-model="batchImportSeverity" class="severity-select" :disabled="disabled">
           <option v-for="opt in severityOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
@@ -199,12 +195,7 @@ function updateRule<K extends keyof ProjectContentSafetyRule>(
         />
         启用
       </label>
-      <button
-        class="remove-button"
-        type="button"
-        :disabled="disabled"
-        @click="removeRule(index)"
-      >
+      <button class="remove-button" type="button" :disabled="disabled" @click="removeRule(index)">
         删除
       </button>
     </div>

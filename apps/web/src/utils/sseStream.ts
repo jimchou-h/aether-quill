@@ -12,9 +12,7 @@ export function isSseAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-export type SseDataLineHandler = (
-  dataLine: string
-) => void | boolean | Promise<void | boolean>;
+export type SseDataLineHandler = (dataLine: string) => void | boolean | Promise<void | boolean>;
 
 function bindAbortToReader(reader: ReadableStreamDefaultReader<Uint8Array>, signal?: AbortSignal) {
   if (!signal) {
@@ -34,10 +32,7 @@ function bindAbortToReader(reader: ReadableStreamDefaultReader<Uint8Array>, sign
   return () => signal.removeEventListener('abort', onAbort);
 }
 
-async function emitSseDataLine(
-  onDataLine: SseDataLineHandler,
-  dataPart: string
-): Promise<boolean> {
+async function emitSseDataLine(onDataLine: SseDataLineHandler, dataPart: string): Promise<boolean> {
   if (!dataPart) {
     return false;
   }
@@ -63,11 +58,7 @@ export async function readSseSegments(
   let buffer = '';
 
   try {
-    while (true) {
-      if (signal?.aborted) {
-        throw new SseAbortError();
-      }
-
+    while (!signal?.aborted) {
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -88,6 +79,10 @@ export async function readSseSegments(
           return;
         }
       }
+    }
+
+    if (signal?.aborted) {
+      throw new SseAbortError();
     }
 
     const tail = buffer.trim();
@@ -119,11 +114,7 @@ export async function readSseLines(
   let buffer = '';
 
   try {
-    while (true) {
-      if (signal?.aborted) {
-        throw new SseAbortError();
-      }
-
+    while (!signal?.aborted) {
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -142,6 +133,10 @@ export async function readSseLines(
           onDataLine(dataPart);
         }
       }
+    }
+
+    if (signal?.aborted) {
+      throw new SseAbortError();
     }
   } finally {
     unbind();

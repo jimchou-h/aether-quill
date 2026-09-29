@@ -32,7 +32,9 @@ export function mergeMembersForProjectIds<T extends { userId: string; projectId:
   jsonMembers: T[],
   projectIds: Set<string>
 ): T[] {
-  const memberKeys = new Set(existingMembers.map((member) => `${member.userId}:${member.projectId}`));
+  const memberKeys = new Set(
+    existingMembers.map((member) => `${member.userId}:${member.projectId}`)
+  );
   const merged = [...existingMembers];
   for (const member of jsonMembers) {
     if (!projectIds.has(member.projectId)) {
@@ -73,7 +75,9 @@ export function mergeKnowledgeChaptersFromJsonMirror<T extends KnowledgeChapterM
   let changed = false;
 
   for (const jsonChapter of jsonChapters) {
-    const loadedChapter = loadedChapters.find((chapter) => chapter.chapterNo === jsonChapter.chapterNo);
+    const loadedChapter = loadedChapters.find(
+      (chapter) => chapter.chapterNo === jsonChapter.chapterNo
+    );
     const jsonMs = chapterUpdatedAtMs(jsonChapter);
     const loadedMs = loadedChapter ? chapterUpdatedAtMs(loadedChapter) : 0;
     if (!loadedChapter || jsonMs > loadedMs) {

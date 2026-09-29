@@ -20,7 +20,10 @@ test('isRetryableChapterSummaryIndexError detects axios-like failures', () => {
     isRetryableChapterSummaryIndexError({ message: 'Request failed with status code 400' }),
     true
   );
-  assert.equal(isRetryableChapterSummaryIndexError({ code: 'EMBEDDING_PROVIDER_UNAVAILABLE' }), true);
+  assert.equal(
+    isRetryableChapterSummaryIndexError({ code: 'EMBEDDING_PROVIDER_UNAVAILABLE' }),
+    true
+  );
   assert.equal(isRetryableChapterSummaryIndexError({ response: { status: 404 } }), false);
 });
 

@@ -253,8 +253,7 @@ function resolveCustomRules(
 
 function applyFromSettings(s: ProjectSettings, rulesFallback: ProjectContentSafetyRule[] = []) {
   summaryCount.value = s.chapterSummaryPromptCount;
-  memoryCount.value =
-    (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3;
+  memoryCount.value = (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3;
   priorTailChars.value = (s as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800;
   excerptMaxChars.value = (s as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400;
   outlineMaxChars.value = (s as { outlineMaxChars?: number }).outlineMaxChars ?? 4000;
@@ -270,8 +269,7 @@ function applyFromSettings(s: ProjectSettings, rulesFallback: ProjectContentSafe
   chapterOptimizeSegmentCharSize.value = s.chapterOptimizeSegmentCharSize ?? 3000;
   saved.value = {
     summaryCount: s.chapterSummaryPromptCount,
-    memoryCount:
-      (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3,
+    memoryCount: (s as { chapterSummaryMemoryCount?: number }).chapterSummaryMemoryCount ?? 3,
     priorTailChars: (s as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800,
     excerptMaxChars: (s as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400,
     outlineMaxChars: (s as { outlineMaxChars?: number }).outlineMaxChars ?? 4000,
@@ -422,7 +420,8 @@ onMounted(() => {
         />
       </div>
       <p class="field-hint inline-hint">
-        范围 0~10；默认 3。选取「章号 &lt; 当前写作章节」的章节；无摘要时使用正文摘录降级（近期连续性池）。
+        范围 0~10；默认 3。选取「章号 &lt;
+        当前写作章节」的章节；无摘要时使用正文摘录降级（近期连续性池）。
       </p>
 
       <div class="row">
@@ -457,7 +456,8 @@ onMounted(() => {
         </button>
       </div>
       <p class="field-hint inline-hint memory-rebuild-hint">
-        已用「生成摘要」产生 LLM 摘要时，点「同步已有摘要」即可写入 Qdrant，不再次调用模型。批量同步会自动限速，章数多时请耐心等待。无摘要的章会跳过。
+        已用「生成摘要」产生 LLM 摘要时，点「同步已有摘要」即可写入
+        Qdrant，不再次调用模型。批量同步会自动限速，章数多时请耐心等待。无摘要的章会跳过。
       </p>
 
       <div class="row">
@@ -520,7 +520,9 @@ onMounted(() => {
           step="100"
         />
       </div>
-      <p class="field-hint inline-hint">身份关系 + 已选关系事件合计上限；默认 2000。0 表示不注入。</p>
+      <p class="field-hint inline-hint">
+        身份关系 + 已选关系事件合计上限；默认 2000。0 表示不注入。
+      </p>
 
       <div class="row">
         <label class="field-label" for="aq-excerpt-max">无摘要摘录字数</label>
@@ -567,9 +569,7 @@ onMounted(() => {
           <span class="toggle-text">手动保存章节后，提示生成本章关系事件</span>
         </label>
       </div>
-      <p class="field-hint inline-hint">
-        以上开关仅控制「手动编辑保存」是否弹出后处理确认。
-      </p>
+      <p class="field-hint inline-hint">以上开关仅控制「手动编辑保存」是否弹出后处理确认。</p>
 
       <div class="toggle-row">
         <label class="toggle-label">
@@ -578,7 +578,8 @@ onMounted(() => {
         </label>
       </div>
       <p class="field-hint inline-hint">
-        开启后，章节续写、优化正文等 AI 输出会经过硬规则扫描；关闭后跳过扫描与自动改写，但仍显示任务进度。
+        开启后，章节续写、优化正文等 AI
+        输出会经过硬规则扫描；关闭后跳过扫描与自动改写，但仍显示任务进度。
       </p>
 
       <div class="content-safety-rules-block">
@@ -623,11 +624,7 @@ onMounted(() => {
             当前 {{ contentSafetyCustomRules.length }} 条自定义禁用词
           </p>
 
-          <div
-            v-for="(rule, index) in contentSafetyCustomRules"
-            :key="rule.id"
-            class="rule-row"
-          >
+          <div v-for="(rule, index) in contentSafetyCustomRules" :key="rule.id" class="rule-row">
             <input
               class="pattern-input"
               type="text"
@@ -635,9 +632,7 @@ onMounted(() => {
               :disabled="saving"
               maxlength="64"
               placeholder="禁用词或短语"
-              @input="
-                updateCustomRule(index, 'pattern', ($event.target as HTMLInputElement).value)
-              "
+              @input="updateCustomRule(index, 'pattern', ($event.target as HTMLInputElement).value)"
             />
             <select
               class="severity-select"

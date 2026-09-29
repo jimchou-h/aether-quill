@@ -480,9 +480,7 @@ defineExpose({ clearEditing });
               >
                 {{ kw }}
                 <span
-                  v-if="
-                    isPersonaKeywordSupplement(kw, selectedChapter.structuredInfo)
-                  "
+                  v-if="isPersonaKeywordSupplement(kw, selectedChapter.structuredInfo)"
                   class="keyword-tag-source"
                   >正文匹配</span
                 >

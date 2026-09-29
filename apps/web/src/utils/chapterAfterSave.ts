@@ -1,7 +1,9 @@
 import type { ChapterPendingAction } from '../services/api';
 
 export function formatChapterPendingActionsSummary(actions: ChapterPendingAction[]): string {
-  return actions.map((action) => `${action.label}（约 ${action.estimatedTokens} tokens）`).join('\n');
+  return actions
+    .map((action) => `${action.label}（约 ${action.estimatedTokens} tokens）`)
+    .join('\n');
 }
 
 export function confirmChapterAfterSaveActions(actions: ChapterPendingAction[]): boolean {

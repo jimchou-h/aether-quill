@@ -32,10 +32,11 @@ describe('auto-loop prompt lab', () => {
   });
 
   it('prefers the latest diagnose snapshot after a retry', () => {
-    const found = findPromptLabCall(
-      [call({ id: 'first' }), call({ id: 'retry' })],
-      { kind: 'diagnose', roundIndex: 1, windowIndex: 1 }
-    );
+    const found = findPromptLabCall([call({ id: 'first' }), call({ id: 'retry' })], {
+      kind: 'diagnose',
+      roundIndex: 1,
+      windowIndex: 1,
+    });
     assert.equal(found?.id, 'retry');
   });
 

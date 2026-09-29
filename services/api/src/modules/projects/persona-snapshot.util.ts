@@ -40,7 +40,9 @@ export function normalizePersonaSnapshot(raw: unknown): PersonaSnapshot {
     appearance: clampField(typeof record.appearance === 'string' ? record.appearance : undefined),
     status: clampField(typeof record.status === 'string' ? record.status : undefined),
     location: clampField(typeof record.location === 'string' ? record.location : undefined),
-    possessions: clampField(typeof record.possessions === 'string' ? record.possessions : undefined),
+    possessions: clampField(
+      typeof record.possessions === 'string' ? record.possessions : undefined
+    ),
   };
 }
 
@@ -139,10 +141,7 @@ export function resolvePersonaSnapshotAsOfChapter(
   }
   let best: PersonaChapterStateRecord | null = null;
   for (const record of chapterStates) {
-    if (
-      record.chapterNo < asOfBeforeChapterNo &&
-      (!best || record.chapterNo > best.chapterNo)
-    ) {
+    if (record.chapterNo < asOfBeforeChapterNo && (!best || record.chapterNo > best.chapterNo)) {
       best = record;
     }
   }

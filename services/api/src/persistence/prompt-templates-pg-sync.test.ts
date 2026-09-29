@@ -6,28 +6,16 @@ import {
 } from './prompt-templates-pg-sync';
 
 test('空快照不得覆盖已有模板', () => {
-  assert.equal(
-    shouldReplacePromptTemplateSnapshot({ existingCount: 30, incomingCount: 0 }),
-    false
-  );
+  assert.equal(shouldReplacePromptTemplateSnapshot({ existingCount: 30, incomingCount: 0 }), false);
 });
 
 test('initDefaults 只种出少量行时不得整表覆盖', () => {
-  assert.equal(
-    shouldReplacePromptTemplateSnapshot({ existingCount: 30, incomingCount: 3 }),
-    false
-  );
+  assert.equal(shouldReplacePromptTemplateSnapshot({ existingCount: 30, incomingCount: 3 }), false);
 });
 
 test('单条删除或空库灌入允许落盘', () => {
-  assert.equal(
-    shouldReplacePromptTemplateSnapshot({ existingCount: 30, incomingCount: 29 }),
-    true
-  );
-  assert.equal(
-    shouldReplacePromptTemplateSnapshot({ existingCount: 0, incomingCount: 3 }),
-    true
-  );
+  assert.equal(shouldReplacePromptTemplateSnapshot({ existingCount: 30, incomingCount: 29 }), true);
+  assert.equal(shouldReplacePromptTemplateSnapshot({ existingCount: 0, incomingCount: 3 }), true);
 });
 
 test('已有版本史只插入缺失版本，并在发布标记变化时重标', () => {

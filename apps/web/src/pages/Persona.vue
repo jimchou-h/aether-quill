@@ -49,9 +49,7 @@ const personaName = shallowRef('');
 const personaProfile = shallowRef('');
 const personaState = shallowRef('');
 
-const linkedPersonaCardByPersonaId = computed(() =>
-  buildLinkedPersonaCardMap(documents.value)
-);
+const linkedPersonaCardByPersonaId = computed(() => buildLinkedPersonaCardMap(documents.value));
 
 const statusChapterOptions = computed(() => collectPersonaStatusChapterOptions(personas.value));
 
@@ -415,9 +413,7 @@ onMounted(() => {
                 <td>
                   <span
                     :class="
-                      linkedPersonaCardByPersonaId.has(persona.id)
-                        ? 'link-ok'
-                        : 'link-missing'
+                      linkedPersonaCardByPersonaId.has(persona.id) ? 'link-ok' : 'link-missing'
                     "
                   >
                     {{ linkedCardTitle(persona.id) }}
@@ -590,7 +586,9 @@ onMounted(() => {
   padding: 0.3rem 0.75rem;
   cursor: pointer;
   font-size: 0.85rem;
-  transition: background var(--aq-transition-fast), border-color var(--aq-transition-fast);
+  transition:
+    background var(--aq-transition-fast),
+    border-color var(--aq-transition-fast);
 }
 
 .view-switch-button.active {

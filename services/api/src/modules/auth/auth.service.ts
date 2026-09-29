@@ -81,7 +81,7 @@ export class AuthService implements OnModuleInit {
   private async loadSessionsFromDatabase() {
     try {
       const now = new Date();
-      const dbSessions = await (this.prisma as any).session.findMany({
+      const dbSessions = await this.prisma.session.findMany({
         where: {
           expiresAt: {
             gte: now,
@@ -208,8 +208,7 @@ export class AuthService implements OnModuleInit {
       const current = user.generationPreferences
         ? normalizeUserGenerationPreferences(user.generationPreferences)
         : normalizeUserGenerationPreferences({});
-      const source =
-        input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+      const source = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
       prefs = normalizeUserGenerationPreferences({
         writing: source.writing !== undefined ? source.writing : current.writing,
         utility: source.utility !== undefined ? source.utility : current.utility,
@@ -353,7 +352,7 @@ export class AuthService implements OnModuleInit {
 
     if (usePostgresPersistence()) {
       try {
-        await (this.prisma as any).session.create({
+        await this.prisma.session.create({
           data: {
             id: session.id,
             userId: session.userId,
@@ -374,7 +373,7 @@ export class AuthService implements OnModuleInit {
 
     if (usePostgresPersistence()) {
       try {
-        await (this.prisma as any).session.delete({
+        await this.prisma.session.delete({
           where: {
             token: refreshToken,
           },

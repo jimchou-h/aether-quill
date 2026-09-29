@@ -234,9 +234,7 @@ export async function loadWorkspaceFromPostgres(
       settings[p.id] = settingsRow;
     }
 
-    const workbenchStructuredByChapter = parseWorkbenchStructuredFromPg(
-      p.workbenchStructuredJson
-    );
+    const workbenchStructuredByChapter = parseWorkbenchStructuredFromPg(p.workbenchStructuredJson);
 
     personas[p.id] = p.personas.map((per) => ({
       id: per.id,
@@ -425,9 +423,7 @@ export async function syncWorkspaceToPostgres(
           chapterSummaryMemoryCount:
             s.chapterSummaryMemoryCount ?? DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
           generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
-          settingsExtensions: pickProjectSettingsJsonExtensions(
-            s
-          ) as Prisma.InputJsonValue,
+          settingsExtensions: pickProjectSettingsJsonExtensions(s) as Prisma.InputJsonValue,
           updatedAt: new Date(s.updatedAt),
         },
         update: {
@@ -438,9 +434,7 @@ export async function syncWorkspaceToPostgres(
           chapterSummaryMemoryCount:
             s.chapterSummaryMemoryCount ?? DEFAULT_CHAPTER_SUMMARY_MEMORY_COUNT,
           generationTemperature: s.generationTemperature ?? DEFAULT_GENERATION_TEMPERATURE,
-          settingsExtensions: pickProjectSettingsJsonExtensions(
-            s
-          ) as Prisma.InputJsonValue,
+          settingsExtensions: pickProjectSettingsJsonExtensions(s) as Prisma.InputJsonValue,
           updatedAt: new Date(s.updatedAt),
         },
       });

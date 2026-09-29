@@ -148,7 +148,11 @@ test('workbench draft attaches read-only adjacent context for stitching', () => 
   assert.match(prompt, /原文原样交回视为失败/);
   const atStart = sliceWorkbenchRangeNeighborhood(sourceText, 0, 3);
   assert.equal(atStart.beforeContext, '');
-  const atEnd = sliceWorkbenchRangeNeighborhood(sourceText, sourceText.length - 3, sourceText.length);
+  const atEnd = sliceWorkbenchRangeNeighborhood(
+    sourceText,
+    sourceText.length - 3,
+    sourceText.length
+  );
   assert.equal(atEnd.afterContext, '');
 });
 
@@ -245,7 +249,8 @@ test('parseWorkbenchReviewItems drops illegal kinds, additive instructions, and 
 
 test('assertWorkbenchFixSpanRequest requires span and instruction', () => {
   assert.throws(
-    () => assertWorkbenchFixSpanRequest({ spanText: '', instruction: '改拍打节奏', profile: 'sex' }),
+    () =>
+      assertWorkbenchFixSpanRequest({ spanText: '', instruction: '改拍打节奏', profile: 'sex' }),
     /spanText/
   );
   assert.throws(

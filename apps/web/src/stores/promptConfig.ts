@@ -145,10 +145,7 @@ export const usePromptConfigStore = defineStore('promptConfig', () => {
         await loadVersions(projectId);
         const published = latestPublished(versions.value);
         draftText.value =
-          systemTemplate.content.trim() ||
-          published?.content ||
-          configData.systemPromptText ||
-          '';
+          systemTemplate.content.trim() || published?.content || configData.systemPromptText || '';
       } else {
         systemTemplateId.value = '';
         versions.value = [];

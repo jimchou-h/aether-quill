@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  formatFromPlanClosedRunStatus,
-  shouldRunFromPlanRefinePass,
-} from './fromPlanClosedRun';
+import { formatFromPlanClosedRunStatus, shouldRunFromPlanRefinePass } from './fromPlanClosedRun';
 
 test('formatFromPlanClosedRunStatus names each closed-run phase', () => {
   assert.match(formatFromPlanClosedRunStatus({ phase: 'draft1' }), /按方案改写/);

@@ -120,9 +120,7 @@ export async function syncDocumentsToPostgres(
     // 禁止用空内存快照清空 PG：启动失败/半初始化时 fire-and-forget 同步会误删全库
     const existing = await prisma.document.count();
     if (existing > 0) {
-      console.error(
-        `[persistence] 拒绝空 documents 快照覆盖 PG（库内仍有 ${existing} 篇文档）`
-      );
+      console.error(`[persistence] 拒绝空 documents 快照覆盖 PG（库内仍有 ${existing} 篇文档）`);
       throw new Error('Refusing to wipe non-empty documents table with empty in-memory snapshot');
     }
     return;

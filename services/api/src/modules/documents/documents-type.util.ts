@@ -37,7 +37,11 @@ export function inferDocumentKnowledgeType(title: string, content: string): Docu
 }
 
 /** 用户 docType → 入库 payload document_type */
-export function docTypeForIngestion(userDocType: UserDocType, title: string, content: string): string {
+export function docTypeForIngestion(
+  userDocType: UserDocType,
+  title: string,
+  content: string
+): string {
   if (userDocType === 'persona_card') {
     return 'persona_card';
   }

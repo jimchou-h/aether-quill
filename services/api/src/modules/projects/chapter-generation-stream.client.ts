@@ -69,9 +69,7 @@ export async function streamPipelineGeneration(input: {
         templateKey: input.templateKey,
         maxTokens: input.maxTokens,
         context: input.context,
-        ...(input.systemPromptOverride
-          ? { systemPromptOverride: input.systemPromptOverride }
-          : {}),
+        ...(input.systemPromptOverride ? { systemPromptOverride: input.systemPromptOverride } : {}),
       },
       {
         responseType: 'stream',
@@ -169,11 +167,7 @@ export async function streamPipelineGeneration(input: {
             break;
           }
           case 'stage':
-            input.callbacks.onStage?.(
-              event.stage || '',
-              event.segmentIndex,
-              event.segmentTotal
-            );
+            input.callbacks.onStage?.(event.stage || '', event.segmentIndex, event.segmentTotal);
             break;
           case 'error':
             errorMessage = typeof event.data === 'string' ? event.data : '生成失败';
@@ -244,9 +238,7 @@ export async function generatePipelinePlainText(input: {
         templateKey: input.templateKey,
         maxTokens: input.maxTokens,
         context: input.context,
-        ...(input.systemPromptOverride
-          ? { systemPromptOverride: input.systemPromptOverride }
-          : {}),
+        ...(input.systemPromptOverride ? { systemPromptOverride: input.systemPromptOverride } : {}),
       },
       {
         timeout: input.timeoutMs ?? 180000,

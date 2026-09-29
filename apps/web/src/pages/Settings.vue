@@ -62,7 +62,10 @@ watch(
     <h2 class="page-title">项目设置</h2>
     <p class="page-subtitle">维护大纲摘要与系统提示词版本，确保每个项目独立生效。</p>
 
-    <p v-if="errorMessage || promptConfigStore.errorMessage || taskPromptConfigStore.errorMessage" class="message message-error">
+    <p
+      v-if="errorMessage || promptConfigStore.errorMessage || taskPromptConfigStore.errorMessage"
+      class="message message-error"
+    >
       {{ errorMessage || promptConfigStore.errorMessage || taskPromptConfigStore.errorMessage }}
     </p>
     <p v-if="promptConfigStore.message || taskPromptConfigStore.message" class="message message-ok">

@@ -56,16 +56,12 @@ function applyFromPreferences(prefs: UserGenerationPreferences) {
   writingProvider.value = prefs.writing.provider;
   writingModel.value = normalizeModelInput(prefs.writing.model) || DEFAULT_MODEL;
   writingTemperature.value =
-    typeof prefs.writing.temperature === 'number'
-      ? prefs.writing.temperature
-      : DEFAULT_TEMPERATURE;
+    typeof prefs.writing.temperature === 'number' ? prefs.writing.temperature : DEFAULT_TEMPERATURE;
 
   utilityProvider.value = prefs.utility.provider;
   utilityModel.value = normalizeModelInput(prefs.utility.model) || DEFAULT_MODEL;
   utilityTemperature.value =
-    typeof prefs.utility.temperature === 'number'
-      ? prefs.utility.temperature
-      : DEFAULT_TEMPERATURE;
+    typeof prefs.utility.temperature === 'number' ? prefs.utility.temperature : DEFAULT_TEMPERATURE;
 
   saved.value = prefs;
 }
@@ -140,8 +136,8 @@ onMounted(() => {
   <section class="panel">
     <h2 class="panel-title">全局模型设置</h2>
     <p class="field-hint">
-      写作与常规任务可分别选择厂商、模型与温度。默认均为 DeepSeek /
-      deepseek-v4-flash / 0.7。API Key 仅在服务端 .env 配置，此处不填写。
+      写作与常规任务可分别选择厂商、模型与温度。默认均为 DeepSeek / deepseek-v4-flash / 0.7。API Key
+      仅在服务端 .env 配置，此处不填写。
     </p>
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>

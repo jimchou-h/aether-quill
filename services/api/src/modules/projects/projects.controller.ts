@@ -13,7 +13,6 @@ import {
   UseGuards,
   Request,
   BadRequestException,
-  HttpException,
   forwardRef,
 } from '@nestjs/common';
 import { Request as ExpressRequest, Response as ExpressResponse } from 'express';
@@ -1283,4 +1282,3 @@ export class ProjectsController {
     return this.projectsService.removeMember(id, memberId, currentUserId);
   }
 }
-

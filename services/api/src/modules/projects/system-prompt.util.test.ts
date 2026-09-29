@@ -4,10 +4,7 @@ import { mergeSystemPromptSections } from './system-prompt.util';
 
 describe('mergeSystemPromptSections', () => {
   it('joins non-empty sections with blank line', () => {
-    assert.equal(
-      mergeSystemPromptSections('项目约束 A', '任务约束 B'),
-      '项目约束 A\n\n任务约束 B'
-    );
+    assert.equal(mergeSystemPromptSections('项目约束 A', '任务约束 B'), '项目约束 A\n\n任务约束 B');
   });
 
   it('skips empty and whitespace-only sections', () => {

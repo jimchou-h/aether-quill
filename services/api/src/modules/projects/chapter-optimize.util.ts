@@ -128,8 +128,7 @@ export function resolveOptimizeDraftExecution(input: {
   return {
     optimizationMode: 'single',
     segmentTotal: 1,
-    strategyLabel:
-      input.rewriteMode === 'direct' ? '按要求直接生成正文' : '整章生成正文',
+    strategyLabel: input.rewriteMode === 'direct' ? '按要求直接生成正文' : '整章生成正文',
     skipPlanDiagnosis,
   };
 }
@@ -184,8 +183,7 @@ export function clampChapterOptimizeSegmentCharSize(value: unknown): number {
   if (value === 0 || value === '0') {
     return 0;
   }
-  const parsed =
-    typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed) || parsed < 0) {
     return DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE;
   }
@@ -232,8 +230,7 @@ export function resolveChapterOptimizeLengthStrategy(
 
   if (segmentCount <= 1) {
     const disabledByZeroSize =
-      config.segmentCharSize === 0 &&
-      inputChapterChars > config.singleSegmentThreshold;
+      config.segmentCharSize === 0 && inputChapterChars > config.singleSegmentThreshold;
     return {
       mode: 'single',
       segmentCount: 1,
@@ -564,9 +561,7 @@ export function buildSegmentDiagnosisUserPrompt(input: {
   sections.push(
     `<segment-original segment="${segment.index + 1}/${totalSegments}">\n${segment.originalText}\n</segment-original>`
   );
-  sections.push(
-    '请输出本段结构化诊断报告（控制在 200～400 字），禁止输出正文或整章方案。'
-  );
+  sections.push('请输出本段结构化诊断报告（控制在 200～400 字），禁止输出正文或整章方案。');
 
   return sections.join('\n\n');
 }
@@ -603,10 +598,7 @@ export function buildPlanSynthesisUserPrompt(input: {
   }
 
   const diagnosisBlock = segmentDiagnoses
-    .map(
-      (item) =>
-        `### 第 ${item.segmentIndex} 段诊断\n${item.diagnosisText.trim()}`
-    )
+    .map((item) => `### 第 ${item.segmentIndex} 段诊断\n${item.diagnosisText.trim()}`)
     .join('\n\n');
   sections.push(`<segment-diagnoses>\n${diagnosisBlock}\n</segment-diagnoses>`);
   sections.push(
@@ -865,9 +857,7 @@ export function ensureChapterVersionMatches(chapterNo: number, expected: Date, a
 /**
  * 用稳定的伪随机生成 planId / draftId，便于 trace 关联。
  */
-export function makeOptimizationId(
-  prefix: 'plan' | 'draft' | 'auto-loop' | 'review'
-): string {
+export function makeOptimizationId(prefix: 'plan' | 'draft' | 'auto-loop' | 'review'): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -1300,6 +1290,8 @@ export function calculateSegmentMaxTokensForIndex(
   _segmentIndex: number,
   _totalSegments: number
 ): number {
+  void _segmentIndex;
+  void _totalSegments;
   return calculateSegmentMaxTokens(originalText);
 }
 

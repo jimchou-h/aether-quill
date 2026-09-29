@@ -12,7 +12,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { streamPipelineGeneration, generatePipelinePlainText } from './chapter-generation-stream.client';
+import {
+  streamPipelineGeneration,
+  generatePipelinePlainText,
+} from './chapter-generation-stream.client';
 import { resolveUpstreamFailureMessage } from './orchestrator-error.util';
 import {
   CHAPTER_AUTO_LOOP_DRAFT_TEMPLATE_KEY,

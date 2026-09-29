@@ -940,7 +940,8 @@ export const apiClient = {
           (workspace.settings as { priorChapterTailChars?: number }).priorChapterTailChars ?? 800,
         contextExcerptMaxChars:
           (workspace.settings as { contextExcerptMaxChars?: number }).contextExcerptMaxChars ?? 400,
-        outlineMaxChars: (workspace.settings as { outlineMaxChars?: number }).outlineMaxChars ?? 4000,
+        outlineMaxChars:
+          (workspace.settings as { outlineMaxChars?: number }).outlineMaxChars ?? 4000,
         personaProfileMaxChars:
           (workspace.settings as { personaProfileMaxChars?: number }).personaProfileMaxChars ??
           2000,
@@ -1728,7 +1729,6 @@ export const apiClient = {
     }>(response.data);
   },
 
-
   async exportProjectChaptersTxt(projectId: string): Promise<Blob> {
     const { useAuthStore } = await import('../stores/auth');
     await useAuthStore().ensureFreshSession();
@@ -1979,7 +1979,6 @@ export interface StructuredInfoParseResult {
   chapter: ChapterItem;
   structuredInfo?: ChapterStructuredInfo;
 }
-
 
 export const DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE = 3000;
 

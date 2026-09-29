@@ -16,8 +16,7 @@ const PERSONA_TITLE_PATTERNS: RegExp[] = [
   /^(.+?)人物设定$/,
 ];
 
-const PAREN_ALIAS_DISPLAY_NAME =
-  /^(.+?)\s*[（(]\s*([^）)]+)\s*[）)]\s*$/;
+const PAREN_ALIAS_DISPLAY_NAME = /^(.+?)\s*[（(]\s*([^）)]+)\s*[）)]\s*$/;
 
 function extractPersonaDisplayName(title: string): string {
   const trimmed = title.trim();
@@ -35,10 +34,7 @@ function extractPersonaDisplayName(title: string): string {
 }
 
 /** 中文全名常见称呼：取末尾 2~3 字（如 霞之丘舞衣 → 舞衣），仅当全名足够长时启用 */
-function appendPersonaNicknameSuffixTokens(
-  fullName: string,
-  add: (token: string) => void
-): void {
+function appendPersonaNicknameSuffixTokens(fullName: string, add: (token: string) => void): void {
   const len = fullName.length;
   if (len >= 4) {
     add(fullName.slice(-2));
@@ -147,9 +143,7 @@ function collectSupplementedPersonaNames(
   const supplemented: string[] = [];
   const seen = new Set<string>();
 
-  const cards = personaCards.filter(
-    (card) => !card.docType || card.docType === 'persona_card'
-  );
+  const cards = personaCards.filter((card) => !card.docType || card.docType === 'persona_card');
 
   for (const card of cards) {
     const title = card.title?.trim() ?? '';
@@ -170,12 +164,7 @@ function collectSupplementedPersonaNames(
       matchedFromTokens = true;
     }
 
-    if (
-      !matchedFromTokens &&
-      title.length >= 2 &&
-      !seen.has(title) &&
-      sourceText.includes(title)
-    ) {
+    if (!matchedFromTokens && title.length >= 2 && !seen.has(title) && sourceText.includes(title)) {
       supplemented.push(title);
       seen.add(title);
     }

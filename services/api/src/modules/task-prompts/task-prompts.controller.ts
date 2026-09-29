@@ -41,10 +41,6 @@ export class TaskPromptsController {
     @Param('templateKey') templateKey: string,
     @Body() body: { targetVersion?: number }
   ) {
-    return this.service.rollback(
-      projectId,
-      decodeURIComponent(templateKey),
-      body?.targetVersion
-    );
+    return this.service.rollback(projectId, decodeURIComponent(templateKey), body?.targetVersion);
   }
 }

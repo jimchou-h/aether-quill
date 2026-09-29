@@ -8,10 +8,7 @@ defineProps<{
 </script>
 
 <template>
-  <div
-    class="outline-review-layout"
-    :class="{ 'with-reference': Boolean(referenceText?.trim()) }"
-  >
+  <div class="outline-review-layout" :class="{ 'with-reference': Boolean(referenceText?.trim()) }">
     <div class="outline-review-main">
       <slot />
     </div>

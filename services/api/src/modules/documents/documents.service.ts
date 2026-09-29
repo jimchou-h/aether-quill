@@ -210,7 +210,11 @@ export class DocumentsService implements OnModuleInit {
       doc.docType = nextType;
     }
     if (payload.personaId !== undefined) {
-      doc.personaId = this.resolvePersonaIdForDocument(doc.projectId, doc.docType, payload.personaId);
+      doc.personaId = this.resolvePersonaIdForDocument(
+        doc.projectId,
+        doc.docType,
+        payload.personaId
+      );
     }
 
     doc.version += 1;
@@ -339,8 +343,13 @@ export class DocumentsService implements OnModuleInit {
       throw new BadRequestException('documentIds 不能为空');
     }
 
-    const out: Array<{ id: string; title: string; content: string; type: string; docType: string }> =
-      [];
+    const out: Array<{
+      id: string;
+      title: string;
+      content: string;
+      type: string;
+      docType: string;
+    }> = [];
     for (const id of uniqueIds) {
       const doc = this.documents.find((d) => d.id === id && d.projectId === projectId);
       if (!doc) {

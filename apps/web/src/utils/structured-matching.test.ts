@@ -18,10 +18,13 @@ describe('hasStructuredInfoForKnowledgeMatch', () => {
       }),
       true
     );
-    assert.equal(resolveEffectiveStructuredMatchingText({
-      matchingText: '',
-      personaKeywordSupplements: ['林策'],
-    }), '林策');
+    assert.equal(
+      resolveEffectiveStructuredMatchingText({
+        matchingText: '',
+        personaKeywordSupplements: ['林策'],
+      }),
+      '林策'
+    );
   });
 
   it('returns true when only keywords present', () => {

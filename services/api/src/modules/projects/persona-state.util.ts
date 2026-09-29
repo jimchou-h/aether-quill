@@ -110,8 +110,7 @@ export function parseChapterPersonaStatesFromModelContent(raw: unknown): Chapter
     if (Object.keys(snapshot).length === 0 && legacyState) {
       snapshot = tryParsePersonaSnapshotFromText(legacyState) ?? snapshot;
     }
-    const summaryLineRaw =
-      typeof record.summaryLine === 'string' ? record.summaryLine.trim() : '';
+    const summaryLineRaw = typeof record.summaryLine === 'string' ? record.summaryLine.trim() : '';
     const summaryLine = (
       summaryLineRaw ||
       buildSummaryLineFromSnapshot(snapshot) ||

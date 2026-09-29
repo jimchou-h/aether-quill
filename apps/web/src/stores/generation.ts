@@ -147,27 +147,27 @@ export const useGenerationStore = defineStore('generation', () => {
         projectId,
         task,
         {
-        onStart: (event) => {
-          outlineId.value = event.outlineId;
-          outlineTraceId.value = event.traceId;
-          chapterNo.value = event.chapterNo;
+          onStart: (event) => {
+            outlineId.value = event.outlineId;
+            outlineTraceId.value = event.traceId;
+            chapterNo.value = event.chapterNo;
+          },
+          onContent: (text) => {
+            outlineText.value += text;
+          },
+          onEnd: (result: WriteChapterOutlineResult) => {
+            outlineText.value = result.outlineText;
+            outlineId.value = result.outlineId;
+            outlineTraceId.value = result.traceId;
+            outlineStatus.value = 'done';
+            invalidateOutlineConfirmation();
+          },
+          onError: (msg) => {
+            outlineErrorMessage.value = presentError(msg);
+            outlineStatus.value = 'error';
+          },
         },
-        onContent: (text) => {
-          outlineText.value += text;
-        },
-        onEnd: (result: WriteChapterOutlineResult) => {
-          outlineText.value = result.outlineText;
-          outlineId.value = result.outlineId;
-          outlineTraceId.value = result.traceId;
-          outlineStatus.value = 'done';
-          invalidateOutlineConfirmation();
-        },
-        onError: (msg) => {
-          outlineErrorMessage.value = presentError(msg);
-          outlineStatus.value = 'error';
-        },
-      },
-      { signal: outlineAbortController.signal }
+        { signal: outlineAbortController.signal }
       );
     } catch (error) {
       if (isSseAbortError(error)) {
@@ -182,10 +182,7 @@ export const useGenerationStore = defineStore('generation', () => {
     }
   }
 
-  async function generate(
-    projectId: string,
-    task: WriteTask
-  ) {
+  async function generate(projectId: string, task: WriteTask) {
     if (!outlineConfirmed.value || !outlineText.value.trim()) {
       errorMessage.value = presentError('请先确认章节大纲后再生成正文');
       return;

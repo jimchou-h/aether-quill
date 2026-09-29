@@ -68,7 +68,10 @@ describe('task prompt runtime resolution chain', () => {
     service.saveDraft(projectId, CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY, custom);
     service.publish(projectId, CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY);
 
-    assert.equal(service.resolveTaskSystemPrompt(projectId, CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY), custom);
+    assert.equal(
+      service.resolveTaskSystemPrompt(projectId, CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY),
+      custom
+    );
     assert.notEqual(
       service.resolveTaskSystemPrompt(projectId, CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY),
       getWarehouseDefaultTaskPromptText(CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY)

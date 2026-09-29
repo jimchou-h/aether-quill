@@ -356,8 +356,7 @@ export function parseMergeIntoNeighborPair(instruction: string): MergeIntoNeighb
     text.match(/(?:整合进|整合到|并入|合并到)\[(\d+)\]/) ??
     text.match(/(?:整合进|整合到|并入|合并到)(?:第)?(\d+)段/);
   const deleteSource =
-    text.match(/(?:删除|删掉|去掉)\[(\d+)\]/) ??
-    text.match(/(?:删除|删掉|去掉)(?:第)?(\d+)段/);
+    text.match(/(?:删除|删掉|去掉)\[(\d+)\]/) ?? text.match(/(?:删除|删掉|去掉)(?:第)?(\d+)段/);
   if (integrateKeeper && deleteSource) {
     const keeperIndex = Number(integrateKeeper[1]);
     const sourceIndex = Number(deleteSource[1]);
@@ -447,10 +446,7 @@ function numberedDeleteMatchesSlot(text: string, paragraphIndex?: number): boole
  * 「删除这句里的成语」不算；「删除[183]整句」「删除第36段整段」才算。
  * 复诊若写成「与邻段合并」，挂在被并掉的源段上也按抽槽处理，避免改写交空。
  */
-export function isWholeParagraphDeletion(
-  instruction: string,
-  paragraphIndex?: number
-): boolean {
+export function isWholeParagraphDeletion(instruction: string, paragraphIndex?: number): boolean {
   const text = instruction.replace(/\s+/g, '');
   if (!text) {
     return false;
@@ -993,9 +989,15 @@ function quoteFromParagraph(text: string): string {
   return compact.slice(0, 24);
 }
 
-function buildKeeperMergeInstruction(sourceInstruction: string, pair: MergeIntoNeighborPair): string {
+function buildKeeperMergeInstruction(
+  sourceInstruction: string,
+  pair: MergeIntoNeighborPair
+): string {
   const stripped = sourceInstruction
-    .replace(/(?:删除|删掉|去掉)\s*(?:\[\d+\]|第?\d+段)?\s*(?:整段|整句|此句|该句|该段|本段)?[，。；]*/g, '')
+    .replace(
+      /(?:删除|删掉|去掉)\s*(?:\[\d+\]|第?\d+段)?\s*(?:整段|整句|此句|该句|该段|本段)?[，。；]*/g,
+      ''
+    )
     .replace(/使\s*(?:\[\d+\]|第?\d+段)\s*直接衔接\s*(?:\[\d+\]|第?\d+段)[，。；]*/g, '')
     .trim();
   const detail = stripped || sourceInstruction.trim();
@@ -1070,9 +1072,7 @@ export function expandMergeIntoNeighborItems(
       resolvedParagraphIndex: pair.sourceIndex,
       // 保留原 instruction，供 mergeDeleteDependsOnKeeper 解析保留段编号
       status: 'pending',
-      note:
-        item.note ??
-        `合并对源段：先改写第 ${pair.keeperIndex} 段，成功后再删除本段`,
+      note: item.note ?? `合并对源段：先改写第 ${pair.keeperIndex} 段，成功后再删除本段`,
     });
   });
 
@@ -1100,9 +1100,7 @@ export function orderTargetsRewriteBeforeDelete(targets: AutoLoopTarget[]): Auto
     const dependsOn =
       target.deleteAfterRewriteIndex ??
       mergeDeleteDependsOnKeeper(target.items, target.paragraphIndex);
-    return dependsOn == null
-      ? target
-      : { ...target, deleteAfterRewriteIndex: dependsOn };
+    return dependsOn == null ? target : { ...target, deleteAfterRewriteIndex: dependsOn };
   };
 
   const rewrites = targets
@@ -1219,9 +1217,7 @@ export function selectAutoLoopTargets(input: {
       return left.paragraphIndex - right.paragraphIndex;
     });
 
-  const cap = input.unlimitedHits
-    ? groups.length
-    : resolveAutoLoopHitCap(input.paragraphs.length);
+  const cap = input.unlimitedHits ? groups.length : resolveAutoLoopHitCap(input.paragraphs.length);
   let selected = groups.slice(0, cap);
   let overflow = groups.slice(cap);
 
@@ -1609,9 +1605,7 @@ export interface AutoLoopPersonaLike {
 }
 
 function uniquePersonaNames(names: string[] | undefined): string[] {
-  return [
-    ...new Set((names ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
-  ];
+  return [...new Set((names ?? []).map((name) => name.trim()).filter((name) => name.length > 0))];
 }
 
 /**

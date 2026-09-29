@@ -150,10 +150,7 @@ onMounted(() => {
           <p class="project-description">{{ project.description || '暂无描述' }}</p>
         </div>
         <div class="card-actions">
-          <router-link
-            class="aq-btn aq-btn-primary"
-            :to="`/projects/${project.id}/workbench`"
-          >
+          <router-link class="aq-btn aq-btn-primary" :to="`/projects/${project.id}/workbench`">
             进入写作
           </router-link>
           <router-link class="aq-btn aq-btn-link" :to="`/projects/${project.id}/knowledge`">

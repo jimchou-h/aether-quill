@@ -12,7 +12,8 @@ test('naive Buffer.toString corrupts a Chinese character split across chunks', (
 test('createUtf8StreamDecoder reassembles a Chinese character split across chunks', () => {
   const bytes = Buffer.from('你好世界', 'utf8');
   const decoder = createUtf8StreamDecoder();
-  const text = decoder.decode(bytes.subarray(0, 2)) + decoder.decode(bytes.subarray(2)) + decoder.flush();
+  const text =
+    decoder.decode(bytes.subarray(0, 2)) + decoder.decode(bytes.subarray(2)) + decoder.flush();
   assert.equal(text, '你好世界');
   assert.equal(text.includes('\uFFFD'), false);
 });
