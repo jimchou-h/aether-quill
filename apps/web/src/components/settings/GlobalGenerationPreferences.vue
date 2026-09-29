@@ -180,7 +180,7 @@ onMounted(() => {
       <datalist id="aq-global-writing-model-suggestions">
         <option v-for="modelId in writingModelSuggestions" :key="modelId" :value="modelId" />
       </datalist>
-      <p class="field-hint inline-hint">用于续写、优化 draft、精修改写等进正文任务。</p>
+      <p class="field-hint inline-hint">用于续写、文笔优化正文等进正文任务。</p>
 
       <div class="row">
         <label class="field-label" for="aq-global-writing-temperature">写作温度</label>

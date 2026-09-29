@@ -1618,7 +1618,7 @@ function uniquePersonaNames(names: string[] | undefined): string[] {
  * 自动循环注入哪些角色卡。
  *
  * - 请求里带了名单：以这份为准（弹窗勾选）。
- * - 否则：正文里出现的人物名 ∪ 本章最近一次创作精修选角。
+ * - 否则：正文里出现的人物名；若无匹配则回退全部已发布人物。
  * - 仍为空：回退全部已发布人物，避免循环完全看不到人设。
  */
 export function resolveAutoLoopPersonaNames(input: {

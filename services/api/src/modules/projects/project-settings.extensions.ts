@@ -5,11 +5,6 @@ import {
   clampChapterOptimizeSegmentCharSize,
   DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
 } from './chapter-optimize.util';
-import type { ChapterPipelineConfig, ChapterPipelineRulesFixMode, ProtagonistUnlockRule } from './legacy-pipeline-settings.util';
-import {
-  DEFAULT_PIPELINE_CONFIG,
-  DEFAULT_PROTAGONIST_PROGRESS_RULES,
-} from './legacy-pipeline-settings.util';
 import type { WritingStyleSample } from './writing-style-samples.util';
 import { sanitizeWritingStyleSamples } from './writing-style-samples.util';
 import {
@@ -41,19 +36,6 @@ export type ProjectSettingsJsonExtensions = {
   chapterOptimizeSegmentCharSize?: number;
   contentSafetyScanEnabled?: boolean;
   contentSafetyCustomRules?: ProjectContentSafetyRule[];
-  pipelinePreset?: ChapterPipelineConfig['pipelinePreset'];
-  pipelineSkipSensoryOutlineReview?: boolean;
-  pipelineSkipCharacterOutlineReview?: boolean;
-  pipelineSkipCharacterTraitsOutlineReview?: boolean;
-  pipelineCharacterAdjustmentEnabled?: boolean;
-  pipelineCharacterTraitsEnabled?: boolean;
-  pipelineRulesFixMode?: ChapterPipelineRulesFixMode;
-  pipelineRulesModuleEnabled?: boolean;
-  complianceRulesFixMode?: ChapterPipelineRulesFixMode;
-  pipelineHomogenizationEnabled?: boolean;
-  pipelineHomogenizationPriorChapterCount?: number;
-  pipelineEnabledModules?: number[];
-  protagonistProgressRules?: ProtagonistUnlockRule[];
   writingStyleSamples?: WritingStyleSample[];
   generationWritingModel?: string | null;
   generationUtilityModel?: string | null;
@@ -79,19 +61,6 @@ export function pickProjectSettingsJsonExtensions(
     ...(Array.isArray(raw.contentSafetyCustomRules)
       ? { contentSafetyCustomRules: raw.contentSafetyCustomRules }
       : {}),
-    pipelinePreset: raw.pipelinePreset,
-    pipelineSkipSensoryOutlineReview: raw.pipelineSkipSensoryOutlineReview,
-    pipelineSkipCharacterOutlineReview: raw.pipelineSkipCharacterOutlineReview,
-    pipelineSkipCharacterTraitsOutlineReview: raw.pipelineSkipCharacterTraitsOutlineReview,
-    pipelineCharacterAdjustmentEnabled: raw.pipelineCharacterAdjustmentEnabled,
-    pipelineCharacterTraitsEnabled: raw.pipelineCharacterTraitsEnabled,
-    pipelineRulesFixMode: raw.pipelineRulesFixMode,
-    pipelineRulesModuleEnabled: raw.pipelineRulesModuleEnabled,
-    complianceRulesFixMode: raw.complianceRulesFixMode,
-    pipelineHomogenizationEnabled: raw.pipelineHomogenizationEnabled,
-    pipelineHomogenizationPriorChapterCount: raw.pipelineHomogenizationPriorChapterCount,
-    pipelineEnabledModules: raw.pipelineEnabledModules,
-    protagonistProgressRules: raw.protagonistProgressRules,
     ...(Array.isArray(raw.writingStyleSamples)
       ? { writingStyleSamples: raw.writingStyleSamples }
       : {}),
@@ -144,51 +113,6 @@ export function applyProjectSettingsJsonExtensions<T extends ProjectSettingsJson
     target.contentSafetyCustomRules = sanitizeProjectContentSafetyRules(
       extensions.contentSafetyCustomRules
     );
-  }
-  if (extensions.pipelinePreset !== undefined) {
-    target.pipelinePreset = extensions.pipelinePreset;
-  }
-  if (extensions.pipelineSkipSensoryOutlineReview !== undefined) {
-    target.pipelineSkipSensoryOutlineReview = extensions.pipelineSkipSensoryOutlineReview;
-  }
-  if (extensions.pipelineSkipCharacterOutlineReview !== undefined) {
-    target.pipelineSkipCharacterOutlineReview = extensions.pipelineSkipCharacterOutlineReview;
-  }
-  if (extensions.pipelineSkipCharacterTraitsOutlineReview !== undefined) {
-    target.pipelineSkipCharacterTraitsOutlineReview =
-      extensions.pipelineSkipCharacterTraitsOutlineReview;
-  }
-  if (extensions.pipelineCharacterTraitsEnabled !== undefined) {
-    target.pipelineCharacterTraitsEnabled = extensions.pipelineCharacterTraitsEnabled;
-  }
-  if (extensions.pipelineCharacterAdjustmentEnabled !== undefined) {
-    target.pipelineCharacterAdjustmentEnabled = extensions.pipelineCharacterAdjustmentEnabled;
-  }
-  if (extensions.pipelineRulesFixMode !== undefined) {
-    target.pipelineRulesFixMode = extensions.pipelineRulesFixMode;
-  }
-  if (extensions.pipelineRulesModuleEnabled !== undefined) {
-    target.pipelineRulesModuleEnabled = extensions.pipelineRulesModuleEnabled;
-  }
-  if (extensions.complianceRulesFixMode !== undefined) {
-    target.complianceRulesFixMode = extensions.complianceRulesFixMode;
-  }
-  if (extensions.pipelineHomogenizationEnabled !== undefined) {
-    target.pipelineHomogenizationEnabled = extensions.pipelineHomogenizationEnabled;
-  }
-  if (extensions.pipelineHomogenizationPriorChapterCount !== undefined) {
-    target.pipelineHomogenizationPriorChapterCount = Math.min(
-      10,
-      Math.max(1, extensions.pipelineHomogenizationPriorChapterCount)
-    );
-  }
-  if (Array.isArray(extensions.pipelineEnabledModules)) {
-    target.pipelineEnabledModules = extensions.pipelineEnabledModules.filter(
-      (m) => m >= 1 && m <= 4
-    );
-  }
-  if (Array.isArray(extensions.protagonistProgressRules)) {
-    target.protagonistProgressRules = extensions.protagonistProgressRules;
   }
   if (Array.isArray(extensions.writingStyleSamples)) {
     target.writingStyleSamples = sanitizeWritingStyleSamples(extensions.writingStyleSamples);
@@ -250,19 +174,6 @@ export function serializeProjectSettingsForJsonMirror(settings: {
   chapterOptimizeSegmentCharSize?: number;
   contentSafetyScanEnabled?: boolean;
   contentSafetyCustomRules?: ProjectContentSafetyRule[];
-  pipelinePreset?: ChapterPipelineConfig['pipelinePreset'];
-  pipelineSkipSensoryOutlineReview?: boolean;
-  pipelineSkipCharacterOutlineReview?: boolean;
-  pipelineSkipCharacterTraitsOutlineReview?: boolean;
-  pipelineCharacterAdjustmentEnabled?: boolean;
-  pipelineCharacterTraitsEnabled?: boolean;
-  pipelineRulesFixMode?: ChapterPipelineRulesFixMode;
-  pipelineRulesModuleEnabled?: boolean;
-  complianceRulesFixMode?: ChapterPipelineRulesFixMode;
-  pipelineHomogenizationEnabled?: boolean;
-  pipelineHomogenizationPriorChapterCount?: number;
-  pipelineEnabledModules?: number[];
-  protagonistProgressRules?: ProtagonistUnlockRule[];
   writingStyleSamples?: WritingStyleSample[];
   generationWritingModel?: string | null;
   generationUtilityModel?: string | null;
@@ -297,35 +208,6 @@ export function serializeProjectSettingsForJsonMirror(settings: {
     contentSafetyCustomRules: sanitizeProjectContentSafetyRules(
       settings.contentSafetyCustomRules
     ).map((rule) => ({ ...rule })),
-    pipelinePreset: settings.pipelinePreset,
-    pipelineSkipSensoryOutlineReview:
-      settings.pipelineSkipSensoryOutlineReview ??
-      DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
-    pipelineSkipCharacterOutlineReview:
-      settings.pipelineSkipCharacterOutlineReview ??
-      DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
-    pipelineSkipCharacterTraitsOutlineReview:
-      settings.pipelineSkipCharacterTraitsOutlineReview ??
-      DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
-    pipelineCharacterAdjustmentEnabled:
-      settings.pipelineCharacterAdjustmentEnabled ??
-      DEFAULT_PIPELINE_CONFIG.pipelineCharacterAdjustmentEnabled,
-    pipelineCharacterTraitsEnabled:
-      settings.pipelineCharacterTraitsEnabled ?? DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
-    complianceRulesFixMode: settings.complianceRulesFixMode ?? 'semi',
-    ...(settings.pipelineRulesModuleEnabled !== undefined
-      ? { pipelineRulesModuleEnabled: settings.pipelineRulesModuleEnabled }
-      : {}),
-    pipelineHomogenizationEnabled:
-      settings.pipelineHomogenizationEnabled ??
-      DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationEnabled,
-    pipelineHomogenizationPriorChapterCount:
-      settings.pipelineHomogenizationPriorChapterCount ??
-      DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationPriorChapterCount,
-    pipelineEnabledModules:
-      settings.pipelineEnabledModules ?? DEFAULT_PIPELINE_CONFIG.pipelineEnabledModules,
-    protagonistProgressRules:
-      settings.protagonistProgressRules ?? DEFAULT_PROTAGONIST_PROGRESS_RULES,
     writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map((item) => ({
       ...item,
     })),
@@ -353,19 +235,6 @@ export const PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS = {
   chapterOptimizeSegmentCharSize: DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   contentSafetyScanEnabled: true,
   contentSafetyCustomRules: [] as ProjectContentSafetyRule[],
-  pipelinePreset: DEFAULT_PIPELINE_CONFIG.pipelinePreset ?? 'creative_refine',
-  pipelineSkipSensoryOutlineReview: DEFAULT_PIPELINE_CONFIG.pipelineSkipSensoryOutlineReview,
-  pipelineSkipCharacterOutlineReview: DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterOutlineReview,
-  pipelineSkipCharacterTraitsOutlineReview:
-    DEFAULT_PIPELINE_CONFIG.pipelineSkipCharacterTraitsOutlineReview,
-  pipelineCharacterAdjustmentEnabled: DEFAULT_PIPELINE_CONFIG.pipelineCharacterAdjustmentEnabled,
-  pipelineCharacterTraitsEnabled: DEFAULT_PIPELINE_CONFIG.pipelineCharacterTraitsEnabled,
-  complianceRulesFixMode: 'semi' as ChapterPipelineRulesFixMode,
-  pipelineHomogenizationEnabled: DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationEnabled,
-  pipelineHomogenizationPriorChapterCount:
-    DEFAULT_PIPELINE_CONFIG.pipelineHomogenizationPriorChapterCount,
-  pipelineEnabledModules: DEFAULT_PIPELINE_CONFIG.pipelineEnabledModules,
-  protagonistProgressRules: DEFAULT_PROTAGONIST_PROGRESS_RULES,
   writingStyleSamples: [] as WritingStyleSample[],
   generationWritingModel: null as string | null,
   generationUtilityModel: null as string | null,

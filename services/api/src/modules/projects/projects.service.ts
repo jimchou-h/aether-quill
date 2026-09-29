@@ -220,7 +220,6 @@ import {
   PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS,
   serializeProjectSettingsForJsonMirror,
 } from './project-settings.extensions';
-import { migratePipelineSettingsFromPreset } from './legacy-pipeline-settings.util';
 import {
   createWritingStyleSampleRecord,
   sanitizeWritingStyleSamples,
@@ -290,25 +289,6 @@ export interface ProjectSettings {
   contentSafetyScanEnabled: boolean;
   /** 项目自定义禁用词 */
   contentSafetyCustomRules: ProjectContentSafetyRule[];
-  /** 分步精修预设（AQ-273） */
-  pipelinePreset?: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
-  pipelineSkipSensoryOutlineReview?: boolean;
-  pipelineSkipCharacterOutlineReview?: boolean;
-  pipelineSkipCharacterTraitsOutlineReview?: boolean;
-  pipelineCharacterAdjustmentEnabled?: boolean;
-  pipelineCharacterTraitsEnabled?: boolean;
-  pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
-  pipelineRulesModuleEnabled?: boolean;
-  complianceRulesFixMode?: 'auto' | 'semi' | 'manual';
-  pipelineHomogenizationEnabled?: boolean;
-  pipelineHomogenizationPriorChapterCount?: number;
-  pipelineEnabledModules?: number[];
-  protagonistProgressRules?: Array<{
-    abilityKey: string;
-    unlockAtChapter?: number;
-    unlockAfterCondition?: string;
-    descriptionForPrompt: string;
-  }>;
   writingStyleSamples?: WritingStyleSample[];
   /** 项目级写作模型覆盖；null = 使用环境默认 */
   generationWritingModel?: string | null;
@@ -763,19 +743,6 @@ export class ProjectsService implements OnModuleInit {
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
       contentSafetyCustomRules?: ProjectContentSafetyRule[];
-      pipelinePreset?: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
-      pipelineSkipSensoryOutlineReview?: boolean;
-      pipelineSkipCharacterOutlineReview?: boolean;
-      pipelineSkipCharacterTraitsOutlineReview?: boolean;
-      pipelineCharacterAdjustmentEnabled?: boolean;
-      pipelineCharacterTraitsEnabled?: boolean;
-      pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
-      pipelineRulesModuleEnabled?: boolean;
-      complianceRulesFixMode?: 'auto' | 'semi' | 'manual';
-      pipelineHomogenizationEnabled?: boolean;
-      pipelineHomogenizationPriorChapterCount?: number;
-      pipelineEnabledModules?: number[];
-      protagonistProgressRules?: ProjectSettings['protagonistProgressRules'];
       generationWritingModel?: string | null;
       generationUtilityModel?: string | null;
       writingGenerationTemperature?: number | null;
@@ -912,21 +879,6 @@ export class ProjectsService implements OnModuleInit {
       settings.contentSafetyCustomRules = validated.rules;
     }
 
-    applyProjectSettingsJsonExtensions(settings, {
-      pipelinePreset: payload.pipelinePreset,
-      pipelineSkipSensoryOutlineReview: payload.pipelineSkipSensoryOutlineReview,
-      pipelineSkipCharacterOutlineReview: payload.pipelineSkipCharacterOutlineReview,
-      pipelineSkipCharacterTraitsOutlineReview: payload.pipelineSkipCharacterTraitsOutlineReview,
-      pipelineCharacterAdjustmentEnabled: payload.pipelineCharacterAdjustmentEnabled,
-      pipelineCharacterTraitsEnabled: payload.pipelineCharacterTraitsEnabled,
-      pipelineRulesFixMode: payload.pipelineRulesFixMode,
-      pipelineRulesModuleEnabled: payload.pipelineRulesModuleEnabled,
-      complianceRulesFixMode: payload.complianceRulesFixMode,
-      pipelineHomogenizationEnabled: payload.pipelineHomogenizationEnabled,
-      pipelineHomogenizationPriorChapterCount: payload.pipelineHomogenizationPriorChapterCount,
-      pipelineEnabledModules: payload.pipelineEnabledModules,
-      protagonistProgressRules: payload.protagonistProgressRules,
-    });
 
     settings.updatedAt = new Date();
     this.patchSettingsDefaults(settings);
@@ -4835,56 +4787,6 @@ export class ProjectsService implements OnModuleInit {
     settings.contentSafetyCustomRules = sanitizeProjectContentSafetyRules(
       settings.contentSafetyCustomRules
     );
-    if (!settings.pipelineEnabledModules?.length && settings.pipelinePreset === undefined) {
-      settings.pipelinePreset = PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelinePreset;
-    }
-    migratePipelineSettingsFromPreset(
-      settings as Parameters<typeof migratePipelineSettingsFromPreset>[0]
-    );
-    if (settings.pipelineCharacterAdjustmentEnabled === undefined) {
-      settings.pipelineCharacterAdjustmentEnabled =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineCharacterAdjustmentEnabled;
-    }
-    if (settings.pipelineSkipSensoryOutlineReview === undefined) {
-      settings.pipelineSkipSensoryOutlineReview =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineSkipSensoryOutlineReview;
-    }
-    if (settings.pipelineSkipCharacterOutlineReview === undefined) {
-      settings.pipelineSkipCharacterOutlineReview =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineSkipCharacterOutlineReview;
-    }
-    if (settings.pipelineSkipCharacterTraitsOutlineReview === undefined) {
-      settings.pipelineSkipCharacterTraitsOutlineReview =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineSkipCharacterTraitsOutlineReview;
-    }
-    if (settings.pipelineCharacterTraitsEnabled === undefined) {
-      settings.pipelineCharacterTraitsEnabled =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineCharacterTraitsEnabled;
-    }
-    if (settings.complianceRulesFixMode === undefined) {
-      settings.complianceRulesFixMode =
-        settings.pipelineRulesFixMode ??
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.complianceRulesFixMode;
-    }
-    if (settings.pipelineRulesFixMode === undefined) {
-      settings.pipelineRulesFixMode = settings.complianceRulesFixMode;
-    }
-    if (settings.pipelineHomogenizationEnabled === undefined) {
-      settings.pipelineHomogenizationEnabled =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineHomogenizationEnabled;
-    }
-    if (settings.pipelineHomogenizationPriorChapterCount === undefined) {
-      settings.pipelineHomogenizationPriorChapterCount =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineHomogenizationPriorChapterCount;
-    }
-    if (!settings.pipelineEnabledModules?.length) {
-      settings.pipelineEnabledModules =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.pipelineEnabledModules;
-    }
-    if (!settings.protagonistProgressRules) {
-      settings.protagonistProgressRules =
-        PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS.protagonistProgressRules;
-    }
     settings.writingStyleSamples = sanitizeWritingStyleSamples(settings.writingStyleSamples);
     if (settings.generationWritingModel === undefined) {
       settings.generationWritingModel =
@@ -4919,23 +4821,6 @@ export class ProjectsService implements OnModuleInit {
       chapterOptimizeSegmentCharSize: settings.chapterOptimizeSegmentCharSize,
       contentSafetyScanEnabled: settings.contentSafetyScanEnabled,
       contentSafetyCustomRules: settings.contentSafetyCustomRules.map((rule) => ({ ...rule })),
-      pipelinePreset: settings.pipelinePreset,
-      pipelineSkipSensoryOutlineReview: settings.pipelineSkipSensoryOutlineReview,
-      pipelineSkipCharacterOutlineReview: settings.pipelineSkipCharacterOutlineReview,
-      pipelineSkipCharacterTraitsOutlineReview: settings.pipelineSkipCharacterTraitsOutlineReview,
-      pipelineCharacterAdjustmentEnabled: settings.pipelineCharacterAdjustmentEnabled,
-      pipelineCharacterTraitsEnabled: settings.pipelineCharacterTraitsEnabled,
-      pipelineRulesFixMode: settings.pipelineRulesFixMode,
-      pipelineRulesModuleEnabled: settings.pipelineRulesModuleEnabled,
-      complianceRulesFixMode: settings.complianceRulesFixMode,
-      pipelineHomogenizationEnabled: settings.pipelineHomogenizationEnabled,
-      pipelineHomogenizationPriorChapterCount: settings.pipelineHomogenizationPriorChapterCount,
-      pipelineEnabledModules: settings.pipelineEnabledModules
-        ? [...settings.pipelineEnabledModules]
-        : undefined,
-      protagonistProgressRules: settings.protagonistProgressRules
-        ? settings.protagonistProgressRules.map((rule) => ({ ...rule }))
-        : undefined,
       writingStyleSamples: sanitizeWritingStyleSamples(settings.writingStyleSamples).map(
         (item) => ({ ...item })
       ),

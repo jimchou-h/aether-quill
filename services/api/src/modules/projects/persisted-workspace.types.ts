@@ -52,24 +52,6 @@ export interface PersistedProjectState {
         severity: 'low' | 'medium' | 'high';
         enabled: boolean;
       }>;
-      pipelinePreset?: 'creative_refine' | 'full' | 'character_rules' | 'sensory_only';
-      pipelineSkipSensoryOutlineReview?: boolean;
-      pipelineSkipCharacterOutlineReview?: boolean;
-      pipelineSkipCharacterTraitsOutlineReview?: boolean;
-      pipelineCharacterAdjustmentEnabled?: boolean;
-      pipelineCharacterTraitsEnabled?: boolean;
-      pipelineRulesFixMode?: 'auto' | 'semi' | 'manual';
-      pipelineRulesModuleEnabled?: boolean;
-      complianceRulesFixMode?: 'auto' | 'semi' | 'manual';
-      pipelineHomogenizationEnabled?: boolean;
-      pipelineHomogenizationPriorChapterCount?: number;
-      pipelineEnabledModules?: number[];
-      protagonistProgressRules?: Array<{
-        abilityKey: string;
-        unlockAtChapter?: number;
-        unlockAfterCondition?: string;
-        descriptionForPrompt: string;
-      }>;
       writingStyleSamples?: Array<{
         id: string;
         text: string;
