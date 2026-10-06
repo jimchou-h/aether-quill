@@ -113,6 +113,8 @@ paths:
     $ref: './paths/projects/chapter-optimize-draft.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/review:
     $ref: './paths/projects/chapter-optimize-review.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/continuity-review:
+    $ref: './paths/projects/chapter-optimize-continuity-review.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/draft:
     $ref: './paths/projects/chapter-optimize-workbench-draft.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/review:
@@ -2235,6 +2237,32 @@ components:
           minLength: 1
           maxLength: 200000
           description: First-pass optimized draft to review against the frozen contract.
+        planId:
+          type: string
+          description: Optional plan id from the plan step, for trace correlation.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+        selectedEventIds:
+          type: array
+          items:
+            type: string
+    ChapterOptimizationContinuityReviewRequest:
+      type: object
+      required:
+        - planText
+        - draftText
+      properties:
+        planText:
+          type: string
+          minLength: 1
+          description: Confirmed optimize plan used as the continuity contract.
+        draftText:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          description: Optimized draft to check for continuity defects.
         planId:
           type: string
           description: Optional plan id from the plan step, for trace correlation.

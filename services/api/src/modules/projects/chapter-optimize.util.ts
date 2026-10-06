@@ -50,6 +50,7 @@ export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
   '1) 若方案含「主锚 / 关键一笔」，须在对应落点自然织入改写意图（可改写措辞，不必逐字粘贴方案例句）；其余部分也要按方案整体意图重写，禁止大段照抄原文。',
   '2) 改动幅度由【用户优化要求】与方案决定：该大改就大改，该扩就扩，该删就删；禁止因「方案未点名某句 / 未给句级落点」而几乎不动。',
   '3) 以原文为情节与信息基础，禁止凭空另起无关剧情。',
+  '4) 重写后对应内容的信息量与感官密度不得低于原文；禁止摘要式压缩或为「更通顺」抽薄描写。方案明确要求删除的除外。',
   '硬约束（仅保底，不压制改写幅度）：',
   '1) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
   '2) 语言、人称、时态、人物名称须与原文一致，除非方案明确要求修改；',
@@ -63,6 +64,7 @@ export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_SYSTEM_PROMPT = [
   '你是一位资深小说写作助手，正在按照用户的优化要求重写给定章节正文。',
   '本步骤需要直接输出「优化后的章节正文」，不要输出任何方案、说明、Markdown 标题或代码块包裹。',
   '工作方式：改动幅度由【用户优化要求】决定——该大改就大改，该扩就扩，该删就删；禁止大段照抄原文。',
+  '重写后对应内容的信息量与感官密度不得低于原文；禁止摘要式压缩或为「更通顺」抽薄描写。用户明确要求删减的除外。',
   '硬约束（仅保底，不压制改写幅度）：',
   '1) 以 <chapter-original> 为情节与信息基础改写，禁止凭空另起无关剧情；',
   '2) 必须遵循【用户优化要求】，不得另起优化方案或大纲；',
@@ -93,7 +95,8 @@ export type ChapterOptimizeStage =
   | 'merge_validation'
   | 'content_safety_scan'
   | 'content_safety_rewrite'
-  | 'frozen_review';
+  | 'frozen_review'
+  | 'continuity_review';
 
 export interface ChapterOptimizeLengthStrategy {
   mode: ChapterOptimizeMode;
@@ -355,6 +358,51 @@ export function buildFrozenReviewUserPrompt(input: {
     `<chapter-draft chapter-no="${input.chapter.chapterNo}">\n${input.draftText.trim()}\n</chapter-draft>`,
     '只输出验收结论。没有实质缺口则【验收结论】CLOSED；有则【验收结论】GAPS + 【缺口说明】。禁止新正文或新方案。',
   ].join('\n\n');
+}
+
+export const CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_TEMPLATE_KEY =
+  'chapter.optimize.continuity-review';
+
+/** from-plan 成稿后的连续性自检（不审文笔加浓）。 */
+export const CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在对照「优化方案合同」验收一稿刚写完的章节正文的连续性。',
+  '合同优先阅读方案中的：【关键情节点清单】【场景状态】【指代依赖】及「逐字保留」引用。',
+  '若方案缺少上述结构，则降级检查：过场是否被删却残留指代、地点/姿势跳变、坐姿抽送等空间穿帮、便签等硬锁是否被改写。',
+  '只判断连续性缺陷，禁止提出文笔加浓、感官加强等润色愿望，禁止输出新正文或新方案。',
+  '检查清单：',
+  '1) 情节点：清单中保留/改写/重排的节点是否在成稿中有对应；删除节点后是否仍出现对应指代；',
+  '2) 指代依赖：是否出现「视频后」「刚挂电话」等悬空指代；',
+  '3) 场景状态：姿势/地点/是否结合/发力方式是否违反方案；无过渡换场；插入中不合理瞬移；',
+  '4) 逐字锁：标注逐字保留的便签/对白/系统提示是否被改写。',
+  '若没有实质缺口，只输出一行：【验收结论】CLOSED',
+  '若有实质缺口，第一行必须是【验收结论】GAPS，随后用【缺口说明】列出可执行缺口（点明落点与要补的意图）。',
+].join('\n');
+
+/** Continuity review reuses the CLOSED/GAPS surface for refine injection. */
+export const parseContinuityReviewResult = parseFrozenReviewResult;
+
+export function buildContinuityReviewUserPrompt(input: {
+  chapter: ChapterOptimizeChapterRef;
+  planText: string;
+  draftText: string;
+}): string {
+  return [
+    `【自检目标】对照方案合同验收第${input.chapter.chapterNo}章「${input.chapter.title}」成稿的连续性（情节点/场景状态/指代/逐字锁）。`,
+    `<optimization-plan chapter-no="${input.chapter.chapterNo}">\n${input.planText.trim()}\n</optimization-plan>`,
+    `<chapter-draft chapter-no="${input.chapter.chapterNo}">\n${input.draftText.trim()}\n</chapter-draft>`,
+    '只输出验收结论。没有实质缺口则【验收结论】CLOSED；有则【验收结论】GAPS + 【缺口说明】。禁止新正文、新方案或文笔加浓建议。',
+  ].join('\n\n');
+}
+
+export function formatContinuityReviewGapsForRefine(reviewText: string): string {
+  const trimmed = reviewText.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (trimmed.includes('【连续性自检缺口】')) {
+    return trimmed;
+  }
+  return `【连续性自检缺口】\n${trimmed}`;
 }
 
 export function normalizeReviewGaps(value: unknown): string {
@@ -772,6 +820,7 @@ export function buildDraftUserPrompt(input: {
       '按 <optimization-plan> 与【用户优化要求】对正文做实质性重写，按方案整体意图改写。',
       '禁止因「方案未点名具体句子 / 没有落点」而大段照抄；改动幅度由要求与方案决定，不必迁就原文篇幅或段落数。',
       '须保留情节节点、对白含义、人物动作与指代关系；措辞、句式、感官密度可大胆重写。',
+      '重写后信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案明确要求删除的除外。',
     ].join('\n')
   );
 
@@ -816,6 +865,7 @@ export function buildDirectDraftUserPrompt(input: {
       '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。',
       '必须基于 <chapter-original> 改写，保留情节节点、对白含义、人物动作与指代关系；禁止大段原样照抄。',
       '改动幅度由【用户优化要求】决定：该大改就大改，该扩就扩，该收紧就收紧，不必迁就原文的篇幅或段落数。',
+      '重写后信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。用户明确要求删减的除外。',
     ].join('\n')
   );
 
@@ -857,7 +907,9 @@ export function ensureChapterVersionMatches(chapterNo: number, expected: Date, a
 /**
  * 用稳定的伪随机生成 planId / draftId，便于 trace 关联。
  */
-export function makeOptimizationId(prefix: 'plan' | 'draft' | 'auto-loop' | 'review'): string {
+export function makeOptimizationId(
+  prefix: 'plan' | 'draft' | 'auto-loop' | 'review' | 'continuity',
+): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -1252,6 +1304,7 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
       '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',
       '改写要求：按【用户优化要求】与（若有）优化方案对本段从头到尾重写；保留情节节点、对白含义与人物动作，但禁止大段照抄原文。',
       '禁止「前半改写、后半原样粘贴」；不得以「方案未点名本段句子」为由几乎不动。',
+      '重写后本段信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案或用户明确要求删除的除外。',
       '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语；禁止原样输出本段原文。',
     ].join('\n')
   );

@@ -182,7 +182,10 @@ export function buildChapterDiffLines(original: string, draft: string): DiffLine
   return buildChapterDiffLinesFromChanges(computeDiff(original, draft));
 }
 
-/** SSE / 自动循环未结束时不算、不渲染红绿对照，避免每条流式增量重跑整章 diff。 */
+/**
+ * SSE / 自动循环未结束时不算、不渲染红绿对照，避免每条流式增量重跑整章 diff。
+ * 生成结束后由 ComparePane 自动算一次；用户改字后需点「生成对照」，不再防抖自动刷新。
+ */
 export function shouldRenderOptimizeDiff(isGenerating: boolean): boolean {
   return !isGenerating;
 }

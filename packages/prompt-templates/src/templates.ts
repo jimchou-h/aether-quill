@@ -68,7 +68,7 @@ export const chapterOptimizePlanTemplate: PromptTemplate = {
 export const chapterOptimizeDraftTemplate: PromptTemplate = {
   id: 'chapter.optimize.draft',
   name: '章节优化-正文',
-  version: '1.2.1',
+  version: '1.2.2',
   category: 'task',
   status: 'published',
   systemPromptText: [
@@ -77,6 +77,7 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
     '1) 若方案含「主锚 / 关键一笔」，须在对应落点自然织入改写意图（可改写措辞，不必逐字粘贴方案例句）；其余部分也要按方案整体意图重写，禁止大段照抄原文。',
     '2) 改动幅度由【用户优化要求】与方案决定：该大改就大改，该扩就扩，该删就删；禁止因「方案未点名某句 / 未给句级落点」而几乎不动。',
     '3) 以原文为情节与信息基础，禁止凭空另起无关剧情。',
+    '4) 重写后对应内容的信息量与感官密度不得低于原文；禁止摘要式压缩或为「更通顺」抽薄描写。方案明确要求删除的除外。',
     '硬约束（仅保底，不压制改写幅度）：',
     '1) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
     '2) 语言、人称、时态、人物名称须与原文一致，除非方案明确要求修改；',
@@ -85,7 +86,7 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
     '5) 若【叙事上下文】含【下章衔接】，章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
     '6) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
   ].join('\n'),
-  content: '章节优化-正文 system prompt（v1.2.1）',
+  content: '章节优化-正文 system prompt（v1.2.2）',
 };
 
 /**
@@ -95,13 +96,14 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
 export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
   id: 'chapter.optimize.direct-draft',
   name: '章节优化-直接正文',
-  version: '1.1.1',
+  version: '1.1.2',
   category: 'task',
   status: 'published',
   systemPromptText: [
     '你是一位资深小说写作助手，正在按照用户的优化要求重写给定章节正文。',
     '本步骤需要直接输出「优化后的章节正文」，不要输出任何方案、说明、Markdown 标题或代码块包裹。',
     '工作方式：改动幅度由【用户优化要求】决定——该大改就大改，该扩就扩，该删就删；禁止大段照抄原文。',
+    '重写后对应内容的信息量与感官密度不得低于原文；禁止摘要式压缩或为「更通顺」抽薄描写。用户明确要求删减的除外。',
     '硬约束（仅保底，不压制改写幅度）：',
     '1) 以 <chapter-original> 为情节与信息基础改写，禁止凭空另起无关剧情；',
     '2) 必须遵循【用户优化要求】，不得另起优化方案或大纲；',
@@ -112,7 +114,7 @@ export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
     '7) 若【叙事上下文】含【下章衔接】，本章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
     '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
   ].join('\n'),
-  content: '章节优化-直接正文 system prompt（v1.1.1）',
+  content: '章节优化-直接正文 system prompt（v1.1.2）',
 };
 
 /** 按场成稿-感官加料（范围内正文；不分段） */
@@ -204,6 +206,22 @@ export const chapterOptimizeWorkbenchFixSpanTemplate: PromptTemplate = {
   content: '按场成稿-点句修复 system prompt（v1.0.0）',
 };
 
+/** from-plan 成稿后的连续性自检 */
+export const chapterOptimizeContinuityReviewTemplate: PromptTemplate = {
+  id: 'chapter.optimize.continuity-review',
+  name: '章节优化-连续性自检',
+  version: '1.0.0',
+  category: 'task',
+  status: 'published',
+  systemPromptText: [
+    '你是一位资深小说编辑，正在对照「优化方案合同」验收一稿刚写完的章节正文的连续性。',
+    '合同优先阅读方案中的：【关键情节点清单】【场景状态】【指代依赖】及「逐字保留」引用。',
+    '若方案缺少上述结构，则降级检查：过场是否被删却残留指代、地点/姿势跳变、坐姿抽送等空间穿帮、便签等硬锁是否被改写。',
+    '只判断连续性缺陷，禁止提出文笔加浓、感官加强等润色愿望，禁止输出新正文或新方案。',
+  ].join('\n'),
+  content: '章节优化-连续性自检 system prompt（v1.0.0）',
+};
+
 /**
  * 通用章节续写（AQ-122）
  *
@@ -259,6 +277,7 @@ export const templateRegistry: Record<string, PromptTemplate> = {
   [chapterOptimizeWorkbenchDraftProseTemplate.id]: chapterOptimizeWorkbenchDraftProseTemplate,
   [chapterOptimizeWorkbenchReviewTemplate.id]: chapterOptimizeWorkbenchReviewTemplate,
   [chapterOptimizeWorkbenchFixSpanTemplate.id]: chapterOptimizeWorkbenchFixSpanTemplate,
+  [chapterOptimizeContinuityReviewTemplate.id]: chapterOptimizeContinuityReviewTemplate,
   [writeChapterOutlineTemplate.id]: writeChapterOutlineTemplate,
   [writeChapterTaskTemplate.id]: writeChapterTaskTemplate,
 };

@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, shallowRef, watch } from 'vue';
-import { buildOptimizeDiffBundle } from '../../utils/chapterOptimizeDiff';
+import { computed, onBeforeUnmount, shallowRef, watch } from 'vue';
+import {
+  buildOptimizeDiffBundle,
+  type OptimizeDiffBundle,
+} from '../../utils/chapterOptimizeDiff';
 
 const props = withDefaults(
   defineProps<{
@@ -31,37 +34,111 @@ const streamPreviewText = computed(() => {
   return `…\n${text.slice(-STREAM_PREVIEW_CHARS)}`;
 });
 
-const diffReady = computed(() => props.showDiff);
-/** 等一帧再算对照，先让「生成完成」状态画出来，避免结束瞬间卡死。 */
-const diffComputeReady = shallowRef(false);
-let diffComputeToken = 0;
+/**
+ * 输入与对照拆开：编辑 textarea 不自动算 diff。
+ * 仅在生成刚结束时自动算一次；之后改字会卸掉旧对照，需点「生成对照」。
+ */
+const diffBundle = shallowRef<OptimizeDiffBundle | null>(null);
+const diffComputing = shallowRef(false);
+const diffStale = shallowRef(false);
+const diffMountKey = shallowRef(0);
+let computeToken = 0;
+let pendingOriginal = '';
+let pendingDraft = '';
+let syncedOriginal = '';
+let syncedDraft = '';
+
+function invalidateDiff() {
+  computeToken += 1;
+  diffBundle.value = null;
+  diffComputing.value = false;
+  diffStale.value = true;
+  pendingOriginal = '';
+  pendingDraft = '';
+}
+
+function clearDiffSurface() {
+  computeToken += 1;
+  diffBundle.value = null;
+  diffComputing.value = false;
+  diffStale.value = false;
+  pendingOriginal = '';
+  pendingDraft = '';
+  syncedOriginal = '';
+  syncedDraft = '';
+}
+
+function runDiff() {
+  if (!props.showDiff) {
+    return;
+  }
+
+  const token = ++computeToken;
+  const sourceOriginal = props.original;
+  const sourceDraft = draft.value;
+  pendingOriginal = sourceOriginal;
+  pendingDraft = sourceDraft;
+  // 先销毁旧 DOM，再异步挂新树，避免对着旧 span 做错误 patch
+  diffBundle.value = null;
+  diffComputing.value = true;
+  diffStale.value = false;
+
+  window.setTimeout(() => {
+    if (token !== computeToken || !props.showDiff) {
+      return;
+    }
+    diffBundle.value = buildOptimizeDiffBundle(sourceOriginal, sourceDraft);
+    syncedOriginal = sourceOriginal;
+    syncedDraft = sourceDraft;
+    pendingOriginal = '';
+    pendingDraft = '';
+    diffMountKey.value += 1;
+    diffComputing.value = false;
+  }, 0);
+}
 
 watch(
-  () => [props.showDiff, props.original, draft.value] as const,
-  async ([ready]) => {
-    const token = ++diffComputeToken;
+  () => props.showDiff,
+  (ready) => {
     if (!ready) {
-      diffComputeReady.value = false;
+      clearDiffSurface();
       return;
     }
-    diffComputeReady.value = false;
-    await nextTick();
-    await new Promise<void>((resolve) => {
-      window.setTimeout(resolve, 0);
-    });
-    if (token !== diffComputeToken || !props.showDiff) {
-      return;
-    }
-    diffComputeReady.value = true;
+    // 流式/循环刚结束：自动出一次对照，之后改字需手动确认
+    runDiff();
   },
   { immediate: true }
 );
 
-const diffBundle = computed(() => {
-  if (!diffReady.value || !diffComputeReady.value) {
-    return null;
+watch(
+  () => props.original,
+  (value) => {
+    if (!props.showDiff) {
+      return;
+    }
+    if (value === syncedOriginal || value === pendingOriginal) {
+      return;
+    }
+    if (diffBundle.value != null || diffComputing.value) {
+      invalidateDiff();
+    }
   }
-  return buildOptimizeDiffBundle(props.original, draft.value);
+);
+
+watch(draft, (value) => {
+  if (!props.showDiff) {
+    return;
+  }
+  if (value === syncedDraft || value === pendingDraft) {
+    return;
+  }
+  if (diffBundle.value != null || diffComputing.value || diffStale.value) {
+    invalidateDiff();
+  }
+});
+
+onBeforeUnmount(() => {
+  computeToken += 1;
 });
 
 const inlineDiff = computed(
@@ -71,13 +148,9 @@ const addedCount = computed(() => diffBundle.value?.addedCount ?? 0);
 const removedCount = computed(() => diffBundle.value?.removedCount ?? 0);
 const modifiedCount = computed(() => diffBundle.value?.modifiedCount ?? 0);
 const hasDiff = computed(() =>
-  Boolean(
-    diffBundle.value &&
-    props.original.trim() &&
-    draft.value.trim() &&
-    diffBundle.value.lines.length > 0
-  )
+  Boolean(diffBundle.value && props.original.trim() && diffBundle.value.lines.length > 0)
 );
+const canBuildDiff = computed(() => props.showDiff && !diffComputing.value);
 </script>
 
 <template>
@@ -95,9 +168,23 @@ const hasDiff = computed(() =>
         <textarea v-else v-model="draft" class="draft-input" :disabled="draftDisabled" />
       </div>
     </div>
-    <p v-if="!diffReady" class="diff-pending">生成完成后显示对照</p>
-    <p v-else-if="!diffComputeReady" class="diff-pending">正在生成对照…</p>
-    <div v-else-if="hasDiff" class="diff-block">
+
+    <div v-if="showDiff" class="diff-toolbar">
+      <button
+        type="button"
+        class="diff-action"
+        :disabled="!canBuildDiff"
+        @click="runDiff"
+      >
+        {{ diffBundle ? '刷新对照' : '生成对照' }}
+      </button>
+      <p v-if="diffComputing" class="diff-pending">正在生成对照…</p>
+      <p v-else-if="diffStale" class="diff-pending">文稿已改动，对照已清除；确认后点击生成。</p>
+      <p v-else-if="!diffBundle" class="diff-pending">编辑不会自动刷新对照，改完后点按钮生成。</p>
+    </div>
+    <p v-else class="diff-pending">生成完成后显示对照</p>
+
+    <div v-if="hasDiff" :key="diffMountKey" class="diff-block">
       <div class="diff-summary">
         <span class="diff-badge diff-removed">-{{ removedCount }} 删除</span>
         <span class="diff-badge diff-added">+{{ addedCount }} 新增</span>
@@ -202,9 +289,34 @@ const hasDiff = computed(() =>
 .draft-stream-preview {
   background: #fff;
 }
+.diff-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.diff-action {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.diff-action:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+.diff-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .diff-pending {
   margin: 0;
-  padding: 8px 0 2px;
+  padding: 2px 0;
   font-size: 12px;
   color: #6b7280;
 }
@@ -215,7 +327,9 @@ const hasDiff = computed(() =>
 }
 .diff-summary {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
 }
 .diff-badge {
   padding: 2px 8px;

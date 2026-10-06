@@ -9,6 +9,7 @@ const PREP_STEP: Partial<Record<ChapterOptimizeStage, number>> = {
   segment_diagnosis: 3,
   plan_synthesis: 3,
   frozen_review: 3,
+  continuity_review: 3,
   draft_segment: 3,
   merge_validation: 4,
   content_safety_scan: 4,

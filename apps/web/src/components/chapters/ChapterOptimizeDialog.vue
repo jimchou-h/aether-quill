@@ -34,6 +34,7 @@ import { shouldRenderOptimizeDiff } from '../../utils/chapterOptimizeDiff';
 import { createThrottledTextSink } from '../../utils/throttledTextSink';
 import { formatWritingOptimizePassLabel } from '../../utils/writingOptimizeMultiPass';
 import {
+  formatContinuitySelfCheckSummary,
   formatFromPlanClosedRunStatus,
   shouldRunFromPlanRefinePass,
 } from '../../utils/fromPlanClosedRun';
@@ -94,6 +95,10 @@ const selectedPersonaNames = ref<string[]>([]);
 const personasLoading = shallowRef(false);
 const passLoopAborted = shallowRef(false);
 const closedRunStatus = shallowRef('');
+const draftBeforeRefine = shallowRef('');
+const continuitySummary = shallowRef('');
+const markFixNotes = shallowRef('');
+const repairingMarked = shallowRef(false);
 const roundBudgetOptions = Array.from(
   { length: AUTO_LOOP_ROUND_BUDGET_MAX - AUTO_LOOP_ROUND_BUDGET_MIN + 1 },
   (_, index) => AUTO_LOOP_ROUND_BUDGET_MIN + index
@@ -146,7 +151,12 @@ function closePromptLab() {
 }
 
 const isBusy = computed(
-  () => generatingPlan.value || generatingDraft.value || applying.value || autoLoopRunning.value
+  () =>
+    generatingPlan.value ||
+    generatingDraft.value ||
+    applying.value ||
+    autoLoopRunning.value ||
+    repairingMarked.value
 );
 const canGeneratePlan = computed(() => Boolean(instruction.value.trim()) && !isBusy.value);
 const canRevisePlan = computed(
@@ -226,7 +236,7 @@ const modeSubtitle = computed(() => {
   if (isDirectMode.value) {
     return '根据自由要求直接改写整章正文；只有确认应用后才会覆盖原文。';
   }
-  return '根据自由要求先生成编辑方案，再按冻结合同改写并验收；最多再补一刀后收口。只有确认应用后才会覆盖原文。';
+  return '根据自由要求先生成编辑方案，再按方案改写；成稿后自动做连续性自检，有缺口最多自动修一刀。你可再标记残留问题修复。只有确认应用后才会覆盖原文。';
 });
 
 function bindInterruptHandler() {
@@ -302,6 +312,10 @@ function resetState() {
   statusText.value = '';
   errorMessage.value = '';
   closedRunStatus.value = '';
+  draftBeforeRefine.value = '';
+  continuitySummary.value = '';
+  markFixNotes.value = '';
+  repairingMarked.value = false;
   generatingPlan.value = false;
   generatingDraft.value = false;
   applying.value = false;
@@ -823,12 +837,19 @@ async function generateDraft() {
     }
 
     lastSuccessful = draftText.value.trim();
-    const review = await runFrozenReview(chapter);
+    draftBeforeRefine.value = lastSuccessful;
+    continuitySummary.value = '';
+    const review = await runContinuityReview(chapter);
     if (review === 'aborted') {
       draftText.value = lastSuccessful;
       return;
     }
     if (!shouldRunFromPlanRefinePass(review.hasMaterialGaps)) {
+      continuitySummary.value = formatContinuitySelfCheckSummary({
+        reviewed: true,
+        hadGaps: false,
+        autoRefined: false,
+      });
       closedRunStatus.value = formatFromPlanClosedRunStatus({
         phase: 'closed',
         hasMaterialGaps: false,
@@ -844,11 +865,26 @@ async function generateDraft() {
       passIndex: 2,
       passTotal: 2,
       sourceText: lastSuccessful,
-      reviewGaps: review.reviewText,
+      reviewGaps: review.reviewText.includes('【连续性自检缺口】')
+        ? review.reviewText
+        : `【连续性自检缺口】\n${review.reviewText}`,
       completeOnEnd: true,
     });
     if (refineOutcome !== 'ok') {
       draftText.value = lastSuccessful;
+      continuitySummary.value = formatContinuitySelfCheckSummary({
+        reviewed: true,
+        hadGaps: true,
+        autoRefined: false,
+        reviewText: review.reviewText,
+      });
+    } else {
+      continuitySummary.value = formatContinuitySelfCheckSummary({
+        reviewed: true,
+        hadGaps: true,
+        autoRefined: true,
+        reviewText: review.reviewText,
+      });
     }
     closedRunStatus.value = formatFromPlanClosedRunStatus({
       phase: 'closed',
@@ -863,7 +899,7 @@ async function generateDraft() {
   }
 }
 
-async function runFrozenReview(
+async function runContinuityReview(
   chapter: ChapterItem
 ): Promise<{ hasMaterialGaps: boolean; reviewText: string } | 'aborted'> {
   const currentPlan = plan.value;
@@ -876,7 +912,7 @@ async function runFrozenReview(
   statusText.value = passLabel;
   applyAiTaskProgressEvent(aiTaskProgress, {
     taskKey: 'chapter.optimize.draft',
-    stage: 'frozen_review',
+    stage: 'continuity_review',
     message: passLabel,
   });
 
@@ -885,11 +921,10 @@ async function runFrozenReview(
   let outcome: { hasMaterialGaps: boolean; reviewText: string } | 'aborted' | 'error' = 'error';
 
   try {
-    await apiClient.optimizeChapterReviewSSE(
+    await apiClient.optimizeChapterContinuityReviewSSE(
       props.projectId,
       chapter.chapterNo,
       {
-        instruction: instruction.value.trim(),
         planText: editablePlanText.value.trim(),
         draftText: draft,
         planId: currentPlan.planId,
@@ -922,7 +957,7 @@ async function runFrozenReview(
       outcome = 'aborted';
       cancelAiTaskProgress(aiTaskProgress, '已中断文笔优化生成');
     } else {
-      errorMessage.value = presentErrorFromCaught(error, '冻结验收失败');
+      errorMessage.value = presentErrorFromCaught(error, '连续性自检失败');
       outcome = 'error';
     }
   } finally {
@@ -937,6 +972,77 @@ async function runFrozenReview(
     return { hasMaterialGaps: false, reviewText: '' };
   }
   return outcome;
+}
+
+async function revertToDraftBeforeRefine() {
+  if (!draftBeforeRefine.value.trim()) {
+    return;
+  }
+  draftText.value = draftBeforeRefine.value;
+  presentInfo('已回退到自检前的成稿');
+}
+
+async function repairMarkedIssues() {
+  const chapter = props.chapter;
+  const notes = markFixNotes.value.trim();
+  if (!chapter || rewriteMode.value !== 'from-plan' || !plan.value) {
+    return;
+  }
+  if (!notes) {
+    errorMessage.value = '请先写下仍有问题的地方';
+    return;
+  }
+  if (!draftText.value.trim()) {
+    errorMessage.value = '当前没有可修复的成稿';
+    return;
+  }
+  if (generatingDraft.value || repairingMarked.value) {
+    return;
+  }
+
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.optimize.draft',
+    message: formatFromPlanClosedRunStatus({ phase: 'mark_fix' }),
+    source: 'dialog:writing-optimize-mark-fix',
+    chapterNo: chapter.chapterNo,
+    interruptible: true,
+    force: false,
+  });
+  if (!started.ok) {
+    errorMessage.value = '当前有其他 AI 任务进行中，请先等待或中断';
+    return;
+  }
+
+  repairingMarked.value = true;
+  generatingDraft.value = true;
+  errorMessage.value = '';
+  const previous = draftText.value.trim();
+  draftBeforeRefine.value = previous;
+  passLoopAborted.value = false;
+
+  try {
+    const outcome = await runSingleDraftPass({
+      chapter,
+      isDirect: false,
+      passIndex: 2,
+      passTotal: 2,
+      sourceText: previous,
+      reviewGaps: `【作者标记问题】\n${notes}`,
+      completeOnEnd: true,
+    });
+    if (outcome !== 'ok') {
+      draftText.value = previous;
+      return;
+    }
+    markFixNotes.value = '';
+    continuitySummary.value = '已按你标记的问题修复一刀；请核对终稿后再应用';
+    closedRunStatus.value = '已按标记问题修复，请核对终稿';
+    statusText.value = closedRunStatus.value;
+    presentSuccess('已按标记问题修复，请核对终稿');
+  } finally {
+    repairingMarked.value = false;
+    generatingDraft.value = false;
+  }
 }
 
 async function applyDraft() {
@@ -1194,6 +1300,41 @@ async function applyDraft() {
             :draft-disabled="generatingDraft || applying"
             :show-diff="shouldRenderOptimizeDiff(generatingDraft)"
           />
+          <div
+            v-if="!isDirectMode && (continuitySummary || draftText.trim()) && !generatingDraft"
+            class="continuity-panel"
+          >
+            <p v-if="continuitySummary" class="message message-info">{{ continuitySummary }}</p>
+            <button
+              v-if="draftBeforeRefine.trim() && draftBeforeRefine !== draftText"
+              class="secondary-button continuity-revert"
+              type="button"
+              :disabled="isBusy"
+              @click="revertToDraftBeforeRefine"
+            >
+              回退到自检前成稿
+            </button>
+            <label class="field-label" for="writing-optimize-mark-fix">仍有问题？标记后让 AI 修</label>
+            <textarea
+              id="writing-optimize-mark-fix"
+              v-model="markFixNotes"
+              class="mark-fix-input"
+              rows="3"
+              :disabled="isBusy"
+              placeholder="例如：视频通话被删了但还写「视频后」；第3段男主坐着却写成挺腰抽送。"
+            />
+            <div class="revision-actions">
+              <span class="field-hint">只修你标出的问题，不会自动覆盖入库；确认后点「应用优化正文」。</span>
+              <button
+                class="primary-button"
+                type="button"
+                :disabled="isBusy || !markFixNotes.trim() || !draftText.trim()"
+                @click="repairMarkedIssues"
+              >
+                {{ repairingMarked ? '修复中…' : '按标记修复' }}
+              </button>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -1590,6 +1731,31 @@ async function applyDraft() {
   border: 1px solid #dbeafe;
   border-radius: 8px;
   background: #f8fbff;
+}
+
+.continuity-panel {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.continuity-revert {
+  justify-self: start;
+}
+
+.mark-fix-input {
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
 }
 
 .field-hint {

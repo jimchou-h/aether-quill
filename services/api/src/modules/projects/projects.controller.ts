@@ -714,6 +714,63 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/continuity-review')
+  async optimizeChapterContinuityReview(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      planText?: string;
+      draftText?: string;
+      planId?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    const userId = req.user?.userId;
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.projectsService.optimizeChapterContinuityReviewStream(
+        id,
+        Number(chapterNo),
+        data,
+        userId,
+        {
+          onStart: ({ traceId, chapterNo: currentChapterNo }) => {
+            writeEvent({ event: 'start', traceId, chapterNo: currentChapterNo });
+          },
+          onStage: ({ stage }) => {
+            writeEvent({ event: 'stage', stage });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (event) => {
+            writeEvent({ event: 'end', ...event });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '连续性自检失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/optimize/apply')
   applyChapterOptimization(
     @Param('id') id: string,

@@ -1412,6 +1412,72 @@ export const apiClient = {
     );
   },
 
+  async optimizeChapterContinuityReviewSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterOptimizationContinuityReviewRequest,
+    callbacks: {
+      onStart?: (event: { traceId: string; chapterNo: number }) => void;
+      onStage?: (event: { stage: ChapterOptimizeStage }) => void;
+      onContent?: (text: string) => void;
+      onEnd?: (event: { traceId: string; reviewText: string; hasMaterialGaps: boolean }) => void;
+      onError?: (message: string) => void;
+    },
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/continuity-review`;
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'stage' | 'content' | 'end' | 'error';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            stage?: ChapterOptimizeStage;
+            reviewText?: string;
+            hasMaterialGaps?: boolean;
+          };
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({ stage: event.stage });
+              }
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId ?? '',
+                reviewText: event.reviewText?.trim() ?? '',
+                hasMaterialGaps: event.hasMaterialGaps === true,
+              });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data ?? '连续性自检失败');
+              break;
+          }
+        } catch {
+          // 忽略不完整 SSE 分片
+        }
+      }
+    );
+  },
+
   async applyChapterOptimization(
     projectId: string,
     chapterNo: number,
@@ -2059,6 +2125,14 @@ export interface ChapterOptimizationReviewRequest {
   selectedEventIds?: string[];
 }
 
+export interface ChapterOptimizationContinuityReviewRequest {
+  planText: string;
+  draftText: string;
+  planId?: string;
+  appearingCharacters?: string[];
+  selectedEventIds?: string[];
+}
+
 export interface ChapterOptimizationApplyRequest {
   draftText: string;
   expectedChapterUpdatedAt: string;
@@ -2127,7 +2201,8 @@ export type ChapterOptimizeStage =
   | 'merge_validation'
   | 'content_safety_scan'
   | 'content_safety_rewrite'
-  | 'frozen_review';
+  | 'frozen_review'
+  | 'continuity_review';
 
 interface ChapterOptimizePlanSseEvent {
   event?: 'start' | 'stage' | 'content' | 'end' | 'error';
@@ -2422,6 +2497,8 @@ export function formatChapterOptimizeStageLabel(
       return `方案汇总${retry}`;
     case 'frozen_review':
       return `对照合同验收${retry}`;
+    case 'continuity_review':
+      return `连续性自检${retry}`;
     case 'draft_segment':
       return segmentIndex && segmentTotal
         ? `正文生成 ${segmentIndex}/${segmentTotal}`

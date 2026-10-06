@@ -127,8 +127,12 @@ import {
   assertOptimizeDraftRequest,
   assertPlanText,
   buildFrozenReviewUserPrompt,
+  buildContinuityReviewUserPrompt,
   CHAPTER_OPTIMIZE_FROZEN_REVIEW_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_TEMPLATE_KEY,
   parseFrozenReviewResult,
+  parseContinuityReviewResult,
   resolveDraftSplitSource,
   buildDirectDraftUserPrompt,
   buildDraftUserPrompt,
@@ -3395,6 +3399,103 @@ export class ProjectsService implements OnModuleInit {
       });
     } catch (error) {
       callbacks.onError(error instanceof Error ? error.message : '冻结验收失败');
+    }
+  }
+
+  async optimizeChapterContinuityReviewStream(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      planText?: string;
+      draftText?: string;
+      planId?: string;
+      appearingCharacters?: string[];
+      selectedEventIds?: string[];
+    },
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: { traceId: string; chapterNo: number }) => void;
+      onStage?: (event: { stage: ChapterOptimizeStage }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: { traceId: string; reviewText: string; hasMaterialGaps: boolean }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const planText = typeof payload.planText === 'string' ? payload.planText.trim() : '';
+    assertPlanText(planText);
+    const draftText = typeof payload.draftText === 'string' ? payload.draftText.trim() : '';
+    assertDraftText(draftText);
+
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+    const usedRelationEvents = this.resolveSelectedRelationEvents(
+      projectId,
+      payload.selectedEventIds
+    );
+
+    callbacks.onStage?.({ stage: 'syncing_context' });
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      usedRelationEvents,
+      userId
+    );
+
+    const chapterRef = {
+      chapterNo: chapter.chapterNo,
+      title: chapter.title,
+      content: chapter.content,
+      updatedAt: chapter.updatedAt,
+    };
+    const traceId = makeOptimizationId('continuity');
+    callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
+    callbacks.onStage?.({ stage: 'continuity_review' });
+
+    try {
+      const reviewText = await this.callOrchestratorGeneratePlainText({
+        projectId,
+        prompt: buildContinuityReviewUserPrompt({
+          chapter: chapterRef,
+          planText,
+          draftText,
+        }),
+        templateKey: CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_TEMPLATE_KEY,
+        systemPromptOverride: CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT,
+        maxTokens: 2048,
+        context: {
+          task: CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_TEMPLATE_KEY,
+          chapterNo: normalizedChapterNo,
+          planId: payload.planId,
+          retrievalChapterTitle: chapter.title,
+          frozenRetrievedEvidence: '',
+        },
+      });
+      const verdict = parseContinuityReviewResult(reviewText);
+      if (verdict.reviewText) {
+        callbacks.onContent(verdict.reviewText);
+      }
+      callbacks.onEnd({
+        traceId,
+        reviewText: verdict.reviewText,
+        hasMaterialGaps: verdict.hasMaterialGaps,
+      });
+    } catch (error) {
+      callbacks.onError(error instanceof Error ? error.message : '连续性自检失败');
     }
   }
 

@@ -1,0 +1,66 @@
+post:
+  tags:
+    - Projects
+  summary: Stream continuity self-check of an optimized draft (SSE)
+  description: |
+    Review a from-plan draft against the confirmed plan continuity contract
+    (plot-beat list, scene states, reference dependencies, verbatim locks).
+    Does NOT request prose enrichment.
+
+    SSE event sequence:
+      - `data: {"event":"stage","stage":"syncing_context|continuity_review"}`
+      - `data: {"event":"start","traceId":"...","chapterNo":N}`
+      - `data: {"event":"content","data":"..."}` (newlines escaped as `\\n`)
+      - `data: {"event":"end","traceId":"...","reviewText":"...","hasMaterialGaps":true|false}`
+      - `data: {"event":"error","data":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizationContinuityReviewRequest'
+  responses:
+    '200':
+      description: SSE stream of continuity review chunks and verdict
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Invalid request (empty planText or draftText)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Continuity review failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

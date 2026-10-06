@@ -8,6 +8,9 @@ import {
   assertOptimizeDraftRequest,
   parseFrozenReviewResult,
   buildFrozenReviewUserPrompt,
+  buildContinuityReviewUserPrompt,
+  parseContinuityReviewResult,
+  formatContinuityReviewGapsForRefine,
   resolveDraftSplitSource,
   buildDraftUserPrompt,
   buildDirectDraftUserPrompt,
@@ -249,6 +252,18 @@ test('buildFrozenReviewUserPrompt freezes plan and draft', () => {
   assert.match(prompt, /主锚在营火/);
   assert.match(prompt, /新写的正文/);
   assert.match(prompt, /【验收结论】CLOSED/);
+});
+
+test('continuity review prompt and gaps helper', () => {
+  const prompt = buildContinuityReviewUserPrompt({
+    chapter: sampleChapter,
+    planText: '【关键情节点清单】\nP1 视频 保留',
+    draftText: '成稿正文',
+  });
+  assert.match(prompt, /关键情节点清单/);
+  assert.match(prompt, /<chapter-draft/);
+  assert.equal(parseContinuityReviewResult('【验收结论】CLOSED').hasMaterialGaps, false);
+  assert.match(formatContinuityReviewGapsForRefine('缺口A'), /【连续性自检缺口】/);
 });
 
 test('resolveDraftSplitSource prefers previous draft', () => {
