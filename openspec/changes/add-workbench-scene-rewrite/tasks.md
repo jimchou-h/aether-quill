@@ -20,5 +20,5 @@
 
 ## 4. 自检与评测
 
-- [ ] 4.1 全量门禁：web / api / rag-orchestrator / prompt-templates / shared-types 的 lint、typecheck、test、build 全部通过；AC：对应 `pnpm --filter` 命令绿灯，无新增诊断
+- [x] 4.1 全量门禁：web / api / rag-orchestrator / prompt-templates / shared-types 的 lint、typecheck、test、build 全部通过；AC：对应 `pnpm --filter` 命令绿灯，无新增诊断。**lint 例外（经决策）**：本 change 触及文件零诊断（web 4 / api 5 / rag-orchestrator 1 / config 1 / prompt-templates 1 逐一 eslint 均 exit 0）；仓库既有 prettier/CRLF 债（rag-orchestrator 28 / api 6 / web 6）不夹带进本 change，另开 #39 清理。prompt-templates、shared-types 无 test 脚本（仅 lint/typecheck/build）。
 - [ ] 4.2 RAG 评测基线回归：新模板发布前按 `RAG评测与验收基线-v1.md` 跑关键链路回归，重点场景——创编成稿落实删/加/重排、散场状态可接 after-context、范围外零改动、无注水/答题感、长范围被拒；旧两档基线不回退；AC：达阈值后模板发布为默认，未达则保持草稿并在 change 内记录缺口
