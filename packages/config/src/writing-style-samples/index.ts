@@ -90,7 +90,8 @@ export function isWritingStyleInjectionTemplateKey(templateKey: string): boolean
     key === 'chapter.optimize.direct-draft' ||
     key === 'chapter.optimize.loop.draft' ||
     key === 'chapter.optimize.workbench-draft-sex' ||
-    key === 'chapter.optimize.workbench-draft-prose'
+    key === 'chapter.optimize.workbench-draft-prose' ||
+    key === 'chapter.optimize.workbench-draft-scene'
   ) {
     return true;
   }

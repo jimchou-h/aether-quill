@@ -10,7 +10,7 @@
 ## 2. Prompt 与服务编排
 
 - [x] 2.1 登记 `chapter.optimize.workbench-plan-scene` v1.0.0 与 `chapter.optimize.workbench-draft-scene` v1.0.0：`packages/prompt-templates` + API `task-prompt-defaults` + orchestrator `task-prompt-defaults` 三处文本一致；plan 模板含四要件（入场/散场清单、改动账本、篇幅预算、边界声明）与「情绪/伏笔段删除须补偿」；draft 模板允许场内删/加/重排并锁定散场状态；默认草稿状态、可回滚；AC：三处镜像一致性测试通过，Settings 模板列表可见且旧四模板不变
-- [ ] 2.2 服务端端到端：API 新增 `POST .../workbench/plan`（鉴权 owner/editor、SSE 转发 orchestrator plain/stream 生成、失败映射 1502）；`optimizeChapterWorkbenchDraftStream` 增加 from-plan 分支（单窗、templateKey 用 draft-scene、仍走现有 context sync 与 SSE 回调、拼回与质量校验复用）；direct 分支零改动；AC：接口测覆盖 plan 流式产出方案、from-plan 成稿成功、from-plan 缺 planText/超长返回 400、旧 sex/prose 请求快照行为不变
+- [x] 2.2 服务端端到端：API 新增 `POST .../workbench/plan`（鉴权 owner/editor、SSE 转发 orchestrator plain/stream 生成、失败映射 1502）；`optimizeChapterWorkbenchDraftStream` 增加 from-plan 分支（单窗、templateKey 用 draft-scene、仍走现有 context sync 与 SSE 回调、拼回与质量校验复用）；direct 分支零改动；AC：接口测覆盖 plan 流式产出方案、from-plan 成稿成功、from-plan 缺 planText/超长返回 400、旧 sex/prose 请求快照行为不变
 
 ## 3. 前端创编流程
 

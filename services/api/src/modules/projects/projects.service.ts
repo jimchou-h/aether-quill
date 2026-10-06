@@ -165,15 +165,20 @@ import {
   type Segment,
 } from './chapter-optimize.util';
 import {
+  CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
   assertWorkbenchDraftRequest,
   assertWorkbenchFixSpanRequest,
+  assertWorkbenchPlanRequest,
   assertWorkbenchReviewRequest,
   WORKBENCH_RANGE_CONTEXT_CHARS,
   buildWorkbenchDraftUserPrompt,
   buildWorkbenchFixSpanUserPrompt,
+  buildWorkbenchPlanUserPrompt,
   buildWorkbenchReviewUserPrompt,
+  buildWorkbenchSceneDraftUserPrompt,
   parseWorkbenchReviewItems,
   resolveWorkbenchDraftTemplateKey,
   splitWorkbenchRewriteWindows,
@@ -3499,6 +3504,103 @@ export class ProjectsService implements OnModuleInit {
     }
   }
 
+  /** 按场创编第 1 步：在划定范围内产出可确认的改写方案，不产出正文。 */
+  async optimizeChapterWorkbenchPlanStream(
+    projectId: string,
+    chapterNo: number,
+    payload: {
+      instruction?: string;
+      profile?: string;
+      startOffset?: number;
+      endOffset?: number;
+      baseUpdatedAt?: string;
+      sourceText?: string;
+      appearingCharacters?: string[];
+    },
+    userId: string | undefined,
+    callbacks: {
+      onStart: (event: { traceId: string; chapterNo: number }) => void;
+      onStage?: (event: { stage: ChapterOptimizeStage }) => void;
+      onContent: (text: string) => void;
+      onEnd: (event: { traceId: string; planText: string }) => void;
+      onError: (message: string) => void;
+    }
+  ): Promise<void> {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第${normalizedChapterNo}章`);
+    }
+
+    const request = assertWorkbenchPlanRequest(payload);
+    const settings = this.settingsStore.get(projectId)!;
+    const personas = this.personasStore.get(projectId)!;
+
+    callbacks.onStage?.({ stage: 'syncing_context' });
+    await this.syncProjectContextToOrchestrator(
+      projectId,
+      settings,
+      personas,
+      knowledge,
+      [],
+      userId
+    );
+
+    const traceId = makeOptimizationId('plan');
+    callbacks.onStart({ traceId, chapterNo: normalizedChapterNo });
+
+    const chapterSummaryForRetrieval =
+      (chapter.summary && chapter.summary.trim()) || chapter.content.slice(0, 160);
+    let reportedError = false;
+    const result = await this.streamOrchestratorPlanGeneration({
+      projectId,
+      userPrompt: buildWorkbenchPlanUserPrompt({
+        chapterNo: normalizedChapterNo,
+        title: chapter.title,
+        instruction: request.instruction,
+        rangeText: request.rangeText,
+        beforeContext: request.beforeContext,
+        afterContext: request.afterContext,
+        appearingCharacters: request.appearingCharacters,
+      }),
+      chapterNo: normalizedChapterNo,
+      planId: traceId,
+      chapterTitle: chapter.title,
+      chapterSummaryForRetrieval,
+      instruction: request.instruction,
+      inputChapterChars: request.rangeText.length,
+      optimizationMode: 'single',
+      segmentTotal: 1,
+      task: CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_TEMPLATE_KEY,
+      appearingCharacters: request.appearingCharacters,
+      templateKey: CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_TEMPLATE_KEY,
+      callbacks: {
+        // 方案自己的 traceId 已通过 onStart 发给前端，这里只转发内容与错误
+        onStart: () => {},
+        onContent: callbacks.onContent,
+        onStage: (stage) => callbacks.onStage?.({ stage }),
+        onError: (message) => {
+          reportedError = true;
+          callbacks.onError(message);
+        },
+      },
+    });
+    if (!result.ok) {
+      if (!reportedError) {
+        callbacks.onError('按场创编方案生成失败');
+      }
+      return;
+    }
+    callbacks.onEnd({ traceId, planText: result.planText });
+  }
+
   async optimizeChapterWorkbenchDraftStream(
     projectId: string,
     chapterNo: number,
@@ -3510,6 +3612,8 @@ export class ProjectsService implements OnModuleInit {
       baseUpdatedAt?: string;
       sourceText?: string;
       appearingCharacters?: string[];
+      mode?: string;
+      planText?: string;
     },
     userId: string | undefined,
     callbacks: {
@@ -3545,6 +3649,7 @@ export class ProjectsService implements OnModuleInit {
     }
 
     const request = assertWorkbenchDraftRequest(payload);
+    const isSceneRewrite = request.mode === 'from-plan';
     const windows = splitWorkbenchRewriteWindows(request.rangeText);
     const windowTotal = windows.length;
 
@@ -3561,15 +3666,20 @@ export class ProjectsService implements OnModuleInit {
       userId
     );
 
-    const templateKey = resolveWorkbenchDraftTemplateKey(request.profile);
+    const templateKey = isSceneRewrite
+      ? CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_TEMPLATE_KEY
+      : resolveWorkbenchDraftTemplateKey(request.profile);
     const traceId = makeOptimizationId('draft');
     callbacks.onStart({
       traceId,
       chapterNo: normalizedChapterNo,
       optimizationMode: windowTotal > 1 ? 'segmented' : 'single',
       segmentTotal: windowTotal,
-      strategyLabel:
-        windowTotal > 1 ? `按场成稿·同场续写 ${windowTotal} 窗` : '按场成稿·范围内一次生成',
+      strategyLabel: isSceneRewrite
+        ? '按场创编·按方案成稿'
+        : windowTotal > 1
+          ? `按场成稿·同场续写 ${windowTotal} 窗`
+          : '按场成稿·范围内一次生成',
     });
 
     const chapterSummaryForRetrieval =
@@ -3589,18 +3699,29 @@ export class ProjectsService implements OnModuleInit {
         index === windows.length - 1
           ? `${afterFromRange}${request.afterContext}`.slice(0, WORKBENCH_RANGE_CONTEXT_CHARS)
           : afterFromRange;
-      const userPrompt = buildWorkbenchDraftUserPrompt({
-        chapterNo: normalizedChapterNo,
-        title: chapter.title,
-        instruction: request.instruction,
-        profile: request.profile,
-        rangeText: window.text,
-        beforeContext,
-        afterContext,
-        appearingCharacters: request.appearingCharacters,
-        windowIndex: index,
-        windowTotal,
-      });
+      const userPrompt = isSceneRewrite
+        ? buildWorkbenchSceneDraftUserPrompt({
+            chapterNo: normalizedChapterNo,
+            title: chapter.title,
+            instruction: request.instruction,
+            planText: request.planText ?? '',
+            rangeText: window.text,
+            beforeContext,
+            afterContext,
+            appearingCharacters: request.appearingCharacters,
+          })
+        : buildWorkbenchDraftUserPrompt({
+            chapterNo: normalizedChapterNo,
+            title: chapter.title,
+            instruction: request.instruction,
+            profile: request.profile,
+            rangeText: window.text,
+            beforeContext,
+            afterContext,
+            appearingCharacters: request.appearingCharacters,
+            windowIndex: index,
+            windowTotal,
+          });
       const draftResult = await this.generateOptimizeDraftSegment({
         projectId,
         prompt: userPrompt,
@@ -5320,6 +5441,8 @@ export class ProjectsService implements OnModuleInit {
     segmentTotal: number;
     task: string;
     appearingCharacters?: string[];
+    /** 缺省沿用整章方案模板；按场创编传 workbench-plan-scene。 */
+    templateKey?: string;
     callbacks: {
       onStart: (traceId: string) => void;
       onContent: (text: string) => void;
@@ -5336,7 +5459,7 @@ export class ProjectsService implements OnModuleInit {
           projectId: input.projectId,
           prompt: input.userPrompt,
           useSSE: true,
-          templateKey: CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+          templateKey: input.templateKey ?? CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
           context: {
             task: input.task,
             chapterNo: input.chapterNo,

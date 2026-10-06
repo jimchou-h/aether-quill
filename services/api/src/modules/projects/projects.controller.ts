@@ -25,6 +25,7 @@ import { createSseStreamContext } from '../../common/sse-stream.util';
 import {
   assertWorkbenchDraftRequest,
   assertWorkbenchFixSpanRequest,
+  assertWorkbenchPlanRequest,
   assertWorkbenchReviewRequest,
 } from './chapter-optimize-workbench.util';
 
@@ -493,6 +494,71 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/optimize/workbench/plan')
+  async optimizeChapterWorkbenchPlan(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body()
+    data: {
+      instruction?: string;
+      profile?: string;
+      startOffset?: number;
+      endOffset?: number;
+      baseUpdatedAt?: string;
+      sourceText?: string;
+      appearingCharacters?: string[];
+    },
+    @Request() req: AuthenticatedRequest,
+    @Res() res: ExpressResponse
+  ) {
+    try {
+      assertWorkbenchPlanRequest(data);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : '请求无效');
+    }
+
+    const userId = req.user?.userId;
+    const sse = createSseStreamContext(req, res);
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (sse.isAborted()) {
+        return false;
+      }
+      return sse.writeEvent(payload);
+    };
+
+    try {
+      await this.projectsService.optimizeChapterWorkbenchPlanStream(
+        id,
+        Number(chapterNo),
+        data,
+        userId,
+        {
+          onStart: ({ traceId, chapterNo: currentChapterNo }) => {
+            writeEvent({ event: 'start', traceId, chapterNo: currentChapterNo });
+          },
+          onStage: ({ stage }) => {
+            writeEvent({ event: 'stage', stage });
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (event) => {
+            writeEvent({ event: 'end', ...event });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '按场创编方案生成失败';
+      writeEvent({ event: 'error', data: message });
+    } finally {
+      res.end();
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post(':id/knowledge/chapters/:chapterNo/optimize/workbench/draft')
   async optimizeChapterWorkbenchDraft(
     @Param('id') id: string,
@@ -506,6 +572,8 @@ export class ProjectsController {
       baseUpdatedAt?: string;
       sourceText?: string;
       appearingCharacters?: string[];
+      mode?: string;
+      planText?: string;
     },
     @Request() req: AuthenticatedRequest,
     @Res() res: ExpressResponse

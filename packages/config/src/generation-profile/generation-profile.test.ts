@@ -101,6 +101,11 @@ test('resolveGenerationTierForTemplateKey maps writing vs utility tasks', () => 
   assert.equal(isWritingTierTemplateKey('chapter.optimize.workbench-draft-prose'), true);
   assert.equal(isWritingTierTemplateKey('chapter.optimize.workbench-review'), false);
   assert.equal(isWritingTierTemplateKey('chapter.optimize.workbench-fix-span'), true);
+  assert.equal(isWritingTierTemplateKey('chapter.optimize.workbench-draft-scene'), true);
+  assert.equal(
+    resolveGenerationTierForTemplateKey('chapter.optimize.workbench-plan-scene'),
+    'utility'
+  );
 });
 
 test('resolveGenerationCallProfile uses built-in defaults; project overrides when no user prefs', () => {
