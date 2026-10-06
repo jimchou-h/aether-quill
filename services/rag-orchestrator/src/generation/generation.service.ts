@@ -15,6 +15,8 @@
 
 import axios from 'axios';
 import {
+  buildChapterSummaryPromptRules,
+  normalizeChapterSummary,
   resolveGenerationCallProfile,
   resolveLlmChatProviderEndpoint,
   type LlmChatProviderId,
@@ -474,14 +476,7 @@ export class GenerationService {
 
   buildChapterSummaryPrompt(input: { chapterNo: number; title: string; content: string }): string {
     return [
-      '你是一位小说编辑，请为以下章节正文生成一段详细的中文语义摘要。',
-      '要求：',
-      '1. 概括主要情节、冲突与结果，保留关键角色互动与状态变化',
-      '2. 标注本章涉及的角色名称及其行为动机',
-      '3. 单独列出主要出场人物的着装与瞬时状态（无变化则写「维持」）',
-      '4. 如有伏笔或悬念，简要提及',
-      '5. 控制在 300~500 字',
-      '6. 只输出摘要正文，不要标题、编号或解释',
+      ...buildChapterSummaryPromptRules(),
       '',
       `章节：第${input.chapterNo}章 ${input.title}`,
       '正文：',
@@ -497,12 +492,12 @@ export class GenerationService {
     const prompt = this.buildChapterSummaryPrompt(input);
     const profile = this.resolveUtilityCallProfile();
     const result = await this.callProviderApi(prompt, {
-      maxTokens: 1536,
+      maxTokens: 512,
       temperature: profile.temperature,
       model: profile.model,
       provider: profile.provider,
     });
-    return result.content.trim();
+    return normalizeChapterSummary(result.content) ?? '';
   }
 
   buildChapterRelationEventExtractPrompt(input: {

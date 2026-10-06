@@ -2,23 +2,44 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildFallbackChapterSummary,
+  normalizeLlmChapterSummary,
   resolveChapterSummaryOnContentWrite,
   resolveChapterSummaryOnOptimizeApply,
 } from './chapter-summary.util';
 
-test('buildFallbackChapterSummary returns placeholder for empty content', () => {
-  assert.equal(buildFallbackChapterSummary('   \n\t'), '暂无摘要（章节内容为空）');
+const pendingFallbackTail = ['人物：待补全', '未收线：待补全'].join('\n');
+
+test('buildFallbackChapterSummary returns template placeholder for empty content', () => {
+  assert.equal(
+    buildFallbackChapterSummary('   \n\t'),
+    ['情节：暂无摘要（章节内容为空）', pendingFallbackTail].join('\n')
+  );
 });
 
-test('buildFallbackChapterSummary keeps short content intact', () => {
-  assert.equal(buildFallbackChapterSummary('短摘要'), '短摘要');
+test('buildFallbackChapterSummary wraps short content in template', () => {
+  assert.equal(
+    buildFallbackChapterSummary('短摘要'),
+    ['情节：短摘要', pendingFallbackTail].join('\n')
+  );
 });
 
-test('buildFallbackChapterSummary truncates long content to 160 characters', () => {
+test('buildFallbackChapterSummary truncates long plot excerpt', () => {
   const content = '章'.repeat(200);
   const summary = buildFallbackChapterSummary(content);
-  assert.equal(summary.length, 163);
-  assert.ok(summary.endsWith('...'));
+  assert.ok(summary.startsWith('情节：'));
+  assert.ok(summary.endsWith(pendingFallbackTail));
+  assert.ok(summary.includes('...'));
+});
+
+test('normalizeLlmChapterSummary accepts valid template', () => {
+  assert.equal(
+    normalizeLlmChapterSummary('情节：冲突收束\n人物：甲\n未收线：无'),
+    ['情节：冲突收束', '人物：甲', '未收线：无'].join('\n')
+  );
+});
+
+test('normalizeLlmChapterSummary rejects free-form prose', () => {
+  assert.equal(normalizeLlmChapterSummary('这是一段没有标签的散文摘要。'), null);
 });
 
 test('resolveChapterSummaryOnContentWrite preserves non-empty llm summary', () => {
@@ -45,7 +66,7 @@ test('resolveChapterSummaryOnContentWrite refreshes fallback summary when not ll
       summarySource: 'fallback',
     },
   });
-  assert.equal(result.summary, '新的短正文');
+  assert.equal(result.summary, ['情节：新的短正文', pendingFallbackTail].join('\n'));
   assert.equal(result.summarySource, 'fallback');
 });
 
@@ -93,7 +114,7 @@ test('resolveChapterSummaryOnOptimizeApply refreshes fallback when preserveSumma
       summaryUpdatedAt: new Date('2026-05-01T00:00:00.000Z'),
     },
   });
-  assert.equal(result.summary, content);
+  assert.equal(result.summary, ['情节：新的短正文', pendingFallbackTail].join('\n'));
   assert.equal(result.summarySource, 'fallback');
   assert.equal(result.reindexSummaryVector, true);
 });
@@ -103,6 +124,6 @@ test('resolveChapterSummaryOnContentWrite uses fallback for new chapter', () => 
     content: '首章正文',
     existing: null,
   });
-  assert.equal(result.summary, '首章正文');
+  assert.equal(result.summary, ['情节：首章正文', pendingFallbackTail].join('\n'));
   assert.equal(result.summarySource, 'fallback');
 });

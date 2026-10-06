@@ -28,6 +28,7 @@ import {
 } from './content-safety.pipeline';
 import {
   buildFallbackChapterSummary,
+  normalizeLlmChapterSummary,
   resolveChapterSummaryOnContentWrite,
   resolveChapterSummaryOnOptimizeApply,
   type ChapterSummarySource,
@@ -4625,7 +4626,7 @@ export class ProjectsService implements OnModuleInit {
         { timeout: 90000 }
       );
 
-      const summary = String(response.data?.summary || '').trim();
+      const summary = normalizeLlmChapterSummary(String(response.data?.summary || ''));
       if (summary) {
         return {
           chapterNo: chapter.chapterNo,

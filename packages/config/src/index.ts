@@ -21,3 +21,4 @@ export {
 export * from './content-safety';
 export * from './writing-style-samples';
 export * from './generation-profile';
+export * from './chapter-summary';

@@ -1,17 +1,16 @@
+import {
+  buildFallbackChapterSummary,
+  normalizeChapterSummary,
+} from '@aether-quill/config';
+
 export type ChapterSummarySource = 'llm' | 'fallback';
 
-export function buildFallbackChapterSummary(content: string): string {
-  const compact = content.replace(/\s+/g, ' ').trim();
-  if (!compact) {
-    return '暂无摘要（章节内容为空）';
-  }
-  return compact.length > 160 ? `${compact.slice(0, 160)}...` : compact;
-}
+export { buildFallbackChapterSummary };
 
 /**
  * 正文变更写入时的摘要字段。
  * 已有非空 LLM 摘要时保留，避免手改保存冲掉语义摘要；
- * 无 LLM 摘要时回退为正文截取（fallback）。完整语义摘要仍需用户点击「生成摘要」。
+ * 无 LLM 摘要时回退为模板形规则摘要（fallback）。完整语义摘要仍需用户点击「生成摘要」。
  */
 export function resolveChapterSummaryOnContentWrite(input: {
   content: string;
@@ -79,4 +78,9 @@ export function resolveChapterSummaryOnOptimizeApply(input: {
     summaryUpdatedAt: now,
   };
   return { ...fields, reindexSummaryVector: true };
+}
+
+/** LLM 返回文本二次规范化；失败返回 null，由调用方走 fallback。 */
+export function normalizeLlmChapterSummary(raw: string): string | null {
+  return normalizeChapterSummary(raw);
 }
