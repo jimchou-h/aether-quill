@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from 'vue';
+import { computed, onMounted, ref, shallowRef, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   apiClient,
@@ -29,6 +29,7 @@ const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
 
 const personas = ref<PersonaItem[]>([]);
+const knowledgeChapterNos = ref<number[]>([]);
 const loading = shallowRef(false);
 const savingPersona = shallowRef(false);
 const exportingBundle = shallowRef(false);
@@ -51,7 +52,9 @@ const personaState = shallowRef('');
 
 const linkedPersonaCardByPersonaId = computed(() => buildLinkedPersonaCardMap(documents.value));
 
-const statusChapterOptions = computed(() => collectPersonaStatusChapterOptions(personas.value));
+const statusChapterOptions = computed(() =>
+  collectPersonaStatusChapterOptions(personas.value, knowledgeChapterNos.value)
+);
 
 const statusViewMode = computed(() =>
   statusAsOfChapterNo.value === null
@@ -59,9 +62,32 @@ const statusViewMode = computed(() =>
     : { asOfChapterNo: statusAsOfChapterNo.value }
 );
 
-function personaStatusText(persona: PersonaItem): string {
-  return resolvePersonaStatusForView(persona, statusViewMode.value).text;
-}
+const personaStatusViews = computed(() => {
+  const mode = statusViewMode.value;
+  const asOf = statusAsOfChapterNo.value;
+  const map = new Map<string, { text: string; hint: string | null }>();
+  for (const persona of personas.value) {
+    const result = resolvePersonaStatusForView(persona, mode);
+    let hint: string | null = null;
+    if (asOf !== null) {
+      hint =
+        result.usedSnapshot && result.sourceChapterNo !== null
+          ? result.sourceChapterNo === asOf
+            ? `第${result.sourceChapterNo}章快照`
+            : `沿用第${result.sourceChapterNo}章快照（截至第${asOf}章）`
+          : null;
+    }
+    map.set(persona.id, { text: result.text, hint });
+  }
+  return map;
+});
+
+watch(statusChapterOptions, (options) => {
+  const current = statusAsOfChapterNo.value;
+  if (current !== null && !options.includes(current)) {
+    statusAsOfChapterNo.value = null;
+  }
+});
 
 const publishedPersona = computed(
   () => personas.value.find((item) => item.status === 'published') || null
@@ -139,6 +165,10 @@ async function loadData() {
       appearedChapterNos: persona.appearedChapterNos ?? [],
       lastAppearedChapterNo: persona.lastAppearedChapterNo ?? null,
     }));
+    knowledgeChapterNos.value = (workspace.knowledge?.chapters ?? [])
+      .map((chapter) => Number(chapter.chapterNo))
+      .filter((chapterNo) => Number.isFinite(chapterNo) && chapterNo >= 1)
+      .sort((a, b) => a - b);
     relationEvents.value = events;
     identityRelations.value = workspace.identityRelations ?? [];
     documents.value = docsPayload.map((doc) => ({
@@ -361,7 +391,13 @@ onMounted(() => {
           </label>
         </div>
         <p v-if="statusAsOfChapterNo !== null" class="field-hint status-as-of-hint">
-          当前为只读快照视图；编辑人物状态仍写入「最新」。
+          当前为只读快照视图；编辑人物状态仍写入「最新」。请看「人物状态」列（「发布状态」不会随章节切换变化）。无快照的章节会显示「截至第 N 章尚无快照」。
+        </p>
+        <p
+          v-else-if="statusChapterOptions.length === 0 && personas.length > 0"
+          class="field-hint status-as-of-hint"
+        >
+          暂无可选章节；请先在知识库中录入章节。
         </p>
 
         <p v-if="personas.length === 0" class="empty-state">暂无人物设定，请点击右上角新增。</p>
@@ -391,7 +427,7 @@ onMounted(() => {
             <thead>
               <tr>
                 <th scope="col">人物名称</th>
-                <th scope="col">状态</th>
+                <th scope="col">发布状态</th>
                 <th scope="col">简介</th>
                 <th scope="col">关联角色卡</th>
                 <th scope="col">人物状态</th>
@@ -419,7 +455,12 @@ onMounted(() => {
                     {{ linkedCardTitle(persona.id) }}
                   </span>
                 </td>
-                <td>{{ personaStatusText(persona) }}</td>
+                <td>
+                  <div>{{ personaStatusViews.get(persona.id)?.text }}</div>
+                  <div v-if="personaStatusViews.get(persona.id)?.hint" class="field-hint">
+                    {{ personaStatusViews.get(persona.id)?.hint }}
+                  </div>
+                </td>
                 <td class="actions-col">
                   <div class="row-actions">
                     <button class="table-button" type="button" @click="startEdit(persona)">

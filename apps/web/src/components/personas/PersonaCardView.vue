@@ -61,6 +61,19 @@ function personaStatusText(persona: PersonaItem): string {
   return resolvePersonaStatusForView(persona, statusViewMode.value).text;
 }
 
+function personaStatusHint(persona: PersonaItem): string | null {
+  if (props.statusAsOfChapterNo == null) {
+    return null;
+  }
+  const result = resolvePersonaStatusForView(persona, statusViewMode.value);
+  if (result.usedSnapshot && result.sourceChapterNo !== null) {
+    return result.sourceChapterNo === props.statusAsOfChapterNo
+      ? `第${result.sourceChapterNo}章快照`
+      : `沿用第${result.sourceChapterNo}章快照（截至第${props.statusAsOfChapterNo}章）`;
+  }
+  return null;
+}
+
 const linkedDocuments = computed(() => {
   if (!selectedPersona.value) {
     return [];
@@ -127,6 +140,9 @@ function jumpToChapter(chapterNo: number) {
       >
         <strong>{{ persona.name }}</strong>
         <span>{{ personaStatusText(persona) }}</span>
+        <span v-if="personaStatusHint(persona)" class="status-source-hint">{{
+          personaStatusHint(persona)
+        }}</span>
       </button>
     </aside>
 
@@ -137,6 +153,9 @@ function jumpToChapter(chapterNo: number) {
           状态：{{ selectedPersona.status === 'published' ? '已发布' : '草稿' }} · 人物状态：{{
             personaStatusText(selectedPersona)
           }}
+          <template v-if="personaStatusHint(selectedPersona)">
+            （{{ personaStatusHint(selectedPersona) }}）
+          </template>
         </p>
         <p>出场章节：{{ formatAppearance(selectedPersona) }}</p>
         <p>
@@ -257,6 +276,11 @@ function jumpToChapter(chapterNo: number) {
 .persona-list-item.active {
   border-color: var(--aq-primary);
   background: var(--aq-primary-soft);
+}
+
+.status-source-hint {
+  font-size: 0.75rem;
+  color: #6b7280;
 }
 
 .persona-detail-card {
