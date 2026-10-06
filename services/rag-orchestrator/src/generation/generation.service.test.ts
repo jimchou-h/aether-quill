@@ -48,9 +48,9 @@ describe('generation prompt assembly', () => {
   it('buildUserMessage excludes system instructions', () => {
     const user = buildUserMessage(baseContext, '请优化本章');
     assert.doesNotMatch(user, /【系统指令】/);
-    assert.match(user, /【叙事上下文】[\s\S]*【大纲】主角赴京/);
+    assert.match(user, /【参考上下文】[\s\S]*【大纲】主角赴京/);
     assert.match(user, /【检索证据】[\s\S]*chunk-1 京城设定/);
-    assert.match(user, /【用户需求】\n请优化本章/);
+    assert.match(user, /【任务输入】\n请优化本章/);
   });
 
   it('buildUserMessage inserts style sample block before user demand', () => {
@@ -62,9 +62,9 @@ describe('generation prompt assembly', () => {
       '请优化本章'
     );
     const styleIndex = user.indexOf('【文风参照】');
-    const demandIndex = user.indexOf('【用户需求】');
+    const demandIndex = user.indexOf('【任务输入】');
     assert.ok(styleIndex >= 0 && demandIndex > styleIndex);
-    assert.match(user, /【检索证据】[\s\S]*【文风参照】[\s\S]*【用户需求】/);
+    assert.match(user, /【检索证据】[\s\S]*【文风参照】[\s\S]*【任务输入】/);
   });
 
   it('buildSystemMessage merges global, project, and task layers', () => {
@@ -101,7 +101,7 @@ describe('generation prompt assembly', () => {
       assert.equal(messages.length, 1);
       assert.equal(messages[0]?.role, 'user');
       assert.match(messages[0]?.content ?? '', /【系统指令】/);
-      assert.match(messages[0]?.content ?? '', /【用户需求】\n请优化本章/);
+      assert.match(messages[0]?.content ?? '', /【任务输入】\n请优化本章/);
     } finally {
       if (prev === undefined) {
         delete process.env.LLM_PROMPT_LEGACY_SINGLE_USER;

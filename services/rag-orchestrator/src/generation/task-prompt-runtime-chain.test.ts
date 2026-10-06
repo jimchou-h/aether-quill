@@ -29,7 +29,7 @@ describe('task prompt orchestrator runtime chain', () => {
     assert.match(messages[0]?.content ?? '', /项目文风：克制/);
     assert.equal(messages[1]?.role, 'user');
     assert.doesNotMatch(messages[1]?.content ?? '', /【系统指令】/);
-    assert.match(messages[1]?.content ?? '', /【用户需求】\n请输出优化方案/);
+    assert.match(messages[1]?.content ?? '', /【任务输入】\n请输出优化方案/);
   });
 
   it('systemPromptOverride wins over synced taskPrompts', () => {

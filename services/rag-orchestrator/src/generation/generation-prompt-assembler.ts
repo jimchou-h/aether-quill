@@ -39,7 +39,7 @@ export function buildSystemMessage(context: GenerationContext): string {
   });
 }
 
-/** user 角色：叙事上下文、检索证据、业务 prompt（不含【系统指令】） */
+/** user 角色：参考上下文、检索证据、业务 prompt（不含【系统指令】） */
 export function buildUserMessage(context: GenerationContext, userPrompt: string): string {
   const sections: string[] = [];
 
@@ -48,7 +48,7 @@ export function buildUserMessage(context: GenerationContext, userPrompt: string)
     if (narrative.includes('【人物当前快照】')) {
       narrative = `${PERSONA_APPEARANCE_CONTINUITY_GUARD}\n\n${narrative}`;
     }
-    sections.push(`【叙事上下文】\n${narrative}`);
+    sections.push(`【参考上下文】\n${narrative}`);
   }
   if (context.retrievedEvidence?.trim()) {
     let evidence = context.retrievedEvidence.trim();
@@ -61,7 +61,7 @@ export function buildUserMessage(context: GenerationContext, userPrompt: string)
     sections.push(context.styleSampleBlock.trim());
   }
 
-  sections.push(`【用户需求】\n${userPrompt}`);
+  sections.push(`【任务输入】\n${userPrompt}`);
 
   return sections.join('\n\n');
 }

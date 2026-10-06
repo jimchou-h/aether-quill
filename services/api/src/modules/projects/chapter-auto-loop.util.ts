@@ -1487,7 +1487,7 @@ export function buildAutoLoopPlanUserPrompt(input: {
     sections.push(`【人物卡】\n${input.personaBlock.trim()}`);
   }
   if (input.narrativeContext?.trim()) {
-    sections.push(`【叙事上下文】\n${input.narrativeContext.trim()}`);
+    sections.push(`【参考上下文】\n${input.narrativeContext.trim()}`);
   }
   if (input.previousWindowTail?.trim()) {
     sections.push(
@@ -1520,7 +1520,7 @@ export function buildAutoLoopPlanUserPrompt(input: {
   sections.push(`<indexed-chapter>\n${input.indexedBody}\n</indexed-chapter>`);
   sections.push(
     [
-      '请只输出 JSON 条目。每条的 paragraphIndex 必须照抄上方 [n] 编号，anchorQuote 必须是 <indexed-chapter> 该段原文的连续摘录，不得摘录【叙事上下文】、【下章衔接】、【前章衔接】或【上一窗末文·只读】。',
+      '请只输出 JSON 条目。每条的 paragraphIndex 必须照抄上方 [n] 编号，anchorQuote 必须是 <indexed-chapter> 该段原文的连续摘录，不得摘录【参考上下文】、【下章衔接】、【前章衔接】或【上一窗末文·只读】。',
       '只出两类条目：要求明显未落地，或上轮改坏。禁止把文风目标或「还能更贴要求」写成条目。没有这两类则输出 {"items":[]}。',
     ].join('\n')
   );

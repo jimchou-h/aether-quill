@@ -3,7 +3,7 @@
  *
  * 默认消息结构（`buildLlmMessages`）：
  *   system ← 全局默认 + 项目 systemPromptText + 任务 taskSystemPrompt
- *   user   ←【叙事上下文】→【检索证据】→【文风参照】（如有）→【用户需求】
+ *   user   ←【参考上下文】→【检索证据】→【文风参照】（如有）→【任务输入】
  *
  * `LLM_PROMPT_LEGACY_SINGLE_USER=1` 时回退为单条 user（含【系统指令】段）。
  *

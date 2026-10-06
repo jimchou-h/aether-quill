@@ -32,7 +32,7 @@ POST /api/generate 或 /api/generate/draft
                     ↓
          GenerationService.buildLlmMessages
            system ← 全局默认 + 项目 system + 任务 prompt
-           user   ←【叙事上下文】【检索证据】【用户需求】
+           user   ←【参考上下文】【检索证据】【任务输入】
                     ↓
               LLM 流式 / 非流式
 ```

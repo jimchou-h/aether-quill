@@ -70,7 +70,7 @@ describe('AQ-339 writing style injection regression', () => {
       },
       '请按人物口吻改写本章'
     );
-    assert.match(user, /【检索证据】[\s\S]*【文风参照】[\s\S]*【用户需求】/);
+    assert.match(user, /【检索证据】[\s\S]*【文风参照】[\s\S]*【任务输入】/);
     const styleTagCount = (user.match(/<style-sample /g) ?? []).length;
     assert.ok(styleTagCount <= 2 && styleTagCount >= 1);
   });

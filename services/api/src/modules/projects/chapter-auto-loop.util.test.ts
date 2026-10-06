@@ -878,7 +878,7 @@ test('buildAutoLoopPlanUserPrompt 首轮不含上一轮条目区块', () => {
   });
   assert.match(prompt, /【用户优化要求】[\s\S]*让打斗更有临场感/);
   assert.match(prompt, /\[1\] 第一段。/);
-  assert.match(prompt, /不得摘录【叙事上下文】、【下章衔接】/);
+  assert.match(prompt, /不得摘录【参考上下文】、【下章衔接】/);
   assert.match(prompt, /只出两类条目/);
   assert.ok(!prompt.includes('<previous-items>'));
 });
@@ -915,7 +915,7 @@ test('buildAutoLoopPlanUserPrompt 带上一窗只读前文且不把它放进可�
   assert.match(prompt, /【上一窗末文·只读】/);
   assert.match(prompt, /禁止对其出条目或改写/);
   assert.match(prompt, /上一窗最后一段只读。/);
-  assert.match(prompt, /不得摘录【叙事上下文】、【下章衔接】/);
+  assert.match(prompt, /不得摘录【参考上下文】、【下章衔接】/);
   assert.ok(!prompt.includes('[1] 上一窗最后一段只读。'));
 });
 
