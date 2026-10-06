@@ -75,6 +75,20 @@ export function filterWorkbenchReviewItemsForProfile<T extends WorkbenchReviewIt
   return legal.filter((item) => item.kind === 'regression');
 }
 
+/**
+ * review 过滤口径：直出档沿用 profile（文笔档只留改差）；按场创编全开三类。
+ * 两类都仍由 filterWorkbenchReviewItems 丢弃非法 kind 与「加深/写细」类加料指令。
+ */
+export function filterWorkbenchReviewItemsForMode<T extends WorkbenchReviewItem>(
+  items: T[],
+  mode: WorkbenchCreationMode
+): T[] {
+  if (mode === 'scene') {
+    return filterWorkbenchReviewItems(items);
+  }
+  return filterWorkbenchReviewItemsForProfile(items, mode);
+}
+
 export function describeInvalidWorkbenchRange(
   startOffset: number,
   endOffset: number,
@@ -218,13 +232,21 @@ export function describeWorkbenchRangeBinding(input: {
   return `成稿范围 ${committed}`;
 }
 
-export function isSceneRewriteMode(mode: WorkbenchCreationMode): boolean {
+export function isSceneRewriteMode(mode: WorkbenchCreationMode): mode is 'scene' {
   return mode === 'scene';
 }
 
 /** 按场创编没有感官/文笔档位，但 draft 接口仍要求 profile，统一按日常文笔上报。 */
 export function resolveWorkbenchDraftProfile(mode: WorkbenchCreationMode): WorkbenchProfile {
   return mode === 'scene' ? 'prose' : mode;
+}
+
+/**
+ * review / 点修的档位。按场创编要全开三类（pose/vocab/regression），
+ * 服务端只有非 prose 档不做裁剪，故复用感官档；两个直出档沿用自身档位，行为不变。
+ */
+export function resolveWorkbenchReviewProfile(mode: WorkbenchCreationMode): WorkbenchProfile {
+  return isSceneRewriteMode(mode) ? 'sex' : mode;
 }
 
 /** 步骤机：两个直出档 4 步；按场创编在「划范围」后多一个「创编方案」步骤。 */

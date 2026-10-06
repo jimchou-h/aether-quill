@@ -8,6 +8,7 @@ import {
   describeSceneRangeOverflow,
   describeWorkbenchRangeBinding,
   filterWorkbenchReviewItems,
+  filterWorkbenchReviewItemsForMode,
   filterWorkbenchReviewItemsForProfile,
   isNearCopyWorkbenchDraft,
   locateUniqueAnchor,
@@ -16,6 +17,7 @@ import {
   resolveWorkbenchApplyOffsets,
   resolveWorkbenchCreationSteps,
   resolveWorkbenchDraftProfile,
+  resolveWorkbenchReviewProfile,
   resolveWorkbenchSseEndText,
   sliceSpanNeighborhood,
   spliceChapterRange,
@@ -268,6 +270,14 @@ describe('resolveWorkbenchDraftProfile', () => {
   });
 });
 
+describe('resolveWorkbenchReviewProfile', () => {
+  it('uses the full-open tier for scene rewrite and the own tier otherwise', () => {
+    assert.equal(resolveWorkbenchReviewProfile('scene'), 'sex');
+    assert.equal(resolveWorkbenchReviewProfile('sex'), 'sex');
+    assert.equal(resolveWorkbenchReviewProfile('prose'), 'prose');
+  });
+});
+
 describe('describeSceneRangeOverflow', () => {
   it('stays silent at or under one window and warns above it', () => {
     assert.equal(describeSceneRangeOverflow(WORKBENCH_SCENE_MAX_RANGE_CHARS), null);
@@ -330,5 +340,60 @@ describe('buildWorkbenchDraftModeFields', () => {
       mode: 'from-plan',
       planText: '已确认方案',
     });
+  });
+});
+
+describe('filterWorkbenchReviewItemsForMode', () => {
+  it('keeps all three legal kinds for scene rewrite', () => {
+    const kept = filterWorkbenchReviewItemsForMode(
+      [
+        item({ id: 'pose', kind: 'pose' }),
+        item({ id: 'vocab', kind: 'vocab', instruction: '把这个词换成更贴切的说法' }),
+        item({ id: 'reg', kind: 'regression', instruction: '恢复被删的拍打接触' }),
+        item({ id: 'bad', kind: 'tension' }),
+        item({ id: 'deepen', instruction: '再加深这段感官' }),
+      ],
+      'scene'
+    );
+    assert.deepEqual(
+      kept.map((entry) => entry.id),
+      ['pose', 'vocab', 'reg']
+    );
+  });
+
+  it('still restricts the direct prose tier to regression', () => {
+    const kept = filterWorkbenchReviewItemsForMode(
+      [
+        item({ id: 'pose', kind: 'pose' }),
+        item({ id: 'reg', kind: 'regression', instruction: '恢复被删的拍打接触' }),
+      ],
+      'prose'
+    );
+    assert.deepEqual(
+      kept.map((entry) => entry.id),
+      ['reg']
+    );
+  });
+});
+
+describe('scene rewrite apply payload', () => {
+  it('prefixes and suffixes the frozen original outside the committed range', () => {
+    const prefix = '前'.repeat(10);
+    const suffix = '后'.repeat(10);
+    const original = '【范围原文】';
+    const base = `${prefix}${original}${suffix}`;
+    const start = prefix.length;
+    const end = start + original.length;
+    const offsets = resolveWorkbenchApplyOffsets({
+      draftText: '【创编成稿】',
+      committedStart: start,
+      committedEnd: end,
+      selectedStart: 0,
+      selectedEnd: 3,
+    });
+    assert.equal(
+      spliceChapterRange(base, offsets.start, offsets.end, '【创编成稿】'),
+      `${prefix}【创编成稿】${suffix}`
+    );
   });
 });

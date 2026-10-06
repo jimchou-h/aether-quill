@@ -29,13 +29,14 @@ import {
   describeWorkbenchRangeBinding,
   isNearCopyWorkbenchDraft,
   isSceneRewriteMode,
-  filterWorkbenchReviewItemsForProfile,
+  filterWorkbenchReviewItemsForMode,
   locateUniqueAnchor,
   normalizeWorkbenchReviewItems,
   applyWorkbenchSseEndText,
   resolveWorkbenchApplyOffsets,
   resolveWorkbenchCreationSteps,
   resolveWorkbenchDraftProfile,
+  resolveWorkbenchReviewProfile,
   resolveWorkbenchSseEndText,
   sliceSpanNeighborhood,
   spliceChapterRange,
@@ -114,6 +115,7 @@ const isBusy = computed(
 const isSceneMode = computed(() => isSceneRewriteMode(creationMode.value));
 const stepperSteps = computed(() => resolveWorkbenchCreationSteps(creationMode.value));
 const draftProfile = computed(() => resolveWorkbenchDraftProfile(creationMode.value));
+const reviewProfile = computed(() => resolveWorkbenchReviewProfile(creationMode.value));
 const selectedRangeText = computed(() =>
   hasRange.value ? baseText.value.slice(rangeStart.value, rangeEnd.value) : ''
 );
@@ -636,13 +638,13 @@ async function runReview() {
 
   try {
     const result = await apiClient.reviewWorkbenchRange(props.projectId, chapter.chapterNo, {
-      profile: draftProfile.value,
+      profile: reviewProfile.value,
       rangeText: rangeDraft.value,
       ...(instruction.value.trim() ? { instruction: instruction.value.trim() } : {}),
     });
-    const filtered = filterWorkbenchReviewItemsForProfile(
+    const filtered = filterWorkbenchReviewItemsForMode(
       normalizeWorkbenchReviewItems(result.items),
-      draftProfile.value
+      creationMode.value
     );
     reviewItems.value = filtered.map((item) => ({ ...item, status: 'pending' as const }));
     reviewed.value = true;
