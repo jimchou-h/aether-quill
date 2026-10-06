@@ -14,6 +14,7 @@ export const CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY =
   'chapter.optimize.workbench-fix-span';
 
 export type ChapterOptimizeWorkbenchProfile = 'sex' | 'prose';
+export type ChapterOptimizeWorkbenchDraftMode = 'direct' | 'from-plan';
 export type WorkbenchReviewKind = 'pose' | 'vocab' | 'regression';
 export type WorkbenchReviewSeverity = 'high' | 'medium' | 'low';
 
@@ -243,6 +244,16 @@ export function normalizeWorkbenchProfile(value: unknown): ChapterOptimizeWorkbe
   throw new Error('profile 必须为 sex 或 prose');
 }
 
+export function normalizeWorkbenchDraftMode(value: unknown): ChapterOptimizeWorkbenchDraftMode {
+  if (value === undefined || value === null || value === '') {
+    return 'direct';
+  }
+  if (value === 'direct' || value === 'from-plan') {
+    return value;
+  }
+  throw new Error('mode 必须为 direct 或 from-plan');
+}
+
 export function sliceWorkbenchRangeNeighborhood(
   sourceText: string,
   startOffset: number,
@@ -282,17 +293,8 @@ export function sliceWorkbenchRange(
   return rangeText;
 }
 
-export function assertWorkbenchDraftRequest(input: {
-  instruction?: unknown;
-  profile?: unknown;
-  startOffset?: unknown;
-  endOffset?: unknown;
-  baseUpdatedAt?: unknown;
-  sourceText?: unknown;
-  appearingCharacters?: unknown;
-}): {
+interface WorkbenchRangeRequest {
   instruction: string;
-  profile: ChapterOptimizeWorkbenchProfile;
   startOffset: number;
   endOffset: number;
   baseUpdatedAt: string;
@@ -301,7 +303,23 @@ export function assertWorkbenchDraftRequest(input: {
   beforeContext: string;
   afterContext: string;
   appearingCharacters: string[] | undefined;
-} {
+}
+
+/**
+ * 范围内请求的公共校验：要求 / 冻结正文 / 偏移 / baseUpdatedAt / 只读衔接。
+ * `singleWindowMax` 给出时，超长范围直接拒绝而不是切窗（按场创编硬顶）。
+ */
+function assertWorkbenchRangeRequest(
+  input: {
+    instruction?: unknown;
+    startOffset?: unknown;
+    endOffset?: unknown;
+    baseUpdatedAt?: unknown;
+    sourceText?: unknown;
+    appearingCharacters?: unknown;
+  },
+  options: { singleWindowMax?: number } = {}
+): WorkbenchRangeRequest {
   const instruction = asTrimmedString(input.instruction);
   if (!instruction) {
     throw new Error('优化要求 instruction 不能为空');
@@ -309,7 +327,6 @@ export function assertWorkbenchDraftRequest(input: {
   if (instruction.length > INSTRUCTION_MAX) {
     throw new Error(`优化要求 instruction 长度不能超过 ${INSTRUCTION_MAX} 字符`);
   }
-  const profile = normalizeWorkbenchProfile(input.profile);
   const sourceText = typeof input.sourceText === 'string' ? input.sourceText : '';
   if (!sourceText) {
     throw new Error('冻结正文 sourceText 不能为空');
@@ -331,10 +348,12 @@ export function assertWorkbenchDraftRequest(input: {
     throw new Error('baseUpdatedAt 不是合法的 ISO 时间字符串');
   }
   const rangeText = sliceWorkbenchRange(sourceText, startOffset, endOffset);
+  if (options.singleWindowMax && rangeText.length > options.singleWindowMax) {
+    throw new Error(`划选范围过长，请划小到单窗（不超过 ${options.singleWindowMax} 字）以内`);
+  }
   const neighborhood = sliceWorkbenchRangeNeighborhood(sourceText, startOffset, endOffset);
   return {
     instruction,
-    profile,
     startOffset,
     endOffset,
     baseUpdatedAt: parsed.toISOString(),
@@ -344,6 +363,56 @@ export function assertWorkbenchDraftRequest(input: {
     afterContext: neighborhood.afterContext,
     appearingCharacters: normalizeAppearingCharacters(input.appearingCharacters),
   };
+}
+
+export function assertWorkbenchDraftRequest(input: {
+  instruction?: unknown;
+  profile?: unknown;
+  startOffset?: unknown;
+  endOffset?: unknown;
+  baseUpdatedAt?: unknown;
+  sourceText?: unknown;
+  appearingCharacters?: unknown;
+  mode?: unknown;
+  planText?: unknown;
+}): WorkbenchRangeRequest & {
+  profile: ChapterOptimizeWorkbenchProfile;
+  mode: ChapterOptimizeWorkbenchDraftMode;
+  planText: string | undefined;
+} {
+  const mode = normalizeWorkbenchDraftMode(input.mode);
+  const planText = asTrimmedString(input.planText);
+  if (mode === 'from-plan' && !planText) {
+    throw new Error('mode=from-plan 时必须提供已确认方案 planText');
+  }
+  const range = assertWorkbenchRangeRequest(input, {
+    singleWindowMax: mode === 'from-plan' ? WORKBENCH_REWRITE_WINDOW_CHARS : undefined,
+  });
+  return {
+    ...range,
+    profile: normalizeWorkbenchProfile(input.profile),
+    mode,
+    planText: mode === 'from-plan' ? planText : undefined,
+  };
+}
+
+export function assertWorkbenchPlanRequest(input: {
+  instruction?: unknown;
+  profile?: unknown;
+  startOffset?: unknown;
+  endOffset?: unknown;
+  baseUpdatedAt?: unknown;
+  sourceText?: unknown;
+  appearingCharacters?: unknown;
+}): WorkbenchRangeRequest & { profile: ChapterOptimizeWorkbenchProfile | undefined } {
+  const range = assertWorkbenchRangeRequest(input, {
+    singleWindowMax: WORKBENCH_REWRITE_WINDOW_CHARS,
+  });
+  const profile =
+    input.profile === undefined || input.profile === null || input.profile === ''
+      ? undefined
+      : normalizeWorkbenchProfile(input.profile);
+  return { ...range, profile };
 }
 
 export function assertWorkbenchReviewRequest(input: {
@@ -480,6 +549,88 @@ export function buildWorkbenchDraftUserPrompt(input: {
         ? '感官加料：必须有可见加料。原文原样交回视为失败。'
         : '日常文笔：必须有可见的节奏、对白或衔接改动；禁止原样交回；禁止增色。',
       '若有 <before-context> / <after-context>：只读，用来把头尾接上；不要复述或改写它们。',
+    ].join('\n')
+  );
+  return sections.join('\n\n');
+}
+
+/** 按场创编第 1 步：只产出可确认的方案，不产出正文。 */
+export function buildWorkbenchPlanUserPrompt(input: {
+  chapterNo: number;
+  title: string;
+  instruction: string;
+  rangeText: string;
+  beforeContext?: string;
+  afterContext?: string;
+  appearingCharacters?: string[];
+}): string {
+  const sections: string[] = [];
+  sections.push(
+    `【方案目标】为第${input.chapterNo}章「${input.title}」中用户划定的这一场写一份可确认的改写方案。`
+  );
+  sections.push(`【用户优化要求】\n${input.instruction}`);
+  if (input.appearingCharacters?.length) {
+    sections.push(`【本章出场角色】${input.appearingCharacters.join('、')}`);
+  }
+  if (input.beforeContext) {
+    sections.push(`<before-context>\n${input.beforeContext}\n</before-context>`);
+  }
+  sections.push(`<range-original>\n${input.rangeText}\n</range-original>`);
+  if (input.afterContext) {
+    sections.push(`<after-context>\n${input.afterContext}\n</after-context>`);
+  }
+  sections.push(
+    [
+      '方案必须包含且只包含以下四块：',
+      '1) 【入场 / 散场状态清单】列出本场开头与结尾的人物位置、姿态、随身物件与情绪；散场状态将被成稿硬锁；',
+      '2) 【改动账本】逐拍标注 keep（保留）/ rewrite（改写）/ expand（扩写）/ delete（删除）；删除情绪或伏笔拍必须写清补偿落点；',
+      '3) 【篇幅预算】给出成稿相对原文的篇幅增减幅度与大致字数；',
+      '4) 【边界声明】明确本方案不改动范围外正文，且范围首尾需接上前后文。',
+    ].join('\n')
+  );
+  sections.push('只输出方案文本，不要输出任何正文、说明、Markdown 标题或代码块。');
+  return sections.join('\n\n');
+}
+
+/** 按场创编第 2 步：按已确认方案成稿，范围锁定、散场状态硬锁。 */
+export function buildWorkbenchSceneDraftUserPrompt(input: {
+  chapterNo: number;
+  title: string;
+  instruction: string;
+  planText: string;
+  rangeText: string;
+  beforeContext?: string;
+  afterContext?: string;
+  appearingCharacters?: string[];
+}): string {
+  const sections: string[] = [];
+  sections.push(
+    `【写作目标】按已确认方案改写第${input.chapterNo}章「${input.title}」中用户划定的这一场。`
+  );
+  sections.push(`【已确认方案】\n${input.planText}`);
+  if (input.instruction) {
+    sections.push(`【用户优化要求】\n${input.instruction}`);
+  }
+  if (input.appearingCharacters?.length) {
+    sections.push(`【本章出场角色】${input.appearingCharacters.join('、')}`);
+  }
+  sections.push('【场内自由度】允许在本场范围内删拍、加戏、重排与扩写；按方案执行，不得越出范围。');
+  sections.push(
+    '【散场状态硬锁】成稿结尾必须与方案的散场状态一致：人物位置、姿态、随身物件与情绪不得改变，也不得提前写下场内容。'
+  );
+  sections.push('【入场衔接】成稿开头必须能直接接在 <before-context> 之后。');
+  if (input.beforeContext) {
+    sections.push(`<before-context>\n${input.beforeContext}\n</before-context>`);
+  }
+  sections.push(`<range-original>\n${input.rangeText}\n</range-original>`);
+  if (input.afterContext) {
+    sections.push(`<after-context>\n${input.afterContext}\n</after-context>`);
+  }
+  sections.push(
+    [
+      '请直接输出这一场改写后的正文纯文本，不要方案、说明、Markdown 标题或代码块。',
+      '禁止输出范围外正文；<before-context> 与 <after-context> 只读，不要复述或改写。',
+      '禁止摘要式压缩：重写后对应内容的信息量与感官密度不得低于原文，方案明确要求删除的除外。',
     ].join('\n')
   );
   return sections.join('\n\n');

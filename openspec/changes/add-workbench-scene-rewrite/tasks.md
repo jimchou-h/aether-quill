@@ -5,7 +5,7 @@
 ## 1. 合同与纯函数
 
 - [x] 1.1 OpenAPI：新增 `chapter-optimize-workbench-plan.yaml`（SSE：`start/stage/content/end/error`，入参 `instruction/profile?/startOffset/endOffset/baseUpdatedAt/sourceText/appearingCharacters?`）并挂入 `openapi.yaml`；扩展 workbench draft 请求体增加可选 `mode`（`direct|from-plan`，缺省 `direct`）与 `planText`；**禁止**改 `rewriteMode` 枚举与旧 plan/draft 路径；补契约 snapshot：新路径存在、draft 旧请求体仍合法且 `rewriteMode` 枚举不变；AC：contract 校验通过、前端类型由合同生成无破坏
-- [ ] 1.2 纯函数（`chapter-optimize-workbench.util.ts`）：新增 `assertWorkbenchPlanRequest`（沿用范围/偏移/只读上下文切分校验）、`buildWorkbenchPlanUserPrompt`（四块方案引导 + 只输出方案）、`buildWorkbenchSceneDraftUserPrompt`（携带已确认 planText，行文层约束，**不得**含账本/举证/准入/验收术语）；扩展 draft 请求校验支持 `mode` 与 `planText`（from-plan 缺 planText 抛 400、范围多窗抛 400）；**动 draft 分支前先补旧行为红灯基线**：现有 sex/prose 的 draft 请求规范化结果与 user prompt 文本快照测试先落盘；AC：单测覆盖空范围/空要求/缺 planText/超长范围四类拒绝、prompt 文本断言无流程术语且含散场状态硬锁、旧两档快照在新分支合入前后字节不变
+- [x] 1.2 纯函数（`chapter-optimize-workbench.util.ts`）：新增 `assertWorkbenchPlanRequest`（沿用范围/偏移/只读上下文切分校验）、`buildWorkbenchPlanUserPrompt`（四块方案引导 + 只输出方案）、`buildWorkbenchSceneDraftUserPrompt`（携带已确认 planText，行文层约束，**不得**含账本/举证/准入/验收术语）；扩展 draft 请求校验支持 `mode` 与 `planText`（from-plan 缺 planText 抛 400、范围多窗抛 400）；**动 draft 分支前先补旧行为红灯基线**：现有 sex/prose 的 draft 请求规范化结果与 user prompt 文本快照测试先落盘；AC：单测覆盖空范围/空要求/缺 planText/超长范围四类拒绝、prompt 文本断言无流程术语且含散场状态硬锁、旧两档快照在新分支合入前后字节不变
 
 ## 2. Prompt 与服务编排
 

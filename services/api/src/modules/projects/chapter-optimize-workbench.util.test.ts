@@ -9,8 +9,11 @@ import {
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
   assertWorkbenchDraftRequest,
   assertWorkbenchFixSpanRequest,
+  assertWorkbenchPlanRequest,
   assertWorkbenchReviewRequest,
   buildWorkbenchDraftUserPrompt,
+  buildWorkbenchPlanUserPrompt,
+  buildWorkbenchSceneDraftUserPrompt,
   isNearCopyWorkbenchDraft,
   filterWorkbenchReviewItems,
   locateUniqueAnchor,
@@ -294,4 +297,264 @@ test('workbench util source does not call splitIntoSegments', () => {
   assert.equal(source.includes('splitIntoSegments('), false);
   assert.ok(source.includes(CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY));
   assert.ok(source.includes(CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY));
+});
+
+// ---------------------------------------------------------------------------
+// 红灯基线：旧两档（sex / prose）draft 行为冻结。
+// 后续为「按场创编」增加 mode / planText 时，下面两组快照必须逐字节不变。
+// ---------------------------------------------------------------------------
+
+const LEGACY_DRAFT_INPUT = {
+  instruction: '收紧节奏',
+  profile: 'sex',
+  startOffset: 3,
+  endOffset: 9,
+  baseUpdatedAt: '2026-10-01T00:00:00.000Z',
+  sourceText: '前文。范围内一句。后文。',
+};
+
+function legacyDraftView(input: Parameters<typeof assertWorkbenchDraftRequest>[0]) {
+  const normalized = assertWorkbenchDraftRequest(input);
+  return {
+    instruction: normalized.instruction,
+    profile: normalized.profile,
+    startOffset: normalized.startOffset,
+    endOffset: normalized.endOffset,
+    baseUpdatedAt: normalized.baseUpdatedAt,
+    sourceText: normalized.sourceText,
+    rangeText: normalized.rangeText,
+    beforeContext: normalized.beforeContext,
+    afterContext: normalized.afterContext,
+    appearingCharacters: normalized.appearingCharacters,
+  };
+}
+
+test('baseline: sex and prose draft normalization is frozen', () => {
+  assert.deepEqual(legacyDraftView(LEGACY_DRAFT_INPUT), {
+    instruction: '收紧节奏',
+    profile: 'sex',
+    startOffset: 3,
+    endOffset: 9,
+    baseUpdatedAt: '2026-10-01T00:00:00.000Z',
+    sourceText: '前文。范围内一句。后文。',
+    rangeText: '范围内一句。',
+    beforeContext: '前文。',
+    afterContext: '后文。',
+    appearingCharacters: undefined,
+  });
+
+  assert.deepEqual(legacyDraftView({ ...LEGACY_DRAFT_INPUT, profile: 'prose' }), {
+    instruction: '收紧节奏',
+    profile: 'prose',
+    startOffset: 3,
+    endOffset: 9,
+    baseUpdatedAt: '2026-10-01T00:00:00.000Z',
+    sourceText: '前文。范围内一句。后文。',
+    rangeText: '范围内一句。',
+    beforeContext: '前文。',
+    afterContext: '后文。',
+    appearingCharacters: undefined,
+  });
+});
+
+test('baseline: sex and prose draft user prompt is frozen', () => {
+  const sexPrompt = buildWorkbenchDraftUserPrompt({
+    chapterNo: 3,
+    title: '雨夜',
+    instruction: '收紧节奏',
+    profile: 'sex',
+    rangeText: '范围内一句。',
+    beforeContext: '前文。',
+    afterContext: '后文。',
+  });
+  assert.equal(
+    sexPrompt,
+    [
+      '【写作目标】请按「感官加料」档改写第3章「雨夜」中用户划定的连续范围。',
+      '',
+      '【用户优化要求】',
+      '收紧节奏',
+      '',
+      '<before-context>',
+      '前文。',
+      '</before-context>',
+      '',
+      '<range-original>',
+      '范围内一句。',
+      '</range-original>',
+      '',
+      '<after-context>',
+      '后文。',
+      '</after-context>',
+      '',
+      '请直接输出该范围内改写后的正文纯文本，不要方案、说明、Markdown 标题或代码块。',
+      '必须基于 <range-original> 从头到尾重写；禁止输出范围外原文。',
+      '禁止大段照抄原文；禁止「前半改写、后半原样粘贴」；禁止原样输出 <range-original>。',
+      '感官加料：必须有可见加料。原文原样交回视为失败。',
+      '若有 <before-context> / <after-context>：只读，用来把头尾接上；不要复述或改写它们。',
+    ].join('\n')
+  );
+
+  const prosePrompt = buildWorkbenchDraftUserPrompt({
+    chapterNo: 3,
+    title: '雨夜',
+    instruction: '收紧节奏',
+    profile: 'prose',
+    rangeText: '范围内一句。',
+    beforeContext: '前文。',
+    afterContext: '后文。',
+  });
+  assert.equal(
+    prosePrompt,
+    [
+      '【写作目标】请按「日常文笔」档改写第3章「雨夜」中用户划定的连续范围。',
+      '',
+      '【用户优化要求】',
+      '收紧节奏',
+      '',
+      '【档位约束】本档为日常文笔。禁止按感官加料要求增色、堆砌特写或无必要地夸张动作。',
+      '',
+      '<before-context>',
+      '前文。',
+      '</before-context>',
+      '',
+      '<range-original>',
+      '范围内一句。',
+      '</range-original>',
+      '',
+      '<after-context>',
+      '后文。',
+      '</after-context>',
+      '',
+      '请直接输出该范围内改写后的正文纯文本，不要方案、说明、Markdown 标题或代码块。',
+      '必须基于 <range-original> 从头到尾重写；禁止输出范围外原文。',
+      '禁止大段照抄原文；禁止「前半改写、后半原样粘贴」；禁止原样输出 <range-original>。',
+      '日常文笔：必须有可见的节奏、对白或衔接改动；禁止原样交回；禁止增色。',
+      '若有 <before-context> / <after-context>：只读，用来把头尾接上；不要复述或改写它们。',
+    ].join('\n')
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 按场创编：新增 plan 请求校验 / 四块方案引导 / 场上成稿 prompt
+// ---------------------------------------------------------------------------
+
+test('assertWorkbenchPlanRequest accepts an offset-only request without profile', () => {
+  const normalized = assertWorkbenchPlanRequest({
+    instruction: '把过场压掉，加一拍争执，散场锁在门口。',
+    startOffset: 3,
+    endOffset: 9,
+    baseUpdatedAt: '2026-10-01T00:00:00.000Z',
+    sourceText: '前文。范围内一句。后文。',
+  });
+  assert.equal(normalized.instruction, '把过场压掉，加一拍争执，散场锁在门口。');
+  assert.equal(normalized.profile, undefined);
+  assert.equal(normalized.rangeText, '范围内一句。');
+  assert.equal(normalized.beforeContext, '前文。');
+  assert.equal(normalized.afterContext, '后文。');
+});
+
+test('assertWorkbenchPlanRequest rejects empty range and empty instruction', () => {
+  const base = {
+    startOffset: 3,
+    endOffset: 9,
+    baseUpdatedAt: '2026-10-01T00:00:00.000Z',
+    sourceText: '前文。范围内一句。后文。',
+  };
+  assert.throws(() => assertWorkbenchPlanRequest({ ...base, instruction: '   ' }), /instruction/);
+  assert.throws(
+    () =>
+      assertWorkbenchPlanRequest({ ...base, instruction: '改一下', startOffset: 5, endOffset: 5 }),
+    /划选|起止/
+  );
+});
+
+test('assertWorkbenchPlanRequest rejects a range longer than one window', () => {
+  const longBody = '句。'.repeat(Math.ceil(WORKBENCH_REWRITE_WINDOW_CHARS / 2) + 10);
+  assert.ok(longBody.length > WORKBENCH_REWRITE_WINDOW_CHARS);
+  assert.throws(
+    () =>
+      assertWorkbenchPlanRequest({
+        instruction: '整体改写',
+        startOffset: 0,
+        endOffset: longBody.length,
+        baseUpdatedAt: '2026-10-01T00:00:00.000Z',
+        sourceText: longBody,
+      }),
+    /划小|单窗|范围过长/
+  );
+});
+
+test('assertWorkbenchDraftRequest requires planText in from-plan mode and rejects multi-window ranges', () => {
+  const base = {
+    instruction: '按方案成稿',
+    profile: 'sex',
+    startOffset: 3,
+    endOffset: 9,
+    baseUpdatedAt: '2026-10-01T00:00:00.000Z',
+    sourceText: '前文。范围内一句。后文。',
+    mode: 'from-plan',
+  };
+  assert.throws(() => assertWorkbenchDraftRequest(base), /planText/);
+
+  const normalized = assertWorkbenchDraftRequest({
+    ...base,
+    planText: '【改动账本】keep 前文；rewrite 中段。',
+  });
+  assert.equal(normalized.mode, 'from-plan');
+  assert.equal(normalized.planText, '【改动账本】keep 前文；rewrite 中段。');
+
+  const legacy = assertWorkbenchDraftRequest({ ...LEGACY_DRAFT_INPUT });
+  assert.equal(legacy.mode, 'direct');
+  assert.equal(legacy.planText, undefined);
+
+  const longBody = '句。'.repeat(Math.ceil(WORKBENCH_REWRITE_WINDOW_CHARS / 2) + 10);
+  assert.throws(
+    () =>
+      assertWorkbenchDraftRequest({
+        ...base,
+        planText: '方案',
+        startOffset: 0,
+        endOffset: longBody.length,
+        sourceText: longBody,
+      }),
+    /划小|单窗|范围过长/
+  );
+});
+
+test('buildWorkbenchPlanUserPrompt asks for a four-part scene plan only', () => {
+  const prompt = buildWorkbenchPlanUserPrompt({
+    chapterNo: 3,
+    title: '雨夜',
+    instruction: '把过场压掉，加一拍争执，散场锁在门口。',
+    rangeText: '范围内一句。',
+    beforeContext: '前文。',
+    afterContext: '后文。',
+    appearingCharacters: ['阿青', '老陈'],
+  });
+  assert.match(prompt, /入场|散场/);
+  assert.match(prompt, /改动账本|keep|rewrite|expand|delete/);
+  assert.match(prompt, /篇幅|字数/);
+  assert.match(prompt, /边界|范围外/);
+  assert.match(prompt, /只输出方案|不要输出正文|方案/);
+  assert.match(prompt, /阿青、老陈/);
+  assert.ok(prompt.includes('范围内一句。'));
+  assert.ok(!prompt.includes('后文。后文。'));
+});
+
+test('buildWorkbenchSceneDraftUserPrompt carries the confirmed plan and locks the closing state', () => {
+  const prompt = buildWorkbenchSceneDraftUserPrompt({
+    chapterNo: 3,
+    title: '雨夜',
+    instruction: '把过场压掉，加一拍争执，散场锁在门口。',
+    planText: '【散场状态】两人停在门口，钥匙仍在外套口袋。',
+    rangeText: '范围内一句。',
+    beforeContext: '前文。',
+    afterContext: '后文。',
+  });
+  assert.ok(prompt.includes('【散场状态】两人停在门口，钥匙仍在外套口袋。'));
+  assert.match(prompt, /散场状态/);
+  assert.match(prompt, /锁定|不得改变|保持一致/);
+  assert.ok(prompt.includes('范围内一句。'));
+  assert.doesNotMatch(prompt, /账本|举证|准入|验收/);
 });
