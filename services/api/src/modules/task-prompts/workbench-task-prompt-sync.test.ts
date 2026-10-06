@@ -1,5 +1,5 @@
 /**
- * 守卫「三处同步」：按场成稿四个 task prompt 默认文本必须在
+ * 守卫「三处同步」：按场成稿六个 task prompt 默认文本必须在
  * util 运行时种子、API 白名单、orchestrator 兜底、prompt-templates 登记四处一致。
  */
 
@@ -10,10 +10,14 @@ import test from 'node:test';
 import {
   CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
 } from '../projects/chapter-optimize-workbench.util';
@@ -34,6 +38,8 @@ const WORKBENCH_KEYS = [
   CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_TEMPLATE_KEY,
 ] as const;
 
 const WORKBENCH_PROMPTS = [
@@ -41,9 +47,21 @@ const WORKBENCH_PROMPTS = [
   CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_SYSTEM_PROMPT,
 ] as const;
 
-test('四个 workbench prompt 已进入 Settings 可配置白名单并分入文笔优化', () => {
+/** 旧四模板文本基线：新增创编模板不得改动它们（v1.0.0/v1.1.0 已发布文本） */
+const LEGACY_WORKBENCH_TEXT_MARKERS: Record<string, string> = {
+  [CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SEX_TEMPLATE_KEY]:
+    '正在对用户划定的连续范围内正文做感官加料改写。',
+  [CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_TEMPLATE_KEY]:
+    '正在对用户划定的连续范围内正文做日常文笔润色。',
+  [CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY]: '正在对范围内成稿做一次定点检查。',
+  [CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY]: '正在按指令改写用户划定的一小段选区。',
+};
+
+test('六个 workbench prompt 已进入 Settings 可配置白名单并分入文笔优化', () => {
   const keys = TASK_PROMPT_DEFINITIONS.map((definition) => definition.templateKey);
   for (const key of WORKBENCH_KEYS) {
     assert.ok(keys.includes(key), `missing ${key}`);
@@ -53,6 +71,39 @@ test('四个 workbench prompt 已进入 Settings 可配置白名单并分入文�
     (key) => TASK_PROMPT_DEFINITIONS.find((item) => item.templateKey === key)?.name ?? ''
   );
   assert.ok(names.every((name) => name.startsWith('文笔优化 ·')));
+});
+
+test('旧四模板文本保持不变且默认仍为未发布草稿', () => {
+  for (const [key, marker] of Object.entries(LEGACY_WORKBENCH_TEXT_MARKERS)) {
+    assert.ok(getWarehouseDefaultTaskPromptText(key).includes(marker), `${key} 文本被改动`);
+    assert.ok(
+      (WORKBENCH_PROMPTS as readonly string[]).includes(getWarehouseDefaultTaskPromptText(key))
+    );
+  }
+  // 默认草稿状态：白名单记录初始 publishedText 为空，回滚由 TaskPromptsService 提供（见 runtime-chain 测试）
+  assert.equal(TASK_PROMPT_DEFINITIONS.length, 11);
+});
+
+test('plan-scene 模板含四要件与删除补偿硬约束', () => {
+  const text = CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_SYSTEM_PROMPT;
+  for (const marker of [
+    '入场 / 散场状态清单',
+    '改动账本',
+    '篇幅预算',
+    '边界声明',
+    '删除情绪或伏笔拍必须写清补偿落点',
+  ]) {
+    assert.ok(text.includes(marker), `plan-scene 缺少要件：${marker}`);
+  }
+  assert.ok(text.includes('禁止输出任何正文'));
+});
+
+test('draft-scene 模板允许场内删/加/重排并锁定散场状态且不含流程术语', () => {
+  const text = CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_SYSTEM_PROMPT;
+  for (const marker of ['删拍', '加戏', '重排', '散场状态硬锁']) {
+    assert.ok(text.includes(marker), `draft-scene 缺少：${marker}`);
+  }
+  assert.equal(/账本|举证|准入|验收/.test(text), false, 'draft-scene 不得出现流程术语');
 });
 
 test('白名单默认文本与 util 运行时种子一致', () => {

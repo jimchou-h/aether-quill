@@ -12,6 +12,10 @@ export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_PROSE_TEMPLATE_KEY =
 export const CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY = 'chapter.optimize.workbench-review';
 export const CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY =
   'chapter.optimize.workbench-fix-span';
+export const CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_TEMPLATE_KEY =
+  'chapter.optimize.workbench-plan-scene';
+export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_TEMPLATE_KEY =
+  'chapter.optimize.workbench-draft-scene';
 
 export type ChapterOptimizeWorkbenchProfile = 'sex' | 'prose';
 export type ChapterOptimizeWorkbenchDraftMode = 'direct' | 'from-plan';
@@ -90,6 +94,36 @@ export const CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_SYSTEM_PROMPT = [
   '2) 必须落实【改写指令】，不得另起方案、不得扩写到选区外情节；',
   '3) 保持人称、时态与人物名称；不得使用占位语；',
   '4) 输出必须可以直接替换原选区，前后衔接由调用方拼回。',
+].join('\n');
+
+/** 按场创编第 1 步：只产出可确认的方案。四要件 + 删除补偿硬约束。 */
+export const CHAPTER_OPTIMIZE_WORKBENCH_PLAN_SCENE_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在为用户划定的「一场」正文写一份可确认的改写方案。',
+  'ONLY：只输出方案文本；禁止输出任何正文、Markdown 标题或代码块。',
+  '方案角色：成稿步骤将在本场范围内执行删拍、加戏、重排与扩写，范围边界与散场状态会被硬锁；方案须让成稿可直接照做。',
+  '方案必须包含且只包含以下四块：',
+  '1) 【入场 / 散场状态清单】列出本场开头与结尾的人物位置、姿态、随身物件与情绪；散场状态将被成稿硬锁；',
+  '2) 【改动账本】逐拍标注 keep（保留）/ rewrite（改写）/ expand（扩写）/ delete（删除）；删除情绪或伏笔拍必须写清补偿落点；',
+  '3) 【篇幅预算】给出成稿相对原文的篇幅增减幅度与大致字数；',
+  '4) 【边界声明】明确本方案不改动范围外正文，且范围首尾需接上前后文。',
+  '硬约束：',
+  '1) 只针对 <range-original> 这一场做方案，禁止提出改动 <before-context> 与 <after-context> 的做法；',
+  '2) 删除任何情绪拍或伏笔拍时，改动账本必须写明补偿落点；无法补偿的拍不得删除；',
+  '3) 重排只在同一场内进行，禁止把情节挪到范围之外。',
+].join('\n');
+
+/** 按场创编第 2 步：按已确认方案成稿；场内可删/加/重排，散场状态硬锁。 */
+export const CHAPTER_OPTIMIZE_WORKBENCH_DRAFT_SCENE_SYSTEM_PROMPT = [
+  '你是一位资深小说写作助手，正在按已确认方案改写用户划定的「一场」正文。',
+  'ONLY：输出该场改写后的正文；禁止输出范围外文字、方案、说明、Markdown 标题或代码块。',
+  '场内自由度：允许在本场范围内删拍、加戏、重排与扩写，按方案执行，不得越出范围。',
+  '硬约束：',
+  '1) 只改写 <range-original> 这一场，禁止输出范围前后的原文；<before-context> 与 <after-context> 只读，禁止复述或并入输出；',
+  '2) 入场衔接：成稿开头必须能直接接在 <before-context> 之后，不得复述 before 内容；',
+  '3) 散场状态硬锁：成稿结尾必须与方案的散场状态一致，人物位置、姿态、随身物件与情绪不得改变，也不得提前写下场内容；',
+  '4) 不得使用「（此处省略）」「[原段落保留]」等占位语；禁止大段照抄原文；禁止原样输出 <range-original>；',
+  '5) 人称、时态、人物名称须与原文一致，除非方案明确要求修改；',
+  '6) 禁止摘要式压缩：重写后对应内容的信息量与感官密度不得低于原文，方案明确要求删除的除外。',
 ].join('\n');
 
 export function spliceChapterRange(
