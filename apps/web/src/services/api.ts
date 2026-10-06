@@ -1563,6 +1563,61 @@ export const apiClient = {
     );
   },
 
+  async optimizeWorkbenchPlanSSE(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterOptimizeWorkbenchPlanRequest,
+    callbacks: ChapterOptimizeWorkbenchPlanCallbacks,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/workbench/plan`;
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as ChapterOptimizePlanSseEvent;
+          switch (event.event) {
+            case 'start':
+              callbacks.onStart?.({
+                traceId: event.traceId ?? '',
+                chapterNo: event.chapterNo ?? chapterNo,
+              });
+              break;
+            case 'stage':
+              if (event.stage) {
+                callbacks.onStage?.({
+                  stage: event.stage,
+                  segmentIndex: event.segmentIndex,
+                  segmentTotal: event.segmentTotal,
+                });
+              }
+              break;
+            case 'content':
+              callbacks.onContent?.((event.data ?? '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId ?? '',
+                planText: event.planText?.trim() ?? '',
+              });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data ?? '生成创编方案失败');
+              break;
+          }
+        } catch {
+          // 忽略不完整 SSE 分片
+        }
+      }
+    );
+  },
+
   async reviewWorkbenchRange(
     projectId: string,
     chapterNo: number,
@@ -2141,10 +2196,23 @@ export interface ChapterOptimizationApplyRequest {
 }
 
 export type ChapterOptimizeWorkbenchProfile = 'sex' | 'prose';
+export type ChapterOptimizeWorkbenchDraftMode = 'direct' | 'from-plan';
 
 export interface ChapterOptimizeWorkbenchDraftRequest {
   instruction: string;
   profile: ChapterOptimizeWorkbenchProfile;
+  mode?: ChapterOptimizeWorkbenchDraftMode;
+  planText?: string;
+  startOffset: number;
+  endOffset: number;
+  baseUpdatedAt: string;
+  sourceText: string;
+  appearingCharacters?: string[];
+}
+
+export interface ChapterOptimizeWorkbenchPlanRequest {
+  instruction: string;
+  profile?: ChapterOptimizeWorkbenchProfile;
   startOffset: number;
   endOffset: number;
   baseUpdatedAt: string;
@@ -2265,6 +2333,18 @@ export interface ChapterOptimizeDraftCallbacks {
     finalDraftText?: string;
     contentSafety?: ContentSafetyScanResult;
   }) => void;
+  onError?: (message: string) => void;
+}
+
+export interface ChapterOptimizeWorkbenchPlanCallbacks {
+  onStart?: (event: { traceId: string; chapterNo: number }) => void;
+  onStage?: (event: {
+    stage: ChapterOptimizeStage;
+    segmentIndex?: number;
+    segmentTotal?: number;
+  }) => void;
+  onContent?: (text: string) => void;
+  onEnd?: (event: { traceId: string; planText: string }) => void;
   onError?: (message: string) => void;
 }
 
@@ -2672,13 +2752,7 @@ export interface RelationEventItem {
   deletedAt?: string | null;
 }
 
-export type EventCardKind =
-  | 'foreshadow'
-  | 'relation'
-  | 'ability'
-  | 'promise'
-  | 'object'
-  | 'other';
+export type EventCardKind = 'foreshadow' | 'relation' | 'ability' | 'promise' | 'object' | 'other';
 export type EventCardStatus = 'open' | 'paid' | 'fact';
 export type EventCardSource = 'auto' | 'user_edit';
 

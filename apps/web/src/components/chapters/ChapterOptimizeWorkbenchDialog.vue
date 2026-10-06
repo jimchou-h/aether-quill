@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue';
-import {
-  apiClient,
-  formatChapterOptimizeStageLabel,
-  type ChapterItem,
-  type ChapterOptimizeWorkbenchProfile,
-} from '../../services/api';
+import { apiClient, formatChapterOptimizeStageLabel, type ChapterItem } from '../../services/api';
 import { useAbortableSse } from '../../composables/useAbortableSse';
 import { confirmAction } from '../../composables/useAppConfirm';
 import {
@@ -26,24 +21,33 @@ import { resolveChapterOptimizePrepProgress } from '../../utils/chapterOptimizeP
 import { shouldRenderOptimizeDiff } from '../../utils/chapterOptimizeDiff';
 import { createThrottledTextSink } from '../../utils/throttledTextSink';
 import {
+  buildWorkbenchDraftModeFields,
+  canConfirmWorkbenchPlan,
+  canGenerateWorkbenchDraft,
   describeInvalidWorkbenchRange,
+  describeSceneRangeOverflow,
   describeWorkbenchRangeBinding,
   isNearCopyWorkbenchDraft,
+  isSceneRewriteMode,
   filterWorkbenchReviewItemsForProfile,
   locateUniqueAnchor,
   normalizeWorkbenchReviewItems,
   applyWorkbenchSseEndText,
   resolveWorkbenchApplyOffsets,
+  resolveWorkbenchCreationSteps,
+  resolveWorkbenchDraftProfile,
   resolveWorkbenchSseEndText,
   sliceSpanNeighborhood,
   spliceChapterRange,
+  type WorkbenchCreationMode,
   type WorkbenchReviewItem,
+  type WorkbenchStepKey,
 } from '../../utils/chapterOptimizeWorkbench';
 import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
 import ChapterOptimizeComparePane from './ChapterOptimizeComparePane.vue';
 
-type WorkbenchStep = 'range' | 'generate' | 'review' | 'apply';
+type WorkbenchStep = WorkbenchStepKey;
 type ReviewRowStatus = 'pending' | 'applied' | 'skipped_unlocatable' | 'failed';
 
 interface ReviewRow extends WorkbenchReviewItem {
@@ -51,22 +55,16 @@ interface ReviewRow extends WorkbenchReviewItem {
   skipReason?: string;
 }
 
-const STEPPER_STEPS: Array<{ key: WorkbenchStep; label: string }> = [
-  { key: 'range', label: '划范围' },
-  { key: 'generate', label: '生成' },
-  { key: 'review', label: '检查/点句' },
-  { key: 'apply', label: '应用' },
-];
-
 const KIND_LABEL: Record<string, string> = {
   pose: '动作',
   vocab: '用词',
   regression: '改差',
 };
 
-const INSTRUCTION_PLACEHOLDER: Record<ChapterOptimizeWorkbenchProfile, string> = {
+const INSTRUCTION_PLACEHOLDER: Record<WorkbenchCreationMode, string> = {
   sex: '例如：在划选范围内加深感官与节奏，保持时序与空间连续，不要省略中间过程。',
   prose: '例如：理顺划选范围内的节奏、对白与衔接，不要增色或堆砌特写。',
+  scene: '例如：这一场删掉中间过渡拍、把冲突提前，末拍落在原定散场状态；不要越出范围。',
 };
 
 const props = defineProps<{
@@ -81,8 +79,11 @@ const emit = defineEmits<{
 }>();
 
 const step = shallowRef<WorkbenchStep>('range');
-const profile = shallowRef<ChapterOptimizeWorkbenchProfile>('prose');
+const creationMode = shallowRef<WorkbenchCreationMode>('prose');
 const instruction = shallowRef('');
+const planText = shallowRef('');
+const planConfirmed = shallowRef(false);
+const planning = shallowRef(false);
 const spanInstruction = shallowRef('');
 const baseText = shallowRef('');
 const baseUpdatedAt = shallowRef('');
@@ -108,10 +109,17 @@ const frozenTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const rangeDraftTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 const isBusy = computed(
-  () => generating.value || reviewing.value || fixing.value || applying.value
+  () => generating.value || planning.value || reviewing.value || fixing.value || applying.value
 );
+const isSceneMode = computed(() => isSceneRewriteMode(creationMode.value));
+const stepperSteps = computed(() => resolveWorkbenchCreationSteps(creationMode.value));
+const draftProfile = computed(() => resolveWorkbenchDraftProfile(creationMode.value));
 const selectedRangeText = computed(() =>
   hasRange.value ? baseText.value.slice(rangeStart.value, rangeEnd.value) : ''
+);
+const rangeChars = computed(() => selectedRangeText.value.length);
+const rangeOverflowHint = computed(() =>
+  isSceneMode.value ? describeSceneRangeOverflow(rangeChars.value) : null
 );
 const applyOffsets = computed(() =>
   resolveWorkbenchApplyOffsets({
@@ -148,10 +156,22 @@ const rangeMeta = computed(() =>
 const showRangeCompare = computed(
   () => Boolean(committedOriginal.value) && (Boolean(rangeDraft.value.trim()) || generating.value)
 );
-const instructionPlaceholder = computed(() => INSTRUCTION_PLACEHOLDER[profile.value]);
-const canGenerate = computed(
-  () => Boolean(instruction.value.trim()) && hasRange.value && !isBusy.value
+const instructionPlaceholder = computed(() => INSTRUCTION_PLACEHOLDER[creationMode.value]);
+const canGenerate = computed(() =>
+  canGenerateWorkbenchDraft({
+    mode: creationMode.value,
+    hasRange: hasRange.value,
+    rangeChars: rangeChars.value,
+    instruction: instruction.value,
+    planConfirmed: planConfirmed.value,
+    busy: isBusy.value,
+  })
 );
+const canPlan = computed(
+  () =>
+    Boolean(instruction.value.trim()) && hasRange.value && !isBusy.value && !rangeOverflowHint.value
+);
+const canConfirmPlan = computed(() => canConfirmWorkbenchPlan(planText.value) && !isBusy.value);
 const canReview = computed(() => Boolean(rangeDraft.value.trim()) && !isBusy.value);
 const canApply = computed(() => Boolean(rangeDraft.value.trim()) && !isBusy.value);
 const canFixSelection = computed(
@@ -159,7 +179,7 @@ const canFixSelection = computed(
 );
 
 function stepperClass(key: WorkbenchStep): string {
-  const order = STEPPER_STEPS.map((entry) => entry.key);
+  const order = stepperSteps.value.map((entry) => entry.key);
   const currentIndex = order.indexOf(step.value);
   const keyIndex = order.indexOf(key);
   if (keyIndex < currentIndex) {
@@ -168,6 +188,7 @@ function stepperClass(key: WorkbenchStep): string {
   if (key === step.value) {
     if (
       (key === 'generate' && generating.value) ||
+      (key === 'plan' && planning.value) ||
       (key === 'review' && (reviewing.value || fixing.value))
     ) {
       return 'step--running';
@@ -179,6 +200,9 @@ function stepperClass(key: WorkbenchStep): string {
       return 'step--awaiting';
     }
     if (key === 'generate' && rangeDraft.value.trim()) {
+      return 'step--awaiting';
+    }
+    if (key === 'plan' && planConfirmed.value) {
       return 'step--awaiting';
     }
     return 'active';
@@ -200,8 +224,11 @@ function clearInterruptHandler() {
 
 function resetState() {
   step.value = 'range';
-  profile.value = 'prose';
+  creationMode.value = 'prose';
   instruction.value = '';
+  planText.value = '';
+  planConfirmed.value = false;
+  planning.value = false;
   spanInstruction.value = '';
   baseText.value = props.chapter?.content ?? '';
   baseUpdatedAt.value = props.chapter?.updatedAt ?? '';
@@ -237,8 +264,21 @@ watch(
   { immediate: true }
 );
 
+watch(creationMode, () => {
+  planConfirmed.value = false;
+  if (step.value === 'plan') {
+    step.value = 'range';
+  }
+});
+
+watch(planText, () => {
+  if (planConfirmed.value) {
+    planConfirmed.value = false;
+  }
+});
+
 function close() {
-  if (generating.value || fixing.value) {
+  if (generating.value || planning.value || fixing.value) {
     sseStream.abort();
   }
   if (!applying.value) {
@@ -249,6 +289,7 @@ function close() {
 function interruptGeneration() {
   sseStream.abort();
   generating.value = false;
+  planning.value = false;
   fixing.value = false;
   cancelAiTaskProgress(aiTaskProgress, '已中断按场成稿生成');
   statusText.value = presentInfo('已中断按场成稿生成');
@@ -270,10 +311,14 @@ function captureFrozenRange() {
     errorMessage.value = invalid;
     return;
   }
+  const changed = start !== rangeStart.value || end !== rangeEnd.value;
   rangeStart.value = start;
   rangeEnd.value = end;
   hasRange.value = true;
   errorMessage.value = '';
+  if (changed && planConfirmed.value) {
+    planConfirmed.value = false;
+  }
   if (!rangeDraft.value) {
     step.value = 'range';
   }
@@ -290,6 +335,128 @@ function currentDraftSelection(): { start: number; end: number } | null {
     return null;
   }
   return { start, end };
+}
+
+async function generateScenePlan() {
+  const chapter = props.chapter;
+  if (!chapter) {
+    return;
+  }
+  const rangeError = describeInvalidWorkbenchRange(
+    rangeStart.value,
+    rangeEnd.value,
+    baseText.value
+  );
+  if (!hasRange.value || rangeError) {
+    errorMessage.value = rangeError ?? '请在冻结正文中划选连续范围';
+    return;
+  }
+  if (!instruction.value.trim()) {
+    errorMessage.value = '请填写创编要求';
+    return;
+  }
+  const overflow = rangeOverflowHint.value;
+  if (overflow) {
+    errorMessage.value = overflow;
+    return;
+  }
+
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.optimize.workbench-plan',
+    message: '正在生成创编方案…',
+    source: 'dialog:scene-workbench',
+    chapterNo: chapter.chapterNo,
+    interruptible: true,
+  });
+  if (!started.ok) {
+    errorMessage.value = '当前有其他 AI 任务进行中，请先等待或中断';
+    return;
+  }
+
+  planning.value = true;
+  errorMessage.value = '';
+  statusText.value = '正在生成创编方案…';
+  planConfirmed.value = false;
+  planText.value = '';
+  step.value = 'plan';
+  const signal = sseStream.begin();
+  bindInterruptHandler();
+  const planSink = createThrottledTextSink(planText);
+
+  try {
+    await apiClient.optimizeWorkbenchPlanSSE(
+      props.projectId,
+      chapter.chapterNo,
+      {
+        instruction: instruction.value.trim(),
+        profile: draftProfile.value,
+        startOffset: rangeStart.value,
+        endOffset: rangeEnd.value,
+        baseUpdatedAt: baseUpdatedAt.value,
+        sourceText: baseText.value,
+      },
+      {
+        onStart: () => {
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.optimize.workbench-plan',
+            stage: 'running',
+            message: '正在生成创编方案…',
+          });
+        },
+        onStage: ({ stage, segmentIndex, segmentTotal }) => {
+          const label = formatChapterOptimizeStageLabel(stage, segmentIndex, segmentTotal);
+          statusText.value = label;
+          applyAiTaskProgressEvent(aiTaskProgress, {
+            taskKey: 'chapter.optimize.workbench-plan',
+            stage,
+            message: label,
+          });
+        },
+        onContent: (text) => {
+          planSink.append(text);
+        },
+        onEnd: (event) => {
+          planSink.flush();
+          planText.value = applyWorkbenchSseEndText(planText.value, event.planText);
+          if (!planText.value.trim()) {
+            errorMessage.value = '未收到有效创编方案';
+            failAiTaskProgress(aiTaskProgress, errorMessage.value);
+            return;
+          }
+          statusText.value = '方案已生成，请确认或编辑后确认';
+          completeAiTaskProgress(aiTaskProgress, statusText.value);
+        },
+        onError: (messageText) => {
+          errorMessage.value = messageText;
+          failAiTaskProgress(aiTaskProgress, messageText);
+        },
+      },
+      { signal }
+    );
+  } catch (error) {
+    if (isSseAbortError(error)) {
+      cancelAiTaskProgress(aiTaskProgress, '已中断创编方案生成');
+    } else {
+      errorMessage.value = presentErrorFromCaught(error, '创编方案生成失败');
+      failAiTaskProgress(aiTaskProgress, errorMessage.value);
+    }
+  } finally {
+    planSink.flush();
+    planSink.dispose();
+    planning.value = false;
+    sseStream.abort();
+    clearInterruptHandler();
+  }
+}
+
+function confirmPlan() {
+  if (!canConfirmWorkbenchPlan(planText.value)) {
+    errorMessage.value = '方案为空，请先生成或手动填写';
+    return;
+  }
+  planConfirmed.value = true;
+  errorMessage.value = '';
+  statusText.value = '方案已确认，可以生成范围成稿';
 }
 
 async function generateRangeDraft() {
@@ -309,6 +476,16 @@ async function generateRangeDraft() {
   if (!instruction.value.trim()) {
     errorMessage.value = '请填写优化要求';
     return;
+  }
+  if (isSceneMode.value) {
+    if (rangeOverflowHint.value) {
+      errorMessage.value = rangeOverflowHint.value;
+      return;
+    }
+    if (!planConfirmed.value || !planText.value.trim()) {
+      errorMessage.value = '请先生成并确认创编方案';
+      return;
+    }
   }
 
   const started = tryStartAiTaskProgress(aiTaskProgress, {
@@ -343,7 +520,8 @@ async function generateRangeDraft() {
       chapter.chapterNo,
       {
         instruction: instruction.value.trim(),
-        profile: profile.value,
+        profile: draftProfile.value,
+        ...buildWorkbenchDraftModeFields(creationMode.value, planText.value),
         startOffset: rangeStart.value,
         endOffset: rangeEnd.value,
         baseUpdatedAt: baseUpdatedAt.value,
@@ -458,13 +636,13 @@ async function runReview() {
 
   try {
     const result = await apiClient.reviewWorkbenchRange(props.projectId, chapter.chapterNo, {
-      profile: profile.value,
+      profile: draftProfile.value,
       rangeText: rangeDraft.value,
       ...(instruction.value.trim() ? { instruction: instruction.value.trim() } : {}),
     });
     const filtered = filterWorkbenchReviewItemsForProfile(
       normalizeWorkbenchReviewItems(result.items),
-      profile.value
+      draftProfile.value
     );
     reviewItems.value = filtered.map((item) => ({ ...item, status: 'pending' as const }));
     reviewed.value = true;
@@ -529,7 +707,7 @@ async function rewriteSpan(input: {
       {
         spanText,
         instruction: input.instructionText.trim(),
-        profile: profile.value,
+        profile: draftProfile.value,
         ...(neighborhood.beforeContext ? { beforeContext: neighborhood.beforeContext } : {}),
         ...(neighborhood.afterContext ? { afterContext: neighborhood.afterContext } : {}),
       },
@@ -689,11 +867,11 @@ async function applyDraft() {
     <div class="wb-shell">
       <header class="wb-chrome">
         <p class="modal-subtitle">
-          打开时冻结本章正文。划一场连续范围一次生成；范围外原文字节级保留。确认应用后才会覆盖章节。
+          打开时冻结本章正文。划一场连续范围一次生成；范围外原文字节级保留。确认应用后才会覆盖章节。「按场创编」会先出可编辑方案，确认后才成稿。
         </p>
         <ol class="stepper">
           <li
-            v-for="(entry, index) in STEPPER_STEPS"
+            v-for="(entry, index) in stepperSteps"
             :key="entry.key"
             :class="[stepperClass(entry.key), { active: step === entry.key }]"
           >
@@ -718,15 +896,20 @@ async function applyDraft() {
         <section class="step-section">
           <div class="profile-row" role="radiogroup" aria-label="成稿档位">
             <label class="profile-option">
-              <input v-model="profile" type="radio" value="sex" :disabled="isBusy" />
+              <input v-model="creationMode" type="radio" value="sex" :disabled="isBusy" />
               感官加料
             </label>
             <label class="profile-option">
-              <input v-model="profile" type="radio" value="prose" :disabled="isBusy" />
+              <input v-model="creationMode" type="radio" value="prose" :disabled="isBusy" />
               日常文笔
+            </label>
+            <label class="profile-option">
+              <input v-model="creationMode" type="radio" value="scene" :disabled="isBusy" />
+              按场创编
             </label>
             <span class="field-hint">当前范围：{{ rangeMeta }}</span>
           </div>
+          <p v-if="rangeOverflowHint" class="message message-error">{{ rangeOverflowHint }}</p>
           <label class="field-label" for="scene-workbench-instruction">优化要求</label>
           <textarea
             id="scene-workbench-instruction"
@@ -785,6 +968,39 @@ async function applyDraft() {
                 只改选区
               </button>
             </div>
+          </div>
+        </section>
+
+        <section v-if="isSceneMode" class="step-section">
+          <p class="field-label" for="scene-workbench-plan">创编方案（可编辑）</p>
+          <p class="field-hint">
+            方案只覆盖划选范围：可在场内删拍、加戏、重排、扩写；范围边界与散场状态锁死。生成、编辑后点「确认方案」，未确认不会成稿。
+          </p>
+          <textarea
+            id="scene-workbench-plan"
+            v-model="planText"
+            class="chapter-input plan-input"
+            :disabled="isBusy"
+            placeholder="生成后显示可编辑的创编方案，也可自行填写"
+          />
+          <div class="plan-actions">
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="!canPlan"
+              @click="generateScenePlan"
+            >
+              {{ planning ? '生成中…' : planText.trim() ? '重新生成方案' : '生成创编方案' }}
+            </button>
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="!canConfirmPlan"
+              @click="confirmPlan"
+            >
+              确认方案
+            </button>
+            <span v-if="planConfirmed" class="field-hint">方案已确认</span>
           </div>
         </section>
 
@@ -997,6 +1213,14 @@ async function applyDraft() {
 }
 .span-input {
   flex: 1;
+}
+.plan-input {
+  min-height: 180px;
+}
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .review-list {
   display: grid;

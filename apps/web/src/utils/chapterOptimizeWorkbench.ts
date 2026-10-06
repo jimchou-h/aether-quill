@@ -1,4 +1,6 @@
 export type WorkbenchProfile = 'sex' | 'prose';
+export type WorkbenchCreationMode = 'sex' | 'prose' | 'scene';
+export type WorkbenchStepKey = 'range' | 'plan' | 'generate' | 'review' | 'apply';
 export type WorkbenchReviewKind = 'pose' | 'vocab' | 'regression';
 
 export interface WorkbenchReviewItem {
@@ -11,6 +13,8 @@ export interface WorkbenchReviewItem {
 }
 
 export const WORKBENCH_SPAN_CONTEXT_CHARS = 400;
+/** 按场创编的 plan 与成稿都只发单窗；超过这个字数的范围由前端先行拦截提示。 */
+export const WORKBENCH_SCENE_MAX_RANGE_CHARS = 5200;
 
 const WORKBENCH_REVIEW_KINDS = new Set<WorkbenchReviewKind>(['pose', 'vocab', 'regression']);
 const ADDITIVE_REVIEW_INSTRUCTION = /加深|写细|更浓|再补细节|补接吻|更色/;
@@ -212,4 +216,70 @@ export function describeWorkbenchRangeBinding(input: {
     return `成稿仍按 ${committed}；当前划选 ${selected} 只影响下次生成`;
   }
   return `成稿范围 ${committed}`;
+}
+
+export function isSceneRewriteMode(mode: WorkbenchCreationMode): boolean {
+  return mode === 'scene';
+}
+
+/** 按场创编没有感官/文笔档位，但 draft 接口仍要求 profile，统一按日常文笔上报。 */
+export function resolveWorkbenchDraftProfile(mode: WorkbenchCreationMode): WorkbenchProfile {
+  return mode === 'scene' ? 'prose' : mode;
+}
+
+/** 步骤机：两个直出档 4 步；按场创编在「划范围」后多一个「创编方案」步骤。 */
+export function resolveWorkbenchCreationSteps(
+  mode: WorkbenchCreationMode
+): Array<{ key: WorkbenchStepKey; label: string }> {
+  return [
+    { key: 'range', label: '划范围' },
+    ...(isSceneRewriteMode(mode) ? [{ key: 'plan' as const, label: '创编方案' }] : []),
+    { key: 'generate', label: '生成' },
+    { key: 'review', label: '检查/点句' },
+    { key: 'apply', label: '应用' },
+  ];
+}
+
+/** 按场创编只做单窗；超窗时返回给作者看的提示，未超窗返回 null。 */
+export function describeSceneRangeOverflow(rangeChars: number): string | null {
+  if (rangeChars <= WORKBENCH_SCENE_MAX_RANGE_CHARS) {
+    return null;
+  }
+  return `按场创编一次最多约 ${WORKBENCH_SCENE_MAX_RANGE_CHARS} 字，当前范围 ${rangeChars} 字。请把范围划小一点再试。`;
+}
+
+export function canConfirmWorkbenchPlan(planText: string): boolean {
+  return Boolean(planText.trim());
+}
+
+/** 生成按钮的放行条件：直出档沿用旧口径；创编档还要求「方案已确认」且范围不超窗。 */
+export function canGenerateWorkbenchDraft(input: {
+  mode: WorkbenchCreationMode;
+  hasRange: boolean;
+  rangeChars: number;
+  instruction: string;
+  planConfirmed: boolean;
+  busy: boolean;
+}): boolean {
+  if (input.busy || !input.hasRange || !input.instruction.trim()) {
+    return false;
+  }
+  if (!isSceneRewriteMode(input.mode)) {
+    return true;
+  }
+  if (describeSceneRangeOverflow(input.rangeChars)) {
+    return false;
+  }
+  return input.planConfirmed;
+}
+
+/** 直出档返回空对象，保证旧请求体不变；创编档附带 mode 与已确认方案。 */
+export function buildWorkbenchDraftModeFields(
+  mode: WorkbenchCreationMode,
+  planText: string
+): { mode?: 'from-plan'; planText?: string } {
+  if (!isSceneRewriteMode(mode)) {
+    return {};
+  }
+  return { mode: 'from-plan', planText };
 }

@@ -14,7 +14,7 @@
 
 ## 3. 前端创编流程
 
-- [ ] 3.1 `ChapterOptimizeWorkbenchDialog.vue` + `services/api.ts`：range 步骤增加第三模式「按场创编」；选中后步骤机进入 `range → plan → generate → review → apply`；plan 步骤流式渲染可编辑方案，提供「确认方案/重新生成/编辑后确认」，未确认禁止生成；提交 draft 带 `mode=from-plan` 与 `planText`；两直出档跳过 plan 步骤；范围超约 5200 字时发起前提示划小；AC：组件测覆盖模式切换、未确认不可生成、确认后带参发起、直出档无 plan 步骤
+- [x] 3.1 `ChapterOptimizeWorkbenchDialog.vue` + `services/api.ts`：range 步骤增加第三模式「按场创编」；选中后步骤机进入 `range → plan → generate → review → apply`；plan 步骤流式渲染可编辑方案，提供「确认方案/重新生成/编辑后确认」，未确认禁止生成；提交 draft 带 `mode=from-plan` 与 `planText`；两直出档跳过 plan 步骤；范围超约 5200 字时发起前提示划小；AC：组件测覆盖模式切换、未确认不可生成、确认后带参发起、直出档无 plan 步骤
 - [ ] 3.2 创编模式成稿后复用现有 review（前端按全开 kind 口径展示与过滤）、fix-span（锚点唯一命中）、范围对照与整章 apply（乐观锁）；不新增应用路径；AC：组件测覆盖检查条目过滤、点修拼回、应用载荷为整章且范围外字节不变；旧两档同路径测试保持通过
 - [ ] 3.3 回归保护：`ChapterOptimizeDialog.vue` 相关单测（from-plan/direct/auto-loop）与工作台旧两档 e2e/smoke 全部保持通过，证明旧行为零改动；AC：`pnpm --filter @aether-quill/web test` 与 e2e（若本地可跑）通过，失败项为零
 

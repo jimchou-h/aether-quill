@@ -1,18 +1,25 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  buildWorkbenchDraftModeFields,
+  canConfirmWorkbenchPlan,
+  canGenerateWorkbenchDraft,
   describeInvalidWorkbenchRange,
+  describeSceneRangeOverflow,
+  describeWorkbenchRangeBinding,
   filterWorkbenchReviewItems,
   filterWorkbenchReviewItemsForProfile,
+  isNearCopyWorkbenchDraft,
   locateUniqueAnchor,
   normalizeWorkbenchReviewItems,
   applyWorkbenchSseEndText,
-  describeWorkbenchRangeBinding,
-  isNearCopyWorkbenchDraft,
   resolveWorkbenchApplyOffsets,
+  resolveWorkbenchCreationSteps,
+  resolveWorkbenchDraftProfile,
   resolveWorkbenchSseEndText,
   sliceSpanNeighborhood,
   spliceChapterRange,
+  WORKBENCH_SCENE_MAX_RANGE_CHARS,
   type WorkbenchReviewItem,
 } from './chapterOptimizeWorkbench';
 
@@ -233,5 +240,95 @@ describe('applyWorkbenchSseEndText', () => {
 
   it('uses end text when the server sent a different final draft', () => {
     assert.equal(applyWorkbenchSseEndText('流式半截', '完整成稿'), '完整成稿');
+  });
+});
+
+describe('resolveWorkbenchCreationSteps', () => {
+  it('keeps four steps without a plan step for the two direct tiers', () => {
+    for (const mode of ['sex', 'prose'] as const) {
+      const keys = resolveWorkbenchCreationSteps(mode).map((entry) => entry.key);
+      assert.deepEqual(keys, ['range', 'generate', 'review', 'apply']);
+      assert.equal(keys.includes('plan'), false);
+    }
+  });
+
+  it('inserts a plan step right after range for scene rewrite', () => {
+    assert.deepEqual(
+      resolveWorkbenchCreationSteps('scene').map((entry) => entry.key),
+      ['range', 'plan', 'generate', 'review', 'apply']
+    );
+  });
+});
+
+describe('resolveWorkbenchDraftProfile', () => {
+  it('maps the scene mode onto the prose tier for the draft endpoint', () => {
+    assert.equal(resolveWorkbenchDraftProfile('scene'), 'prose');
+    assert.equal(resolveWorkbenchDraftProfile('sex'), 'sex');
+    assert.equal(resolveWorkbenchDraftProfile('prose'), 'prose');
+  });
+});
+
+describe('describeSceneRangeOverflow', () => {
+  it('stays silent at or under one window and warns above it', () => {
+    assert.equal(describeSceneRangeOverflow(WORKBENCH_SCENE_MAX_RANGE_CHARS), null);
+    const hint = describeSceneRangeOverflow(WORKBENCH_SCENE_MAX_RANGE_CHARS + 1);
+    assert.match(String(hint), /5200/);
+    assert.match(String(hint), /划小/);
+  });
+});
+
+describe('canConfirmWorkbenchPlan', () => {
+  it('requires a non-blank plan', () => {
+    assert.equal(canConfirmWorkbenchPlan(''), false);
+    assert.equal(canConfirmWorkbenchPlan('   \n'), false);
+    assert.equal(canConfirmWorkbenchPlan('第一拍删除，第二拍扩写。'), true);
+  });
+});
+
+describe('canGenerateWorkbenchDraft', () => {
+  const base = {
+    hasRange: true,
+    rangeChars: 800,
+    instruction: '把这一场改写得更紧凑',
+    busy: false,
+  };
+
+  it('keeps the direct behaviour: instruction + range + not busy', () => {
+    assert.equal(canGenerateWorkbenchDraft({ ...base, mode: 'prose', planConfirmed: false }), true);
+    assert.equal(canGenerateWorkbenchDraft({ ...base, mode: 'prose', instruction: '  ' }), false);
+  });
+
+  it('blocks scene rewrite until the plan is confirmed', () => {
+    assert.equal(
+      canGenerateWorkbenchDraft({ ...base, mode: 'scene', planConfirmed: false }),
+      false
+    );
+    assert.equal(canGenerateWorkbenchDraft({ ...base, mode: 'scene', planConfirmed: true }), true);
+  });
+
+  it('blocks scene rewrite when the range exceeds one window', () => {
+    assert.equal(
+      canGenerateWorkbenchDraft({
+        ...base,
+        mode: 'scene',
+        rangeChars: WORKBENCH_SCENE_MAX_RANGE_CHARS + 1,
+        planConfirmed: true,
+      }),
+      false
+    );
+  });
+});
+
+describe('buildWorkbenchDraftModeFields', () => {
+  it('sends nothing extra for the direct tiers so the legacy body is unchanged', () => {
+    assert.deepEqual(buildWorkbenchDraftModeFields('prose', '忽略'), {});
+    assert.deepEqual(buildWorkbenchDraftModeFields('sex', ''), {});
+  });
+
+  it('sends mode=from-plan plus the confirmed plan text for scene rewrite', () => {
+    assert.deepEqual(buildWorkbenchDraftModeFields('scene', '已确认方案'), {
+      mode: 'from-plan',
+      planText: '已确认方案',
+    });
   });
 });
