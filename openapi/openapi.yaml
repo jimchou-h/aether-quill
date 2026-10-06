@@ -115,6 +115,8 @@ paths:
     $ref: './paths/projects/chapter-optimize-review.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/continuity-review:
     $ref: './paths/projects/chapter-optimize-continuity-review.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/plan:
+    $ref: './paths/projects/chapter-optimize-workbench-plan.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/draft:
     $ref: './paths/projects/chapter-optimize-workbench-draft.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/workbench/review:
@@ -2296,6 +2298,23 @@ components:
           maxLength: 20000
         profile:
           $ref: '#/components/schemas/ChapterOptimizeWorkbenchProfile'
+        mode:
+          type: string
+          enum: [direct, from-plan]
+          default: direct
+          description: |
+            Draft strategy. `direct` (default) preserves the existing behaviour: the range draft is
+            generated straight from `instruction` using the tier template. `from-plan` generates the
+            range draft from an author-confirmed scene plan, so `planText` is required and the scene
+            draft template is used. This is additive: omitting `mode` MUST keep the legacy `direct`
+            behaviour byte-for-byte, and it is unrelated to `/optimize/draft` `rewriteMode`.
+        planText:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: |
+            Author-confirmed scene plan (the editable output of `/optimize/workbench/plan`).
+            Required when `mode` is `from-plan`; ignored otherwise.
         startOffset:
           type: integer
           minimum: 0
@@ -2327,6 +2346,55 @@ components:
             neighbors MUST NOT be rewritten or emitted. A long sliced range MAY be rewritten
             as sequential continuation windows of the same scene; the client still receives
             one concatenated range draft.
+    ChapterOptimizeWorkbenchPlanRequest:
+      type: object
+      required:
+        - instruction
+        - startOffset
+        - endOffset
+        - baseUpdatedAt
+        - sourceText
+      properties:
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: Author requirement for how the drawn scene should change.
+        profile:
+          $ref: '#/components/schemas/ChapterOptimizeWorkbenchProfile'
+          description: |
+            Optional and accepted for parity with the workbench session. The scene plan is generated
+            by a fixed dedicated template, independent of sensory/prose tiers.
+        startOffset:
+          type: integer
+          minimum: 0
+          description: Inclusive UTF-16 code unit offset into `sourceText` (same as JavaScript String).
+        endOffset:
+          type: integer
+          minimum: 1
+          description: |
+            Exclusive UTF-16 code unit offset into `sourceText`. MUST be greater than `startOffset`.
+            The sliced range MUST be non-empty and MUST fit a single window (~5200 UTF-16 units);
+            an oversized range is rejected with 400 instead of being split.
+        baseUpdatedAt:
+          type: string
+          format: date-time
+          description: |
+            ISO timestamp of the chapter when the workbench session opened. Round-tripped to apply;
+            plan generation does not overwrite the stored chapter.
+        appearingCharacters:
+          type: array
+          items:
+            type: string
+        sourceText:
+          type: string
+          minLength: 1
+          maxLength: 200000
+          description: |
+            Frozen full-chapter snapshot taken when the workbench opened. The server slices
+            `[startOffset, endOffset)` as the plan target, and also attaches up to 2000
+            UTF-16 units immediately before and after as read-only stitch context. Those
+            neighbors MUST NOT be planned for rewriting.
     ChapterOptimizeWorkbenchReviewRequest:
       type: object
       required:

@@ -1,0 +1,79 @@
+post:
+  tags:
+    - Projects
+  summary: Stream scene-workbench range plan (SSE)
+  description: |
+    Stream an editable rewrite plan for a user-drawn continuous range ("按场创编" mode). Unlike
+    `/optimize/workbench/draft`, this endpoint does not produce prose: it produces a structural
+    plan that the author confirms/edits before any draft is generated. The plan owns the same
+    structural freedom as a full-chapter plan (delete / add / reorder / expand beats) but is
+    strictly locked to the drawn range.
+
+    The client sends a frozen full-chapter `sourceText` plus UTF-16 `startOffset` / `endOffset`;
+    the server slices that range as the plan target and attaches up to 2000 UTF-16 units
+    before/after as read-only stitch context. The plan MUST NOT propose changes outside the range.
+
+    `profile` is accepted but optional; the scene plan is generated with a fixed dedicated
+    template (`chapter.optimize.workbench-plan-scene`) independent of sensory/prose tiers.
+
+    This path is additive. It MUST NOT change `/optimize/plan` semantics or the
+    `/optimize/workbench/draft` `rewriteMode` enum.
+
+    SSE event sequence:
+      - `data: {"event":"stage","stage":"syncing_context|retrieving|waiting_llm","segmentIndex":1,"segmentTotal":1}` (prep; may arrive before `start`)
+      - `data: {"event":"start","traceId":"...","chapterNo":N}`
+      - `data: {"event":"content","data":"...","traceId":"..."}` (multiple; newlines escaped as `\\n`)
+      - `data: {"event":"end","traceId":"...","planText":"..."}`
+      - `data: {"event":"error","data":"...","traceId":"..."}`
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterOptimizeWorkbenchPlanRequest'
+  responses:
+    '200':
+      description: SSE stream of plan chunks and the final editable plan text
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: Server-Sent Events stream of plan generation events
+    '400':
+      description: Invalid request (empty instruction, inverted offsets, empty range, or multi-window range)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Scene plan generation failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
