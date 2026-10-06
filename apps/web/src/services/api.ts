@@ -617,6 +617,38 @@ export const apiClient = {
     return this.unwrapPayload<{ id: string }>(response.data);
   },
 
+  async getEventCards(projectId: string, params: { chapterNo?: number } = {}) {
+    const response = await http.get(`/api/projects/${projectId}/event-cards`, { params });
+    return this.unwrapPayload<EventCardItem[]>(response.data);
+  },
+
+  async updateEventCard(
+    projectId: string,
+    cardId: string,
+    payload: {
+      beat?: string;
+      entities?: string[];
+      kind?: EventCardKind;
+      status?: EventCardStatus;
+      evidence?: string;
+    }
+  ) {
+    const response = await http.put(`/api/projects/${projectId}/event-cards/${cardId}`, payload);
+    return this.unwrapPayload<EventCardItem>(response.data);
+  },
+
+  async deleteEventCard(projectId: string, cardId: string) {
+    const response = await http.delete(`/api/projects/${projectId}/event-cards/${cardId}`);
+    return this.unwrapPayload<{ id: string; deleted: boolean }>(response.data);
+  },
+
+  async generateChapterEventCards(projectId: string, chapterNo: number) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/event-cards/generate`
+    );
+    return this.unwrapPayload<{ chapterNo: number; cards: EventCardItem[] }>(response.data);
+  },
+
   async listWritingStyleSamples(projectId: string) {
     const response = await http.get(`/api/projects/${projectId}/writing-style-samples`);
     return this.unwrapPayload<WritingStyleSample[]>(response.data);
@@ -2561,6 +2593,31 @@ export interface RelationEventItem {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+}
+
+export type EventCardKind =
+  | 'foreshadow'
+  | 'relation'
+  | 'ability'
+  | 'promise'
+  | 'object'
+  | 'other';
+export type EventCardStatus = 'open' | 'paid' | 'fact';
+export type EventCardSource = 'auto' | 'user_edit';
+
+export interface EventCardItem {
+  id: string;
+  projectId: string;
+  chapterNo: number;
+  beat: string;
+  entities: string[];
+  kind: EventCardKind;
+  status: EventCardStatus;
+  evidence: string;
+  source: EventCardSource;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
 }
 
 export interface ChapterImportPersonaBootstrap {

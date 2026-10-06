@@ -1,0 +1,78 @@
+put:
+  tags:
+    - Projects
+  summary: Update an event card
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: cardId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/EventCardUpdateInput'
+  responses:
+    '200':
+      description: Updated
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/EventCard'
+    '400':
+      description: Invalid
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+
+delete:
+  tags:
+    - Projects
+  summary: Soft-delete an event card
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: cardId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Deleted
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Envelope'
+    '404':
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

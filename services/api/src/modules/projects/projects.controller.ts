@@ -143,6 +143,8 @@ export class ProjectsController {
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      eventCardMemoryEnabled?: boolean;
+      generateEventCardsOnSave?: boolean;
       parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
@@ -309,6 +311,17 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
     return this.projectsService.generateChapterRelationEvents(id, Number(chapterNo), userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/knowledge/chapters/:chapterNo/event-cards/generate')
+  generateChapterEventCards(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.generateChapterEventCards(id, Number(chapterNo), userId);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -1028,6 +1041,49 @@ export class ProjectsController {
   ) {
     const userId = req.user?.userId;
     return this.projectsService.deleteRelationEvent(id, eventId, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/event-cards')
+  listEventCards(
+    @Param('id') id: string,
+    @Query('chapterNo') chapterNo: string | undefined,
+    @Request() req: AuthenticatedRequest
+  ) {
+    const parsed = Number(chapterNo);
+    return this.projectsService.listEventCards(
+      id,
+      Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
+      req.user?.userId
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put(':id/event-cards/:cardId')
+  updateEventCard(
+    @Param('id') id: string,
+    @Param('cardId') cardId: string,
+    @Body()
+    data: {
+      beat?: string;
+      entities?: string[];
+      kind?: string;
+      status?: string;
+      evidence?: string;
+    },
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.projectsService.updateEventCard(id, cardId, data, req.user?.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id/event-cards/:cardId')
+  deleteEventCard(
+    @Param('id') id: string,
+    @Param('cardId') cardId: string,
+    @Request() req: AuthenticatedRequest
+  ) {
+    return this.projectsService.deleteEventCard(id, cardId, req.user?.userId);
   }
 
   @UseGuards(JwtAuthGuard)

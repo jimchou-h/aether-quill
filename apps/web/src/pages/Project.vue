@@ -35,6 +35,7 @@ import {
   FileTextOutlined,
   SettingOutlined,
   TeamOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons-vue';
 
 const route = useRoute();
@@ -45,6 +46,7 @@ const navItems = [
   { path: 'knowledge', label: '知识库', icon: BookOutlined },
   { path: 'personas', label: '人物设定', icon: TeamOutlined },
   { path: 'relation-events', label: '关系事件', icon: ClusterOutlined },
+  { path: 'event-cards', label: '事件卡', icon: UnorderedListOutlined },
   { path: 'chapters', label: '章节', icon: FileTextOutlined },
   { path: 'settings', label: '设置', icon: SettingOutlined },
 ];

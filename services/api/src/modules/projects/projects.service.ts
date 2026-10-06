@@ -33,6 +33,8 @@ import {
   resolveChapterSummaryOnOptimizeApply,
   type ChapterSummarySource,
 } from './chapter-summary.util';
+import { EventCardsService } from './event-cards.service';
+import { isEventCardKind, isEventCardStatus } from './event-card.util';
 import {
   isRetryableChapterSummaryIndexError,
   resolveChapterSummaryIndexDelayMs,
@@ -269,6 +271,13 @@ export interface ProjectSettings {
   updatePersonaOnSave: boolean;
   /** 保存章节时自动生成关系事件 */
   generateRelationEventsOnSave: boolean;
+  /**
+   * 事件卡跨章记忆注入开关（默认 false）。
+   * 关闭时文笔优化/续写行为与现网一致，仅不注入【跨章记忆】。
+   */
+  eventCardMemoryEnabled: boolean;
+  /** 保存/应用改写后自动抽取事件卡（建议与 eventCardMemoryEnabled 同开） */
+  generateEventCardsOnSave: boolean;
   /** 保存章节时自动解析结构化信息（matchingText） */
   parseStructuredInfoOnSave: boolean;
   /** 章节优化方案分段字数；0 表示不按字数分段 */
@@ -449,6 +458,7 @@ type RestoredWorkspace = {
   indexJobs: Record<string, IndexJobRecord[]>;
   summarizeJobs: Record<string, SummaryJobRecord[]>;
   relationEvents: Record<string, RelationEventRecord[]>;
+  eventCards: Record<string, import('./event-card.util').EventCardRecord[]>;
   identityRelations: Record<string, PersonaIdentityRelationRecord[]>;
 };
 
@@ -499,7 +509,8 @@ export class ProjectsService implements OnModuleInit {
     private readonly promptTemplatesService: PromptTemplatesService,
     @Inject(forwardRef(() => TaskPromptsService))
     private readonly taskPromptsService: TaskPromptsService,
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    private readonly eventCardsService: EventCardsService
   ) {
     this.persistenceReady = new Promise<void>((resolve) => {
       this.persistenceResolve = resolve;
@@ -727,6 +738,8 @@ export class ProjectsService implements OnModuleInit {
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      eventCardMemoryEnabled?: boolean;
+      generateEventCardsOnSave?: boolean;
       parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
@@ -843,6 +856,14 @@ export class ProjectsService implements OnModuleInit {
 
     if (payload.generateRelationEventsOnSave !== undefined) {
       settings.generateRelationEventsOnSave = payload.generateRelationEventsOnSave;
+    }
+
+    if (payload.eventCardMemoryEnabled !== undefined) {
+      settings.eventCardMemoryEnabled = payload.eventCardMemoryEnabled;
+    }
+
+    if (payload.generateEventCardsOnSave !== undefined) {
+      settings.generateEventCardsOnSave = payload.generateEventCardsOnSave;
     }
 
     if (payload.parseStructuredInfoOnSave !== undefined) {
@@ -1317,6 +1338,7 @@ export class ProjectsService implements OnModuleInit {
           structuredInfo: settings.parseStructuredInfoOnSave !== false,
           persona: settings.updatePersonaOnSave !== false,
           relationEvents: settings.generateRelationEventsOnSave !== false,
+          eventCards: settings.generateEventCardsOnSave === true,
         }
       );
       this.relinkRelationEventsForProject(projectId);
@@ -1367,7 +1389,12 @@ export class ProjectsService implements OnModuleInit {
     chapterNo: number,
     content: string,
     title: string,
-    selected: { persona: boolean; relationEvents: boolean; structuredInfo: boolean }
+    selected: {
+      persona: boolean;
+      relationEvents: boolean;
+      structuredInfo: boolean;
+      eventCards?: boolean;
+    }
   ) {
     if (selected.structuredInfo) {
       try {
@@ -1384,6 +1411,13 @@ export class ProjectsService implements OnModuleInit {
         await this.generateChapterRelationEvents(projectId, chapterNo);
       } catch {
         // 自动生成失败不影响章节保存
+      }
+    }
+    if (selected.eventCards) {
+      try {
+        await this.generateChapterEventCards(projectId, chapterNo);
+      } catch {
+        // 自动抽卡失败不影响章节保存
       }
     }
   }
@@ -2069,6 +2103,79 @@ export class ProjectsService implements OnModuleInit {
       skippedCount,
       events: createdEvents,
     };
+  }
+
+  async generateChapterEventCards(projectId: string, chapterNo: number, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = Number(chapterNo);
+    if (!Number.isFinite(normalizedChapterNo) || normalizedChapterNo <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到章节: ${normalizedChapterNo}`);
+    }
+
+    const personas = this.personasStore.get(projectId)!;
+    const cards = await this.eventCardsService.generateForChapter({
+      projectId,
+      chapterNo: normalizedChapterNo,
+      title: chapter.title,
+      content: chapter.content,
+      personaNames: personas.map((item) => item.name).filter(Boolean),
+      orchestratorUrl: this.getRagOrchestratorUrl(),
+    });
+    this.persistState();
+    return { chapterNo: normalizedChapterNo, cards };
+  }
+
+  listEventCards(projectId: string, chapterNo?: number, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+    return this.eventCardsService.list(projectId, chapterNo);
+  }
+
+  updateEventCard(
+    projectId: string,
+    cardId: string,
+    payload: {
+      beat?: string;
+      entities?: string[];
+      kind?: string;
+      status?: string;
+      evidence?: string;
+    },
+    userId?: string
+  ) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+    const card = this.eventCardsService.update(projectId, cardId, payload);
+    this.persistState();
+    return card;
+  }
+
+  deleteEventCard(projectId: string, cardId: string, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+    this.eventCardsService.softDelete(projectId, cardId);
+    this.persistState();
+    return { id: cardId, deleted: true };
   }
 
   getRelationEvents(
@@ -3678,6 +3785,13 @@ export class ProjectsService implements OnModuleInit {
         chapter.title
       );
     }
+    if (settingsForApply.generateEventCardsOnSave === true) {
+      try {
+        await this.generateChapterEventCards(projectId, normalizedChapterNo);
+      } catch {
+        // 抽卡失败不阻断 apply
+      }
+    }
     this.relinkRelationEventsForProject(projectId);
     await this.persistStateAndAwaitPgSync({
       type: 'chapter',
@@ -3905,6 +4019,7 @@ export class ProjectsService implements OnModuleInit {
       indexJobs: {},
       summarizeJobs: {},
       relationEvents: {},
+      eventCards: {},
       identityRelations: {},
     };
 
@@ -3975,6 +4090,8 @@ export class ProjectsService implements OnModuleInit {
       }));
     }
 
+    payload.eventCards = this.eventCardsService.serializeAll();
+
     for (const [projectId, relations] of this.identityRelationsStore.entries()) {
       payload.identityRelations[projectId] = relations.map((relation) => ({
         ...relation,
@@ -4041,6 +4158,8 @@ export class ProjectsService implements OnModuleInit {
             generationTemperature: clampGenerationTemperature(value.generationTemperature),
             updatePersonaOnSave: value.updatePersonaOnSave ?? true,
             generateRelationEventsOnSave: value.generateRelationEventsOnSave ?? true,
+            eventCardMemoryEnabled: value.eventCardMemoryEnabled ?? false,
+            generateEventCardsOnSave: value.generateEventCardsOnSave ?? false,
             parseStructuredInfoOnSave: value.parseStructuredInfoOnSave ?? true,
             chapterOptimizeSegmentCharSize: clampChapterOptimizeSegmentCharSize(
               value.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
@@ -4181,6 +4300,25 @@ export class ProjectsService implements OnModuleInit {
           }),
         ])
       ),
+      eventCards: Object.fromEntries(
+        Object.entries(parsed.eventCards || {}).map(([projectId, cards]) => [
+          projectId,
+          (cards || []).map((card) => ({
+            id: card.id,
+            projectId: card.projectId,
+            chapterNo: card.chapterNo,
+            beat: card.beat,
+            entities: Array.isArray(card.entities) ? card.entities.map(String) : [],
+            kind: isEventCardKind(card.kind) ? card.kind : 'other',
+            status: isEventCardStatus(card.status) ? card.status : 'fact',
+            evidence: typeof card.evidence === 'string' ? card.evidence : '',
+            source: card.source === 'user_edit' ? 'user_edit' : 'auto',
+            createdAt: new Date(card.createdAt),
+            updatedAt: new Date(card.updatedAt),
+            deletedAt: card.deletedAt ? new Date(card.deletedAt) : null,
+          })),
+        ])
+      ),
       identityRelations: Object.fromEntries(
         Object.entries(parsed.identityRelations || {}).map(([projectId, relations]) => [
           projectId,
@@ -4214,6 +4352,7 @@ export class ProjectsService implements OnModuleInit {
     this.summarizeJobsStore.clear();
     this.relationEventsStore.clear();
     this.identityRelationsStore.clear();
+    this.eventCardsService.clearAll();
     this.hydrateMap(this.settingsStore, restored.settings);
     this.hydrateMap(this.personasStore, restored.personas);
     this.hydrateMap(this.knowledgeStore, restored.knowledge);
@@ -4221,6 +4360,9 @@ export class ProjectsService implements OnModuleInit {
     this.hydrateMap(this.summarizeJobsStore, restored.summarizeJobs);
     this.hydrateMap(this.relationEventsStore, restored.relationEvents);
     this.hydrateMap(this.identityRelationsStore, restored.identityRelations ?? {});
+    for (const [projectId, cards] of Object.entries(restored.eventCards ?? {})) {
+      this.eventCardsService.hydrate(projectId, cards);
+    }
   }
 
   private hydrateMap<T>(target: Map<string, T>, source: Record<string, T>) {
@@ -4660,6 +4802,8 @@ export class ProjectsService implements OnModuleInit {
         generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
         updatePersonaOnSave: true,
         generateRelationEventsOnSave: true,
+        eventCardMemoryEnabled: false,
+        generateEventCardsOnSave: false,
         parseStructuredInfoOnSave: true,
         chapterOptimizeSegmentCharSize: DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
         contentSafetyScanEnabled: true,
@@ -4702,6 +4846,8 @@ export class ProjectsService implements OnModuleInit {
       this.relationEventsStore.set(projectId, []);
     }
 
+    this.eventCardsService.ensureProject(projectId);
+
     if (!this.identityRelationsStore.has(projectId)) {
       this.identityRelationsStore.set(projectId, []);
     }
@@ -4735,6 +4881,12 @@ export class ProjectsService implements OnModuleInit {
     }
     if (settings.generateRelationEventsOnSave === undefined) {
       settings.generateRelationEventsOnSave = true;
+    }
+    if (settings.eventCardMemoryEnabled === undefined) {
+      settings.eventCardMemoryEnabled = false;
+    }
+    if (settings.generateEventCardsOnSave === undefined) {
+      settings.generateEventCardsOnSave = false;
     }
     if (settings.parseStructuredInfoOnSave === undefined) {
       settings.parseStructuredInfoOnSave = true;
@@ -4778,6 +4930,8 @@ export class ProjectsService implements OnModuleInit {
       generationTemperature: settings.generationTemperature,
       updatePersonaOnSave: settings.updatePersonaOnSave,
       generateRelationEventsOnSave: settings.generateRelationEventsOnSave,
+      eventCardMemoryEnabled: settings.eventCardMemoryEnabled,
+      generateEventCardsOnSave: settings.generateEventCardsOnSave,
       parseStructuredInfoOnSave: settings.parseStructuredInfoOnSave,
       chapterOptimizeSegmentCharSize: settings.chapterOptimizeSegmentCharSize,
       contentSafetyScanEnabled: settings.contentSafetyScanEnabled,
@@ -5540,6 +5694,8 @@ export class ProjectsService implements OnModuleInit {
               ...item,
             })
           ),
+          eventCardMemoryEnabled: settings.eventCardMemoryEnabled === true,
+          eventCards: this.eventCardsService.listForContext(projectId),
         },
         { timeout: 120_000 }
       );

@@ -829,6 +829,106 @@ export class GenerationService {
     return this.parseRelationEventsFromModelContent(result.content);
   }
 
+  async extractChapterEventCards(input: {
+    chapterNo: number;
+    title: string;
+    content: string;
+    personaNames: string[];
+  }): Promise<
+    Array<{
+      beat: string;
+      entities: string[];
+      kind: string;
+      status: string;
+      evidence: string;
+    }>
+  > {
+    const prompt = [
+      '你是长篇小说的「跨章记忆」抽取器。',
+      '任务：从本章正文抽出 3~8 条后续章节可能回扣的硬事实事件卡。',
+      '只抽：能力边界、把柄/承诺、关系转折、未回收伏笔、关键物件/地点规则。',
+      '不要抽：氛围、床戏感官堆叠、形容词描写。',
+      '只输出 JSON：{"cards":[{"beat":"≤80字硬事实","entities":["人物"],"kind":"foreshadow|relation|ability|promise|object|other","status":"open|paid|fact","evidence":"原文锚点80~200字"}]}',
+      'foreshadow/promise 默认 status=open；其它默认 fact。',
+      '',
+      `章节：第${input.chapterNo}章「${input.title}」`,
+      input.personaNames.length ? `已知人物：${input.personaNames.join('、')}` : '',
+      '正文：',
+      input.content.trim().slice(0, 24000),
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const profile = this.resolveUtilityCallProfile();
+    const result = await this.callProviderApi(prompt, {
+      maxTokens: 2048,
+      temperature: profile.temperature,
+      model: profile.model,
+      provider: profile.provider,
+    });
+    return this.parseEventCardsFromModelContent(result.content);
+  }
+
+  private parseEventCardsFromModelContent(content: string): Array<{
+    beat: string;
+    entities: string[];
+    kind: string;
+    status: string;
+    evidence: string;
+  }> {
+    const trimmed = content.trim();
+    if (!trimmed) {
+      return [];
+    }
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const jsonText = fenced ? fenced[1].trim() : trimmed;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(jsonText);
+    } catch {
+      return [];
+    }
+    const list = Array.isArray(payload)
+      ? payload
+      : payload && typeof payload === 'object' && Array.isArray((payload as { cards?: unknown }).cards)
+        ? ((payload as { cards: unknown[] }).cards ?? [])
+        : [];
+    const out: Array<{
+      beat: string;
+      entities: string[];
+      kind: string;
+      status: string;
+      evidence: string;
+    }> = [];
+    for (const item of list) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const record = item as Record<string, unknown>;
+      const beat = typeof record.beat === 'string' ? record.beat.trim().slice(0, 80) : '';
+      if (!beat) {
+        continue;
+      }
+      const entities = Array.isArray(record.entities)
+        ? record.entities
+            .map((e) => (typeof e === 'string' ? e.trim() : ''))
+            .filter(Boolean)
+            .slice(0, 12)
+        : [];
+      out.push({
+        beat,
+        entities,
+        kind: typeof record.kind === 'string' ? record.kind : 'other',
+        status: typeof record.status === 'string' ? record.status : 'fact',
+        evidence: typeof record.evidence === 'string' ? record.evidence.trim().slice(0, 200) : '',
+      });
+      if (out.length >= 8) {
+        break;
+      }
+    }
+    return out;
+  }
+
   buildStructuredInfoExtractPrompt(input: {
     mode: 'workbench' | 'chapter';
     sourceText: string;

@@ -13,6 +13,7 @@ const invalidProjectIdAliases = new Set([
   'chapters',
   'personas',
   'relation-events',
+  'event-cards',
   'members',
   'workspace',
   'export',
@@ -95,6 +96,11 @@ const router = createRouter({
           path: 'relation-events',
           name: 'relation-events',
           component: () => import('../pages/RelationEvents.vue'),
+        },
+        {
+          path: 'event-cards',
+          name: 'event-cards',
+          component: () => import('../pages/EventCards.vue'),
         },
         // 项目设置
         {

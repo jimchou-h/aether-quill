@@ -54,6 +54,7 @@ model Project {
   indexJobs        IndexJob[]
   summaryJobs      SummaryJob[]
   relationEvents   RelationEvent[]
+  eventCards       EventCard[]
   promptTemplates  PromptTemplate[]
 
   @@map("projects")
@@ -164,6 +165,26 @@ model RelationEvent {
 
   @@index([projectId], map: "relation_events_project_id_idx")
   @@map("relation_events")
+}
+
+model EventCard {
+  id         String    @id @map("id")
+  projectId  String    @map("project_id")
+  chapterNo  Int       @map("chapter_no")
+  beat       String    @map("beat") @db.Text
+  entities   Json      @map("entities")
+  kind       String    @map("kind")
+  status     String    @map("status")
+  evidence   String    @default("") @map("evidence") @db.Text
+  source     String    @map("source")
+  createdAt  DateTime  @map("created_at")
+  updatedAt  DateTime  @map("updated_at")
+  deletedAt  DateTime? @map("deleted_at")
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId], map: "event_cards_project_id_idx")
+  @@index([projectId, chapterNo], map: "event_cards_project_chapter_idx")
+  @@map("event_cards")
 }
 
 model Document {

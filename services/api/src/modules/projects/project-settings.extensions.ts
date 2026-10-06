@@ -33,6 +33,8 @@ export type ProjectSettingsJsonExtensions = {
   relationMemoMaxChars?: number;
   updatePersonaOnSave?: boolean;
   generateRelationEventsOnSave?: boolean;
+  eventCardMemoryEnabled?: boolean;
+  generateEventCardsOnSave?: boolean;
   chapterOptimizeSegmentCharSize?: number;
   contentSafetyScanEnabled?: boolean;
   contentSafetyCustomRules?: ProjectContentSafetyRule[];
@@ -56,6 +58,8 @@ export function pickProjectSettingsJsonExtensions(
     relationMemoMaxChars: raw.relationMemoMaxChars,
     updatePersonaOnSave: raw.updatePersonaOnSave,
     generateRelationEventsOnSave: raw.generateRelationEventsOnSave,
+    eventCardMemoryEnabled: raw.eventCardMemoryEnabled,
+    generateEventCardsOnSave: raw.generateEventCardsOnSave,
     chapterOptimizeSegmentCharSize: raw.chapterOptimizeSegmentCharSize,
     contentSafetyScanEnabled: raw.contentSafetyScanEnabled,
     ...(Array.isArray(raw.contentSafetyCustomRules)
@@ -100,6 +104,12 @@ export function applyProjectSettingsJsonExtensions<T extends ProjectSettingsJson
   }
   if (extensions.generateRelationEventsOnSave !== undefined) {
     target.generateRelationEventsOnSave = extensions.generateRelationEventsOnSave;
+  }
+  if (extensions.eventCardMemoryEnabled !== undefined) {
+    target.eventCardMemoryEnabled = extensions.eventCardMemoryEnabled;
+  }
+  if (extensions.generateEventCardsOnSave !== undefined) {
+    target.generateEventCardsOnSave = extensions.generateEventCardsOnSave;
   }
   if (extensions.chapterOptimizeSegmentCharSize !== undefined) {
     target.chapterOptimizeSegmentCharSize = clampChapterOptimizeSegmentCharSize(
@@ -171,6 +181,8 @@ export function serializeProjectSettingsForJsonMirror(settings: {
   generationTemperature: number;
   updatePersonaOnSave?: boolean;
   generateRelationEventsOnSave?: boolean;
+  eventCardMemoryEnabled?: boolean;
+  generateEventCardsOnSave?: boolean;
   chapterOptimizeSegmentCharSize?: number;
   contentSafetyScanEnabled?: boolean;
   contentSafetyCustomRules?: ProjectContentSafetyRule[];
@@ -201,6 +213,8 @@ export function serializeProjectSettingsForJsonMirror(settings: {
     generationTemperature: settings.generationTemperature,
     updatePersonaOnSave: settings.updatePersonaOnSave ?? true,
     generateRelationEventsOnSave: settings.generateRelationEventsOnSave ?? true,
+    eventCardMemoryEnabled: settings.eventCardMemoryEnabled ?? false,
+    generateEventCardsOnSave: settings.generateEventCardsOnSave ?? false,
     chapterOptimizeSegmentCharSize: clampChapterOptimizeSegmentCharSize(
       settings.chapterOptimizeSegmentCharSize ?? DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE
     ),
@@ -232,6 +246,8 @@ export const PROJECT_SETTINGS_JSON_EXTENSION_DEFAULTS = {
   relationMemoMaxChars: DEFAULT_RELATION_MEMO_MAX_CHARS,
   updatePersonaOnSave: true,
   generateRelationEventsOnSave: true,
+  eventCardMemoryEnabled: false,
+  generateEventCardsOnSave: false,
   chapterOptimizeSegmentCharSize: DEFAULT_CHAPTER_OPTIMIZE_SEGMENT_CHAR_SIZE,
   contentSafetyScanEnabled: true,
   contentSafetyCustomRules: [] as ProjectContentSafetyRule[],

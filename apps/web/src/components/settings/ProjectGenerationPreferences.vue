@@ -26,6 +26,8 @@ const personaProfileMaxChars = shallowRef(2000);
 const relationMemoMaxChars = shallowRef(2000);
 const updatePersonaOnSave = shallowRef(true);
 const generateRelationEventsOnSave = shallowRef(true);
+const eventCardMemoryEnabled = shallowRef(false);
+const generateEventCardsOnSave = shallowRef(false);
 const contentSafetyScanEnabled = shallowRef(true);
 const contentSafetyCustomRules = shallowRef<ProjectContentSafetyRule[]>([]);
 const chapterOptimizeSegmentCharSize = shallowRef(3000);
@@ -39,6 +41,8 @@ const saved = shallowRef<{
   relationMemoMaxChars: number;
   updatePersonaOnSave: boolean;
   generateRelationEventsOnSave: boolean;
+  eventCardMemoryEnabled: boolean;
+  generateEventCardsOnSave: boolean;
   contentSafetyScanEnabled: boolean;
   contentSafetyCustomRules: ProjectContentSafetyRule[];
   chapterOptimizeSegmentCharSize: number;
@@ -236,6 +240,8 @@ const isDirty = computed(() => {
     relationMemoMaxChars.value !== saved.value.relationMemoMaxChars ||
     updatePersonaOnSave.value !== saved.value.updatePersonaOnSave ||
     generateRelationEventsOnSave.value !== saved.value.generateRelationEventsOnSave ||
+    eventCardMemoryEnabled.value !== saved.value.eventCardMemoryEnabled ||
+    generateEventCardsOnSave.value !== saved.value.generateEventCardsOnSave ||
     contentSafetyScanEnabled.value !== saved.value.contentSafetyScanEnabled ||
     chapterOptimizeSegmentCharSize.value !== saved.value.chapterOptimizeSegmentCharSize ||
     serializeCustomRules(contentSafetyCustomRules.value) !==
@@ -263,6 +269,10 @@ function applyFromSettings(s: ProjectSettings, rulesFallback: ProjectContentSafe
     (s as { relationMemoMaxChars?: number }).relationMemoMaxChars ?? 2000;
   updatePersonaOnSave.value = s.updatePersonaOnSave ?? true;
   generateRelationEventsOnSave.value = s.generateRelationEventsOnSave ?? true;
+  eventCardMemoryEnabled.value =
+    (s as { eventCardMemoryEnabled?: boolean }).eventCardMemoryEnabled ?? false;
+  generateEventCardsOnSave.value =
+    (s as { generateEventCardsOnSave?: boolean }).generateEventCardsOnSave ?? false;
   contentSafetyScanEnabled.value = s.contentSafetyScanEnabled ?? true;
   const rules = resolveCustomRules(s.contentSafetyCustomRules, rulesFallback);
   contentSafetyCustomRules.value = rules;
@@ -278,6 +288,10 @@ function applyFromSettings(s: ProjectSettings, rulesFallback: ProjectContentSafe
     relationMemoMaxChars: (s as { relationMemoMaxChars?: number }).relationMemoMaxChars ?? 2000,
     updatePersonaOnSave: s.updatePersonaOnSave ?? true,
     generateRelationEventsOnSave: s.generateRelationEventsOnSave ?? true,
+    eventCardMemoryEnabled:
+      (s as { eventCardMemoryEnabled?: boolean }).eventCardMemoryEnabled ?? false,
+    generateEventCardsOnSave:
+      (s as { generateEventCardsOnSave?: boolean }).generateEventCardsOnSave ?? false,
     contentSafetyScanEnabled: s.contentSafetyScanEnabled ?? true,
     contentSafetyCustomRules: rules.map((rule) => ({ ...rule })),
     chapterOptimizeSegmentCharSize: s.chapterOptimizeSegmentCharSize ?? 3000,
@@ -363,6 +377,8 @@ async function handleSave() {
       relationMemoMaxChars: relationMemoMaxChars.value,
       updatePersonaOnSave: updatePersonaOnSave.value,
       generateRelationEventsOnSave: generateRelationEventsOnSave.value,
+      eventCardMemoryEnabled: eventCardMemoryEnabled.value,
+      generateEventCardsOnSave: generateEventCardsOnSave.value,
       contentSafetyScanEnabled: contentSafetyScanEnabled.value,
       chapterOptimizeSegmentCharSize: chapterOptimizeSegmentCharSize.value,
       contentSafetyCustomRules: rulesToSave,
@@ -570,6 +586,24 @@ onMounted(() => {
         </label>
       </div>
       <p class="field-hint inline-hint">以上开关仅控制「手动编辑保存」是否弹出后处理确认。</p>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input v-model="eventCardMemoryEnabled" type="checkbox" class="toggle-checkbox" />
+          <span class="toggle-text">启用事件卡跨章记忆注入（续写 / 文笔优化）</span>
+        </label>
+      </div>
+      <p class="field-hint inline-hint">
+        默认关闭。关闭时文笔优化流程与现网一致，不会注入【跨章记忆】。
+      </p>
+
+      <div class="toggle-row">
+        <label class="toggle-label">
+          <input v-model="generateEventCardsOnSave" type="checkbox" class="toggle-checkbox" />
+          <span class="toggle-text">保存章节 / 应用文笔优化后自动抽取事件卡</span>
+        </label>
+      </div>
+      <p class="field-hint inline-hint">建议与「跨章记忆注入」一同开启；也可在事件卡页手动按章抽取。</p>
 
       <div class="toggle-row">
         <label class="toggle-label">

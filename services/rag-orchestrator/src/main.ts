@@ -201,6 +201,18 @@ interface ProjectContext {
   personas?: PersonaContextPayload[];
   /** 项目文风样本库（写作类任务注入 few-shot 参照） */
   writingStyleSamples?: WritingStyleSample[];
+  /** 事件卡跨章记忆（默认关闭注入） */
+  eventCardMemoryEnabled?: boolean;
+  eventCards?: Array<{
+    id: string;
+    chapterNo: number;
+    beat: string;
+    entities: string[];
+    kind: 'foreshadow' | 'relation' | 'ability' | 'promise' | 'object' | 'other';
+    status: 'open' | 'paid' | 'fact';
+    evidence?: string;
+    deletedAt?: string | null;
+  }>;
   updatedAt: string;
 }
 
@@ -305,6 +317,7 @@ async function getGenerationContext(
     includeChapterSummaryMemory?: boolean;
     includeAppearingStaticCards?: boolean;
     appearingCharacters?: string[];
+    eventCardQueryText?: string;
   }
 ): Promise<GenerationContext & { narrativeMeta?: NarrativeContextMeta }> {
   const ctx = getOrCreateContext(projectId);
@@ -335,6 +348,10 @@ async function getGenerationContext(
     includePriorChapterSummaries: options?.includePriorChapterSummaries,
     includeChapterSummaryMemory: options?.includeChapterSummaryMemory,
     includeAppearingStaticCards: options?.includeAppearingStaticCards,
+    eventCardMemoryEnabled: ctx.eventCardMemoryEnabled === true,
+    eventCards: ctx.eventCards,
+    eventCardQueryText:
+      options?.eventCardQueryText ?? chapter?.structuredMatchingText ?? '',
   });
   return {
     systemPromptText: ctx.systemPromptText,
@@ -548,6 +565,40 @@ app.post('/api/extract/relation-events', async (req, res) => {
   }
 });
 
+app.post('/api/extract/event-cards', async (req, res) => {
+  const chapterNo = Number(req.body?.chapterNo || 0);
+  const title = String(req.body?.title || '').trim();
+  const content = String(req.body?.content || '');
+  const personaNames = Array.isArray(req.body?.personaNames)
+    ? req.body.personaNames
+        .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+    : [];
+
+  if (!Number.isFinite(chapterNo) || chapterNo <= 0) {
+    res.status(400).json({ message: 'chapterNo 必须为正整数' });
+    return;
+  }
+
+  if (!content.trim()) {
+    res.status(400).json({ message: 'content 不能为空' });
+    return;
+  }
+
+  try {
+    const cards = await generationService.extractChapterEventCards({
+      chapterNo,
+      title,
+      content,
+      personaNames,
+    });
+    res.json({ cards });
+  } catch (error) {
+    console.error('Event card extraction failed:', error);
+    res.status(502).json({ message: '事件卡抽取失败' });
+  }
+});
+
 app.post('/api/parse/structured-info', async (req, res) => {
   const mode = req.body?.mode;
   const sourceText = typeof req.body?.sourceText === 'string' ? req.body.sourceText : '';
@@ -608,6 +659,52 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   }
   if (Array.isArray(payload.usedRelationEvents)) {
     context.usedRelationEvents = payload.usedRelationEvents;
+  }
+  if (payload.eventCardMemoryEnabled !== undefined) {
+    context.eventCardMemoryEnabled = payload.eventCardMemoryEnabled === true;
+  }
+  if (Array.isArray(payload.eventCards)) {
+    const cards: NonNullable<ProjectContext['eventCards']> = [];
+    for (const row of payload.eventCards as unknown[]) {
+      if (!row || typeof row !== 'object') {
+        continue;
+      }
+      const r = row as Record<string, unknown>;
+      const id = typeof r.id === 'string' ? r.id.trim() : '';
+      const beat = typeof r.beat === 'string' ? r.beat.trim() : '';
+      const chapterNo = Number(r.chapterNo);
+      if (!id || !beat || !Number.isFinite(chapterNo) || chapterNo <= 0) {
+        continue;
+      }
+      const entities = Array.isArray(r.entities)
+        ? r.entities
+            .map((item) => (typeof item === 'string' ? item.trim() : ''))
+            .filter(Boolean)
+        : [];
+      const kind =
+        r.kind === 'foreshadow' ||
+        r.kind === 'relation' ||
+        r.kind === 'ability' ||
+        r.kind === 'promise' ||
+        r.kind === 'object' ||
+        r.kind === 'other'
+          ? r.kind
+          : 'other';
+      const status =
+        r.status === 'open' || r.status === 'paid' || r.status === 'fact' ? r.status : 'fact';
+      cards.push({
+        id,
+        chapterNo,
+        beat,
+        entities,
+        kind,
+        status,
+        evidence: typeof r.evidence === 'string' ? r.evidence : '',
+        deletedAt:
+          typeof r.deletedAt === 'string' || r.deletedAt === null ? (r.deletedAt as string | null) : null,
+      });
+    }
+    context.eventCards = cards;
   }
   if (Array.isArray(payload.knowledgeDocuments)) {
     const docs: KnowledgeDocumentPayload[] = [];
@@ -1071,6 +1168,12 @@ app.post('/api/generate', async (req, res) => {
       includeChapterSummaryMemory: shouldIncludePriorChapterNarrative(tk),
       includeAppearingStaticCards: shouldIncludePriorChapterNarrative(tk),
       appearingCharacters: parseAppearingCharactersFromExtra(extra),
+      eventCardQueryText:
+        typeof extra?.retrievalInstruction === 'string'
+          ? extra.retrievalInstruction
+          : typeof prompt === 'string'
+            ? prompt.slice(0, 800)
+            : undefined,
     });
   }
   const narrativeMeta = generationContext.narrativeMeta;

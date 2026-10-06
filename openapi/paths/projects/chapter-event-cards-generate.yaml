@@ -1,0 +1,50 @@
+post:
+  tags:
+    - Projects
+  summary: Extract event cards for a chapter
+  description: Replaces auto cards for the chapter; keeps user_edit cards.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    '200':
+      description: Extracted cards for the chapter
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      chapterNo:
+                        type: integer
+                      cards:
+                        type: array
+                        items:
+                          $ref: '../../openapi.yaml#/components/schemas/EventCard'
+    '400':
+      description: Invalid
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '502':
+      description: Upstream extract failed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

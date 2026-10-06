@@ -81,6 +81,10 @@ paths:
     $ref: './paths/projects/relation-events.yaml'
   /api/projects/{id}/relation-events/{eventId}:
     $ref: './paths/projects/relation-event-by-id.yaml'
+  /api/projects/{id}/event-cards:
+    $ref: './paths/projects/event-cards.yaml'
+  /api/projects/{id}/event-cards/{cardId}:
+    $ref: './paths/projects/event-card-by-id.yaml'
   /api/projects/{id}/writing-style-samples:
     $ref: './paths/projects/writing-style-samples.yaml'
   /api/projects/{id}/writing-style-samples/{sampleId}:
@@ -99,6 +103,8 @@ paths:
     $ref: './paths/projects/chapter-summarize-by-no.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/relation-events/generate:
     $ref: './paths/projects/chapter-relation-events-generate.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/event-cards/generate:
+    $ref: './paths/projects/chapter-event-cards-generate.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/structured-info/parse:
     $ref: './paths/projects/chapter-structured-info-parse.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/plan:
@@ -873,6 +879,15 @@ components:
           type: boolean
           default: true
           description: 保存章节时自动生成关系事件
+        eventCardMemoryEnabled:
+          type: boolean
+          default: false
+          description: |
+            是否向续写/文笔优化注入【跨章记忆】事件卡。默认 false，关闭时改写行为与现网一致。
+        generateEventCardsOnSave:
+          type: boolean
+          default: false
+          description: 保存章节或应用文笔优化后自动抽取事件卡
         parseStructuredInfoOnSave:
           type: boolean
           default: true
@@ -960,6 +975,12 @@ components:
         generateRelationEventsOnSave:
           type: boolean
           description: 保存章节时自动生成关系事件
+        eventCardMemoryEnabled:
+          type: boolean
+          description: 是否向续写/文笔优化注入【跨章记忆】事件卡
+        generateEventCardsOnSave:
+          type: boolean
+          description: 保存章节或应用文笔优化后自动抽取事件卡
         parseStructuredInfoOnSave:
           type: boolean
           description: 保存章节时自动解析结构化信息（matchingText）
@@ -1380,6 +1401,73 @@ components:
         chapterNo:
           type: integer
           nullable: true
+    EventCard:
+      type: object
+      required:
+        - id
+        - projectId
+        - chapterNo
+        - beat
+        - entities
+        - kind
+        - status
+        - evidence
+        - source
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        projectId:
+          type: string
+        chapterNo:
+          type: integer
+        beat:
+          type: string
+          maxLength: 80
+        entities:
+          type: array
+          items:
+            type: string
+        kind:
+          type: string
+          enum: [foreshadow, relation, ability, promise, object, other]
+        status:
+          type: string
+          enum: [open, paid, fact]
+        evidence:
+          type: string
+        source:
+          type: string
+          enum: [auto, user_edit]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+    EventCardUpdateInput:
+      type: object
+      properties:
+        beat:
+          type: string
+          maxLength: 80
+        entities:
+          type: array
+          items:
+            type: string
+        kind:
+          type: string
+          enum: [foreshadow, relation, ability, promise, object, other]
+        status:
+          type: string
+          enum: [open, paid, fact]
+        evidence:
+          type: string
     WritingStyleSampleSceneType:
       type: string
       enum: [dialogue, action, intimate, atmosphere]

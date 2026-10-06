@@ -44,6 +44,10 @@ import {
   buildAppearingPersonaInjection,
   type KnowledgeDocForPersonaInject,
 } from './appearing-persona-injection';
+import {
+  recallCrossChapterMemory,
+  type ContextEventCard,
+} from './cross-chapter-memory';
 
 export type NarrativeContextMeta = {
   prior_chapter_tail_injected: boolean;
@@ -89,6 +93,11 @@ export type NarrativeContextBuildInput = {
   includeChapterSummaryMemory?: boolean;
   /** 默认 true。按场成稿关掉：角色卡已在检索证据，叙事只留快照。 */
   includeAppearingStaticCards?: boolean;
+  /** 事件卡跨章记忆（开关打开时才应传入） */
+  eventCards?: ContextEventCard[];
+  eventCardMemoryEnabled?: boolean;
+  /** 召回 query（优化要求 / 结构匹配文本等） */
+  eventCardQueryText?: string;
 };
 
 export type NarrativeContextBuildResult = {
@@ -183,6 +192,24 @@ export async function buildNarrativeContextText(
     sections.push(`【前章衔接】\n${priorTail.text}`);
   } else if (currentChapterNo && currentChapterNo > 1 && tailChars > 0) {
     priorTail = { ...priorTail, skipped: true };
+  }
+
+  // §1b 跨章事件卡记忆（默认关；打开后才注入，不替换近期摘要）
+  if (
+    input.eventCardMemoryEnabled &&
+    currentChapterNo &&
+    currentChapterNo > 0 &&
+    (input.eventCards?.length ?? 0) > 0
+  ) {
+    const recalled = recallCrossChapterMemory({
+      cards: input.eventCards ?? [],
+      currentChapterNo,
+      appearingCharacters: appearingNames,
+      queryText: input.eventCardQueryText ?? input.outlineMatchingQuery ?? '',
+    });
+    if (recalled.blockText) {
+      sections.push(recalled.blockText);
+    }
   }
 
   // §5 前置：出场人物合并注入（静态卡 + 动态快照），成功则跳过全局快照与单 active 全文

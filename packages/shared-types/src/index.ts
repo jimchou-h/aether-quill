@@ -1959,6 +1959,10 @@ export interface components {
       updatePersonaOnSave: boolean;
       /** @description 保存章节时自动生成关系事件 */
       generateRelationEventsOnSave: boolean;
+      /** @description 是否向续写/文笔优化注入【跨章记忆】事件卡 */
+      eventCardMemoryEnabled: boolean;
+      /** @description 保存章节或应用文笔优化后自动抽取事件卡 */
+      generateEventCardsOnSave: boolean;
       /** @description 保存章节时自动解析结构化信息 */
       parseStructuredInfoOnSave: boolean;
       /** @description 章节优化方案分段字数；0 表示不按字数分段 */
@@ -1986,6 +1990,8 @@ export interface components {
       writingGenerationTemperature?: number | null;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      eventCardMemoryEnabled?: boolean;
+      generateEventCardsOnSave?: boolean;
       parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;

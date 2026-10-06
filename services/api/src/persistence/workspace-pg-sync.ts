@@ -184,6 +184,7 @@ export async function loadWorkspaceFromPostgres(
       indexJobs: { orderBy: { createdAt: 'desc' } },
       summaryJobs: { orderBy: { createdAt: 'desc' } },
       relationEvents: { orderBy: { createdAt: 'asc' } },
+      eventCards: { orderBy: { createdAt: 'asc' } },
     },
     orderBy: { createdAt: 'asc' },
   });
@@ -203,6 +204,7 @@ export async function loadWorkspaceFromPostgres(
   const indexJobs: PersistedProjectState['indexJobs'] = {};
   const summarizeJobs: PersistedProjectState['summarizeJobs'] = {};
   const relationEvents: PersistedProjectState['relationEvents'] = {};
+  const eventCards: PersistedProjectState['eventCards'] = {};
 
   const identityRelations: PersistedProjectState['identityRelations'] = {};
 
@@ -332,6 +334,21 @@ export async function loadWorkspaceFromPostgres(
       deletedAt: e.deletedAt ? e.deletedAt.toISOString() : null,
     }));
 
+    eventCards[p.id] = (p.eventCards ?? []).map((e) => ({
+      id: e.id,
+      projectId: e.projectId,
+      chapterNo: e.chapterNo,
+      beat: e.beat,
+      entities: Array.isArray(e.entities) ? (e.entities as string[]) : [],
+      kind: e.kind,
+      status: e.status,
+      evidence: e.evidence ?? '',
+      source: e.source,
+      createdAt: e.createdAt.toISOString(),
+      updatedAt: e.updatedAt.toISOString(),
+      deletedAt: e.deletedAt ? e.deletedAt.toISOString() : null,
+    }));
+
     identityRelations[p.id] = parseIdentityRelationsFromPg(p.identityRelationsJson);
   }
 
@@ -344,6 +361,7 @@ export async function loadWorkspaceFromPostgres(
     indexJobs,
     summarizeJobs,
     relationEvents,
+    eventCards,
     identityRelations,
   };
 }
@@ -549,6 +567,30 @@ export async function syncWorkspaceToPostgres(
     }
     if (relRows.length > 0) {
       await tx.relationEvent.createMany({ data: relRows });
+    }
+
+    await tx.eventCard.deleteMany({ where: { projectId: { in: projectIds } } });
+    const eventCardRows: Prisma.EventCardCreateManyInput[] = [];
+    for (const pid of projectIds) {
+      for (const e of payload.eventCards?.[pid] ?? []) {
+        eventCardRows.push({
+          id: e.id,
+          projectId: pid,
+          chapterNo: e.chapterNo,
+          beat: e.beat,
+          entities: e.entities,
+          kind: e.kind,
+          status: e.status,
+          evidence: e.evidence ?? '',
+          source: e.source,
+          createdAt: new Date(e.createdAt),
+          updatedAt: new Date(e.updatedAt),
+          deletedAt: e.deletedAt ? new Date(e.deletedAt) : null,
+        });
+      }
+    }
+    if (eventCardRows.length > 0) {
+      await tx.eventCard.createMany({ data: eventCardRows });
     }
   }, WORKSPACE_PG_FULL_TX_OPTIONS);
 }

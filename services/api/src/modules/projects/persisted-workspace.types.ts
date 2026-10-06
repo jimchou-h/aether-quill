@@ -43,6 +43,8 @@ export interface PersistedProjectState {
       generationTemperature?: number;
       updatePersonaOnSave?: boolean;
       generateRelationEventsOnSave?: boolean;
+      eventCardMemoryEnabled?: boolean;
+      generateEventCardsOnSave?: boolean;
       parseStructuredInfoOnSave?: boolean;
       chapterOptimizeSegmentCharSize?: number;
       contentSafetyScanEnabled?: boolean;
@@ -166,6 +168,23 @@ export interface PersistedProjectState {
       chapterNo: number | null;
       protagonistPersonaId?: string | null;
       counterpartyPersonaId?: string | null;
+      createdAt: string;
+      updatedAt: string;
+      deletedAt: string | null;
+    }>
+  >;
+  eventCards: Record<
+    string,
+    Array<{
+      id: string;
+      projectId: string;
+      chapterNo: number;
+      beat: string;
+      entities: string[];
+      kind: string;
+      status: string;
+      evidence: string;
+      source: string;
       createdAt: string;
       updatedAt: string;
       deletedAt: string | null;
