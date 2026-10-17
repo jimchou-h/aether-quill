@@ -1,0 +1,72 @@
+post:
+  tags:
+    - Projects
+  summary: Discard a chapter refinement run
+  description: |
+    Cancel any in-flight attempt, then clear the frozen base text, candidate draft and prompt
+    materials, and mark the run `discarded`. A minimal tombstone is kept so the run list still shows
+    the summary while `GET .../runs/{runId}` and new subscriptions return 410.
+
+    Discard is idempotent: repeating it on an already discarded run returns the same summary; any
+    other revision mismatch returns 409. Discarding never deletes or edits the chapter text.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterRefinementDiscardRequest'
+  responses:
+    '200':
+      description: Run discarded (or already discarded) and candidate materials cleared
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/RefinementRunSummary'
+    '400':
+      description: Invalid body
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project, chapter or run not found (or run belongs to another creator)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '409':
+      description: Revision conflict
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

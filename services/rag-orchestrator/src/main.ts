@@ -39,11 +39,14 @@ import {
   sanitizeWritingStyleSamples,
   buildStyleSamplePromptBlock,
   isWritingStyleInjectionTemplateKey,
+  isRefinementUtilityStageTemplateKey,
   selectWritingStyleSamplesForTask,
   normalizeGenerationModelId,
   resolveGenerationCallProfile,
   resolveWritingGenerationTemperatureOverride,
   normalizeUserGenerationPreferences,
+  LLM_CHAT_PROVIDER_IDS,
+  type LlmChatProviderId,
   type ProjectContentSafetyRule,
   type ResolvedGenerationCallProfile,
   type UserGenerationPreferences,
@@ -64,6 +67,8 @@ import {
   resolveChapterScopedEmbeddingQuery,
   retrieveKnowledgeForDraft,
   readFrozenRetrievedEvidence,
+  readFrozenReferenceMaterials,
+  pickFrozenStyleSampleBlock,
   readProjectSystemPromptOverride,
 } from './retrieval/knowledge-retrieval';
 import { mergeTitleAndVectorEvidence } from './retrieval/hybrid-knowledge-merge';
@@ -129,14 +134,6 @@ const vectorStore = new VectorStore();
 const reranker = new Reranker();
 const generationService = new GenerationService();
 const consistencyChecker = new ConsistencyChecker();
-
-function buildTargetWordsRequirement(targetWords: unknown): string {
-  const parsed = Number(targetWords);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return `${parsed}字左右`;
-  }
-  return '不设字数上限，在情节完整的前提下尽量充实详尽';
-}
 
 interface ContextChapter {
   chapterNo: number;
@@ -284,6 +281,64 @@ function resolveGenerationCallProfileForProject(
   });
 }
 
+/**
+ * F4：解析随请求下发的「冻结模型路由」覆盖（`context.generationRouteOverride`）。
+ *
+ * 章节精修 run 在创建时冻结 provider / model / temperature，运行时随每次生成下发；
+ * orchestrator 直接采用该覆盖，不再从当前项目 / 用户设置重新解析——否则实际调用参数会
+ * 与冻结快照不一致（冻结路由只存不用的验收缺陷）。
+ */
+function readGenerationRouteOverride(
+  extra: Record<string, unknown> | undefined
+): { provider?: LlmChatProviderId; model?: string; temperature?: number } | null {
+  if (!extra) {
+    return null;
+  }
+  const raw = extra.generationRouteOverride;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const provider =
+    typeof record.provider === 'string' &&
+    (LLM_CHAT_PROVIDER_IDS as readonly string[]).includes(record.provider)
+      ? (record.provider as LlmChatProviderId)
+      : undefined;
+  const model =
+    typeof record.model === 'string' && record.model.trim() ? record.model.trim() : undefined;
+  const temperature =
+    typeof record.temperature === 'number' && Number.isFinite(record.temperature)
+      ? record.temperature
+      : undefined;
+  if (!provider && !model && temperature === undefined) {
+    return null;
+  }
+  return {
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+  };
+}
+
+/** F4：把冻结路由覆盖应用到已解析的生成档位（provider / model / temperature）。 */
+function applyGenerationRouteOverride(
+  profile: ResolvedGenerationCallProfile,
+  override: { provider?: LlmChatProviderId; model?: string; temperature?: number } | null
+): void {
+  if (!override) {
+    return;
+  }
+  if (override.provider) {
+    profile.provider = override.provider;
+  }
+  if (override.model) {
+    profile.model = override.model;
+  }
+  if (override.temperature !== undefined) {
+    profile.temperature = override.temperature;
+  }
+}
+
 function applyWritingStyleSamplesToContext(
   generationContext: GenerationContext,
   projectCtx: ProjectContext,
@@ -350,8 +405,7 @@ async function getGenerationContext(
     includeAppearingStaticCards: options?.includeAppearingStaticCards,
     eventCardMemoryEnabled: ctx.eventCardMemoryEnabled === true,
     eventCards: ctx.eventCards,
-    eventCardQueryText:
-      options?.eventCardQueryText ?? chapter?.structuredMatchingText ?? '',
+    eventCardQueryText: options?.eventCardQueryText ?? chapter?.structuredMatchingText ?? '',
   });
   return {
     systemPromptText: ctx.systemPromptText,
@@ -633,7 +687,11 @@ app.post('/api/projects/:projectId/context', (req, res) => {
   if (typeof payload.systemPromptText === 'string') {
     context.systemPromptText = payload.systemPromptText;
   }
-  if (payload.taskPrompts && typeof payload.taskPrompts === 'object' && !Array.isArray(payload.taskPrompts)) {
+  if (
+    payload.taskPrompts &&
+    typeof payload.taskPrompts === 'object' &&
+    !Array.isArray(payload.taskPrompts)
+  ) {
     const taskPrompts: Record<string, string> = {};
     for (const [key, value] of Object.entries(payload.taskPrompts as Record<string, unknown>)) {
       if (typeof key === 'string' && key.trim() && typeof value === 'string' && value.trim()) {
@@ -677,9 +735,7 @@ app.post('/api/projects/:projectId/context', (req, res) => {
         continue;
       }
       const entities = Array.isArray(r.entities)
-        ? r.entities
-            .map((item) => (typeof item === 'string' ? item.trim() : ''))
-            .filter(Boolean)
+        ? r.entities.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
         : [];
       const kind =
         r.kind === 'foreshadow' ||
@@ -701,7 +757,9 @@ app.post('/api/projects/:projectId/context', (req, res) => {
         status,
         evidence: typeof r.evidence === 'string' ? r.evidence : '',
         deletedAt:
-          typeof r.deletedAt === 'string' || r.deletedAt === null ? (r.deletedAt as string | null) : null,
+          typeof r.deletedAt === 'string' || r.deletedAt === null
+            ? (r.deletedAt as string | null)
+            : null,
       });
     }
     context.eventCards = cards;
@@ -769,8 +827,7 @@ app.post('/api/projects/:projectId/context', (req, res) => {
         payload.userGenerationPreferences
       );
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Invalid userGenerationPreferences';
+      const message = error instanceof Error ? error.message : 'Invalid userGenerationPreferences';
       res.status(400).json({ error: message });
       return;
     }
@@ -960,9 +1017,10 @@ app.post('/api/generate', async (req, res) => {
   const ragEnv = getResolvedRagInfrastructureEnv();
   const projectCtx = getOrCreateContext(projectId);
   const extra = extraContext as Record<string, unknown> | undefined;
+  // F4：精修 run 冻结的参考材料（人物 / 知识 / 文风样本）。有值时不再从当前 projectCtx 检索 / 选样。
+  const frozenReferenceMaterials = readFrozenReferenceMaterials(extra);
   const tk = typeof templateKey === 'string' ? templateKey.trim() : '';
-  const isComplianceTask =
-    extra?.omitProjectSystemPrompt === true;
+  const isComplianceTask = extra?.omitProjectSystemPrompt === true;
   const chapterNoRaw = extra?.chapterNo;
   const chapterNo =
     typeof chapterNoRaw === 'number' && Number.isFinite(chapterNoRaw)
@@ -1031,54 +1089,95 @@ app.post('/api/generate', async (req, res) => {
     }
   };
 
-  // Step 2: 检索证据 — 合规检验等任务跳过 RAG；实验室重跑可冻住证据
+  // Step 2: 检索证据 — 合规检验等任务跳过 RAG；实验室重跑可冻住证据；精修直接用冻结材料
   const frozenRetrievedEvidence = readFrozenRetrievedEvidence(extra);
-  if (frozenRetrievedEvidence !== undefined) {
+  if (frozenReferenceMaterials) {
+    // F4：精修 run 用冻结的知识文本作为【检索证据】，完全跳过向量 / 标题检索
+    retrievedEvidence = frozenReferenceMaterials.knowledgeText;
+  } else if (frozenRetrievedEvidence !== undefined) {
     retrievedEvidence = frozenRetrievedEvidence;
   } else if (!isComplianceTask) {
     ensureSseHeaders();
     writeGenerateSse({ event: 'stage', stage: 'retrieving' });
     try {
       if (useStructuredChapterKb) {
-      const optimizeInstruction =
-        typeof extra?.retrievalInstruction === 'string' ? extra.retrievalInstruction.trim() : '';
-      const appearingCharacters = parseAppearingCharactersFromExtra(extra);
-      const personaCards = listPersonaCardsFromKnowledgeDocs(
-        projectCtx.knowledgeDocuments ?? [],
-        projectCtx.personas
-      );
-      const optimizeBoost = shouldApplyChapterOptimizeMatchingBoost({
-        templateKey: tk,
-        instruction: optimizeInstruction,
-        appearingCharacters,
-      })
-        ? {
-            instruction: optimizeInstruction,
-            appearingCharacters,
-            personaCards,
-          }
-        : undefined;
+        const optimizeInstruction =
+          typeof extra?.retrievalInstruction === 'string' ? extra.retrievalInstruction.trim() : '';
+        const appearingCharacters = parseAppearingCharactersFromExtra(extra);
+        const personaCards = listPersonaCardsFromKnowledgeDocs(
+          projectCtx.knowledgeDocuments ?? [],
+          projectCtx.personas
+        );
+        const optimizeBoost = shouldApplyChapterOptimizeMatchingBoost({
+          templateKey: tk,
+          instruction: optimizeInstruction,
+          appearingCharacters,
+        })
+          ? {
+              instruction: optimizeInstruction,
+              appearingCharacters,
+              personaCards,
+            }
+          : undefined;
 
-      const sr = buildStructuredKnowledgeEvidence(structuredChapterNo, {
-        chapterNo: structuredChapterNo,
-        chapters: mapChaptersForStructuredKnowledgeMatch(
-          projectCtx.chapters.map((c) => ({
-            chapterNo: c.chapterNo,
-            structuredMatchingText: c.structuredMatchingText,
-          })),
-          structuredChapterNo,
-          optimizeBoost
-        ),
-        knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
-      });
+        const sr = buildStructuredKnowledgeEvidence(structuredChapterNo, {
+          chapterNo: structuredChapterNo,
+          chapters: mapChaptersForStructuredKnowledgeMatch(
+            projectCtx.chapters.map((c) => ({
+              chapterNo: c.chapterNo,
+              structuredMatchingText: c.structuredMatchingText,
+            })),
+            structuredChapterNo,
+            optimizeBoost
+          ),
+          knowledgeDocuments: projectCtx.knowledgeDocuments ?? [],
+        });
 
-      let vectorPart: Awaited<ReturnType<typeof retrieveKnowledgeForDraft>> | null = null;
-      try {
-        const vectorQuery =
-          chapterScopedEmbeddingQuery !== undefined
-            ? chapterScopedEmbeddingQuery
-            : buildEmbeddingRetrievalQuery(String(prompt), projectCtx, extra);
-        vectorPart = await retrieveKnowledgeForDraft(
+        let vectorPart: Awaited<ReturnType<typeof retrieveKnowledgeForDraft>> | null = null;
+        try {
+          const vectorQuery =
+            chapterScopedEmbeddingQuery !== undefined
+              ? chapterScopedEmbeddingQuery
+              : buildEmbeddingRetrievalQuery(String(prompt), projectCtx, extra);
+          vectorPart = await retrieveKnowledgeForDraft(
+            vectorStore,
+            reranker,
+            projectId,
+            retrievalQuery,
+            {
+              topK: ragEnv.retrievalTopK,
+              topN: ragEnv.rerankTopN,
+              minScore: ragEnv.retrievalMinScore,
+              apiBaseUrl: API_BASE_URL,
+              enrichFullDocuments: true,
+              embeddingQuery: vectorQuery,
+            }
+          );
+        } catch (vectorError) {
+          console.error('Generate vector supplement failed:', vectorError);
+        }
+
+        const merged = mergeTitleAndVectorEvidence(sr, vectorPart);
+        structuredKbTrace = {
+          titleMatchedDocumentIds: merged.titleMatchedDocumentIds,
+          evidenceDocumentIds: merged.evidenceDocumentIds,
+          vectorDocumentIds: merged.vectorDocumentIds,
+          dualHitDocumentIds: merged.dualHitDocumentIds,
+          retrievalMode: merged.retrievalMode,
+          retrievalSkippedNoStructured: merged.retrievalSkippedNoStructured,
+        };
+        retrievalQuery = merged.query.trim() ? merged.query : retrievalQuery;
+        retrievedEvidence = merged.evidenceText;
+        retrievedChunkIds = merged.chunks
+          .filter((c) => merged.evidenceDocumentIds.includes(c.documentId))
+          .map((c) => c.id)
+          .filter((id) => Boolean(id?.trim()));
+        const evidenceDocSet = new Set(merged.evidenceDocumentIds);
+        retrievedFullDocuments = (merged.fullDocuments ?? [])
+          .filter((d) => evidenceDocSet.has(d.documentId))
+          .map((d) => ({ ...d }));
+      } else {
+        const retrieval = await retrieveKnowledgeForDraft(
           vectorStore,
           reranker,
           projectId,
@@ -1089,65 +1188,27 @@ app.post('/api/generate', async (req, res) => {
             minScore: ragEnv.retrievalMinScore,
             apiBaseUrl: API_BASE_URL,
             enrichFullDocuments: true,
-            embeddingQuery: vectorQuery,
+            ...(chapterScopedEmbeddingQuery !== undefined
+              ? { embeddingQuery: chapterScopedEmbeddingQuery }
+              : {
+                  embeddingQuery: buildEmbeddingRetrievalQuery(String(prompt), projectCtx, extra),
+                }),
           }
         );
-      } catch (vectorError) {
-        console.error('Generate vector supplement failed:', vectorError);
+        retrievedEvidence = retrieval.evidenceText;
+        retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
+        retrievedFullDocuments = (retrieval.fullDocuments ?? []).map((d) => ({ ...d }));
+        structuredKbTrace = {
+          titleMatchedDocumentIds: [],
+          evidenceDocumentIds: retrievedFullDocuments
+            .map((d) => String(d.documentId ?? ''))
+            .filter(Boolean),
+          vectorDocumentIds: retrievedFullDocuments
+            .map((d) => String(d.documentId ?? ''))
+            .filter(Boolean),
+          retrievalMode: 'vector',
+        };
       }
-
-      const merged = mergeTitleAndVectorEvidence(sr, vectorPart);
-      structuredKbTrace = {
-        titleMatchedDocumentIds: merged.titleMatchedDocumentIds,
-        evidenceDocumentIds: merged.evidenceDocumentIds,
-        vectorDocumentIds: merged.vectorDocumentIds,
-        dualHitDocumentIds: merged.dualHitDocumentIds,
-        retrievalMode: merged.retrievalMode,
-        retrievalSkippedNoStructured: merged.retrievalSkippedNoStructured,
-      };
-      retrievalQuery = merged.query.trim() ? merged.query : retrievalQuery;
-      retrievedEvidence = merged.evidenceText;
-      retrievedChunkIds = merged.chunks
-        .filter((c) => merged.evidenceDocumentIds.includes(c.documentId))
-        .map((c) => c.id)
-        .filter((id) => Boolean(id?.trim()));
-      const evidenceDocSet = new Set(merged.evidenceDocumentIds);
-      retrievedFullDocuments = (merged.fullDocuments ?? [])
-        .filter((d) => evidenceDocSet.has(d.documentId))
-        .map((d) => ({ ...d }));
-    } else {
-      const retrieval = await retrieveKnowledgeForDraft(
-        vectorStore,
-        reranker,
-        projectId,
-        retrievalQuery,
-        {
-          topK: ragEnv.retrievalTopK,
-          topN: ragEnv.rerankTopN,
-          minScore: ragEnv.retrievalMinScore,
-          apiBaseUrl: API_BASE_URL,
-          enrichFullDocuments: true,
-          ...(chapterScopedEmbeddingQuery !== undefined
-            ? { embeddingQuery: chapterScopedEmbeddingQuery }
-            : {
-                embeddingQuery: buildEmbeddingRetrievalQuery(String(prompt), projectCtx, extra),
-              }),
-        }
-      );
-      retrievedEvidence = retrieval.evidenceText;
-      retrievedChunkIds = retrieval.chunks.map((c) => c.id).filter((id) => Boolean(id?.trim()));
-      retrievedFullDocuments = (retrieval.fullDocuments ?? []).map((d) => ({ ...d }));
-      structuredKbTrace = {
-        titleMatchedDocumentIds: [],
-        evidenceDocumentIds: retrievedFullDocuments
-          .map((d) => String(d.documentId ?? ''))
-          .filter(Boolean),
-        vectorDocumentIds: retrievedFullDocuments
-          .map((d) => String(d.documentId ?? ''))
-          .filter(Boolean),
-        retrievalMode: 'vector',
-      };
-    }
     } catch (error) {
       console.error('Generate retrieval failed:', error);
     }
@@ -1187,28 +1248,55 @@ app.post('/api/generate', async (req, res) => {
     generationContext.taskSystemPrompt = resolvedTaskSystemPrompt;
   }
 
+  // R12/B5（R1 修复）：精修工具档（inspect / plan / review）不注入项目长写作指导。
+  // 档位由模板键判定，是这里的权威来源——此前「请求带了 projectSystemPromptOverride」
+  // 会把 omit 无条件重新关掉，导致五阶段全部注入，测试只在手工 context 下正确。
+  const refinementUtilityStage = isRefinementUtilityStageTemplateKey(tk);
+
   if (extra?.omitProjectSystemPrompt === true && !isComplianceTask) {
     generationContext.omitProjectSystemPrompt = true;
   }
 
   const projectSystemOverride = readProjectSystemPromptOverride(extra);
-  if (projectSystemOverride !== undefined) {
+  if (projectSystemOverride !== undefined && !refinementUtilityStage) {
     generationContext.systemPromptText = projectSystemOverride;
     generationContext.omitProjectSystemPrompt = false;
+  }
+  if (refinementUtilityStage) {
+    // override 不得把工具档的项目文风重新打开；当前项目设置同样不注入
+    generationContext.omitProjectSystemPrompt = true;
   }
 
   generationContext.retrievedEvidence = isComplianceTask
     ? undefined
     : retrievedEvidence.trim() || undefined;
 
-  const injectedStyleSampleIds = applyWritingStyleSamplesToContext(
-    generationContext,
-    projectCtx,
-    tk,
-    narrativeCurrentChapter
-  );
+  let injectedStyleSampleIds: string[] = [];
+  if (frozenReferenceMaterials) {
+    // F4：精修 run 用 run 冻结的参考材料组装最终消息，不读当前 projectCtx 的人物 / 知识 / 文风样本。
+    // buildUserMessage 会忽略 narrativeContext / retrievedEvidence / styleSampleBlock，改用冻结块。
+    // C4（R12）：文风样本只在写作阶段（rewrite / repair）注入；inspect / plan / review 不注入。
+    generationContext.frozenReferenceMaterials = {
+      personaText: frozenReferenceMaterials.personaText,
+      knowledgeText: frozenReferenceMaterials.knowledgeText,
+      styleSampleBlock: pickFrozenStyleSampleBlock(tk, frozenReferenceMaterials),
+    };
+  } else {
+    injectedStyleSampleIds = applyWritingStyleSamplesToContext(
+      generationContext,
+      projectCtx,
+      tk,
+      narrativeCurrentChapter
+    );
+  }
 
-  const resolvedProfile = resolveGenerationCallProfileForProject(tk, projectCtx, req.body?.temperature);
+  const resolvedProfile = resolveGenerationCallProfileForProject(
+    tk,
+    projectCtx,
+    req.body?.temperature
+  );
+  // F4：采用随请求下发的冻结模型路由（精修 run 创建时冻结），不读当前设置
+  applyGenerationRouteOverride(resolvedProfile, readGenerationRouteOverride(extra));
   const resolvedSystemPrompt = generationService.buildSystemMessage(generationContext);
 
   const traceContext: Record<string, unknown> = {
@@ -1302,7 +1390,14 @@ app.post('/api/generate', async (req, res) => {
       }
 
       if (!abortController.signal.aborted) {
-        writeGenerateSse({ event: 'end', traceId: trace.id, retrievedEvidence });
+        writeGenerateSse({
+          event: 'end',
+          traceId: trace.id,
+          retrievedEvidence,
+          // 可选完成元数据：旧调用忽略即可；严格调用据此判定非空内容是否真的收束
+          completed: true,
+          finishReason: trace.finishReason ?? null,
+        });
       }
       res.end();
     } catch (error) {
@@ -1428,14 +1523,22 @@ app.post('/api/generate/draft', async (req, res) => {
     let vectorPart: Awaited<ReturnType<typeof retrieveKnowledgeForDraft>> | null = null;
     try {
       const ragEnv = getResolvedRagInfrastructureEnv();
-      vectorPart = await retrieveKnowledgeForDraft(vectorStore, reranker, projectId, retrievalQuery, {
-        topK: ragEnv.retrievalTopK,
-        topN: ragEnv.rerankTopN,
-        minScore: ragEnv.retrievalMinScore,
-        apiBaseUrl: API_BASE_URL,
-        enrichFullDocuments: true,
-        embeddingQuery: buildEmbeddingRetrievalQuery(fallbackQuery, context, { task: taskRecord }),
-      });
+      vectorPart = await retrieveKnowledgeForDraft(
+        vectorStore,
+        reranker,
+        projectId,
+        retrievalQuery,
+        {
+          topK: ragEnv.retrievalTopK,
+          topN: ragEnv.rerankTopN,
+          minScore: ragEnv.retrievalMinScore,
+          apiBaseUrl: API_BASE_URL,
+          enrichFullDocuments: true,
+          embeddingQuery: buildEmbeddingRetrievalQuery(fallbackQuery, context, {
+            task: taskRecord,
+          }),
+        }
+      );
     } catch (vectorError) {
       console.error('Draft vector supplement failed:', vectorError);
     }

@@ -42,7 +42,11 @@ test.describe('author-path visual audit', () => {
     let bestLen = -1;
     for (let i = 0; i < tabCount; i += 1) {
       await tabs.nth(i).click();
-      const text = (await page.locator('pre.content-text').innerText().catch(() => '')) || '';
+      const text =
+        (await page
+          .locator('pre.content-text')
+          .innerText()
+          .catch(() => '')) || '';
       if (text.length > bestLen) {
         bestLen = text.length;
         const label = await tabs.nth(i).locator('.chapter-tab-no').innerText();
@@ -51,7 +55,10 @@ test.describe('author-path visual audit', () => {
       }
     }
     notes.push(`[${viewport}] longestChapter=${bestNo} chars=${bestLen}`);
-    await page.locator('.chapter-tab', { hasText: `第${bestNo}章` }).first().click();
+    await page
+      .locator('.chapter-tab', { hasText: `第${bestNo}章` })
+      .first()
+      .click();
     await shot('03-chapter-selected');
 
     await page.getByRole('button', { name: '章节优化' }).click();
@@ -59,9 +66,9 @@ test.describe('author-path visual audit', () => {
     await expect(optimizeDialog.first()).toBeVisible();
     await shot('04-writing-optimize-open');
 
-    await page.locator('#writing-optimize-instruction').fill(
-      '请给出简短文笔优化方案：收紧对话节奏，不要扩写剧情。'
-    );
+    await page
+      .locator('#writing-optimize-instruction')
+      .fill('请给出简短文笔优化方案：收紧对话节奏，不要扩写剧情。');
     const planStart = Date.now();
     await page.getByRole('button', { name: '生成优化方案' }).click();
     await expect(page.locator('#writing-optimize-plan')).toBeVisible({ timeout: 120_000 });
@@ -89,9 +96,12 @@ test.describe('author-path visual audit', () => {
       ta.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     }, selectEnd);
 
-    await page.locator('#scene-workbench-instruction').fill('理顺这段节奏，不要扩写。').catch(async () => {
-      await page.locator('.instruction-input').first().fill('理顺这段节奏，不要扩写。');
-    });
+    await page
+      .locator('#scene-workbench-instruction')
+      .fill('理顺这段节奏，不要扩写。')
+      .catch(async () => {
+        await page.locator('.instruction-input').first().fill('理顺这段节奏，不要扩写。');
+      });
 
     const wbStart = Date.now();
     await page.getByRole('button', { name: '生成范围成稿' }).click();
@@ -99,12 +109,18 @@ test.describe('author-path visual audit', () => {
       expect
         .poll(async () => page.locator('#scene-workbench-draft').inputValue(), { timeout: 120_000 })
         .toMatch(/\S/),
-      page.getByText(/失败|请先|无效范围|几乎是原文/).first().waitFor({
-        state: 'visible',
-        timeout: 120_000,
-      }),
+      page
+        .getByText(/失败|请先|无效范围|几乎是原文/)
+        .first()
+        .waitFor({
+          state: 'visible',
+          timeout: 120_000,
+        }),
     ]).catch(() => undefined);
-    const draftVal = await page.locator('#scene-workbench-draft').inputValue().catch(() => '');
+    const draftVal = await page
+      .locator('#scene-workbench-draft')
+      .inputValue()
+      .catch(() => '');
     notes.push(
       `[${viewport}][workbench-draft] elapsedMs=${Date.now() - wbStart} draftChars=${draftVal.length}`
     );

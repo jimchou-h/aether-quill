@@ -3,13 +3,7 @@
  * 由 narrative-context 在开关打开时注入【跨章记忆】。
  */
 
-export type EventCardKind =
-  | 'foreshadow'
-  | 'relation'
-  | 'ability'
-  | 'promise'
-  | 'object'
-  | 'other';
+export type EventCardKind = 'foreshadow' | 'relation' | 'ability' | 'promise' | 'object' | 'other';
 
 export type EventCardStatus = 'open' | 'paid' | 'fact';
 

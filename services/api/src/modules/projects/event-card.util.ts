@@ -126,9 +126,7 @@ export function parseExtractedEventCardCandidates(raw: unknown): EventCardCandid
       continue;
     }
     const kind = isEventCardKind(record.kind) ? record.kind : 'other';
-    const status = isEventCardStatus(record.status)
-      ? record.status
-      : defaultStatusForKind(kind);
+    const status = isEventCardStatus(record.status) ? record.status : defaultStatusForKind(kind);
     const evidence = truncate(
       String(record.evidence ?? record.evidenceSnippet ?? ''),
       MAX_EVENT_CARD_EVIDENCE_CHARS
@@ -164,11 +162,7 @@ export function mergeEventCardsAfterExtract(input: {
     (() => `ec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`);
 
   const preserved = input.existing.map((card) => {
-    if (
-      card.chapterNo === input.chapterNo &&
-      card.source === 'auto' &&
-      card.deletedAt === null
-    ) {
+    if (card.chapterNo === input.chapterNo && card.source === 'auto' && card.deletedAt === null) {
       return { ...card, deletedAt: now, updatedAt: now };
     }
     return { ...card };

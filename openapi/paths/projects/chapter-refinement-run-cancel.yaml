@@ -1,0 +1,78 @@
+post:
+  tags:
+    - Projects
+  summary: Cancel a running chapter refinement attempt
+  description: |
+    Explicitly abort the current execution attempt and persist the last valid checkpoint. Cancel is
+    idempotent: cancelling the same attempt twice returns the same summary; if the run has already
+    advanced to another attempt, the request returns 409 so a stale browser cannot cancel a newer
+    resume. Accepted ranges are preserved; only the in-flight model call is aborted.
+
+    Late callbacks from the aborted attempt must not overwrite the cancelled checkpoint.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: false
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterRefinementCancelRequest'
+  responses:
+    '200':
+      description: Attempt cancelled (or already cancelled) and checkpoint preserved
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/RefinementRunSummary'
+    '400':
+      description: Invalid body
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project, chapter or run not found (or run belongs to another creator)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '409':
+      description: The run already advanced to another attempt or is not cancellable
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '410':
+      description: Run expired or discarded
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

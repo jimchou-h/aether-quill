@@ -31,7 +31,9 @@ export function summarizeContentSafetyHits(hits: ContentSafetyHit[]): string {
       continue;
     }
     seen.add(key);
-    labels.push(`${hit.severity === 'high' ? '高' : hit.severity === 'medium' ? '中' : '低'}:${hitDisplayLabel(hit)}`);
+    labels.push(
+      `${hit.severity === 'high' ? '高' : hit.severity === 'medium' ? '中' : '低'}:${hitDisplayLabel(hit)}`
+    );
     if (labels.length >= 3) {
       break;
     }

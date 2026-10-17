@@ -9,7 +9,7 @@
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "node ../../scripts/run-tests.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {},

@@ -67,7 +67,11 @@ export async function collectOverflowHints(page: Page): Promise<string[]> {
     const candidates = Array.from(document.querySelectorAll('body *')).slice(0, 800);
     for (const el of candidates) {
       const style = window.getComputedStyle(el);
-      if (style.overflow === 'hidden' || style.display === 'none' || style.visibility === 'hidden') {
+      if (
+        style.overflow === 'hidden' ||
+        style.display === 'none' ||
+        style.visibility === 'hidden'
+      ) {
         continue;
       }
       const rect = el.getBoundingClientRect();

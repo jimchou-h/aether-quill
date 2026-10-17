@@ -32,22 +32,13 @@ import {
 import { resolveNextChapterHead } from './next-chapter-head';
 import { resolvePriorChapterTail } from './prior-chapter-tail';
 import { resolveMemoryChapterSummaryEmbeddingQuery } from '../retrieval/knowledge-retrieval';
-import {
-  buildPersonaSnapshotSection,
-  type PersonaContextPayload,
-} from './persona-snapshot';
-import {
-  applyHeadCharBudget,
-  applyOutlineBudget,
-} from './narrative-budget';
+import { buildPersonaSnapshotSection, type PersonaContextPayload } from './persona-snapshot';
+import { applyHeadCharBudget, applyOutlineBudget } from './narrative-budget';
 import {
   buildAppearingPersonaInjection,
   type KnowledgeDocForPersonaInject,
 } from './appearing-persona-injection';
-import {
-  recallCrossChapterMemory,
-  type ContextEventCard,
-} from './cross-chapter-memory';
+import { recallCrossChapterMemory, type ContextEventCard } from './cross-chapter-memory';
 
 export type NarrativeContextMeta = {
   prior_chapter_tail_injected: boolean;
@@ -145,9 +136,7 @@ function applyRelationMemoBudget(
   selected?: string,
   maxChars?: number
 ): string[] {
-  const budget = clampRelationMemoMaxChars(
-    maxChars ?? DEFAULT_RELATION_MEMO_MAX_CHARS
-  );
+  const budget = clampRelationMemoMaxChars(maxChars ?? DEFAULT_RELATION_MEMO_MAX_CHARS);
   if (budget <= 0) {
     return [];
   }
@@ -177,9 +166,7 @@ export async function buildNarrativeContextText(
 
   const tailChars = clampPriorChapterTailChars(input.priorChapterTailChars);
   const excerptMax = clampContextExcerptMaxChars(input.contextExcerptMaxChars);
-  const outlineMax = clampOutlineMaxChars(
-    input.outlineMaxChars ?? DEFAULT_OUTLINE_MAX_CHARS
-  );
+  const outlineMax = clampOutlineMaxChars(input.outlineMaxChars ?? DEFAULT_OUTLINE_MAX_CHARS);
   const personaMax = clampPersonaProfileMaxChars(
     input.personaProfileMaxChars ?? DEFAULT_PERSONA_PROFILE_MAX_CHARS
   );
@@ -284,14 +271,8 @@ export async function buildNarrativeContextText(
   // §5 静态设定与关系备忘（预算治理）
   if (appearingInjection.text) {
     sections.push(appearingInjection.text);
-  } else if (
-    input.personaProfile &&
-    input.personaProfile !== '未配置人物设定' &&
-    personaMax > 0
-  ) {
-    sections.push(
-      `【人物设定】\n${applyHeadCharBudget(input.personaProfile, personaMax)}`
-    );
+  } else if (input.personaProfile && input.personaProfile !== '未配置人物设定' && personaMax > 0) {
+    sections.push(`【人物设定】\n${applyHeadCharBudget(input.personaProfile, personaMax)}`);
   }
 
   let outlineBudgetMode: NarrativeContextMeta['outline_budget_mode'] = null;

@@ -36,9 +36,7 @@ export function resolveLlmChatProviderEndpoint(
   if (provider === 'siliconflow') {
     const apiKey = genericKey || (env.SILICONFLOW_API_KEY ?? '').trim();
     if (!apiKey) {
-      throw new Error(
-        '未配置 SiliconFlow API Key，请设置 SILICONFLOW_API_KEY 或 PROVIDER_API_KEY'
-      );
+      throw new Error('未配置 SiliconFlow API Key，请设置 SILICONFLOW_API_KEY 或 PROVIDER_API_KEY');
     }
     const fromVendor =
       joinChatCompletionsUrl(env.SILICONFLOW_API_URL ?? '') ||

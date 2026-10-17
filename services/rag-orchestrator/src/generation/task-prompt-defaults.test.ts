@@ -33,7 +33,7 @@ describe('task-prompt-defaults', () => {
     );
     assert.match(
       resolveWarehouseTaskPromptDefault('chapter.optimize.draft') ?? '',
-      /实质性重写/
+      /指定的改写拍点.*实质变化/
     );
     assert.equal(resolveWarehouseTaskPromptDefault('chapter.compliance.outline'), undefined);
     assert.equal(resolveWarehouseTaskPromptDefault('chapter.pipeline.character'), undefined);

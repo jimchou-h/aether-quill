@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx,.vue",
     "typecheck": "vue-tsc --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "node ../../scripts/run-tests.mjs",
     "e2e:smoke": "playwright test --config=playwright.config.ts",
     "clean": "rm -rf dist node_modules"
   },

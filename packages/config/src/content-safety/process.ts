@@ -1,14 +1,7 @@
 import { applyLowRiskReplacements, scanContentSafety } from './scan';
-import {
-  collectUniqueSentenceRangesForHits,
-  replaceSentenceInText,
-} from './sentence';
+import { collectUniqueSentenceRangesForHits, replaceSentenceInText } from './sentence';
 import { DEFAULT_CONTENT_SAFETY_RULES } from './rules';
-import type {
-  ContentSafetyHit,
-  ContentSafetyProcessResult,
-  ContentSafetyRule,
-} from './types';
+import type { ContentSafetyHit, ContentSafetyProcessResult, ContentSafetyRule } from './types';
 
 /** @deprecated 使用 CONTENT_SAFETY_MAX_REWRITE_BATCHES */
 export const CONTENT_SAFETY_MAX_REWRITE_ATTEMPTS = 2;

@@ -81,7 +81,8 @@ test('旧四模板文本保持不变且默认仍为未发布草稿', () => {
     );
   }
   // 默认草稿状态：白名单记录初始 publishedText 为空，回滚由 TaskPromptsService 提供（见 runtime-chain 测试）
-  assert.equal(TASK_PROMPT_DEFINITIONS.length, 11);
+  // 11 = 文笔优化三模式(5) + 按场成稿/创编(6)；AQ-381 追加智能精修 5 条 → 16
+  assert.equal(TASK_PROMPT_DEFINITIONS.length, 16);
 });
 
 test('plan-scene 模板含四要件与删除补偿硬约束', () => {

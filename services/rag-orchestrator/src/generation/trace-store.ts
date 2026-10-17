@@ -122,6 +122,10 @@ export class TraceStore {
   constructor() {
     this.restoreFromDisk();
     this.autoSaveInterval = setInterval(() => this.persist(), 60_000);
+    // W5：周期自动保存定时器不应单独维持事件循环存活。
+    // 单测会创建 GenerationService（内含 TraceStore）而不显式 close()，若该定时器 ref 着事件循环，
+    // 测试进程会一直挂住（此前靠 `--test-force-exit` 兜底）。真正的服务由 HTTP 监听器维持事件循环。
+    this.autoSaveInterval.unref?.();
   }
 
   push(trace: TraceRecord): void {
@@ -220,6 +224,8 @@ export class TraceStore {
       this.persistTimer = null;
       this.persist();
     }, TRACE_STORE_PERSIST_DEBOUNCE_MS);
+    // W5：防抖写入定时器同样不维持事件循环（否则测试进程退出会被这 2s 定时器拖住）
+    this.persistTimer.unref?.();
   }
 
   private persist(): void {

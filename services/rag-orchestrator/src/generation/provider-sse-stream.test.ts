@@ -50,9 +50,8 @@ test('parseProviderSseLine ignores reasoning_content and only yields answer cont
   assert.equal(parseProviderSseLine('data: {"choices":[{"delta":{}}]}').type, 'skip');
   assert.equal(parseProviderSseLine(': keep-alive').type, 'skip');
   assert.equal(
-    parseProviderSseLine(
-      'data: {"choices":[{"delta":{"reasoning_content":"先分析方案再写正文"}}]}'
-    ).type,
+    parseProviderSseLine('data: {"choices":[{"delta":{"reasoning_content":"先分析方案再写正文"}}]}')
+      .type,
     'reasoning'
   );
   const contentLine = parseProviderSseLine(

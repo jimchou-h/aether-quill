@@ -1,0 +1,85 @@
+post:
+  tags:
+    - Projects
+  summary: Resume a paused chapter refinement run
+  description: |
+    Re-validate the frozen chapter version, the caller's project permission and the frozen template
+    snapshot, then start a new execution attempt from the persisted checkpoint. Already accepted
+    units are not re-run; the per-unit repair counters and the accumulated usage are preserved.
+
+    The request carries `expectedRunRevision` for a compare-and-set update; a mismatched revision
+    returns 409. A run that is not resumable (source changed, boundary conflict, revoked permission
+    or exhausted plan recovery) returns 409 and keeps its partial candidate readable only.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterRefinementResumeRequest'
+  responses:
+    '202':
+      description: New execution attempt accepted
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/RefinementRunSummary'
+    '400':
+      description: Invalid body
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '403':
+      description: The caller lost owner/editor access to the project
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project, chapter or run not found (or run belongs to another creator)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '409':
+      description: Revision conflict, not resumable, or the frozen chapter version changed
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '410':
+      description: Run expired or discarded
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

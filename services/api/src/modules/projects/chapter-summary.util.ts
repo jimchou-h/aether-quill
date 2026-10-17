@@ -1,7 +1,4 @@
-import {
-  buildFallbackChapterSummary,
-  normalizeChapterSummary,
-} from '@aether-quill/config';
+import { buildFallbackChapterSummary, normalizeChapterSummary } from '@aether-quill/config';
 
 export type ChapterSummarySource = 'llm' | 'fallback';
 

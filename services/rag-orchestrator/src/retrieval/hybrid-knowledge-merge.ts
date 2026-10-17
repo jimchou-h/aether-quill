@@ -3,10 +3,7 @@ import type {
   KnowledgeRetrievalResult,
   StructuredKnowledgeRetrievalResult,
 } from './knowledge-retrieval';
-import {
-  PERSONA_CARD_DOC_TYPE,
-  TITLE_MATCHED_OTHER_DOC_TOP_N,
-} from './knowledge-retrieval';
+import { PERSONA_CARD_DOC_TYPE, TITLE_MATCHED_OTHER_DOC_TOP_N } from './knowledge-retrieval';
 import { aggregateChunksByDocument, buildDocumentHitReason } from './doc-aggregator';
 import { resolveEvidenceTokenBudget, trimEvidencePreferPersonaCards } from './token-budget';
 import {

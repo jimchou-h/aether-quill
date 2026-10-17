@@ -58,12 +58,14 @@ export function pickPriorChapterSummariesForPrompt(
     .sort((a, b) => b.chapterNo - a.chapterNo)
     .slice(0, maxCount);
 
-  return picked.map((ch) => {
-    const summaryText = ch.summary?.trim();
-    if (summaryText) {
-      return { ...ch, summary: summaryText, usedExcerptFallback: false };
-    }
-    const excerpt = buildChapterExcerpt(ch, excerptMax);
-    return { ...ch, summary: excerpt, usedExcerptFallback: Boolean(excerpt) };
-  }).filter((ch) => ch.summary?.trim());
+  return picked
+    .map((ch) => {
+      const summaryText = ch.summary?.trim();
+      if (summaryText) {
+        return { ...ch, summary: summaryText, usedExcerptFallback: false };
+      }
+      const excerpt = buildChapterExcerpt(ch, excerptMax);
+      return { ...ch, summary: excerpt, usedExcerptFallback: Boolean(excerpt) };
+    })
+    .filter((ch) => ch.summary?.trim());
 }

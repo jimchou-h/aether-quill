@@ -94,15 +94,15 @@ function formatProviderHttpError(
   const status =
     axiosError?.response?.status ??
     (error &&
-    typeof error === 'object' &&
-    'response' in error &&
-    (error as { response?: { status?: number } }).response?.status);
+      typeof error === 'object' &&
+      'response' in error &&
+      (error as { response?: { status?: number } }).response?.status);
   const data =
     axiosError?.response?.data ??
     (error &&
-    typeof error === 'object' &&
-    'response' in error &&
-    (error as { response?: { data?: unknown } }).response?.data);
+      typeof error === 'object' &&
+      'response' in error &&
+      (error as { response?: { data?: unknown } }).response?.data);
   let detail = '';
   if (typeof data === 'string') {
     detail = data.slice(0, 500);
@@ -353,6 +353,8 @@ export class GenerationService {
         status: 'completed',
         result: fullContent,
         completedAt: new Date().toISOString(),
+        // 把供应商结束原因落到 trace，供调用方区分「正常收束」与「被截断／提前断流」
+        finishReason: stats.finishReason,
       });
       logGenerationResponse(trace, fullContent);
     } catch (error) {
@@ -418,7 +420,10 @@ export class GenerationService {
       temperature: options?.temperature ?? provider.temperature,
       stream: false,
     };
-    if (typeof options?.frequencyPenalty === 'number' && Number.isFinite(options.frequencyPenalty)) {
+    if (
+      typeof options?.frequencyPenalty === 'number' &&
+      Number.isFinite(options.frequencyPenalty)
+    ) {
       body.frequency_penalty = options.frequencyPenalty;
     }
     return body;
@@ -605,7 +610,13 @@ export class GenerationService {
       .map((persona, index) => {
         const priorParts: string[] = [];
         const prior = persona.priorSnapshot ?? {};
-        for (const key of ['clothing', 'appearance', 'status', 'location', 'possessions'] as const) {
+        for (const key of [
+          'clothing',
+          'appearance',
+          'status',
+          'location',
+          'possessions',
+        ] as const) {
           const value = prior[key];
           if (typeof value === 'string' && value.trim()) {
             priorParts.push(`${key}=${value.trim()}`);
@@ -890,7 +901,9 @@ export class GenerationService {
     }
     const list = Array.isArray(payload)
       ? payload
-      : payload && typeof payload === 'object' && Array.isArray((payload as { cards?: unknown }).cards)
+      : payload &&
+          typeof payload === 'object' &&
+          Array.isArray((payload as { cards?: unknown }).cards)
         ? ((payload as { cards: unknown[] }).cards ?? [])
         : [];
     const out: Array<{
@@ -1060,17 +1073,13 @@ export class GenerationService {
         ? [{ role: 'user' as const, content: promptOrMessages }]
         : promptOrMessages;
     const body = withChatThinkingMode(
-      this.buildProviderRequestBody(
-        messages,
-        provider,
-        {
-          ...options,
-          maxTokens: applyThinkingTokenReserve(
-            options?.maxTokens ?? provider.maxTokens,
-            options?.enableThinking === true
-          ),
-        }
-      ),
+      this.buildProviderRequestBody(messages, provider, {
+        ...options,
+        maxTokens: applyThinkingTokenReserve(
+          options?.maxTokens ?? provider.maxTokens,
+          options?.enableThinking === true
+        ),
+      }),
       options?.enableThinking ? 'enabled' : 'disabled'
     );
     const model = String(body.model ?? provider.model);

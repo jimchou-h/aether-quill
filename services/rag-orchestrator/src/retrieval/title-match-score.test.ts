@@ -6,10 +6,7 @@ import { scoreTitleAgainstMatchingText } from './title-match-score';
 
 describe('scoreTitleAgainstMatchingText', () => {
   it('scores when matching text embeds persona name in a long instruction sentence', () => {
-    const score = scoreTitleAgainstMatchingText(
-      '增加林策与反派的对手戏',
-      '人物小传：林策'
-    );
+    const score = scoreTitleAgainstMatchingText('增加林策与反派的对手戏', '人物小传：林策');
     assert.ok(score > 0);
   });
 });

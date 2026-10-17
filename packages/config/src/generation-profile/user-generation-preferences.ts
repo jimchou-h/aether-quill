@@ -63,8 +63,7 @@ function normalizeTier(
   raw: unknown,
   defaults: UserGenerationTierPreferences
 ): UserGenerationTierPreferences {
-  const source =
-    raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
 
   const providerRaw = source.provider ?? defaults.provider;
   if (!isLlmChatProviderId(providerRaw)) {
@@ -105,11 +104,8 @@ function normalizeTier(
  * Empty / null model or temperature are materialized to built-in defaults.
  * Throws on invalid provider / temperature shape.
  */
-export function normalizeUserGenerationPreferences(
-  input: unknown
-): UserGenerationPreferences {
-  const source =
-    input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+export function normalizeUserGenerationPreferences(input: unknown): UserGenerationPreferences {
+  const source = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
 
   return {
     writing: normalizeTier(source.writing, DEFAULT_USER_GENERATION_PREFERENCES.writing),

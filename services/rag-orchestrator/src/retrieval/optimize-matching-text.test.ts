@@ -107,9 +107,6 @@ describe('mapChaptersForStructuredKnowledgeMatch', () => {
 
 describe('shouldApplyChapterOptimizeMatchingBoost', () => {
   it('applies when instruction present', () => {
-    assert.equal(
-      shouldApplyChapterOptimizeMatchingBoost({ instruction: '加林策' }),
-      true
-    );
+    assert.equal(shouldApplyChapterOptimizeMatchingBoost({ instruction: '加林策' }), true);
   });
 });

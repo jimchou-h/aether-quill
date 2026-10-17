@@ -40,6 +40,8 @@ import {
   confirmChapterAfterSaveActions,
   formatChapterAfterSaveProgressMessage,
 } from '../utils/chapterAfterSave';
+import { confirmAction } from '../composables/useAppConfirm';
+import { resolveOptimizeEntryGuard } from '../utils/chapterRefinement';
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
 
@@ -285,7 +287,11 @@ async function handleImportChapter(payload: { chapterNo: number; title: string; 
   }
 }
 
-async function handleSaveChapter(payload: { chapterNo: number; title: string; content: string }) {
+async function handleSaveChapter(payload: {
+  chapterNo: number;
+  title: string;
+  content: string;
+}): Promise<boolean> {
   savingChapterNo.value = payload.chapterNo;
   errorMessage.value = '';
   message.value = '';
@@ -310,11 +316,36 @@ async function handleSaveChapter(payload: { chapterNo: number; title: string; co
     }
     chapterListRef.value?.clearEditing();
     await loadWorkspace();
+    return true;
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '更新章节失败');
+    return false;
   } finally {
     savingChapterNo.value = null;
   }
+}
+
+/**
+ * 6.1：打开文笔优化 / 智能精修前，如果编辑器里还有相对已保存正文的未保存改动，
+ * 要求作者「先保存并继续」或「返回编辑器」，避免用旧正文发起精修后静默丢弃改动。
+ * 返回 true 表示可以继续打开对话框。
+ */
+async function ensureChapterSavedBeforeOptimize(chapterNo: number): Promise<boolean> {
+  const pending = chapterListRef.value?.getPendingEdit?.();
+  if (!pending || pending.chapterNo !== chapterNo) {
+    return true;
+  }
+  const guard = resolveOptimizeEntryGuard({ chapterNo, hasPendingEdit: true });
+  const confirmed = await confirmAction({
+    title: guard.title,
+    content: guard.content,
+    okText: guard.okText,
+    cancelText: guard.cancelText,
+  });
+  if (!confirmed) {
+    return false;
+  }
+  return handleSaveChapter(pending);
 }
 
 async function handleParseStructuredChapter(chapterNo: number) {
@@ -519,11 +550,16 @@ function ensureAiActivityIdle(): boolean {
   return false;
 }
 
-function handleOpenWritingOptimizeDialog(chapter: ChapterItem) {
+async function handleOpenWritingOptimizeDialog(chapter: ChapterItem) {
   if (!ensureAiActivityIdle()) {
     return;
   }
-  writingOptimizingChapter.value = chapter;
+  if (!(await ensureChapterSavedBeforeOptimize(chapter.chapterNo))) {
+    return;
+  }
+  // 保存后章节对象可能已刷新（updatedAt 变化），取最新一份，避免精修基于旧版本
+  const fresh = chapters.value.find((item) => item.chapterNo === chapter.chapterNo) ?? chapter;
+  writingOptimizingChapter.value = fresh;
   showWritingOptimizeModal.value = true;
 }
 
@@ -532,11 +568,15 @@ function handleCloseWritingOptimizeDialog() {
   writingOptimizingChapter.value = null;
 }
 
-function handleOpenWorkbenchDialog(chapter: ChapterItem) {
+async function handleOpenWorkbenchDialog(chapter: ChapterItem) {
   if (!ensureAiActivityIdle()) {
     return;
   }
-  workbenchChapter.value = chapter;
+  if (!(await ensureChapterSavedBeforeOptimize(chapter.chapterNo))) {
+    return;
+  }
+  const fresh = chapters.value.find((item) => item.chapterNo === chapter.chapterNo) ?? chapter;
+  workbenchChapter.value = fresh;
   showWorkbenchModal.value = true;
 }
 

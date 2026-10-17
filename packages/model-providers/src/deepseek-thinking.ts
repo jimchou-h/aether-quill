@@ -48,14 +48,14 @@ export function shouldEnableChatThinking(templateKey?: string): boolean {
 export const CHAT_THINKING_TOKEN_RESERVE = 8192;
 export const CHAT_THINKING_MAX_TOKENS_CAP = 65536;
 
-export function applyThinkingTokenReserve(
-  maxTokens: number,
-  thinkingEnabled: boolean
-): number {
+export function applyThinkingTokenReserve(maxTokens: number, thinkingEnabled: boolean): number {
   if (!thinkingEnabled || !Number.isFinite(maxTokens) || maxTokens <= 0) {
     return maxTokens;
   }
-  return Math.min(Math.trunc(maxTokens) + CHAT_THINKING_TOKEN_RESERVE, CHAT_THINKING_MAX_TOKENS_CAP);
+  return Math.min(
+    Math.trunc(maxTokens) + CHAT_THINKING_TOKEN_RESERVE,
+    CHAT_THINKING_MAX_TOKENS_CAP
+  );
 }
 
 export function shouldRetryChatWithoutThinking(input: {

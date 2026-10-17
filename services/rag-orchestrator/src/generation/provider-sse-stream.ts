@@ -68,8 +68,7 @@ export function parseProviderSseLine(line: string): ProviderSseLineResult {
       }>;
     };
     const choice = parsed.choices?.[0];
-    const finishReason =
-      typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
+    const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
     const deltaContent = extractProviderChatText(choice?.delta?.content);
     const messageContent = extractProviderChatText(choice?.message?.content);
     const content = deltaContent || messageContent;

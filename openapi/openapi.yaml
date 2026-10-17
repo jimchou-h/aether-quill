@@ -135,6 +135,18 @@ paths:
     $ref: './paths/projects/chapter-optimize-auto-loop-prompt-lab-replay.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/auto-loop/prompt-lab/advise:
     $ref: './paths/projects/chapter-optimize-auto-loop-prompt-lab-advise.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs:
+    $ref: './paths/projects/chapter-refinement-runs.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}:
+    $ref: './paths/projects/chapter-refinement-run-by-id.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/events:
+    $ref: './paths/projects/chapter-refinement-run-events.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/cancel:
+    $ref: './paths/projects/chapter-refinement-run-cancel.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/resume:
+    $ref: './paths/projects/chapter-refinement-run-resume.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/discard:
+    $ref: './paths/projects/chapter-refinement-run-discard.yaml'
   /api/projects/{id}/knowledge/chapters/import/preview:
     $ref: './paths/projects/chapter-import-preview.yaml'
   /api/projects/{id}/knowledge/chapters/import/confirm:
@@ -2930,6 +2942,371 @@ components:
                 type: string
               name:
                 type: string
+    RefinementStatus:
+      type: string
+      description: |
+        Run lifecycle status. Independent from `phase`: reading/planning are phases, not statuses.
+      enum:
+        - queued
+        - running
+        - paused
+        - ready
+        - ready_with_issues
+        - failed
+        - discarded
+        - expired
+    RefinementPhase:
+      type: string
+      enum:
+        - reading
+        - planning
+        - rewriting
+        - repairing
+        - verifying
+        - finished
+    RefinementPauseReason:
+      type: string
+      enum:
+        - user_cancelled
+        - budget_exhausted
+        - upstream_failure
+        - process_restart
+        - context_budget
+        - invalid_model_output
+        - boundary_conflict
+        - permission_revoked
+        - source_changed
+        - persistence_failed
+    ChapterRefinementRewritePolicy:
+      type: string
+      enum:
+        - preserve-plot
+        - scene-rewrite
+    ChapterRefinementStorageMode:
+      type: string
+      description: Whether this run is persisted in PostgreSQL or only in API process memory.
+      enum:
+        - postgres
+        - memory
+    ChapterRefinementCreateRequest:
+      type: object
+      required:
+        - clientRequestId
+        - expectedChapterUpdatedAt
+        - instruction
+      properties:
+        clientRequestId:
+          type: string
+          minLength: 1
+          description: |
+            Idempotency key. The same key with the same payload returns the existing run; the same
+            key with a different payload returns 409. Generate a new key for an explicit new run and
+            keep the old key when retrying a network request.
+        expectedChapterUpdatedAt:
+          type: string
+          format: date-time
+          description: |
+            Optimistic concurrency token. Must match the saved chapter `updatedAt`; a mismatch
+            returns the existing chapter version-conflict semantics.
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: The refinement brief, trimmed and non-empty.
+        rewritePolicy:
+          $ref: '#/components/schemas/ChapterRefinementRewritePolicy'
+        diagnosisTargetChars:
+          type: integer
+          minimum: 2000
+          maximum: 5000
+          description: |
+            Optional explicit diagnosis window target. `0` is rejected. When omitted, the project
+            segmentation setting is normalized into 2000..5000, and a project value of `0` resolves
+            to the automatic target 3000.
+    ChapterRefinementCancelRequest:
+      type: object
+      properties:
+        expectedAttemptId:
+          type: string
+          nullable: true
+          description: |
+            The attemptId the caller observed. Only a matching in-flight attempt is cancelled.
+            Omitting it cancels whatever attempt is currently active. A run already advanced to a
+            different attempt returns 409.
+    ChapterRefinementResumeRequest:
+      type: object
+      required:
+        - expectedRunRevision
+      properties:
+        expectedRunRevision:
+          type: integer
+          minimum: 1
+          description: Compare-and-set token; the resume only applies when it matches the stored revision.
+    ChapterRefinementDiscardRequest:
+      type: object
+      required:
+        - expectedRunRevision
+      properties:
+        expectedRunRevision:
+          type: integer
+          minimum: 1
+          description: Compare-and-set token; an already discarded run is returned idempotently.
+    RefinementResolvedPolicy:
+      type: object
+      required:
+        - diagnosisTargetChars
+        - rewriteTargetChars
+        - rewriteMaxChars
+        - maxRepairPasses
+        - maxCallsPerAttempt
+        - maxActiveMsPerAttempt
+      properties:
+        diagnosisTargetChars:
+          type: integer
+        normalizationReason:
+          type: string
+        rewriteTargetChars:
+          type: integer
+        rewriteMaxChars:
+          type: integer
+        maxRepairPasses:
+          type: integer
+        maxCallsPerAttempt:
+          type: integer
+        maxActiveMsPerAttempt:
+          type: integer
+    RefinementProgress:
+      type: object
+      required:
+        - unitIndex
+        - unitTotal
+        - message
+      properties:
+        unitIndex:
+          type: integer
+          minimum: 0
+        unitTotal:
+          type: integer
+          minimum: 0
+        sceneId:
+          type: string
+        message:
+          type: string
+    RefinementUsage:
+      type: object
+      required:
+        - callCount
+        - activeElapsedMs
+        - tokenAccounting
+      properties:
+        callCount:
+          type: integer
+          minimum: 0
+        activeElapsedMs:
+          type: integer
+          minimum: 0
+        inputTokens:
+          type: integer
+        outputTokens:
+          type: integer
+        tokenAccounting:
+          type: string
+          enum: [actual, estimated, mixed, unavailable]
+    RefinementTemplateVersionRef:
+      description: |
+        Frozen prompt template identity captured at run creation. Exposed for run traceability so an
+        operator can map a run back to the exact template versions it ran against.
+      type: object
+      required:
+        - key
+        - version
+        - hash
+      properties:
+        key:
+          type: string
+        version:
+          type: integer
+        hash:
+          type: string
+    RefinementRunSummary:
+      type: object
+      required:
+        - runId
+        - projectId
+        - chapterNo
+        - status
+        - phase
+        - revision
+        - baseUpdatedAt
+        - baseHash
+        - rewritePolicy
+        - createdAt
+        - updatedAt
+        - expiresAt
+        - resumable
+        - storageMode
+        - progress
+        - resolvedPolicy
+        - usage
+      properties:
+        runId:
+          type: string
+        projectId:
+          type: string
+        chapterNo:
+          type: integer
+        status:
+          $ref: '#/components/schemas/RefinementStatus'
+        phase:
+          $ref: '#/components/schemas/RefinementPhase'
+        revision:
+          type: integer
+        attemptId:
+          type: string
+          nullable: true
+        baseUpdatedAt:
+          type: string
+          format: date-time
+        baseHash:
+          type: string
+        rewritePolicy:
+          $ref: '#/components/schemas/ChapterRefinementRewritePolicy'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        pauseReason:
+          $ref: '#/components/schemas/RefinementPauseReason'
+        resumable:
+          type: boolean
+        storageMode:
+          $ref: '#/components/schemas/ChapterRefinementStorageMode'
+        progress:
+          $ref: '#/components/schemas/RefinementProgress'
+        resolvedPolicy:
+          $ref: '#/components/schemas/RefinementResolvedPolicy'
+        usage:
+          $ref: '#/components/schemas/RefinementUsage'
+        creationTraceId:
+          type: string
+          nullable: true
+          description: |
+            HTTP request trace id (`x-trace-id` header or generated) captured when the run was
+            created. Written into the frozen snapshot so a run can be correlated back to the
+            request that started it; never contains credentials.
+    RefinementChange:
+      type: object
+      required:
+        - sceneId
+        - startOffset
+        - endOffset
+        - summary
+      properties:
+        sceneId:
+          type: string
+        startOffset:
+          type: integer
+        endOffset:
+          type: integer
+        summary:
+          type: string
+    RefinementIssue:
+      type: object
+      required:
+        - id
+        - category
+        - severity
+        - message
+        - disposition
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum: [hard_constraint, continuity, style, coverage]
+        severity:
+          type: string
+          enum: [high, medium, low]
+        sceneId:
+          type: string
+        unitId:
+          type: string
+        candidateRevision:
+          type: integer
+        anchorQuote:
+          type: string
+        message:
+          type: string
+        disposition:
+          type: string
+          enum: [resolved, retained_original, warning, unresolved]
+    RefinementCoverage:
+      type: object
+      required:
+        - sourceChars
+        - plannedChars
+        - processedChars
+        - retainedOriginalChars
+      properties:
+        sourceChars:
+          type: integer
+        plannedChars:
+          type: integer
+        processedChars:
+          type: integer
+        retainedOriginalChars:
+          type: integer
+    RefinementRunView:
+      description: |
+        Authoritative run state plus the frozen base text and the full accepted candidate draft.
+        `acceptedDraftText` always contains the original tail that has not been processed yet, so it
+        MUST NOT be treated as a verified final draft by itself.
+      allOf:
+        - $ref: '#/components/schemas/RefinementRunSummary'
+        - type: object
+          required:
+            - instruction
+            - baseText
+            - acceptedDraftText
+            - chapterBrief
+            - changes
+            - issues
+            - coverage
+            - sourceCurrent
+          properties:
+            instruction:
+              type: string
+            baseText:
+              type: string
+            acceptedDraftText:
+              type: string
+            chapterBrief:
+              type: string
+              nullable: true
+            changes:
+              type: array
+              items:
+                $ref: '#/components/schemas/RefinementChange'
+            issues:
+              type: array
+              items:
+                $ref: '#/components/schemas/RefinementIssue'
+            coverage:
+              $ref: '#/components/schemas/RefinementCoverage'
+            sourceCurrent:
+              type: boolean
+            frozenTemplateVersions:
+              type: array
+              description: |
+                Prompt template versions frozen at run creation, for run traceability. Empty after a
+                discard/expiry tombstone clears the frozen material.
+              items:
+                $ref: '#/components/schemas/RefinementTemplateVersionRef'
 
 security:
   - BearerAuth: []

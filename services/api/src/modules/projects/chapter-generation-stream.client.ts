@@ -53,6 +53,13 @@ export async function streamPipelineGeneration(input: {
   errorMessage?: string;
   retrievedEvidence?: string;
   aborted?: boolean;
+  /**
+   * 上游是否发出过 `end` 事件。缺 end 视为提前断流。
+   * 旧调用可忽略；精修等严格调用据此判定完整性。
+   */
+  completed?: boolean;
+  /** 供应商结束原因（stop / length / content_filter …）；断流时为 null。 */
+  finishReason?: string | null;
 }> {
   if (input.signal?.aborted) {
     return { ok: false, text: '', traceId: '', errorMessage: 'aborted', aborted: true };
@@ -90,6 +97,8 @@ export async function streamPipelineGeneration(input: {
   let traceId = '';
   let errorMessage: string | undefined;
   let retrievedEvidence = '';
+  let completed = false;
+  let finishReason: string | null = null;
 
   await new Promise<void>((resolve, reject) => {
     const stream = response.data as NodeJS.ReadableStream;
@@ -147,6 +156,8 @@ export async function streamPipelineGeneration(input: {
           segmentIndex?: number;
           segmentTotal?: number;
           retrievedEvidence?: string;
+          completed?: boolean;
+          finishReason?: string | null;
         };
         try {
           event = JSON.parse(dataPart);
@@ -178,6 +189,11 @@ export async function streamPipelineGeneration(input: {
             if (typeof event.retrievedEvidence === 'string') {
               retrievedEvidence = event.retrievedEvidence;
             }
+            // 收到 end 事件即为「上游流正常收束」；finishReason 缺失说明供应商未给结束原因
+            completed = true;
+            if (typeof event.finishReason === 'string' || event.finishReason === null) {
+              finishReason = event.finishReason;
+            }
             break;
         }
       }
@@ -201,17 +217,27 @@ export async function streamPipelineGeneration(input: {
       errorMessage: 'aborted',
       retrievedEvidence,
       aborted: true,
+      completed,
+      finishReason,
     };
   }
 
   const text = accumulated.trim();
   if (errorMessage) {
-    return { ok: false, text, traceId, errorMessage, retrievedEvidence };
+    return { ok: false, text, traceId, errorMessage, retrievedEvidence, completed, finishReason };
   }
   if (!text) {
-    return { ok: false, text: '', traceId, errorMessage: '未收到有效响应', retrievedEvidence };
+    return {
+      ok: false,
+      text: '',
+      traceId,
+      errorMessage: '未收到有效响应',
+      retrievedEvidence,
+      completed,
+      finishReason,
+    };
   }
-  return { ok: true, text, traceId, retrievedEvidence };
+  return { ok: true, text, traceId, retrievedEvidence, completed, finishReason };
 }
 
 export async function generatePipelinePlainText(input: {

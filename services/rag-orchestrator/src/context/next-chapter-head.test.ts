@@ -19,7 +19,10 @@ test('skips when next chapter missing or empty', () => {
   assert.equal(resolveNextChapterHead(chapters, 1, 800).skipped, true);
   assert.equal(
     resolveNextChapterHead(
-      [{ chapterNo: 1, title: '一', summary: '', content: 'a' }, { chapterNo: 2, title: '二', summary: '' }],
+      [
+        { chapterNo: 1, title: '一', summary: '', content: 'a' },
+        { chapterNo: 2, title: '二', summary: '' },
+      ],
       1,
       800
     ).skipped,

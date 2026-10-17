@@ -17,6 +17,10 @@ function pushMessage(content: string, variant: ToastVariant, durationSeconds: nu
   if (!trimmed) {
     return;
   }
+  // 无 DOM 环境（node 单测 / SSR）下 ant-design-vue 的 message 会异步访问 document 并抛错，这里直接跳过
+  if (typeof document === 'undefined') {
+    return;
+  }
 
   const duration = durationSeconds;
   if (variant === 'error') {

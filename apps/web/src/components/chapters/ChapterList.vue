@@ -185,6 +185,29 @@ function clearEditing() {
   cancelEdit();
 }
 
+/**
+ * 6.1：当前编辑器里相对已保存正文的待提交改动。用于在打开文笔优化 / 智能精修前
+ * 要求先保存或返回编辑器，避免用旧正文发起精修并静默丢弃未保存内容。
+ */
+const pendingEdit = computed<{ chapterNo: number; title: string; content: string } | null>(() => {
+  const chapterNo = editingChapterNo.value;
+  if (chapterNo === null) {
+    return null;
+  }
+  const saved = props.chapters.find((chapter) => chapter.chapterNo === chapterNo);
+  if (!saved) {
+    return null;
+  }
+  if (editTitle.value === saved.title && editContent.value === saved.content) {
+    return null;
+  }
+  return { chapterNo, title: editTitle.value, content: editContent.value };
+});
+
+function getPendingEdit() {
+  return pendingEdit.value;
+}
+
 function toggleMoreActions() {
   showMoreActions.value = !showMoreActions.value;
 }
@@ -229,7 +252,7 @@ watch(
   }
 );
 
-defineExpose({ clearEditing });
+defineExpose({ clearEditing, getPendingEdit });
 </script>
 
 <template>

@@ -1,11 +1,7 @@
 import { pickTopParagraphs } from '../retrieval/paragraph-crop';
 
 /** 0 = 不注入该块；正数 = 最大字符数 */
-export function clampNarrativeBlockMaxChars(
-  value: unknown,
-  fallback: number,
-  max = 8000
-): number {
+export function clampNarrativeBlockMaxChars(value: unknown, fallback: number, max = 8000): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) {
     return fallback;

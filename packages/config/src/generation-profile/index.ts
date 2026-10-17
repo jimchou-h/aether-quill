@@ -50,10 +50,7 @@ function parseTemperature(raw: string | undefined, fallback: number, key: string
   return n;
 }
 
-function parseOptionalFrequencyPenalty(
-  raw: string | undefined,
-  key: string
-): number | undefined {
+function parseOptionalFrequencyPenalty(raw: string | undefined, key: string): number | undefined {
   if (raw === undefined || raw.trim() === '') {
     return undefined;
   }
@@ -70,7 +67,9 @@ function validateModelIdIfSet(raw: string | undefined, key: string): void {
   }
   const normalized = normalizeGenerationModelId(raw);
   if (!normalized) {
-    throw new Error(`${key} must be a non-empty model id up to ${GENERATION_MODEL_ID_MAX_LENGTH} chars`);
+    throw new Error(
+      `${key} must be a non-empty model id up to ${GENERATION_MODEL_ID_MAX_LENGTH} chars`
+    );
   }
 }
 
@@ -280,7 +279,7 @@ export function resolveGenerationCallProfile(input: {
     typeof defaults.temperature === 'number'
       ? defaults.temperature
       : DEFAULT_GENERATION_TEMPERATURE;
-  let frequencyPenalty: number | undefined =
+  const frequencyPenalty: number | undefined =
     tier === GENERATION_TIER_WRITING ? env.writingFrequencyPenalty : undefined;
 
   if (userTier) {

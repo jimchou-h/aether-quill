@@ -1865,6 +1865,562 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the caller's chapter refinement runs
+     * @description Return the caller's most recent runs for the chapter, newest first.
+     */
+    get: {
+      parameters: {
+        query?: {
+          limit?: number;
+        };
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Run summaries retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['RefinementRunSummary'][];
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project or chapter not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    /**
+     * Create a chapter refinement run
+     * @description Freeze the saved chapter and start the background orchestration.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': components['schemas']['ChapterRefinementCreateRequest'];
+        };
+      };
+      responses: {
+        /** @description Run created (or the idempotent existing run returned) */
+        202: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['RefinementRunSummary'];
+            };
+          };
+        };
+        /** @description Invalid request */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project or chapter not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Idempotency or single active run conflict */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a chapter refinement run
+     * @description Return the authoritative run state, frozen base text and accepted candidate draft.
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+          runId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description Run detail retrieved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['RefinementRunView'];
+            };
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project, chapter or run not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Run expired or discarded */
+        410: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel a running chapter refinement attempt
+     * @description Abort the current attempt, persist the last valid checkpoint; idempotent per attempt.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+          runId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: {
+        content: {
+          'application/json': components['schemas']['ChapterRefinementCancelRequest'];
+        };
+      };
+      responses: {
+        /** @description Attempt cancelled (or already cancelled) and checkpoint preserved */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['RefinementRunSummary'];
+            };
+          };
+        };
+        /** @description Invalid body */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project, chapter or run not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description The run already advanced to another attempt or is not cancellable */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Run expired or discarded */
+        410: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/resume': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resume a paused chapter refinement run
+     * @description Re-validate version/permission/snapshot, then start a new attempt from the checkpoint.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+          runId: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': components['schemas']['ChapterRefinementResumeRequest'];
+        };
+      };
+      responses: {
+        /** @description New execution attempt accepted */
+        202: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['RefinementRunSummary'];
+            };
+          };
+        };
+        /** @description Invalid body */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description The caller lost owner/editor access to the project */
+        403: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project, chapter or run not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Revision conflict, not resumable, or the frozen chapter version changed */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Run expired or discarded */
+        410: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/discard': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Discard a chapter refinement run
+     * @description Clear frozen text, candidate and prompt materials; keep a minimal tombstone.
+     */
+    post: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+          runId: string;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': components['schemas']['ChapterRefinementDiscardRequest'];
+        };
+      };
+      responses: {
+        /** @description Run discarded (or already discarded) and candidate materials cleared */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['RefinementRunSummary'];
+            };
+          };
+        };
+        /** @description Invalid body */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project, chapter or run not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Revision conflict */
+        409: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/refinement/runs/{runId}/events': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Observe a chapter refinement run (SSE)
+     * @description Stream observation events; observing is decoupled from execution.
+     */
+    get: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+          runId: string;
+        };
+        cookie?: never;
+      };
+      requestBody?: never;
+      responses: {
+        /** @description SSE stream */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'text/event-stream': string;
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project, chapter or run not found */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Run expired or discarded */
+        410: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2282,6 +2838,169 @@ export interface components {
       results: components['schemas']['ConsistencyCheckResult'][];
       /** Format: date-time */
       checkedAt: string;
+    };
+    /** @description Run lifecycle status. Independent from `phase`: reading/planning are phases, not statuses. */
+    RefinementStatus:
+      | 'queued'
+      | 'running'
+      | 'paused'
+      | 'ready'
+      | 'ready_with_issues'
+      | 'failed'
+      | 'discarded'
+      | 'expired';
+    /** @enum {string} */
+    RefinementPhase: 'reading' | 'planning' | 'rewriting' | 'repairing' | 'verifying' | 'finished';
+    /** @enum {string} */
+    RefinementPauseReason:
+      | 'user_cancelled'
+      | 'budget_exhausted'
+      | 'upstream_failure'
+      | 'process_restart'
+      | 'context_budget'
+      | 'invalid_model_output'
+      | 'boundary_conflict'
+      | 'permission_revoked'
+      | 'source_changed'
+      | 'persistence_failed';
+    /** @enum {string} */
+    ChapterRefinementRewritePolicy: 'preserve-plot' | 'scene-rewrite';
+    /** @description Whether this run is persisted in PostgreSQL or only in API process memory. */
+    ChapterRefinementStorageMode: 'postgres' | 'memory';
+    ChapterRefinementCreateRequest: {
+      /**
+       * @description Idempotency key. The same key with the same payload returns the existing run; the same
+       * key with a different payload returns 409. Generate a new key for an explicit new run and
+       * keep the old key when retrying a network request.
+       */
+      clientRequestId: string;
+      /**
+       * Format: date-time
+       * @description Optimistic concurrency token. Must match the saved chapter `updatedAt`; a mismatch
+       * returns the existing chapter version-conflict semantics.
+       */
+      expectedChapterUpdatedAt: string;
+      /** @description The refinement brief, trimmed and non-empty. */
+      instruction: string;
+      rewritePolicy?: components['schemas']['ChapterRefinementRewritePolicy'];
+      /**
+       * @description Optional explicit diagnosis window target. `0` is rejected. When omitted, the project
+       * segmentation setting is normalized into 2000..5000, and a project value of `0` resolves
+       * to the automatic target 3000.
+       */
+      diagnosisTargetChars?: number;
+    };
+    ChapterRefinementCancelRequest: {
+      /**
+       * @description The attemptId the caller observed. Only a matching in-flight attempt is cancelled.
+       * Omitting it cancels whatever attempt is currently active. A run already advanced to a
+       * different attempt returns 409.
+       */
+      expectedAttemptId?: string | null;
+    };
+    ChapterRefinementResumeRequest: {
+      /** @description Compare-and-set token; the resume only applies when it matches the stored revision. */
+      expectedRunRevision: number;
+    };
+    ChapterRefinementDiscardRequest: {
+      /** @description Compare-and-set token; an already discarded run is returned idempotently. */
+      expectedRunRevision: number;
+    };
+    RefinementResolvedPolicy: {
+      diagnosisTargetChars: number;
+      normalizationReason?: string;
+      rewriteTargetChars: number;
+      rewriteMaxChars: number;
+      maxRepairPasses: number;
+      maxCallsPerAttempt: number;
+      maxActiveMsPerAttempt: number;
+    };
+    RefinementProgress: {
+      unitIndex: number;
+      unitTotal: number;
+      sceneId?: string;
+      message: string;
+    };
+    RefinementUsage: {
+      callCount: number;
+      activeElapsedMs: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      /** @enum {string} */
+      tokenAccounting: 'actual' | 'estimated' | 'mixed' | 'unavailable';
+    };
+    RefinementTemplateVersionRef: {
+      key: string;
+      version: number;
+      hash: string;
+    };
+    RefinementRunSummary: {
+      runId: string;
+      projectId: string;
+      chapterNo: number;
+      status: components['schemas']['RefinementStatus'];
+      phase: components['schemas']['RefinementPhase'];
+      revision: number;
+      attemptId?: string | null;
+      /** Format: date-time */
+      baseUpdatedAt: string;
+      baseHash: string;
+      rewritePolicy: components['schemas']['ChapterRefinementRewritePolicy'];
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      updatedAt: string;
+      /** Format: date-time */
+      expiresAt: string;
+      pauseReason?: components['schemas']['RefinementPauseReason'];
+      resumable: boolean;
+      storageMode: components['schemas']['ChapterRefinementStorageMode'];
+      progress: components['schemas']['RefinementProgress'];
+      resolvedPolicy: components['schemas']['RefinementResolvedPolicy'];
+      usage: components['schemas']['RefinementUsage'];
+      creationTraceId?: string | null;
+    };
+    RefinementChange: {
+      sceneId: string;
+      startOffset: number;
+      endOffset: number;
+      summary: string;
+    };
+    RefinementIssue: {
+      id: string;
+      /** @enum {string} */
+      category: 'hard_constraint' | 'continuity' | 'style' | 'coverage';
+      /** @enum {string} */
+      severity: 'high' | 'medium' | 'low';
+      sceneId?: string;
+      unitId?: string;
+      candidateRevision?: number;
+      anchorQuote?: string;
+      message: string;
+      /** @enum {string} */
+      disposition: 'resolved' | 'retained_original' | 'warning' | 'unresolved';
+    };
+    RefinementCoverage: {
+      sourceChars: number;
+      plannedChars: number;
+      processedChars: number;
+      retainedOriginalChars: number;
+    };
+    /**
+     * @description Authoritative run state plus the frozen base text and the full accepted candidate draft.
+     * `acceptedDraftText` always contains the original tail that has not been processed yet, so it
+     * MUST NOT be treated as a verified final draft by itself.
+     */
+    RefinementRunView: components['schemas']['RefinementRunSummary'] & {
+      instruction: string;
+      baseText: string;
+      acceptedDraftText: string;
+      chapterBrief: string | null;
+      changes: components['schemas']['RefinementChange'][];
+      issues: components['schemas']['RefinementIssue'][];
+      coverage: components['schemas']['RefinementCoverage'];
+      sourceCurrent: boolean;
+      frozenTemplateVersions?: components['schemas']['RefinementTemplateVersionRef'][];
     };
   };
   responses: never;

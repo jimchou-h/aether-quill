@@ -1,7 +1,10 @@
 const SENTENCE_END_RE = /[。！？!?；;\n]/;
 
 /** 提取命中 offset 所在句子（含边界标点） */
-export function extractSentenceAtOffset(text: string, offset: number): {
+export function extractSentenceAtOffset(
+  text: string,
+  offset: number
+): {
   sentence: string;
   start: number;
   end: number;

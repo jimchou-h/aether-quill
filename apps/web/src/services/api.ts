@@ -13,6 +13,16 @@ import {
   resolveWorkbenchStructuredInfo,
 } from '../utils/structured-matching';
 import { readSseLines, readSseSegments, type SseDataLineHandler } from '../utils/sseStream';
+import {
+  parseRefinementStreamEvent,
+  type ChapterRefinementCreateRequest,
+  type ChapterRefinementCancelRequest,
+  type ChapterRefinementResumeRequest,
+  type ChapterRefinementDiscardRequest,
+  type RefinementRunSummary,
+  type RefinementRunView,
+  type RefinementStreamEvent,
+} from '../utils/chapterRefinement';
 
 // Type helpers
 type PathMethod<T extends keyof paths> = {
@@ -175,13 +185,31 @@ export interface ProjectWritingStats {
   generationFailed: number;
 }
 
+/**
+ * 安全读取 Vite 注入的环境变量。
+ *
+ * 在 Node（tsx --test）下 `import.meta.env` 不存在，直接取属性会抛错；此处统一降级，
+ * 使本模块在无 Vite 环境也能被导入（便于对依赖它的 composable 做单测）。
+ */
+function readViteEnv(): {
+  DEV?: boolean;
+  VITE_API_BASE_URL?: unknown;
+  VITE_RAG_ORCHESTRATOR_BASE_URL?: unknown;
+} {
+  const meta = import.meta as ImportMeta & {
+    env?: { DEV?: boolean; VITE_API_BASE_URL?: unknown; VITE_RAG_ORCHESTRATOR_BASE_URL?: unknown };
+  };
+  return meta.env ?? {};
+}
+
 /** 开发默认相对路径，走 Vite proxy，支持 localhost / 局域网 IP 访问 */
 function getApiBaseURL(): string {
-  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  const env = readViteEnv();
+  const configured = typeof env.VITE_API_BASE_URL === 'string' ? env.VITE_API_BASE_URL.trim() : '';
   if (configured) {
     return configured.replace(/\/$/, '');
   }
-  if (import.meta.env.DEV) {
+  if (env.DEV) {
     return '';
   }
   return 'http://localhost:3000';
@@ -196,12 +224,16 @@ const http: AxiosInstance = axios.create({
 });
 
 function getRagOrchestratorBaseURL() {
-  const configured = import.meta.env.VITE_RAG_ORCHESTRATOR_BASE_URL?.trim();
+  const env = readViteEnv();
+  const configured =
+    typeof env.VITE_RAG_ORCHESTRATOR_BASE_URL === 'string'
+      ? env.VITE_RAG_ORCHESTRATOR_BASE_URL.trim()
+      : '';
   if (configured) {
     return configured.replace(/\/$/, '');
   }
 
-  if (import.meta.env.DEV) {
+  if (env.DEV) {
     return '';
   }
 
@@ -1698,6 +1730,99 @@ export const apiClient = {
           }
         } catch {
           // 忽略不完整 SSE 分片
+        }
+      }
+    );
+  },
+
+  async createChapterRefinementRun(
+    projectId: string,
+    chapterNo: number,
+    payload: ChapterRefinementCreateRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/refinement/runs`,
+      payload
+    );
+    return this.unwrapPayload<RefinementRunSummary>(response.data);
+  },
+
+  async listChapterRefinementRuns(projectId: string, chapterNo: number, limit?: number) {
+    const response = await http.get(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/refinement/runs`,
+      { params: limit ? { limit } : undefined }
+    );
+    return this.unwrapPayload<RefinementRunSummary[]>(response.data);
+  },
+
+  async getChapterRefinementRun(projectId: string, chapterNo: number, runId: string) {
+    const response = await http.get(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/refinement/runs/${encodeURIComponent(runId)}`
+    );
+    return this.unwrapPayload<RefinementRunView>(response.data);
+  },
+
+  /** 5.1：显式中止当前执行尝试（幂等）；后台 run 保存最后 checkpoint。 */
+  async cancelChapterRefinementRun(
+    projectId: string,
+    chapterNo: number,
+    runId: string,
+    payload: ChapterRefinementCancelRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/refinement/runs/${encodeURIComponent(runId)}/cancel`,
+      payload
+    );
+    return this.unwrapPayload<RefinementRunSummary>(response.data);
+  },
+
+  /** 5.1：从 checkpoint 继续（另开执行尝试，CAS revision）。 */
+  async resumeChapterRefinementRun(
+    projectId: string,
+    chapterNo: number,
+    runId: string,
+    payload: ChapterRefinementResumeRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/refinement/runs/${encodeURIComponent(runId)}/resume`,
+      payload
+    );
+    return this.unwrapPayload<RefinementRunSummary>(response.data);
+  },
+
+  /** 5.1：放弃运行并清理候选材料（幂等）；不触碰章节正文。 */
+  async discardChapterRefinementRun(
+    projectId: string,
+    chapterNo: number,
+    runId: string,
+    payload: ChapterRefinementDiscardRequest
+  ) {
+    const response = await http.post(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/refinement/runs/${encodeURIComponent(runId)}/discard`,
+      payload
+    );
+    return this.unwrapPayload<RefinementRunSummary>(response.data);
+  },
+
+  /**
+   * 观察精修 run。SSE 只做观察：中断订阅不取消后台执行，重连会先收到权威快照。
+   */
+  async observeChapterRefinementRunSSE(
+    projectId: string,
+    chapterNo: number,
+    runId: string,
+    onEvent: (event: RefinementStreamEvent) => void,
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const url = `${getApiBaseURL()}/api/projects/${projectId}/knowledge/chapters/${chapterNo}/optimize/refinement/runs/${encodeURIComponent(runId)}/events`;
+    await requestAuthorizedSse(
+      url,
+      { method: 'GET', signal: options?.signal },
+      'segments',
+      (dataPart) => {
+        const event = parseRefinementStreamEvent(dataPart);
+        if (event) {
+          onEvent(event);
         }
       }
     );

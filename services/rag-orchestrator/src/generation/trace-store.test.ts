@@ -49,7 +49,10 @@ test('TraceStore persists on update', async () => {
     const { TraceStore } = await import('./trace-store');
     const store1 = new TraceStore();
     store1.push(sampleTrace('trace-b'));
-    store1.update('trace-b', { status: 'completed', usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } });
+    store1.update('trace-b', {
+      status: 'completed',
+      usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
+    });
     store1.close();
 
     const store2 = new TraceStore();
@@ -103,7 +106,9 @@ test('TraceStore 落盘去掉完整 prompt 与模型返回', async () => {
         system_message: 'system 全文'.repeat(40),
         systemChars: 12,
         userChars: 34,
-        full_documents: [{ documentId: 'd1', title: '杨幂角色卡', content: '角色卡全文'.repeat(200) }],
+        full_documents: [
+          { documentId: 'd1', title: '杨幂角色卡', content: '角色卡全文'.repeat(200) },
+        ],
       },
       result: '模型返回正文'.repeat(80),
       providerType: 'deepseek',

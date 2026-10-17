@@ -60,10 +60,14 @@ function vectorHit(ids: string[]): KnowledgeRetrievalResult {
 
 describe('mergeTitleAndVectorEvidence', () => {
   it('keeps title hits and supplements vector-only docs', () => {
-    const merged = mergeTitleAndVectorEvidence(structuredHit(['pc-lin']), vectorHit(['ws-harbor']), {
-      personaTopN: 5,
-      otherTopN: 5,
-    });
+    const merged = mergeTitleAndVectorEvidence(
+      structuredHit(['pc-lin']),
+      vectorHit(['ws-harbor']),
+      {
+        personaTopN: 5,
+        otherTopN: 5,
+      }
+    );
     assert.equal(merged.retrievalMode, 'hybrid');
     assert.ok(merged.evidenceDocumentIds.includes('pc-lin'));
     assert.ok(merged.evidenceDocumentIds.includes('ws-harbor'));

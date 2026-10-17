@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue';
-import {
-  buildOptimizeDiffBundle,
-  type OptimizeDiffBundle,
-} from '../../utils/chapterOptimizeDiff';
+import { buildOptimizeDiffBundle, type OptimizeDiffBundle } from '../../utils/chapterOptimizeDiff';
 
 const props = withDefaults(
   defineProps<{
@@ -170,12 +167,7 @@ const canBuildDiff = computed(() => props.showDiff && !diffComputing.value);
     </div>
 
     <div v-if="showDiff" class="diff-toolbar">
-      <button
-        type="button"
-        class="diff-action"
-        :disabled="!canBuildDiff"
-        @click="runDiff"
-      >
+      <button type="button" class="diff-action" :disabled="!canBuildDiff" @click="runDiff">
         {{ diffBundle ? '刷新对照' : '生成对照' }}
       </button>
       <p v-if="diffComputing" class="diff-pending">正在生成对照…</p>

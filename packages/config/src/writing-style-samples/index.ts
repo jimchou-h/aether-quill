@@ -76,6 +76,30 @@ export function sanitizeWritingStyleSamples(raw: unknown): WritingStyleSample[] 
   return samples.slice(0, WRITING_STYLE_SAMPLES_MAX_PER_PROJECT);
 }
 
+/** 智能精修模板前缀 */
+export const CHAPTER_REFINEMENT_TEMPLATE_PREFIX = 'chapter.refinement.';
+
+/** 智能精修的写作档模板：正文改写与定点补修（注入项目长文风与冻结文风样本） */
+const CHAPTER_REFINEMENT_WRITING_KEYS = new Set([
+  'chapter.refinement.rewrite',
+  'chapter.refinement.repair',
+]);
+
+export function isRefinementTemplateKey(templateKey: string): boolean {
+  return templateKey.trim().startsWith(CHAPTER_REFINEMENT_TEMPLATE_PREFIX);
+}
+
+/** 写作档：注入项目长写作指导与冻结文风样本。 */
+export function isRefinementWritingStageTemplateKey(templateKey: string): boolean {
+  return CHAPTER_REFINEMENT_WRITING_KEYS.has(templateKey.trim());
+}
+
+/** 工具档（inspect / plan / review）：不注入项目长写作指导与文风样本。 */
+export function isRefinementUtilityStageTemplateKey(templateKey: string): boolean {
+  const key = templateKey.trim();
+  return isRefinementTemplateKey(key) && !CHAPTER_REFINEMENT_WRITING_KEYS.has(key);
+}
+
 /** 写作类任务 templateKey：续写、优化 draft、pipeline 改写 / revise / fix-items */
 export function isWritingStyleInjectionTemplateKey(templateKey: string): boolean {
   const key = templateKey.trim();
@@ -93,6 +117,10 @@ export function isWritingStyleInjectionTemplateKey(templateKey: string): boolean
     key === 'chapter.optimize.workbench-draft-prose' ||
     key === 'chapter.optimize.workbench-draft-scene'
   ) {
+    return true;
+  }
+  // AQ-381 智能精修：只有正文与补修是写作级；inspect/plan/review 不注入文风样本
+  if (isRefinementWritingStageTemplateKey(key)) {
     return true;
   }
   return false;

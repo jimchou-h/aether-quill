@@ -1,0 +1,127 @@
+post:
+  tags:
+    - Projects
+  summary: Create a chapter refinement run
+  description: |
+    Freeze the saved chapter (text, version, instruction, policy and resolved materials) into an
+    independent run and start the background orchestration. The response returns before the
+    background work finishes; the caller observes progress through `GET .../runs/{runId}/events`.
+
+    AQ-380 baseline: the background engine currently runs the deterministic **keep-only** strategy.
+    It never calls a model and never opens the apply path; the produced candidate equals the frozen
+    base text byte-for-byte. Later tasks replace the engine behind the same contract.
+
+    Idempotency: the same `clientRequestId` with the same payload returns the existing run; the same
+    key with a different payload returns 409. A chapter that already has a queued/running run for
+    the same creator returns 409.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterRefinementCreateRequest'
+  responses:
+    '202':
+      description: Run created (or the idempotent existing run returned)
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/RefinementRunSummary'
+    '400':
+      description: Invalid request (empty chapter, empty instruction, oversize chapter, bad policy)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '409':
+      description: Idempotency conflict, single active run conflict, or chapter version conflict
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+get:
+  tags:
+    - Projects
+  summary: List the caller's chapter refinement runs
+  description: |
+    Return the caller's most recent runs for the chapter, newest first. Only runs created by the
+    caller are visible. Discarded/expired runs appear as minimal summaries.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 20
+        default: 10
+  responses:
+    '200':
+      description: Run summaries retrieved
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '../../openapi.yaml#/components/schemas/RefinementRunSummary'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

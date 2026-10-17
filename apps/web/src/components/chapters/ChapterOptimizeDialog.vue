@@ -53,8 +53,10 @@ import AiTaskProgressPanel from '../common/AiTaskProgressPanel.vue';
 import AutoLoopRoundsPanel from './AutoLoopRoundsPanel.vue';
 import AutoLoopPromptLabDrawer from './AutoLoopPromptLabDrawer.vue';
 import ChapterOptimizeComparePane from './ChapterOptimizeComparePane.vue';
+import ChapterRefinementPanel from './ChapterRefinementPanel.vue';
 import SseInterruptButton from '../common/SseInterruptButton.vue';
 import type { AutoLoopPromptLabCall } from '../../services/api';
+import { isChapterRefinementEntryEnabled } from '../../utils/chapterRefinement';
 
 type OptimizeStep = WritingOptimizeStep;
 
@@ -137,6 +139,31 @@ const {
 
 const promptLabOpen = shallowRef(false);
 const promptLabCall = shallowRef<AutoLoopPromptLabCall | null>(null);
+
+/**
+ * 智能精修草稿入口默认不公开：仅当 URL 显式带 `?refinement=1` 时渲染。
+ * 与旧 mode 完全隔离，点击后在独立弹层里编排，不影响现有流程。
+ */
+const refinementEntryEnabled = isChapterRefinementEntryEnabled(window.location.search);
+const refinementOpen = shallowRef(false);
+
+function openRefinement() {
+  if (!refinementEntryEnabled) {
+    return;
+  }
+  refinementOpen.value = true;
+}
+
+function closeRefinement() {
+  refinementOpen.value = false;
+}
+
+/** 智能精修应用成功：关闭精修弹层，并把刷新后的章节回传给父级刷新编辑器。 */
+function onRefinementApplied(chapter: ChapterItem) {
+  refinementOpen.value = false;
+  emit('applied', chapter);
+  emit('close');
+}
 
 function openPromptLab(call: AutoLoopPromptLabCall) {
   if (!canOpenPromptLabKind(call.kind)) {
@@ -236,7 +263,7 @@ const modeSubtitle = computed(() => {
   if (isDirectMode.value) {
     return '根据自由要求直接改写整章正文；只有确认应用后才会覆盖原文。';
   }
-  return '根据自由要求先生成编辑方案，再按方案改写；成稿后自动做连续性自检，有缺口最多自动修一刀。你可再标记残留问题修复。只有确认应用后才会覆盖原文。';
+  return '根据自由要求先生成编辑方案，再按方案改写；成稿后对照方案验收改写拍点、保留内容和连续性，有缺口最多自动修一刀。你可再标记残留问题修复。只有确认应用后才会覆盖原文。';
 });
 
 function bindInterruptHandler() {
@@ -300,6 +327,7 @@ function stepVisualFor(stepKey: WritingOptimizeStep) {
 function resetState() {
   step.value = 'instruction';
   rewriteMode.value = 'from-plan';
+  refinementOpen.value = false;
   instruction.value = '';
   plan.value = null;
   editablePlanText.value = '';
@@ -844,6 +872,19 @@ async function generateDraft() {
       draftText.value = lastSuccessful;
       return;
     }
+    if (review === 'failed') {
+      draftText.value = lastSuccessful;
+      continuitySummary.value = formatContinuitySelfCheckSummary({
+        reviewed: false,
+        hadGaps: false,
+        autoRefined: false,
+        failed: true,
+      });
+      closedRunStatus.value = '';
+      statusText.value = continuitySummary.value;
+      failAiTaskProgress(aiTaskProgress, continuitySummary.value);
+      return;
+    }
     if (!shouldRunFromPlanRefinePass(review.hasMaterialGaps)) {
       continuitySummary.value = formatContinuitySelfCheckSummary({
         reviewed: true,
@@ -901,7 +942,7 @@ async function generateDraft() {
 
 async function runContinuityReview(
   chapter: ChapterItem
-): Promise<{ hasMaterialGaps: boolean; reviewText: string } | 'aborted'> {
+): Promise<{ hasMaterialGaps: boolean; reviewText: string } | 'aborted' | 'failed'> {
   const currentPlan = plan.value;
   const draft = draftText.value.trim();
   if (!currentPlan || !draft) {
@@ -957,7 +998,7 @@ async function runContinuityReview(
       outcome = 'aborted';
       cancelAiTaskProgress(aiTaskProgress, '已中断文笔优化生成');
     } else {
-      errorMessage.value = presentErrorFromCaught(error, '连续性自检失败');
+      errorMessage.value = presentErrorFromCaught(error, '方案验收失败');
       outcome = 'error';
     }
   } finally {
@@ -969,7 +1010,7 @@ async function runContinuityReview(
     return 'aborted';
   }
   if (outcome === 'error') {
-    return { hasMaterialGaps: false, reviewText: '' };
+    return 'failed';
   }
   return outcome;
 }
@@ -1125,6 +1166,17 @@ async function applyDraft() {
             自动循环
           </button>
         </div>
+
+        <button
+          v-if="refinementEntryEnabled"
+          type="button"
+          class="mode-toggle-button refinement-entry-button"
+          :disabled="isBusy"
+          title="草稿入口：仅带 ?refinement=1 时可见"
+          @click="openRefinement"
+        >
+          智能精修（草稿）
+        </button>
 
         <div v-if="isAutoLoopMode" class="run-prefs">
           <label class="run-pref">
@@ -1314,7 +1366,9 @@ async function applyDraft() {
             >
               回退到自检前成稿
             </button>
-            <label class="field-label" for="writing-optimize-mark-fix">仍有问题？标记后让 AI 修</label>
+            <label class="field-label" for="writing-optimize-mark-fix"
+              >仍有问题？标记后让 AI 修</label
+            >
             <textarea
               id="writing-optimize-mark-fix"
               v-model="markFixNotes"
@@ -1324,7 +1378,9 @@ async function applyDraft() {
               placeholder="例如：视频通话被删了但还写「视频后」；第3段男主坐着却写成挺腰抽送。"
             />
             <div class="revision-actions">
-              <span class="field-hint">只修你标出的问题，不会自动覆盖入库；确认后点「应用优化正文」。</span>
+              <span class="field-hint"
+                >只修你标出的问题，不会自动覆盖入库；确认后点「应用优化正文」。</span
+              >
               <button
                 class="primary-button"
                 type="button"
@@ -1460,6 +1516,20 @@ async function applyDraft() {
       </footer>
     </div>
   </a-modal>
+  <a-modal
+    :open="refinementOpen"
+    :title="`智能精修${props.chapter ? ` · 第${props.chapter.chapterNo}章` : ''}`"
+    width="1100px"
+    :footer="null"
+    destroy-on-close
+    @cancel="closeRefinement"
+  >
+    <ChapterRefinementPanel
+      :project-id="props.projectId"
+      :chapter="props.chapter"
+      @applied="onRefinementApplied"
+    />
+  </a-modal>
   <AutoLoopPromptLabDrawer
     :open="promptLabOpen"
     :project-id="projectId"
@@ -1570,6 +1640,20 @@ async function applyDraft() {
 .mode-toggle-button:focus-visible {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
+}
+
+/* 草稿入口：与正式 mode 视觉区分，默认不渲染 */
+.refinement-entry-button {
+  margin: 0 0 8px;
+  border: 1px dashed #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 13px;
+}
+
+.refinement-entry-button:hover:not(:disabled) {
+  color: #312e81;
+  background: #e0e7ff;
 }
 
 .run-prefs {

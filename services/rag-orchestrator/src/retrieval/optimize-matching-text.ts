@@ -53,9 +53,7 @@ export function listPersonaCardsFromKnowledgeDocs(
   return refs;
 }
 
-export function parseAppearingCharactersFromExtra(
-  extra?: Record<string, unknown>
-): string[] {
+export function parseAppearingCharactersFromExtra(extra?: Record<string, unknown>): string[] {
   const raw = extra?.appearingCharacters;
   if (!Array.isArray(raw)) {
     return [];
@@ -121,8 +119,10 @@ export function resolveOptimizeStructuredMatchingText(input: {
 
   let supplements: string[] = [];
   if (isPersonaKeywordSupplementEnabled() && personaCards.length > 0 && supplementSource.trim()) {
-    supplements = supplementPersonaKeywordsFromSource(supplementSource, personaCards)
-      .supplementedKeywords;
+    supplements = supplementPersonaKeywordsFromSource(
+      supplementSource,
+      personaCards
+    ).supplementedKeywords;
   }
 
   const seen = new Set(supplements);
@@ -134,10 +134,7 @@ export function resolveOptimizeStructuredMatchingText(input: {
   }
 
   const body = [chapterStructured, instruction].filter(Boolean).join(' ').trim();
-  const effective = buildEffectiveMatchingText(
-    body || instruction.slice(0, 400),
-    supplements
-  );
+  const effective = buildEffectiveMatchingText(body || instruction.slice(0, 400), supplements);
   return effective || undefined;
 }
 

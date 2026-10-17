@@ -603,7 +603,9 @@ onMounted(() => {
           <span class="toggle-text">保存章节 / 应用文笔优化后自动抽取事件卡</span>
         </label>
       </div>
-      <p class="field-hint inline-hint">建议与「跨章记忆注入」一同开启；也可在事件卡页手动按章抽取。</p>
+      <p class="field-hint inline-hint">
+        建议与「跨章记忆注入」一同开启；也可在事件卡页手动按章抽取。
+      </p>
 
       <div class="toggle-row">
         <label class="toggle-label">

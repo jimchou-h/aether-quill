@@ -71,10 +71,7 @@ test('applyThinkingTokenReserve only adds headroom when thinking is on', () => {
 });
 
 test('shouldRetryChatWithoutThinking only retries empty thinking passes', () => {
-  assert.equal(
-    shouldRetryChatWithoutThinking({ thinkingEnabled: true, contentEmpty: true }),
-    true
-  );
+  assert.equal(shouldRetryChatWithoutThinking({ thinkingEnabled: true, contentEmpty: true }), true);
   assert.equal(
     shouldRetryChatWithoutThinking({ thinkingEnabled: true, contentEmpty: false }),
     false

@@ -1,0 +1,57 @@
+get:
+  tags:
+    - Projects
+  summary: Get a chapter refinement run
+  description: |
+    Return the authoritative run state, the frozen base text and the full accepted candidate draft
+    for the run creator. A run owned by another project member returns 404 to avoid leaking frozen
+    text, instruction and private materials.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: Run detail retrieved
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/RefinementRunView'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project, chapter or run not found (or run belongs to another creator)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '410':
+      description: Run expired or discarded; the frozen text is no longer readable
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

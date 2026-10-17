@@ -50,6 +50,8 @@ import {
   buildSegmentDiagnosisSystemPrompt,
   buildSegmentDiagnosisUserPrompt,
   CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
+  CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES,
   buildPlanSynthesisUserPrompt,
   type Segment,
@@ -206,14 +208,29 @@ test('buildDraftUserPrompt enforces both <chapter-original> and <optimization-pl
   assert.match(prompt, /1\. 删去重复内心独白/);
   assert.match(prompt, /<chapter-original chapter-no="3">/);
   assert.match(prompt, /原章节正文内容/);
-  assert.match(prompt, /实质性重写/);
+  assert.match(prompt, /实质变化/);
   assert.doesNotMatch(prompt, /主锚/);
-  assert.match(prompt, /禁止因「方案未点名具体句子/);
+  assert.match(prompt, /未列为改写目标的有效内容可以保留原文/);
   assert.doesNotMatch(prompt, /当作改写方向/);
   assert.doesNotMatch(prompt, /不是句级待办清单/);
   assert.doesNotMatch(prompt, /文学策划/);
   assert.doesNotMatch(prompt, /\[n-m\]/);
   assert.doesNotMatch(prompt, /不得另起优化方案或大纲/);
+});
+
+test('from-plan draft requires substantive changes at named beats and permits preserving effective passages', () => {
+  const planText = '【2. 改写拍点】扩展试探对白，写出迟疑。\n【3. 保留清单】保留姐姐赶到时的选择。';
+  const prompt = buildDraftUserPrompt({
+    chapter: sampleChapter,
+    instruction: '增强张力',
+    planText,
+  });
+  assert.match(prompt, /指定.*改写拍点.*实质变化/);
+  assert.match(prompt, /未列为改写目标.*保留原文/);
+  assert.match(prompt, /逐字保留.*原样/);
+  assert.doesNotMatch(prompt, /禁止大段照抄/);
+  assert.match(CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT, /指定.*改写拍点.*实质变化/);
+  assert.doesNotMatch(CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT, /禁止大段照抄/);
 });
 
 test('buildDraftUserPrompt uses sourceText as chapter-original and adds refine constraint', () => {
@@ -263,7 +280,22 @@ test('continuity review prompt and gaps helper', () => {
   assert.match(prompt, /关键情节点清单/);
   assert.match(prompt, /<chapter-draft/);
   assert.equal(parseContinuityReviewResult('【验收结论】CLOSED').hasMaterialGaps, false);
+  assert.throws(() => parseContinuityReviewResult('可能没有问题'), /结论缺失/);
   assert.match(formatContinuityReviewGapsForRefine('缺口A'), /【连续性自检缺口】/);
+});
+
+test('from-plan review compares original, plan and draft for missed beats and lost protected material', () => {
+  const prompt = buildContinuityReviewUserPrompt({
+    chapter: sampleChapter,
+    planText: '【2. 改写拍点】扩展试探对白。\n【3. 保留清单】保留姐姐的选择。',
+    draftText: '成稿正文',
+  });
+  assert.match(prompt, /<chapter-original/);
+  assert.match(prompt, /原章节正文内容/);
+  assert.match(prompt, /<optimization-plan/);
+  assert.match(prompt, /<chapter-draft/);
+  assert.match(CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT, /改写拍点.*未落实/);
+  assert.match(CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT, /保留清单.*丢失/);
 });
 
 test('resolveDraftSplitSource prefers previous draft', () => {
@@ -282,6 +314,7 @@ test('buildDraftUserPrompt injects review gaps on refine pass', () => {
   assert.match(prompt, /【冻结合同未落实缺口】/);
   assert.match(prompt, /章末对峙仍被旁白稀释/);
   assert.match(prompt, /禁止另开润色愿望/);
+  assert.match(prompt, /已落实的改动沿用上一稿/);
 });
 
 test('buildDirectDraftUserPrompt injects instruction and original chapter without optimization-plan', () => {
@@ -397,7 +430,8 @@ test('buildSegmentPrompt includes segment index info and required sections', () 
   assert.doesNotMatch(prompt, /【SEG_SUMMARY】/);
   assert.match(prompt, /不要附加摘要、说明或其他元信息/);
   assert.match(prompt, /<optimization-plan>/);
-  assert.match(prompt, /禁止「前半改写、后半原样粘贴」/);
+  assert.match(prompt, /改写拍点必须产生符合预期效果的实质变化/);
+  assert.match(prompt, /未列为改写目标的有效内容可以保留原文/);
   assert.doesNotMatch(prompt, /若本段无需修改，则原样输出/);
 });
 
@@ -448,6 +482,7 @@ test('buildSegmentPrompt in direct mode omits optimization-plan and keeps instru
   assert.match(prompt, /<segment-original>[\s\S]*第一段原文内容/);
   assert.doesNotMatch(prompt, /<optimization-plan/);
   assert.doesNotMatch(prompt, /<segment-local-plan/);
+  assert.match(prompt, /禁止大段照抄原文/);
 });
 
 test('resolveOptimizeDraftExecution segments long chapters in direct mode without plan diagnosis stages', () => {

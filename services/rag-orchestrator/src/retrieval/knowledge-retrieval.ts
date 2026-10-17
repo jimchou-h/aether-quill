@@ -15,7 +15,10 @@
  * - `buildEmbeddingRetrievalQuery` / `resolveChapterScopedEmbeddingQuery`：仅任务意图进 embedding
  */
 
-import { getResolvedRagInfrastructureEnv } from '@aether-quill/config';
+import {
+  getResolvedRagInfrastructureEnv,
+  isWritingStyleInjectionTemplateKey,
+} from '@aether-quill/config';
 import { clampKnowledgeDocQuota } from '../context/generation-preferences';
 import { Reranker } from './reranker';
 import {
@@ -96,6 +99,25 @@ export const CHAPTER_OPTIMIZE_WORKBENCH_REVIEW_TEMPLATE_KEY = 'chapter.optimize.
 export const CHAPTER_OPTIMIZE_WORKBENCH_FIX_SPAN_TEMPLATE_KEY =
   'chapter.optimize.workbench-fix-span';
 
+/** 智能精修（AQ-381）：全链路 5 个模板 key */
+export const CHAPTER_REFINEMENT_INSPECT_TEMPLATE_KEY = 'chapter.refinement.inspect';
+export const CHAPTER_REFINEMENT_PLAN_TEMPLATE_KEY = 'chapter.refinement.plan';
+export const CHAPTER_REFINEMENT_REWRITE_TEMPLATE_KEY = 'chapter.refinement.rewrite';
+export const CHAPTER_REFINEMENT_REVIEW_TEMPLATE_KEY = 'chapter.refinement.review';
+export const CHAPTER_REFINEMENT_REPAIR_TEMPLATE_KEY = 'chapter.refinement.repair';
+
+/** 智能精修：诊断／规划／检查为 utility，改写／补修为 writing */
+export function isChapterRefinementTemplateKey(templateKey: string): boolean {
+  const tk = templateKey.trim();
+  return (
+    tk === CHAPTER_REFINEMENT_INSPECT_TEMPLATE_KEY ||
+    tk === CHAPTER_REFINEMENT_PLAN_TEMPLATE_KEY ||
+    tk === CHAPTER_REFINEMENT_REWRITE_TEMPLATE_KEY ||
+    tk === CHAPTER_REFINEMENT_REVIEW_TEMPLATE_KEY ||
+    tk === CHAPTER_REFINEMENT_REPAIR_TEMPLATE_KEY
+  );
+}
+
 export function isWorkbenchOptimizeTemplateKey(templateKey: string): boolean {
   const tk = templateKey.trim();
   return (
@@ -151,6 +173,10 @@ export function shouldIncludeNextChapterHead(input: {
   if (tk === CHAPTER_OPTIMIZE_LOOP_PLAN_TEMPLATE_KEY) {
     return false;
   }
+  // 智能精修在冻结章节内部按范围改写，不注入下一章开头
+  if (isChapterRefinementTemplateKey(tk)) {
+    return false;
+  }
   if (isWorkbenchOptimizeTemplateKey(tk)) {
     return false;
   }
@@ -162,6 +188,10 @@ export function shouldIncludeNextChapterHead(input: {
 
 /** 按场成稿不注入近期章节摘要 / 语义记忆：范围内原文 + 前后只读衔接已够。 */
 export function shouldIncludePriorChapterNarrative(templateKey: string): boolean {
+  // 智能精修使用 run 冻结的参考材料，不注入近期摘要／语义记忆／跨章事件卡
+  if (isChapterRefinementTemplateKey(templateKey)) {
+    return false;
+  }
   return !isWorkbenchOptimizeTemplateKey(templateKey);
 }
 
@@ -176,6 +206,7 @@ export const WRITE_CHAPTER_DRAFT_TEMPLATE_KEY = 'write.chapter';
 export function shouldUseChapterOptimizeRetrievalQuery(templateKey: string): boolean {
   const tk = templateKey.trim();
   return (
+    isChapterRefinementTemplateKey(tk) ||
     tk === CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY ||
     tk === CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY ||
@@ -199,12 +230,81 @@ export function readFrozenRetrievedEvidence(extra?: Record<string, unknown>): st
 }
 
 /** 实验室重跑：字段存在且为 string 时覆盖项目 systemPromptText，不改仓库全局默认。 */
-export function readProjectSystemPromptOverride(extra?: Record<string, unknown>): string | undefined {
+export function readProjectSystemPromptOverride(
+  extra?: Record<string, unknown>
+): string | undefined {
   if (!extra || !Object.prototype.hasOwnProperty.call(extra, 'projectSystemPromptOverride')) {
     return undefined;
   }
   const value = extra.projectSystemPromptOverride;
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * F4：精修 run 冻结的实际参考材料（人物 / 知识 / 文风样本文本与来源）。
+ *
+ * 由 API 的精修网关随请求下发（`extra.frozenReferenceMaterials`）。存在时 orchestrator
+ * 直接使用冻结文本组装最终消息，不再从当前 projectCtx 检索证据或重新选择文风样本——
+ * 运行中修改角色卡 / 知识文档 / 样本不会改变已冻结的 run。
+ */
+export interface FrozenReferenceMaterials {
+  materials: Array<{
+    kind: 'persona' | 'knowledge' | 'style';
+    id: string;
+    title: string;
+    text: string;
+    /** C4：文风样本来源章节号（仅 style） */
+    sourceChapterNo?: number;
+    /** C4：文风样本场景类型（仅 style） */
+    sceneType?: string;
+  }>;
+  promptText: string;
+  personaText: string;
+  knowledgeText: string;
+  styleSampleBlock: string;
+  frozenAt: string;
+}
+
+/**
+ * C4（R12）：冻结文风块只在**写作阶段**（rewrite / repair）注入；
+ * inspect / plan / review 等 utility 调用一律不注入文风样本。
+ */
+export function pickFrozenStyleSampleBlock(
+  templateKey: string,
+  frozen: Pick<FrozenReferenceMaterials, 'styleSampleBlock'> | undefined
+): string {
+  const block = frozen?.styleSampleBlock ?? '';
+  if (!block.trim()) {
+    return '';
+  }
+  return isWritingStyleInjectionTemplateKey(templateKey) ? block : '';
+}
+
+export function readFrozenReferenceMaterials(
+  extra?: Record<string, unknown>
+): FrozenReferenceMaterials | undefined {
+  if (!extra) {
+    return undefined;
+  }
+  const value = extra.frozenReferenceMaterials;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const asString = (key: string): string =>
+    typeof record[key] === 'string' ? (record[key] as string) : '';
+  const asMaterials = (): FrozenReferenceMaterials['materials'] =>
+    Array.isArray(record.materials)
+      ? (record.materials as FrozenReferenceMaterials['materials'])
+      : [];
+  return {
+    materials: asMaterials(),
+    promptText: asString('promptText'),
+    personaText: asString('personaText'),
+    knowledgeText: asString('knowledgeText'),
+    styleSampleBlock: asString('styleSampleBlock'),
+    frozenAt: asString('frozenAt'),
+  };
 }
 
 export function resolveGenerateRetrievalQuery(input: {
@@ -626,11 +726,7 @@ export function buildStructuredKnowledgeEvidence(
   const otherTopN = quotas?.otherTopN ?? TITLE_MATCHED_OTHER_DOC_TOP_N;
   const personaDocs = knowledgeDocuments.filter((d) => isPersonaCardDoc(d.docType));
   const otherDocs = knowledgeDocuments.filter((d) => !isPersonaCardDoc(d.docType));
-  const personaPicked = pickTopTitleMatchedDocuments(
-    matchingText,
-    personaDocs,
-    personaDocs.length
-  );
+  const personaPicked = pickTopTitleMatchedDocuments(matchingText, personaDocs, personaDocs.length);
   const otherPicked = pickTopTitleMatchedDocuments(matchingText, otherDocs, otherTopN);
   const picked = [...personaPicked, ...otherPicked];
 

@@ -123,7 +123,10 @@ export class EventCardsService {
       card.beat = payload.beat.trim();
     }
     if (payload.entities !== undefined) {
-      card.entities = payload.entities.map((n) => n.trim()).filter(Boolean).slice(0, 12);
+      card.entities = payload.entities
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .slice(0, 12);
     }
     if (payload.kind !== undefined) {
       if (!isEventCardKind(payload.kind)) {

@@ -66,10 +66,7 @@ export function resolvePersonaSnapshotAsOfChapter(
   }
   let best: PersonaChapterStateRecord | null = null;
   for (const record of chapterStates) {
-    if (
-      record.chapterNo < asOfBeforeChapterNo &&
-      (!best || record.chapterNo > best.chapterNo)
-    ) {
+    if (record.chapterNo < asOfBeforeChapterNo && (!best || record.chapterNo > best.chapterNo)) {
       best = record;
     }
   }
@@ -98,8 +95,7 @@ export function buildPersonaSnapshotSection(input: {
   mode?: 'all_published' | 'active_only';
 }): { text: string; injectedCount: number; asOfChapterNo: number | null } {
   const mode = input.mode ?? 'all_published';
-  const asOf =
-    input.currentChapterNo && input.currentChapterNo > 0 ? input.currentChapterNo : null;
+  const asOf = input.currentChapterNo && input.currentChapterNo > 0 ? input.currentChapterNo : null;
   const filtered =
     mode === 'all_published'
       ? input.personas.filter((persona) => persona.status === 'published')

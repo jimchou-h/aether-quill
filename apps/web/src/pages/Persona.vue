@@ -391,7 +391,8 @@ onMounted(() => {
           </label>
         </div>
         <p v-if="statusAsOfChapterNo !== null" class="field-hint status-as-of-hint">
-          当前为只读快照视图；编辑人物状态仍写入「最新」。请看「人物状态」列（「发布状态」不会随章节切换变化）。无快照的章节会显示「截至第 N 章尚无快照」。
+          当前为只读快照视图；编辑人物状态仍写入「最新」。请看「人物状态」列（「发布状态」不会随章节切换变化）。无快照的章节会显示「截至第
+          N 章尚无快照」。
         </p>
         <p
           v-else-if="statusChapterOptions.length === 0 && personas.length > 0"

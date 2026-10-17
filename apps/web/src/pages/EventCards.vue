@@ -121,17 +121,31 @@ onMounted(() => {
     <div class="toolbar">
       <label class="field-label">
         抽取章节
-        <input v-model.number="extractChapterNo" class="field-input chapter-input" type="number" min="1" />
+        <input
+          v-model.number="extractChapterNo"
+          class="field-input chapter-input"
+          type="number"
+          min="1"
+        />
       </label>
-      <button class="primary-button" type="button" :disabled="extracting || loading" @click="extractChapter">
+      <button
+        class="primary-button"
+        type="button"
+        :disabled="extracting || loading"
+        @click="extractChapter"
+      >
         {{ extracting ? '抽取中…' : '按章抽取' }}
       </button>
-      <button class="secondary-button" type="button" :disabled="loading" @click="loadCards">刷新</button>
+      <button class="secondary-button" type="button" :disabled="loading" @click="loadCards">
+        刷新
+      </button>
     </div>
 
     <p v-if="errorMessage" class="message message-error">{{ errorMessage }}</p>
     <p v-if="loading" class="message">正在加载…</p>
-    <p v-else-if="cards.length === 0" class="empty-state">暂无事件卡。可按章抽取，或开启保存后自动抽卡。</p>
+    <p v-else-if="cards.length === 0" class="empty-state">
+      暂无事件卡。可按章抽取，或开启保存后自动抽卡。
+    </p>
 
     <ul v-else class="card-list">
       <li v-for="card in cards" :key="card.id" class="card-item">
@@ -155,7 +169,9 @@ onMounted(() => {
         </template>
         <template v-else>
           <p class="card-beat">{{ card.beat }}</p>
-          <p v-if="card.entities.length" class="card-entities">人物：{{ card.entities.join('、') }}</p>
+          <p v-if="card.entities.length" class="card-entities">
+            人物：{{ card.entities.join('、') }}
+          </p>
           <p v-if="card.evidence" class="card-evidence">证据：{{ card.evidence }}</p>
           <div class="card-actions">
             <button class="table-button" type="button" @click="startEdit(card)">编辑</button>
@@ -167,7 +183,9 @@ onMounted(() => {
             >
               标已回收
             </button>
-            <button class="table-button danger" type="button" @click="removeCard(card)">删除</button>
+            <button class="table-button danger" type="button" @click="removeCard(card)">
+              删除
+            </button>
           </div>
         </template>
       </li>

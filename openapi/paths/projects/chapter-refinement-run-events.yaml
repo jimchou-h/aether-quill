@@ -1,0 +1,73 @@
+get:
+  tags:
+    - Projects
+  summary: Observe a chapter refinement run (SSE)
+  description: |
+    Stream observation events for a run. Observing is decoupled from execution: closing the panel or
+    dropping the subscription does **not** cancel the run. On (re)connect the stream always sends a
+    `snapshot` first, then live events; clients MUST NOT rely on replaying lost `content` deltas.
+
+    Every event carries `event`, `runId`, `revision`, `attemptId` and `seq`. `seq` is monotonic only
+    within the current attempt.
+
+    AQ-380 event set:
+      - `data: {"event":"snapshot","runId":"...","revision":N,"attemptId":"...","seq":N,"run":{...RefinementRunView}}`
+      - `data: {"event":"stage","runId":"...","revision":N,"attemptId":"...","seq":N,"phase":"...","unitIndex":N,"unitTotal":N,"message":"..."}`
+      - `data: {"event":"finished","runId":"...","revision":N,"attemptId":"...","seq":N,"run":{...RefinementRunSummary}}`
+      - `data: {"event":"error","runId":"...","revision":N,"attemptId":"...","seq":N,"message":"..."}`
+
+    AQ-381 addition:
+      - `data: {"event":"paused","runId":"...","revision":N,"attemptId":"...","seq":N,"run":{...RefinementRunSummary}}`
+        Emitted when the run stops with a recoverable/blocking reason (e.g. `boundary_conflict`,
+        `invalid_model_output`, `upstream_failure`). The stream closes after `paused`; the caller may
+        still read the partial candidate through `GET .../runs/{runId}`. `finished` is only emitted
+        for terminal statuses (`ready` / `ready_with_issues` / `failed` / `discarded`).
+
+    `content`, `unit_settled` and `issue` are reserved for later tasks. The stream closes after
+    `finished` or `paused`.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: SSE stream
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: |
+              Server-Sent Events. Each `data:` line is a JSON object with `event` and `runId`.
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project, chapter or run not found (or run belongs to another creator)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '410':
+      description: Run expired or discarded
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

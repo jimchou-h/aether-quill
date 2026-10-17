@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { confirmAction } from '../../composables/useAppConfirm';
 import { useTaskPromptConfigStore } from '../../stores/taskPromptConfig';
 import type { TaskPromptListItem } from '../../services/api';
+import { describeRefinementTier, resolveRefinementTaskRole } from '../../utils/taskPromptGroups';
 
 const props = defineProps<{
   projectId: string;
@@ -20,6 +21,10 @@ const draftText = computed({
 const isSaving = computed(() => store.savingKey === templateKey.value);
 const isPublishing = computed(() => store.publishingKey === templateKey.value);
 const isRollingBack = computed(() => store.rollingBackKey === templateKey.value);
+
+/** B5：智能精修模板额外展示「职责 + 档位」，避免作者误以为五个模板都能改文风。 */
+const refinementRole = computed(() => resolveRefinementTaskRole(templateKey.value));
+const tierLabel = computed(() => describeRefinementTier(templateKey.value));
 
 const statusLabel = computed(() => {
   if (store.isPublished(templateKey.value)) {
@@ -76,6 +81,10 @@ async function handleRestoreDefault() {
         <p class="card-meta">
           <code>{{ item.templateKey }}</code>
           <span v-if="item.updatedAt"> · 更新于 {{ item.updatedAt }}</span>
+        </p>
+        <p v-if="refinementRole" class="card-duty">
+          <span class="duty-badge">{{ refinementRole.duty }}</span>
+          <span class="tier-badge" :class="`tier-${refinementRole.tier}`">{{ tierLabel }}</span>
         </p>
       </div>
       <div class="version-bar">
@@ -159,6 +168,44 @@ async function handleRestoreDefault() {
   background: #f3f4f6;
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
+}
+
+.card-duty {
+  margin: 0.3rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.duty-badge {
+  font-size: 0.75rem;
+  color: #374151;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+
+.tier-badge {
+  font-size: 0.72rem;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid #e5e7eb;
+  color: #4b5563;
+  background: #f9fafb;
+}
+
+.tier-badge.tier-writing {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.tier-badge.tier-utility {
+  color: #1e40af;
+  background: #eff6ff;
+  border-color: #bfdbfe;
 }
 
 .version-bar {

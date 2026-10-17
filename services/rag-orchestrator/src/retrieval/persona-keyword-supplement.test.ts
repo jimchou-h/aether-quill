@@ -65,11 +65,7 @@ describe('expandPersonaMatchTokens', () => {
       '面包',
       '黄霄雲（面包）',
     ]);
-    assert.deepEqual(expandPersonaMatchTokens('黄霄雲(面包)'), [
-      '黄霄雲',
-      '面包',
-      '黄霄雲(面包)',
-    ]);
+    assert.deepEqual(expandPersonaMatchTokens('黄霄雲(面包)'), ['黄霄雲', '面包', '黄霄雲(面包)']);
   });
 
   it('returns single token when no parentheses', () => {

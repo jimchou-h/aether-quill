@@ -27,11 +27,17 @@ test('resolveLlmChatProviderEndpoint uses SILICONFLOW_API_BASE', () => {
 
 test('resolveLlmChatProviderEndpoint fails clearly when key missing', () => {
   assert.throws(
-    () => resolveLlmChatProviderEndpoint('siliconflow', { DEEPSEEK_API_KEY: 'only-ds' } as NodeJS.ProcessEnv),
+    () =>
+      resolveLlmChatProviderEndpoint('siliconflow', {
+        DEEPSEEK_API_KEY: 'only-ds',
+      } as NodeJS.ProcessEnv),
     /SiliconFlow/
   );
   assert.throws(
-    () => resolveLlmChatProviderEndpoint('deepseek', { SILICONFLOW_API_KEY: 'only-sf' } as NodeJS.ProcessEnv),
+    () =>
+      resolveLlmChatProviderEndpoint('deepseek', {
+        SILICONFLOW_API_KEY: 'only-sf',
+      } as NodeJS.ProcessEnv),
     /DeepSeek/
   );
 });

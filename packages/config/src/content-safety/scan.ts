@@ -1,10 +1,6 @@
 import { buildNormalizedTextIndex } from './normalize';
 import { DEFAULT_CONTENT_SAFETY_RULES } from './rules';
-import type {
-  ContentSafetyHit,
-  ContentSafetyRule,
-  ContentSafetyScanResult,
-} from './types';
+import type { ContentSafetyHit, ContentSafetyRule, ContentSafetyScanResult } from './types';
 
 function isWhitelisted(
   text: string,

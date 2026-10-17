@@ -59,9 +59,10 @@ function findLinkedCard(
 /**
  * 出场人物：每人「静态卡（裁剪）+ 动态快照」合并块，替代单 active persona 全文。
  */
-export function buildAppearingPersonaInjection(
-  input: AppearingPersonaInjectionInput
-): { text: string; injectedNames: string[] } {
+export function buildAppearingPersonaInjection(input: AppearingPersonaInjectionInput): {
+  text: string;
+  injectedNames: string[];
+} {
   const maxChars = input.staticCardMaxChars ?? 1200;
   const names = [...new Set(input.appearingNames.map((n) => n.trim()).filter(Boolean))];
   if (names.length === 0) {

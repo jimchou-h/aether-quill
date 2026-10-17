@@ -1,9 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  buildChapterExcerpt,
-  pickPriorChapterSummariesForPrompt,
-} from './prior-chapter-summaries';
+import { buildChapterExcerpt, pickPriorChapterSummariesForPrompt } from './prior-chapter-summaries';
 
 const chapters = [
   { chapterNo: 1, title: '一', summary: 's1', content: 'c1' },

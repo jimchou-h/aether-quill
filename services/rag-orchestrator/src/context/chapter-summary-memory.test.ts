@@ -13,10 +13,11 @@ function row(chapterNo: number, summary = `s${chapterNo}`) {
 }
 
 test('pickMemoryChapterSummariesFromSearchRows excludes recent pool chapter numbers', () => {
-  const got = pickMemoryChapterSummariesFromSearchRows(
-    [row(99), row(98), row(95), row(90)],
-    { currentChapterNo: 100, maxCount: 3, excludeChapterNos: [99, 98] }
-  );
+  const got = pickMemoryChapterSummariesFromSearchRows([row(99), row(98), row(95), row(90)], {
+    currentChapterNo: 100,
+    maxCount: 3,
+    excludeChapterNos: [99, 98],
+  });
   assert.deepEqual(
     got.map((c) => c.chapterNo),
     [95, 90]

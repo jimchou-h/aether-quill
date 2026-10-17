@@ -9,18 +9,12 @@ import type { TraceRecord } from './types';
 
 const WRITE_CHAPTER_DRAFT_PHASE = 'write.chapter.draft';
 
-export type GenerationPromptLogKind =
-  | 'outline'
-  | 'draft'
-  | 'optimize-plan'
-  | 'optimize-draft';
+export type GenerationPromptLogKind = 'outline' | 'draft' | 'optimize-plan' | 'optimize-draft';
 
 /** @deprecated 使用 GenerationPromptLogKind */
 export type WriteChapterPromptKind = GenerationPromptLogKind;
 
-export function resolveGenerationPromptLogKind(
-  trace: TraceRecord
-): GenerationPromptLogKind | null {
+export function resolveGenerationPromptLogKind(trace: TraceRecord): GenerationPromptLogKind | null {
   const templateKey =
     typeof trace.context?.templateKey === 'string' ? trace.context.templateKey.trim() : '';
   const phase = typeof trace.context?.phase === 'string' ? trace.context.phase.trim() : '';
@@ -119,9 +113,7 @@ export function logAssembledGenerationPrompt(
     chapterNo,
     systemChars: systemText.length,
     userChars: userMessage.length,
-    ...(dumpFull
-      ? { systemMessage: systemText || undefined, userMessage }
-      : {}),
+    ...(dumpFull ? { systemMessage: systemText || undefined, userMessage } : {}),
   });
 
   const header = [
@@ -146,9 +138,7 @@ export function logAssembledGenerationPrompt(
     return;
   }
 
-  const body = systemText
-    ? `【system】\n${systemText}\n\n【user】\n${userMessage}`
-    : userMessage;
+  const body = systemText ? `【system】\n${systemText}\n\n【user】\n${userMessage}` : userMessage;
 
   console.log(`${header}\n${body}\n${'='.repeat(72)}\n`);
 }

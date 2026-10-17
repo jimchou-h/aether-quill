@@ -16,6 +16,8 @@ import {
   resolveMemoryChapterSummaryEmbeddingQuery,
   resolveRetrievalMinScore,
   readFrozenRetrievedEvidence,
+  readFrozenReferenceMaterials,
+  pickFrozenStyleSampleBlock,
   readProjectSystemPromptOverride,
   shouldUseChapterOptimizeRetrievalQuery,
   MEMORY_CHAPTER_SUMMARY_EMBED_MAX_CHARS,
@@ -197,10 +199,7 @@ describe('resolveGenerateRetrievalQuery', () => {
       shouldIncludeNextChapterHead({ templateKey: 'chapter.optimize.workbench-review' }),
       false
     );
-    assert.equal(
-      shouldIncludePriorChapterNarrative('chapter.optimize.workbench-draft-sex'),
-      false
-    );
+    assert.equal(shouldIncludePriorChapterNarrative('chapter.optimize.workbench-draft-sex'), false);
     assert.equal(shouldIncludePriorChapterNarrative('chapter.optimize.draft'), true);
   });
 
@@ -507,5 +506,75 @@ describe('readProjectSystemPromptOverride', () => {
 
   it('accepts empty string as an explicit override', () => {
     assert.equal(readProjectSystemPromptOverride({ projectSystemPromptOverride: '' }), '');
+  });
+});
+
+describe('F4 readFrozenReferenceMaterials', () => {
+  it('returns undefined when the field is absent so live generate still uses current projectCtx', () => {
+    assert.equal(readFrozenReferenceMaterials(undefined), undefined);
+    assert.equal(readFrozenReferenceMaterials({ chapterNo: 3 }), undefined);
+    assert.equal(readFrozenReferenceMaterials({ frozenReferenceMaterials: null }), undefined);
+    assert.equal(readFrozenReferenceMaterials({ frozenReferenceMaterials: 'x' }), undefined);
+  });
+
+  it('reads the frozen persona / knowledge / style blocks and keeps source materials', () => {
+    const frozen = readFrozenReferenceMaterials({
+      frozenReferenceMaterials: {
+        materials: [
+          { kind: 'persona', id: 'p1', title: '甲', text: '冻结角色卡' },
+          { kind: 'style', id: 's1', title: '样本', text: '冻结样本' },
+        ],
+        promptText: '冻结材料全文本',
+        personaText: '【人物设定】甲',
+        knowledgeText: '冻结知识',
+        styleSampleBlock: '【文风参照】\n冻结样本',
+        frozenAt: '2026-10-07T00:00:00.000Z',
+      },
+    });
+    assert.ok(frozen);
+    assert.equal(frozen?.personaText, '【人物设定】甲');
+    assert.equal(frozen?.knowledgeText, '冻结知识');
+    assert.equal(frozen?.styleSampleBlock, '【文风参照】\n冻结样本');
+    assert.equal(frozen?.materials.length, 2);
+    assert.equal(frozen?.frozenAt, '2026-10-07T00:00:00.000Z');
+  });
+
+  it('tolerates a partial payload without throwing', () => {
+    const frozen = readFrozenReferenceMaterials({
+      frozenReferenceMaterials: { personaText: '只有人物' },
+    });
+    assert.ok(frozen);
+    assert.equal(frozen?.personaText, '只有人物');
+    assert.equal(frozen?.knowledgeText, '');
+    assert.deepEqual(frozen?.materials, []);
+  });
+});
+
+describe('C4 pickFrozenStyleSampleBlock 按阶段注入冻结文风块', () => {
+  const frozen = { styleSampleBlock: '【文风参照】\n冻结样本' };
+
+  it('写作阶段（rewrite / repair）注入冻结文风块', () => {
+    assert.equal(
+      pickFrozenStyleSampleBlock('chapter.refinement.rewrite', frozen),
+      frozen.styleSampleBlock
+    );
+    assert.equal(
+      pickFrozenStyleSampleBlock('chapter.refinement.repair', frozen),
+      frozen.styleSampleBlock
+    );
+  });
+
+  it('utility 阶段（inspect / plan / review）不注入文风样本', () => {
+    assert.equal(pickFrozenStyleSampleBlock('chapter.refinement.inspect', frozen), '');
+    assert.equal(pickFrozenStyleSampleBlock('chapter.refinement.plan', frozen), '');
+    assert.equal(pickFrozenStyleSampleBlock('chapter.refinement.review', frozen), '');
+  });
+
+  it('无冻结材料或空块时返回空字符串', () => {
+    assert.equal(pickFrozenStyleSampleBlock('chapter.refinement.rewrite', undefined), '');
+    assert.equal(
+      pickFrozenStyleSampleBlock('chapter.refinement.rewrite', { styleSampleBlock: '   ' }),
+      ''
+    );
   });
 });

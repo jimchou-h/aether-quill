@@ -45,12 +45,13 @@ export const CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT = [
 ].join('\n');
 
 export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
-  '你是一位资深小说写作助手。本步骤按已确认的优化方案对给定正文做实质性重写；只输出「优化后的章节正文」，不要方案、说明、Markdown 标题或代码块。',
+  '你是一位资深小说写作助手。本步骤按已确认的优化方案对给定正文做定向改写；只输出「优化后的章节正文」，不要方案、说明、Markdown 标题或代码块。',
   '工作方式：',
-  '1) 若方案含「主锚 / 关键一笔」，须在对应落点自然织入改写意图（可改写措辞，不必逐字粘贴方案例句）；其余部分也要按方案整体意图重写，禁止大段照抄原文。',
-  '2) 改动幅度由【用户优化要求】与方案决定：该大改就大改，该扩就扩，该删就删；禁止因「方案未点名某句 / 未给句级落点」而几乎不动。',
-  '3) 以原文为情节与信息基础，禁止凭空另起无关剧情。',
-  '4) 重写后对应内容的信息量与感官密度不得低于原文；禁止摘要式压缩或为「更通顺」抽薄描写。方案明确要求删除的除外。',
+  '1) 方案指定的改写拍点必须在对应落点产生符合预期效果的实质变化，不能只换近义词；若方案含「主锚 / 关键一笔」，须自然织入。',
+  '2) 改动幅度由【用户优化要求】与方案决定：该大改就大改，该扩就扩，该删就删。未列为改写目标的有效内容可以保留原文，不为制造变化而改坏好句。',
+  '3) 按方案的保留清单区分强度：事实保留须保住事件与选择、表达效果保留须保住人物声音和有效细节，只有逐字保留项必须原样保留。方案没有固定标题时仍按整体意图执行。',
+  '4) 以原文为情节与信息基础，禁止凭空另起无关剧情。',
+  '5) 重写后对应内容的信息量与感官密度不得低于原文；禁止摘要式压缩或为「更通顺」抽薄描写。方案明确要求删除的除外。',
   '硬约束（仅保底，不压制改写幅度）：',
   '1) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
   '2) 语言、人称、时态、人物名称须与原文一致，除非方案明确要求修改；',
@@ -360,15 +361,14 @@ export function buildFrozenReviewUserPrompt(input: {
   ].join('\n\n');
 }
 
-export const CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_TEMPLATE_KEY =
-  'chapter.optimize.continuity-review';
+export const CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_TEMPLATE_KEY = 'chapter.optimize.continuity-review';
 
-/** from-plan 成稿后的连续性自检（不审文笔加浓）。 */
+/** from-plan 成稿后的方案验收：拍点、保留项与连续性；不提出合同外润色愿望。 */
 export const CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT = [
-  '你是一位资深小说编辑，正在对照「优化方案合同」验收一稿刚写完的章节正文的连续性。',
-  '合同优先阅读方案中的：【关键情节点清单】【场景状态】【指代依赖】及「逐字保留」引用。',
-  '若方案缺少上述结构，则降级检查：过场是否被删却残留指代、地点/姿势跳变、坐姿抽送等空间穿帮、便签等硬锁是否被改写。',
-  '只判断连续性缺陷，禁止提出文笔加浓、感官加强等润色愿望，禁止输出新正文或新方案。',
+  '你是一位资深小说编辑，正在对照原文与已确认方案验收一稿刚写完的章节正文。',
+  '优先检查【2. 改写拍点】是否在指定位置产生预期的实质变化，不能把原文回抄或只换近义词算落实；检查【3. 保留清单】中的事实、人物声音和有效细节是否丢失，只有逐字保留项须字面不变。方案没有固定标题时按其整体意图验收。',
+  '继续检查情节点、场景状态、指代依赖与逐字锁；原文未交代的事实不得推测成缺口。',
+  '改写拍点未落实或保留清单材料丢失时，指出原文位置、方案项与成稿证据；只报告可定位的实质缺口，禁止提出合同之外的文笔加浓、感官加强等新愿望，禁止输出新正文或新方案。',
   '检查清单：',
   '1) 情节点：清单中保留/改写/重排的节点是否在成稿中有对应；删除节点后是否仍出现对应指代；',
   '2) 指代依赖：是否出现「视频后」「刚挂电话」等悬空指代；',
@@ -378,8 +378,19 @@ export const CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT = [
   '若有实质缺口，第一行必须是【验收结论】GAPS，随后用【缺口说明】列出可执行缺口（点明落点与要补的意图）。',
 ].join('\n');
 
-/** Continuity review reuses the CLOSED/GAPS surface for refine injection. */
-export const parseContinuityReviewResult = parseFrozenReviewResult;
+/** 自检只接受明确结论，无法解析时交由调用方显示“未完成”，不能推断为通过。 */
+export function parseContinuityReviewResult(reviewText: string): {
+  hasMaterialGaps: boolean;
+  reviewText: string;
+} {
+  const text = reviewText.trim();
+  const closed = /【验收结论】\s*CLOSED/i.test(text);
+  const gaps = /【验收结论】\s*GAPS/i.test(text);
+  if (closed === gaps) {
+    throw new Error('方案验收结论缺失或冲突');
+  }
+  return { hasMaterialGaps: gaps, reviewText: text };
+}
 
 export function buildContinuityReviewUserPrompt(input: {
   chapter: ChapterOptimizeChapterRef;
@@ -387,10 +398,11 @@ export function buildContinuityReviewUserPrompt(input: {
   draftText: string;
 }): string {
   return [
-    `【自检目标】对照方案合同验收第${input.chapter.chapterNo}章「${input.chapter.title}」成稿的连续性（情节点/场景状态/指代/逐字锁）。`,
+    `【自检目标】对照原文与方案合同验收第${input.chapter.chapterNo}章「${input.chapter.title}」成稿的改写拍点、保留清单与连续性。`,
+    `<chapter-original chapter-no="${input.chapter.chapterNo}">\n${input.chapter.content}\n</chapter-original>`,
     `<optimization-plan chapter-no="${input.chapter.chapterNo}">\n${input.planText.trim()}\n</optimization-plan>`,
     `<chapter-draft chapter-no="${input.chapter.chapterNo}">\n${input.draftText.trim()}\n</chapter-draft>`,
-    '只输出验收结论。没有实质缺口则【验收结论】CLOSED；有则【验收结论】GAPS + 【缺口说明】。禁止新正文、新方案或文笔加浓建议。',
+    '只输出验收结论。没有实质缺口则【验收结论】CLOSED；有则【验收结论】GAPS + 【缺口说明】（原文位置、方案项、成稿问题与修复意图）。禁止新正文、新方案或合同外润色建议。',
   ].join('\n\n');
 }
 
@@ -817,8 +829,11 @@ export function buildDraftUserPrompt(input: {
   sections.push(
     [
       '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。',
-      '按 <optimization-plan> 与【用户优化要求】对正文做实质性重写，按方案整体意图改写。',
-      '禁止因「方案未点名具体句子 / 没有落点」而大段照抄；改动幅度由要求与方案决定，不必迁就原文篇幅或段落数。',
+      reviewGaps
+        ? '本轮只修【冻结合同未落实缺口】中的拍点和保留项，已落实的改动沿用上一稿，不重复改写。'
+        : '按 <optimization-plan> 与【用户优化要求】改写；方案指定的改写拍点必须在对应位置产生符合预期效果的实质变化，不能只换近义词。',
+      '未列为改写目标的有效内容可以保留原文；方案没有固定标题时按整体意图执行，不把沉默的段落自动判作必须重写。',
+      '事实保留守住事件与选择，表达效果保留守住人物声音与有效细节，逐字保留项必须原样保留。',
       '须保留情节节点、对白含义、人物动作与指代关系；措辞、句式、感官密度可大胆重写。',
       '重写后信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案明确要求删除的除外。',
     ].join('\n')
@@ -908,7 +923,7 @@ export function ensureChapterVersionMatches(chapterNo: number, expected: Date, a
  * 用稳定的伪随机生成 planId / draftId，便于 trace 关联。
  */
 export function makeOptimizationId(
-  prefix: 'plan' | 'draft' | 'auto-loop' | 'review' | 'continuity',
+  prefix: 'plan' | 'draft' | 'auto-loop' | 'review' | 'continuity'
 ): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -1222,7 +1237,9 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     totalSegments > 2 && segment.index > 0 && segment.index < totalSegments - 1;
 
   sections.push(
-    `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段。请对本段全文做可见改写，保留情节信息，但禁止前半改、后半抄。`
+    omitOptimizationPlan
+      ? `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段。请对本段全文做可见改写，保留情节信息，但禁止前半改、后半抄。`
+      : `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段。请落实方案指定落在本段的改写拍点，并保护有效原文；不得凭改动率决定是否合格。`
   );
 
   if (totalSegments > 1) {
@@ -1300,13 +1317,23 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
   sections.push(`<segment-original>\n${segment.originalText}\n</segment-original>`);
 
   sections.push(
-    [
-      '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',
-      '改写要求：按【用户优化要求】与（若有）优化方案对本段从头到尾重写；保留情节节点、对白含义与人物动作，但禁止大段照抄原文。',
-      '禁止「前半改写、后半原样粘贴」；不得以「方案未点名本段句子」为由几乎不动。',
-      '重写后本段信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案或用户明确要求删除的除外。',
-      '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语；禁止原样输出本段原文。',
-    ].join('\n')
+    omitOptimizationPlan
+      ? [
+          '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',
+          '改写要求：按【用户优化要求】与（若有）优化方案对本段从头到尾重写；保留情节节点、对白含义与人物动作，但禁止大段照抄原文。',
+          '禁止「前半改写、后半原样粘贴」；不得以「方案未点名本段句子」为由几乎不动。',
+          '重写后本段信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案或用户明确要求删除的除外。',
+          '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语；禁止原样输出本段原文。',
+        ].join('\n')
+      : [
+          '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',
+          gapText
+            ? '本轮只修【冻结合同未落实缺口】中落在本段的问题，已落实的拍点沿用上一稿，不重复改写。'
+            : '方案指定落在本段的改写拍点必须产生符合预期效果的实质变化，不能只换近义词；不得漏掉本段需要落实的拍点。',
+          '未列为改写目标的有效内容可以保留原文；事实保留守住事件与选择，表达效果保留守住人物声音和有效细节，逐字保留项必须原样保留。',
+          '重写后本段信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案或用户明确要求删除的除外。',
+          '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语。',
+        ].join('\n')
   );
 
   return sections.join('\n\n');

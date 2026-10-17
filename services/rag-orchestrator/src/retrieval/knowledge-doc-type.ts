@@ -1,5 +1,4 @@
-const PERSONA_CARD_TITLE_HINT =
-  /角色卡|人物卡|人设|人物设定|人物小传/;
+const PERSONA_CARD_TITLE_HINT = /角色卡|人物卡|人设|人物设定|人物小传/;
 
 export interface KnowledgeDocForTypeResolve {
   id: string;

@@ -230,6 +230,7 @@ import {
 import {
   createWritingStyleSampleRecord,
   sanitizeWritingStyleSamples,
+  selectWritingStyleSamplesForTask,
   validateWritingStyleSampleInput,
   WRITING_STYLE_SAMPLES_MAX_PER_PROJECT,
   type WritingStyleSample,
@@ -910,6 +911,98 @@ export class ProjectsService implements OnModuleInit {
     this.getProjectOrThrow(projectId);
     this.ensureProjectState(projectId);
     return this.personasStore.get(projectId)!;
+  }
+
+  /**
+   * F4 / C4：读取 run 创建时需要冻结的**实际参考材料**（人物卡 / 知识文档 / 文风样本）。
+   *
+   * 只返回文本与来源标识（不含凭据），供章节精修在创建 run 时冻进 snapshot；
+   * 运行中修改角色卡 / 知识文档 / 样本不影响已冻结的 run。
+   *
+   * C4（R12）：文风样本必须**排除当前章自身来源**，并按任务适用性选择——
+   * 因此必须给出正在精修的 `chapterNo`；拿不到章节号时不冻结任何文风样本（保守），
+   * 绝不把当前章样本注入。
+   */
+  getFrozenReferenceMaterials(
+    projectId: string,
+    userId?: string,
+    chapterNo?: number
+  ): Array<{
+    kind: 'persona' | 'knowledge' | 'style';
+    id: string;
+    title: string;
+    text: string;
+    sourceChapterNo?: number;
+    sceneType?: string;
+  }> {
+    const materials: Array<{
+      kind: 'persona' | 'knowledge' | 'style';
+      id: string;
+      title: string;
+      text: string;
+      sourceChapterNo?: number;
+      sceneType?: string;
+    }> = [];
+
+    let personas: PersonaRecord[] = [];
+    try {
+      personas = this.getPersonas(projectId, userId);
+    } catch {
+      personas = [];
+    }
+    for (const persona of personas) {
+      const text = [persona.name, persona.profile, persona.state].filter(Boolean).join('\n');
+      if (text.trim()) {
+        materials.push({
+          kind: 'persona',
+          id: persona.id,
+          title: `人物卡：${persona.name}`,
+          text,
+        });
+      }
+    }
+
+    // C4：只冻结「适用且非当前章来源」的文风样本，沿用统一的样本选择规则
+    const validChapterNo =
+      typeof chapterNo === 'number' && Number.isInteger(chapterNo) && chapterNo > 0
+        ? chapterNo
+        : undefined;
+    if (validChapterNo !== undefined) {
+      const settings = this.getSettings(projectId, userId);
+      const samples = sanitizeWritingStyleSamples(settings.writingStyleSamples);
+      const selected = selectWritingStyleSamplesForTask({
+        samples,
+        templateKey: 'chapter.refinement.rewrite',
+        chapterNo: validChapterNo,
+      });
+      for (const sample of selected) {
+        if (sample.text?.trim()) {
+          materials.push({
+            kind: 'style',
+            id: sample.id,
+            title: `文风样本：${sample.sceneType}`,
+            text: sample.text,
+            sceneType: sample.sceneType,
+            ...(sample.sourceChapterNo !== undefined
+              ? { sourceChapterNo: sample.sourceChapterNo }
+              : {}),
+          });
+        }
+      }
+    }
+
+    for (const doc of this.documentsService.findAll(projectId)) {
+      if (doc.content?.trim()) {
+        materials.push({
+          kind: 'knowledge',
+          id: doc.id,
+          title: doc.title,
+          text: doc.content,
+        });
+      }
+    }
+
+    return materials;
   }
 
   listPersonaCardDocuments(
@@ -4133,6 +4226,42 @@ export class ProjectsService implements OnModuleInit {
 
     this.lastActingUserIdByProject.set(projectId, userId);
     return member;
+  }
+
+  /**
+   * AQ-380：章节精修冻结所需的最小只读材料快照。
+   * 仅读章节正文 / 版本与项目 systemPrompt、分段设置，不产生任何副作用。
+   * 不做权限校验——调用方必须先 `checkAccess(projectId, userId, ['owner','editor'])`。
+   */
+  getChapterRefinementSource(
+    projectId: string,
+    chapterNo: number
+  ): {
+    chapterNo: number;
+    title: string;
+    content: string;
+    updatedAt: Date;
+    systemPromptText: string;
+    chapterOptimizeSegmentCharSize: number;
+  } | null {
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = this.normalizeChapterNo(chapterNo);
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      return null;
+    }
+    const settings = this.settingsStore.get(projectId)!;
+    return {
+      chapterNo: chapter.chapterNo,
+      title: chapter.title,
+      content: chapter.content,
+      updatedAt: chapter.updatedAt,
+      systemPromptText: settings.systemPromptText,
+      chapterOptimizeSegmentCharSize: settings.chapterOptimizeSegmentCharSize,
+    };
   }
 
   private getLatestIndexJob(projectId: string) {

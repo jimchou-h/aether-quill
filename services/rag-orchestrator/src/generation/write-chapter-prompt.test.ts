@@ -1,9 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  assertConfirmedOutlineText,
-  buildWorkbenchDraftUserPrompt,
-} from './write-chapter-prompt';
+import { assertConfirmedOutlineText, buildWorkbenchDraftUserPrompt } from './write-chapter-prompt';
 
 describe('write-chapter-prompt', () => {
   it('requires confirmedOutlineText', () => {

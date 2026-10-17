@@ -7,7 +7,9 @@ import {
   type EventCardRecord,
 } from './event-card.util';
 
-function card(partial: Partial<EventCardRecord> & Pick<EventCardRecord, 'id' | 'beat'>): EventCardRecord {
+function card(
+  partial: Partial<EventCardRecord> & Pick<EventCardRecord, 'id' | 'beat'>
+): EventCardRecord {
   return {
     projectId: 'p1',
     chapterNo: 1,
@@ -145,6 +147,12 @@ test('recallCrossChapterMemory excludes current chapter cards', () => {
     appearingCharacters: ['杨幂'],
     queryText: '撞破',
   });
-  assert.equal(result.used.some((u) => u.id === 'cur'), false);
-  assert.equal(result.used.some((u) => u.id === 'prev'), true);
+  assert.equal(
+    result.used.some((u) => u.id === 'cur'),
+    false
+  );
+  assert.equal(
+    result.used.some((u) => u.id === 'prev'),
+    true
+  );
 });
