@@ -32,6 +32,9 @@ import {
 } from './chapter-refinement-run.repository';
 import { EventCardsService } from './event-cards.service';
 import { ProjectsService } from './projects.service';
+import { EditorChatController } from './editor-chat.controller';
+import { EditorChatService, OrchestratorEditorChatGateway } from './editor-chat.service';
+import type { EditorChatProjectsPort } from './editor-chat.service';
 
 @Module({
   imports: [
@@ -41,7 +44,7 @@ import { ProjectsService } from './projects.service';
     forwardRef(() => PromptTemplatesModule),
     forwardRef(() => TaskPromptsModule),
   ],
-  controllers: [ProjectsController, ChapterRefinementController],
+  controllers: [ProjectsController, ChapterRefinementController, EditorChatController],
   providers: [
     ProjectsService,
     ChapterAutoLoopService,
@@ -77,6 +80,46 @@ import { ProjectsService } from './projects.service';
       inject: [ProjectsService, TaskPromptsService, PromptTemplatesService, AuthService],
     },
     ChapterRefinementService,
+    OrchestratorEditorChatGateway,
+    {
+      provide: EditorChatService,
+      useFactory: (
+        projects: ProjectsService,
+        promptTemplates: PromptTemplatesService,
+        gateway: OrchestratorEditorChatGateway
+      ) => {
+        const port: EditorChatProjectsPort = {
+          checkAccess: (projectId, userId) => {
+            projects.checkAccess(projectId, userId);
+          },
+          getChapter: (projectId, chapterNo) => {
+            const chapter = projects.getChapterRecordForPipeline(projectId, chapterNo);
+            if (!chapter) {
+              return null;
+            }
+            return {
+              chapterNo: chapter.chapterNo,
+              title: chapter.title,
+              content: chapter.content,
+              updatedAt: chapter.updatedAt,
+            };
+          },
+          getPersonas: (projectId) =>
+            projects.getPersonas(projectId).map((p) => ({
+              id: p.id,
+              name: p.name,
+              profile: p.profile,
+              state: p.state,
+              appearedChapterNos: p.appearedChapterNos,
+            })),
+          resolveProjectSystemPromptText: (projectId) =>
+            promptTemplates.resolveProjectSystemPromptText(projectId),
+          getRagOrchestratorUrl: () => projects.getRagOrchestratorUrlForPipeline(),
+        };
+        return new EditorChatService(port, gateway);
+      },
+      inject: [ProjectsService, PromptTemplatesService, OrchestratorEditorChatGateway],
+    },
   ],
   exports: [ProjectsService, ChapterAutoLoopService, EventCardsService, ChapterRefinementService],
 })

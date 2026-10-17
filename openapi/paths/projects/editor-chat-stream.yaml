@@ -1,0 +1,63 @@
+post:
+  tags:
+    - Projects
+  summary: Project editor chat (read-only, SSE)
+  description: |
+    Answer an author's editing question about one chapter of this project. The server resolves the
+    chapter anchor (explicit `第 N 章` mention in the question wins, otherwise `currentChapterNo`
+    from the caller's session), reads that chapter's latest full text and the persona cards that
+    match it, and streams the answer with the project's currently effective system prompt.
+
+    When no chapter anchor exists, the response still uses SSE but the stream contains a guidance
+    answer asking the author to name a chapter; the model is not called. A missing chapter returns
+    the standard not-found error before headers are sent; a project access violation returns the
+    standard forbidden error and no project material is sent to the model.
+
+    Read-only by contract: this endpoint never modifies chapters, persona cards or prompts.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/EditorChatStreamRequest'
+  responses:
+    '200':
+      description: |
+        SSE stream. Each `data:` line is a JSON payload with an `event` field of
+        `start` | `content` | `end` | `error`, same envelope as the workbench generation stream.
+      content:
+        text/event-stream:
+          schema:
+            type: string
+    '400':
+      description: Invalid request (empty question)
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '403':
+      description: No access to the project
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or referenced chapter not found
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'

@@ -137,6 +137,18 @@ export interface SseCallbacks {
 
 export type SseStreamOptions = { signal?: AbortSignal };
 
+export interface EditorChatHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface EditorChatEndEvent {
+  traceId: string;
+  chapterNo?: number;
+  completed: boolean;
+  guidance: boolean;
+}
+
 async function ensureAuthToken(): Promise<string> {
   const { useAuthStore } = await import('../stores/auth');
   await useAuthStore().ensureFreshSession();
@@ -1133,6 +1145,65 @@ export const apiClient = {
               break;
             case 'error':
               callbacks.onError?.(event.data || '生成章节大纲失败');
+              break;
+          }
+        } catch {
+          // skip malformed SSE lines
+        }
+      }
+    );
+  },
+
+  async streamEditorChat(
+    projectId: string,
+    payload: {
+      question: string;
+      history?: EditorChatHistoryMessage[];
+      currentChapterNo?: number;
+    },
+    callbacks: {
+      onContent?: (text: string) => void;
+      onEnd?: (event: EditorChatEndEvent) => void;
+      onError?: (message: string) => void;
+    },
+    options?: SseStreamOptions
+  ): Promise<void> {
+    const baseURL = getApiBaseURL();
+    const url = `${baseURL}/api/projects/${projectId}/editor-chat/stream`;
+
+    await requestAuthorizedSse(
+      url,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      },
+      'segments',
+      (dataPart) => {
+        try {
+          const event = JSON.parse(dataPart) as {
+            event?: 'start' | 'content' | 'end' | 'error';
+            data?: string;
+            traceId?: string;
+            chapterNo?: number;
+            completed?: boolean;
+            guidance?: boolean;
+            error?: string;
+          };
+          switch (event.event) {
+            case 'content':
+              callbacks.onContent?.((event.data || '').replace(/\\n/g, '\n'));
+              break;
+            case 'end':
+              callbacks.onEnd?.({
+                traceId: event.traceId || '',
+                chapterNo: event.chapterNo,
+                completed: event.completed === true,
+                guidance: event.guidance === true,
+              });
+              break;
+            case 'error':
+              callbacks.onError?.(event.data || event.error || '编辑对话请求失败');
               break;
           }
         } catch {

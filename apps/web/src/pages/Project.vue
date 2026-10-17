@@ -21,12 +21,14 @@
     <main class="project-content">
       <router-view />
     </main>
+    <EditorChatPanel :project-id="projectId" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
+import EditorChatPanel from '../components/chat/EditorChatPanel.vue';
 import {
   ArrowLeftOutlined,
   BookOutlined,

@@ -71,6 +71,8 @@ paths:
     $ref: './paths/projects/task-prompt-publish.yaml'
   /api/projects/{id}/task-prompts/{templateKey}/rollback:
     $ref: './paths/projects/task-prompt-rollback.yaml'
+  /api/projects/{id}/editor-chat/stream:
+    $ref: './paths/projects/editor-chat-stream.yaml'
   /api/projects/{id}/personas:
     $ref: './paths/projects/personas.yaml'
   /api/projects/{id}/personas/{personaId}:
@@ -3051,6 +3053,45 @@ components:
           type: integer
           minimum: 1
           description: Compare-and-set token; an already discarded run is returned idempotently.
+    EditorChatStreamRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: |
+            The author's editing question, trimmed and non-empty. An explicit 「第 N 章」 mention
+            (Arabic or Chinese numerals) overrides the session anchor for this turn.
+        history:
+          type: array
+          maxItems: 24
+          description: |
+            Bounded recent conversation from the caller's local session. The server clamps item
+            count and per-message length before composing the model input; history is data, not
+            higher-priority instructions.
+          items:
+            type: object
+            required:
+              - role
+              - content
+            properties:
+              role:
+                type: string
+                enum:
+                  - user
+                  - assistant
+              content:
+                type: string
+                maxLength: 8000
+        currentChapterNo:
+          type: integer
+          minimum: 1
+          description: |
+            The session's current chapter anchor used when the question has no explicit chapter
+            mention. Omitting it (with an unanchored question) yields a guidance answer.
     RefinementResolvedPolicy:
       type: object
       required:
