@@ -9,7 +9,7 @@
     "start:prod": "node dist/main",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "pnpm --filter @aether-quill/config run build && tsc --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "node ../../scripts/run-tests.mjs",
     "clean": "rm -rf dist node_modules",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

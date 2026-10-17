@@ -299,3 +299,35 @@ model Session {
   @@index([userId], map: "sessions_user_id_idx")
   @@map("sessions")
 }
+
+// AQ-380: 章节精修编排 run。独立于 workspace/章节业务 JSON，避免逐 token 重写大对象。
+// 单活动 run 由迁移中的部分唯一索引（status in queued/running）保证。
+model ChapterRefinementRun {
+  id              String    @id @map("id")
+  projectId       String    @map("project_id")
+  chapterNo       Int       @map("chapter_no")
+  creatorId       String    @map("creator_id")
+  clientRequestId String    @map("client_request_id")
+  payloadHash     String    @map("payload_hash")
+  status          String    @map("status")
+  phase           String    @map("phase")
+  revision        Int       @map("revision")
+  attemptId       String?   @map("attempt_id")
+  pauseReason     String?   @map("pause_reason")
+  resumable       Boolean   @default(false) @map("resumable")
+  baseUpdatedAt   DateTime  @map("base_updated_at")
+  baseHash        String    @map("base_hash")
+  rewritePolicy   String    @map("rewrite_policy")
+  snapshotJson    Json      @map("snapshot_json")
+  checkpointJson  Json      @map("checkpoint_json")
+  tombstone       Boolean   @default(false) @map("tombstone")
+  createdAt       DateTime  @map("created_at")
+  updatedAt       DateTime  @map("updated_at")
+  expiresAt       DateTime  @map("expires_at")
+
+  @@unique([creatorId, clientRequestId], map: "chapter_refinement_runs_creator_client_uidx")
+  @@index([projectId, chapterNo, creatorId], map: "chapter_refinement_runs_proj_chap_creator_idx")
+  @@index([status], map: "chapter_refinement_runs_status_idx")
+  @@index([expiresAt], map: "chapter_refinement_runs_expires_at_idx")
+  @@map("chapter_refinement_runs")
+}
