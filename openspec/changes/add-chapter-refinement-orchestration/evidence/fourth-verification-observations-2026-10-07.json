@@ -1,0 +1,58 @@
+{
+  "note": "Positive observations for original D1/D2/D3; E1 closed in B1, W6 closed in B2.",
+  "ordinary3500CharRangeRewritten": {
+    "sourceChars": 3500,
+    "rewriteTargetChars": 3500,
+    "status": "ready",
+    "calls": [
+      "inspect",
+      "plan",
+      "rewrite",
+      "review",
+      "review"
+    ],
+    "unchangedDraft": false,
+    "issues": []
+  },
+  "persistenceFailureDuringFinalRepairReviewPauses": {
+    "storageFaults": 1,
+    "reviewCalls": 2,
+    "status": "paused",
+    "pauseReason": "persistence_failed",
+    "acceptedDraft": "甲推门进屋，将钥匙放下。"
+  },
+  "unresolvedIssueBlocksResume": {
+    "firstStatus": "paused",
+    "resumedStatus": "paused",
+    "resumedCalls": 1,
+    "unresolved": [
+      {
+        "id": "i1",
+        "category": "hard_constraint",
+        "severity": "high",
+        "anchorQuote": "不在正文中的引文",
+        "message": "整章最终检查：修复接缝状态冲突（无法定位到单一活动候选）",
+        "disposition": "unresolved"
+      }
+    ]
+  },
+  "chapterLevelUnresolvedStillBlocksApplyAfterB1": {
+    "note": "E1 closed in B1; positive assertion.",
+    "status": "paused",
+    "pauseReason": "boundary_conflict",
+    "unresolved": [
+      {
+        "id": "i2",
+        "category": "hard_constraint",
+        "severity": "high",
+        "anchorQuote": "不在正文中的引文",
+        "message": "整章最终检查：修复接缝状态冲突（无法定位到单一活动候选）",
+        "disposition": "unresolved"
+      }
+    ]
+  },
+  "falselyLabelledExitAnchorRejectedAfterB2": {
+    "entryAnchorFilledAsExit": "superseded",
+    "lastRelevantChangeAccepted": "evidence"
+  }
+}

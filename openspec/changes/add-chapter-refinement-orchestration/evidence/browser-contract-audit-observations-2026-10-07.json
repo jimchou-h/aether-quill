@@ -1,0 +1,57 @@
+{
+  "sourceBlocks": [
+    {
+      "id": "b0",
+      "text": "第一章 院里的两个人"
+    },
+    {
+      "id": "b1",
+      "text": "甲在院里等了很久，直到门被推开。乙从门外进来，把手里的东西放在石桌上，两个人开始低声说话。"
+    },
+    {
+      "id": "b2",
+      "text": "天色渐晚，院子里只剩下风声。甲送乙到门口，看着对方走远，才转身回屋，把门轻轻关上。"
+    }
+  ],
+  "deliveredFakeScenarioTwo": {
+    "phaseCalls": [
+      "chapter.refinement.inspect",
+      "chapter.refinement.plan",
+      "chapter.refinement.rewrite",
+      "chapter.refinement.review",
+      "chapter.refinement.review"
+    ],
+    "rewriteCount": 1,
+    "terminalStatus": "ready_with_issues",
+    "coverage": {
+      "sourceChars": 100,
+      "plannedChars": 100,
+      "processedChars": 100,
+      "retainedOriginalChars": 88
+    },
+    "issues": [
+      {
+        "id": "i1",
+        "category": "coverage",
+        "severity": "medium",
+        "sceneId": "uncovered-1",
+        "unitId": "u1",
+        "message": "自然段 2~3 未被任何场景覆盖，保留原文",
+        "disposition": "retained_original"
+      }
+    ],
+    "draft": "（脚本改写一）\n\n甲在院里等了很久，直到门被推开。乙从门外进来，把手里的东西放在石桌上，两个人开始低声说话。\n\n天色渐晚，院子里只剩下风声。甲送乙到门口，看着对方走远，才转身回屋，把门轻轻关上。"
+  },
+  "applyCaptureContract": {
+    "actualApplyPath": "/api/projects/neutral-audit/knowledge/chapters/1/optimize/apply",
+    "specInterceptorPattern": "/optimize/refinement/runs/[^/]+/apply$",
+    "matches": false,
+    "skipsEqualityWhenUncaptured": true
+  },
+  "fixtureCleanupContract": {
+    "actualListDataShape": "RefinementRunSummary[]",
+    "discardPostsWithActualShape": 0,
+    "discardHasBodyWhenGivenSyntheticRunsObject": false,
+    "returnedNormallyDespiteHttp400": true
+  }
+}

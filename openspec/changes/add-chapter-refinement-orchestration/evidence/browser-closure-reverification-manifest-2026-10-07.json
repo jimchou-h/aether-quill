@@ -1,0 +1,181 @@
+{
+  "generatedAt": "2026-10-07T13:44:19.990Z",
+  "head": "c848ce040ebc3b075ae9f5b9d6f04af8d784bb83",
+  "worktree": "current uncommitted source",
+  "acceptance": "R1/R2 closed; B4 not accepted",
+  "gates": {
+    "lint": 0,
+    "typecheck": 0,
+    "test": 0,
+    "build": 0,
+    "strictValidate": 0,
+    "pg": 0,
+    "correctBehaviorProbes": 0,
+    "browserAssetObservationProbes": 0
+  },
+  "testTotals": {
+    "pass": 1066,
+    "fail": 0,
+    "skip": 9
+  },
+  "separatePg": {
+    "pass": 10,
+    "fail": 0,
+    "skip": 0
+  },
+  "browser": {
+    "independentRerun": false,
+    "reviewedDeveloperRun": "e2e-run7",
+    "developerDesktopFailed": 7
+  },
+  "sources": [
+    {
+      "path": "apps/web/e2e/chapter-refinement-closed-loop.spec.ts",
+      "sha256": "f16dbee5c6607429ffde90c7ecb1cc9935e9e9a2c31172eac9b237381cb87526"
+    },
+    {
+      "path": "apps/web/e2e/support/refinement-fixture.ts",
+      "sha256": "838892dc13004ca8bad6c6c7c67a21ad6fa95da1f243d7435837244849f89ec9"
+    },
+    {
+      "path": "apps/web/e2e/support/fake-orchestrator.mjs",
+      "sha256": "019e8f3623485472abac3d8ba692619494b989ce6e85996f8261c494c1787797"
+    },
+    {
+      "path": "apps/web/src/composables/useChapterRefinementRun.ts",
+      "sha256": "3a3c796da048ad88c58d39c6b3056864a8c453f79340c842d3f795ff8661a8fa"
+    },
+    {
+      "path": "apps/web/src/components/chapters/ChapterOptimizeDialog.vue",
+      "sha256": "214b8601d34b8c6ca8b122b7d8c13eb50f1068bed1c9d15e624368fd143c1587"
+    },
+    {
+      "path": "apps/web/src/components/chapters/ChapterRefinementPanel.vue",
+      "sha256": "7c7744a29f3f65e0d4a18b9d2eac04d7a2659c65a8eecca683b935899fff5498"
+    },
+    {
+      "path": "apps/web/src/pages/Chapters.vue",
+      "sha256": "ee79243bb5fb73ef0414f46150e9bb0c47032d7d9f11b3e90a53adaed89d8faf"
+    },
+    {
+      "path": "apps/web/src/services/api.ts",
+      "sha256": "4cf1c4b4a3ef2573d0665609e6c86958b231a4b2b2ded527fb1a0801565379c3"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.service.ts",
+      "sha256": "2dea919b36197aa0da99bfe01a59a02fd627609e97cb8d77a3b672d538ad93e6"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.engine.ts",
+      "sha256": "d455454e40fca9966d8348f6fe05bfe7b72bc3bccca73296c278ac36707691c2"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.util.ts",
+      "sha256": "3ea8e285e39b6fba5174b358c792dd8e9d96f90482c78755699b09d1f38a8c73"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.stage-isolation.test.ts",
+      "sha256": "6dacbe48a18702568fc01cfa688c09d6b05bed6843f3902d9ca3ecd68f95e336"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.pg-rebuild.test.ts",
+      "sha256": "6908a559221e11e2b634df77554f07dfe60610301cffbb50332421216fbf2182"
+    },
+    {
+      "path": "services/rag-orchestrator/src/main.ts",
+      "sha256": "7a68edfcf86d0bd25192e02e5aac19dd3048536a398c3f274d5d4b2ff542dd82"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/browser-closure-reverification-2026-10-07.md",
+      "sha256": "0079f50b65406a5553025f073336e5a792ac14accffa308dc19c044604a5c88c"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-contract-audit-probes-2026-10-07.ts",
+      "sha256": "224725b4d4249716525233c31ef3a44a1391803fb4223a930bcfee7f39a0dde6"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-contract-audit-observations-2026-10-07.json",
+      "sha256": "c136cb74d0463c1cdbb47cce6d9f9239df788c62fe35e34dd7b55ab30e8e5041"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/batch-acceptance-probes-2026-10-07.ts",
+      "sha256": "9f4e075d48dfb11a7cf8d1c20dfd841d8aed95bd5b70c4b52291964551f9eec8"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/batch-acceptance-observations-2026-10-07.json",
+      "sha256": "89bd7271d332cf3098199e2b4a4e7411d192070c1d0885ed5abc312db2ed2726"
+    }
+  ],
+  "logs": [
+    {
+      "path": ".scratch/refinement-latest-acceptance/batch-probes.log",
+      "sha256": "9b9b1f3f863a2a0b9de3815c50cd8257c61a2a6c07398f9535383f0ecddbfc81"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/browser-contract-probes.log",
+      "sha256": "d476c85402ce52fedfdd121242254a7d7e41964135b6f90de2adcd9b1df0107c"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/build.log",
+      "sha256": "0f28e2b2036ce79195b95ff23574588bf4a8f49dd535ebe82bf7b273c5be36d9"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/lint.log",
+      "sha256": "f26d2c3238d1b9e771ba50ed6bb75f0e41d22ef1571c1b9c3080c6db878ae2b9"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/openspec.log",
+      "sha256": "8bc47b10957042e3a47db137cf96a566dbe9dc9c9f637e0274f8d5a277b3cf23"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/pg.log",
+      "sha256": "6c61e5e535e244a36a864c4fcd20b868e198d521d318c4bd789c6d2d7a530061"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/run-pg.cjs",
+      "sha256": "c263125f6878afd4f2be7c782787c10087b2fa3c043f8b211454a2bcf2b62e17"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/test.log",
+      "sha256": "888d3b086d6a03f062f1b7c37421ebda1932040054e15c13f075a6b84529cb60"
+    },
+    {
+      "path": ".scratch/refinement-latest-acceptance/typecheck.log",
+      "sha256": "b59a74be55f7167a099e2099ad24be6fc47f1b97fb2ab353d85473c1d439256c"
+    }
+  ],
+  "preservedFailureSnapshots": [
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/developer-e2e-run7.log",
+      "sha256": "c75a42d79cb678db3568e6ae4b0b763e74daa96e98da625075dc53396c449a6b"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/failure-1.md",
+      "sha256": "92be6d8de0e2d71a6df8b4b40c47f4605a5fc319375329299a6496614e332b0f"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/failure-2.md",
+      "sha256": "2519215abc70c7ef552be70c2e72468f97816dc1e03f480197900861ef59aa4f"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/failure-3.md",
+      "sha256": "4c42f6d2823c18a50d5889a34df89795d3828c1617c3b8071755c708efc3f4b1"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/failure-4.md",
+      "sha256": "af04875be2141ffbfe4f9ec19482d13e98e60a31802841c30d5c375a35607986"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/failure-5.md",
+      "sha256": "6ddb98bd337fb425ff0b349fd6d4898662e8135c82c708f3d1a45ee1fa96ad63"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/failure-6.md",
+      "sha256": "3bf1aa41e31163b0363c0d837f67e8cec03dcd8c96684c37d37552c8c0933de0"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-closure-failure-snapshot-2026-10-07/failure-7.md",
+      "sha256": "7a3fbc9877cfd315b8ed7c6f74bd0c005f14cb6e5fbb5c3165593af2f490dee9"
+    }
+  ]
+}

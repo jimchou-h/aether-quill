@@ -1,0 +1,54 @@
+[
+  {
+    "sha256": "a4a2b62411f14e2bf7aa0dfd3cac33d6f44b889b5329c639149d7f7e041d7533",
+    "path": "services/api/src/modules/projects/chapter-refinement.engine.ts"
+  },
+  {
+    "sha256": "2dea919b36197aa0da99bfe01a59a02fd627609e97cb8d77a3b672d538ad93e6",
+    "path": "services/api/src/modules/projects/chapter-refinement.service.ts"
+  },
+  {
+    "sha256": "4393407afe07d3d1dff06ba50d1b9b89042c0fca87069cc79dd034dd7fc484de",
+    "path": "services/api/src/modules/projects/chapter-refinement.util.ts"
+  },
+  {
+    "sha256": "0aa57aa81cb050a40fb35bd22b7b3a4d281994c590d2ccba2a62b8b5bb514e5a",
+    "path": "services/api/src/modules/projects/chapter-refinement.types.ts"
+  },
+  {
+    "sha256": "30d4f03e86b80e34d38ed3ba16c60c94ed243feff1b324b83017981579597d20",
+    "path": "services/api/src/modules/projects/chapter-refinement.materials.ts"
+  },
+  {
+    "sha256": "7f86e6ac6eeafd60579d34fa36ea855ab94d1f418ba1aab1b184016a9697a310",
+    "path": "services/api/src/modules/projects/projects.service.ts"
+  },
+  {
+    "sha256": "db429a8b966a8e9670b94ab7924ade387b4f3abe3dce0246f51024c790b8d853",
+    "path": "services/rag-orchestrator/src/main.ts"
+  },
+  {
+    "sha256": "33c238125ebc9b9fd6e9fdf6f28c858e70bd3c0d380f71c261960d68f92f6e76",
+    "path": "services/rag-orchestrator/src/retrieval/knowledge-retrieval.ts"
+  },
+  {
+    "sha256": "4e6ed6720c5261ff85d6fff61cc3011740c0e03526eb04c7357c20687f0a0888",
+    "path": "services/rag-orchestrator/src/generation/generation-prompt-assembler.ts"
+  },
+  {
+    "sha256": "b0778d96798bff53829fc13b4c1c528c6f8528336d7b4ec1c7ee7fceec9696b1",
+    "path": "services/rag-orchestrator/src/generation/task-prompt-defaults.ts"
+  },
+  {
+    "sha256": "bbd97351e2e3fb5a77427785191301da1fa9f85c523271689941d7e7e7f26894",
+    "path": "packages/prompt-templates/src/templates.ts"
+  },
+  {
+    "sha256": "ba61f2b0c373b7dff5d856b224fa9d43071dc8b1575146f14cf6754b9966b171",
+    "path": "apps/web/src/utils/chapterRefinement.ts"
+  },
+  {
+    "sha256": "b0f4c3cbe472ca121eae745f53a341c0a764afee4be1711ad059a936c364e50e",
+    "path": "openspec/changes/add-chapter-refinement-orchestration/README.md"
+  }
+]

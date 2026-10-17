@@ -1,0 +1,72 @@
+{
+  "note": "Defect observations: exit 0 is reproduction success, not acceptance success.",
+  "necessaryOutputSilentlyClamped": {
+    "requiredOutputTokens": 9000,
+    "budget": {
+      "ok": true,
+      "maxTokens": 8192
+    }
+  },
+  "unknownModelAdmitted": {
+    "contextTokens": 64000,
+    "maxOutputTokens": 8192
+  },
+  "currentChapterSampleNotExcluded": {
+    "currentChapterNo": 1,
+    "frozenSampleIds": [
+      "sample-1",
+      "sample-2"
+    ],
+    "expectedSampleIds": [
+      "sample-2"
+    ]
+  },
+  "entryFactInsideCandidateStillAcceptedAsExit": {
+    "status": "evidence",
+    "origin": "candidate"
+  },
+  "acceptedFinalRepairLost": {
+    "status": "ready",
+    "reviewCalls": 5,
+    "actualDraft": "甲推门进屋，将钥匙放下。\n\n乙来到院中，将门关好。",
+    "repairWasMarkedResolved": true,
+    "repairedDraftReturned": false
+  },
+  "revertedRangeResurrected": {
+    "status": "ready_with_issues",
+    "reviewCalls": 4,
+    "actualDraft": "甲推门进屋，将钥匙放下。\n\n乙来到院中，将门关好。",
+    "changes": [
+      {
+        "sceneId": "scene-2",
+        "startOffset": 12,
+        "endOffset": 22,
+        "summary": "改善表达"
+      }
+    ],
+    "retainedOriginalChars": 10
+  },
+  "revertedOriginalConflictDowngraded": {
+    "status": "ready_with_issues",
+    "reviewCalls": 4,
+    "issues": [
+      {
+        "id": "i1",
+        "category": "hard_constraint",
+        "severity": "high",
+        "sceneId": "scene-1",
+        "unitId": "u0",
+        "message": "整章最终接缝修复未通过程序门禁，回退该范围原文",
+        "disposition": "retained_original"
+      },
+      {
+        "id": "i2",
+        "category": "hard_constraint",
+        "severity": "high",
+        "anchorQuote": "甲推开门，放下钥匙。",
+        "message": "整章最终检查：修复接缝状态冲突",
+        "disposition": "warning"
+      }
+    ]
+  }
+}

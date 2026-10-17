@@ -1,0 +1,34 @@
+{
+  "baselineHead": "c848ce040ebc3b075ae9f5b9d6f04af8d784bb83",
+  "checkedAt": "2026-10-07T17:10:44.6834192+08:00",
+  "files": [
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.engine.ts",
+      "sha256": "d8e3f882426dce9096efb6fb9cc37cccdc5abe868592e499ecb588b58abbea21"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.util.ts",
+      "sha256": "778b7dad1067797350945172d81726d6fa5b7b6101fa40dfd32e17dc1866bcfb"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.types.ts",
+      "sha256": "0aa57aa81cb050a40fb35bd22b7b3a4d281994c590d2ccba2a62b8b5bb514e5a"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.service.ts",
+      "sha256": "2dea919b36197aa0da99bfe01a59a02fd627609e97cb8d77a3b672d538ad93e6"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.long-chapter.test.ts",
+      "sha256": "7a5d03f4facc81155c4f881a5ab08b1908e5294e1bcc4d4b448c14576114ac31"
+    },
+    {
+      "path": "apps/web/src/utils/chapterRefinement.ts",
+      "sha256": "ba61f2b0c373b7dff5d856b224fa9d43071dc8b1575146f14cf6754b9966b171"
+    },
+    {
+      "path": ".scratch/refinement-fourth-verification/frozen-route-long-chapter.test.ts",
+      "sha256": "3dea6437b8571bf543ed697594851c2552e92cb0cba854204bf20225c0c16f73"
+    }
+  ]
+}

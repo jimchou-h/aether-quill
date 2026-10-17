@@ -1,0 +1,58 @@
+[
+  {
+    "probe": "call_cap_fixed",
+    "actual": 1,
+    "status": "paused"
+  },
+  {
+    "probe": "unit_review_failure_fixed",
+    "status": "paused",
+    "changes": 0,
+    "modelRouteForwarded": true
+  },
+  {
+    "probe": "known_fact_null_fixed",
+    "status": "paused",
+    "planCalls": 2
+  },
+  {
+    "probe": "existing_bad_quote_fixed",
+    "violations": 1
+  },
+  {
+    "probe": "final_revert_rechecked",
+    "status": "ready_with_issues",
+    "reviewCalls": 4,
+    "repairCalls": 2,
+    "postRevertReviewCalls": 1
+  },
+  {
+    "probe": "cancel_preserves_draft_and_reserved_repair",
+    "acceptedChanges": 1,
+    "repairCallsStarted": 1,
+    "persistedRepairCount": 1,
+    "actualCalls": 7,
+    "persistedCalls": 7,
+    "status": "paused"
+  },
+  {
+    "probe": "inspect_admitted_within_budget",
+    "inspectCalls": 0,
+    "sentChars": 0,
+    "eventualStatus": "paused",
+    "pauseReason": "context_budget"
+  },
+  {
+    "probe": "historical_original_fact_not_current_state",
+    "verdict": {
+      "status": "historical"
+    }
+  },
+  {
+    "probe": "cross_scene_backfill_blocked",
+    "violations": 1,
+    "scene2AllowedBlocks": [
+      "b1"
+    ]
+  }
+]

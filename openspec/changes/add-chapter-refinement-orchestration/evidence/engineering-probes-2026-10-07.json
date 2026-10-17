@@ -1,0 +1,38 @@
+[
+  {
+    "probe": "call_budget",
+    "configured": 1,
+    "actual": 2,
+    "status": "paused"
+  },
+  {
+    "probe": "incomplete_review",
+    "status": "ready_with_issues",
+    "uncompletedReviewWarnings": 1,
+    "modelRouteForwarded": false
+  },
+  {
+    "probe": "known_fact_to_null",
+    "planCalls": 2,
+    "status": "ready",
+    "acceptedAfterKnownFactBecameNull": true
+  },
+  {
+    "probe": "overwrite_existing_fact_field",
+    "violations": 0,
+    "existingWrongQuoteReplaced": true
+  },
+  {
+    "probe": "checkpoint_while_second_unit_running",
+    "firstUnitAccepted": true,
+    "persistedChanges": 0,
+    "persistedDraftStillOriginal": true,
+    "phaseStored": "reading"
+  },
+  {
+    "probe": "explicit_cancel_loses_accepted_unit",
+    "status": "paused",
+    "storedChanges": 0,
+    "resumeState": null
+  }
+]

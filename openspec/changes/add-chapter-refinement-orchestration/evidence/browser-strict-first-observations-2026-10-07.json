@@ -1,0 +1,13 @@
+[
+  {
+    "width": 1440,
+    "status": "ready",
+    "runId": "7f4bd2c2-bfd3-4e28-a867-f3fa0b939a54",
+    "sourceHash": "8573b8fae84e2c751d07f861ad54ac5102e20f670ceed6d55bed79234ee0a3c6",
+    "candidateHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "responseHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "persistedHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "uiHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "summaryPreserved": true
+  }
+]

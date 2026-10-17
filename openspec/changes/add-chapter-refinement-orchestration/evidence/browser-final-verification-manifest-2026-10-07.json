@@ -1,0 +1,126 @@
+{
+  "date": "2026-10-07",
+  "head": "c848ce040ebc3b075ae9f5b9d6f04af8d784bb83",
+  "acceptance": "latest fixes passed; complete non-model evidence pending",
+  "tests": {
+    "pgPass": 10,
+    "skip": 9,
+    "strictProbePass": 4,
+    "pass": 1066,
+    "browserPass": 14
+  },
+  "files": [
+    {
+      "path": "apps/web/e2e/chapter-refinement-closed-loop.spec.ts",
+      "sha256": "d770d3d556205296e9bf16f3cda86f4185e25c1338a0b341e00ca3404d4dd2db"
+    },
+    {
+      "path": "apps/web/e2e/support/refinement-fixture.ts",
+      "sha256": "afd671da40f2e6146a07396c009b7ffa4e351318e66da58fd9ac6f8fff8403c0"
+    },
+    {
+      "path": "apps/web/e2e/support/fake-orchestrator.mjs",
+      "sha256": "a3a56cb7c821186afb5fcfd655d91799b16ff741e2824eb556dfb16c881f2267"
+    },
+    {
+      "path": "services/api/src/main.ts",
+      "sha256": "b1289f12d5a5cb6fa92d1c9b39fc8289b97e84ab25fa034bea9eb6ef69ee10df"
+    },
+    {
+      "path": "services/api/src/filters/http-exception.filter.ts",
+      "sha256": "2d60afb17c3020c6c3637e4781ec58c4924b9fb3b32a719e37111d8245752f8f"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.service.ts",
+      "sha256": "2dea919b36197aa0da99bfe01a59a02fd627609e97cb8d77a3b672d538ad93e6"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.engine.ts",
+      "sha256": "d455454e40fca9966d8348f6fe05bfe7b72bc3bccca73296c278ac36707691c2"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.util.ts",
+      "sha256": "3ea8e285e39b6fba5174b358c792dd8e9d96f90482c78755699b09d1f38a8c73"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.gateway.ts",
+      "sha256": "7ec882f4b76f647ae6a5a122bc3d999d32b2e83a5c011c95f06f1d242ff6a49d"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.pg-rebuild.test.ts",
+      "sha256": "6908a559221e11e2b634df77554f07dfe60610301cffbb50332421216fbf2182"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.stage-isolation.test.ts",
+      "sha256": "6dacbe48a18702568fc01cfa688c09d6b05bed6843f3902d9ca3ecd68f95e336"
+    },
+    {
+      "path": "services/rag-orchestrator/src/main.ts",
+      "sha256": "7a68edfcf86d0bd25192e02e5aac19dd3048536a398c3f274d5d4b2ff542dd82"
+    },
+    {
+      "path": "apps/web/src/components/chapters/ChapterRefinementPanel.vue",
+      "sha256": "7c7744a29f3f65e0d4a18b9d2eac04d7a2659c65a8eecca683b935899fff5498"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-strict-probe-2026-10-07.ts",
+      "sha256": "8b19ac850c0c75ed1930a230210433c5c7e17bc79411ebf40d94cdc03cb94e52"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-low-warning-repro-2026-10-07.ts",
+      "sha256": "9882ae2abeb1a536d9d720370527d95c164ead1aaae2ac1dacae2034d1422f43"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/browser-strict-observations-2026-10-07.json",
+      "sha256": "43259f2d64b34b88565ccd9268959bcbc42bb93aa85f396c92648b044a4be99e"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/run-browser.cjs",
+      "sha256": "9944be23fbaa3dc6a248f5f4632f5994f11695cefe1e37a7cc7307c7c5769bbe"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/browser.log",
+      "sha256": "87b5f1a0a6d88d9065e5ad99b120078b48e17dbd96181ee4a09c476cf5914ca9"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/strict-probe.log",
+      "sha256": "c498a17d31441f03e33c955a564a887fa2fa72596b65b897b7a478e9eef7bdfb"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/strict-first.log",
+      "sha256": "7f0e2ba60d2a9da726ee3e87f901ad29da7c11331ceeedd3dad588b7c6569004"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/strict-empty-retry.log",
+      "sha256": "5970a508ddef193dbb7ebf8d569f24ba165268a43537b74c54d7080acf6de374"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/gate-lint.log",
+      "sha256": "61618447fe73195cf167b87f31a8a3fcc313d3513e0e51e76186f1c2637abe55"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/gate-typecheck.log",
+      "sha256": "588be6ecb01c9fa8278864a9f7fe3a48f58b327a10dad4ceffe264890fa22afa"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/gate-test.log",
+      "sha256": "425688f3aaf160f467a9097112e56e61bf32f8edd6685fdab7f6b84f4e486752"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/gate-build.log",
+      "sha256": "f8c4fe787e5fe1b18612f39ad7e8e28bb81460d54f756cd436f30187a8acf226"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/pg.log",
+      "sha256": "a6889da90c6f38e55a932dae3b3d734c72c60563616f2254a31cef44428daa1b"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/probes.log",
+      "sha256": "9b9b1f3f863a2a0b9de3815c50cd8257c61a2a6c07398f9535383f0ecddbfc81"
+    },
+    {
+      "path": ".scratch/refinement-final-browser-acceptance/validate.log",
+      "sha256": "8bc47b10957042e3a47db137cf96a566dbe9dc9c9f637e0274f8d5a277b3cf23"
+    }
+  ]
+}

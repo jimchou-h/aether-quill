@@ -1,0 +1,54 @@
+{
+  "baselineHead": "c848ce040ebc3b075ae9f5b9d6f04af8d784bb83",
+  "checkedAt": "2026-10-07T15:49:58.0200700+08:00",
+  "files": [
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.engine.ts",
+      "sha256": "42db0aa3a3533ecd0f80182d5a721b07e2e75a8158fb5e27a493caa7063b9dba"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.util.ts",
+      "sha256": "f2a074845d61581c54cd41ccf7256440ea1dd26d5be98a505909c422ff2c369f"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.materials.ts",
+      "sha256": "dea98120d4ec3354f5995ec6b85cbf22eb6e5e06a1e7c61b37d6f48e33c75423"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.service.ts",
+      "sha256": "78ec0f5c0e113417e8d23625b3fc67852ae0468da1778837f213036096fbee8c"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.gateway.ts",
+      "sha256": "cc723526ba8aabd18f149e95a3a84a5fbe56e1a7ab7ccc56eb5ee954de5dfd98"
+    },
+    {
+      "path": "services/api/src/modules/projects/projects.service.ts",
+      "sha256": "d3eb5fdd97a2ec760cf31fbc747221867eecb04367f5a5755f4e72f9248638b6"
+    },
+    {
+      "path": "apps/web/src/utils/chapterRefinement.ts",
+      "sha256": "e4633ce7e900f4c2be9fc0b2c97ea65c6d36cad592898587ee5857197d81ceed"
+    },
+    {
+      "path": "apps/web/src/utils/taskPromptGroups.ts",
+      "sha256": "7fdd8733458e4acb9bb98d34b7f97e5ac6ebd35a36db8d5650341c4108d665e0"
+    },
+    {
+      "path": "services/rag-orchestrator/src/main.ts",
+      "sha256": "6379ef375228a5bbca39a0a943ccf8b970aa6779ef0a9520bf521d0eb9b43f0c"
+    },
+    {
+      "path": "services/rag-orchestrator/src/generation/generation-prompt-assembler.ts",
+      "sha256": "4e6ed6720c5261ff85d6fff61cc3011740c0e03526eb04c7357c20687f0a0888"
+    },
+    {
+      "path": "openapi/openapi.yaml",
+      "sha256": "b832376ebb3d322f6fa79544c351695536ce82f967bcba4bb99dcbaaa86f658b"
+    },
+    {
+      "path": "scripts/run-tests.mjs",
+      "sha256": "4110174002082c2c739211703982315d3d374048ee0265f47a2357a65e804a50"
+    }
+  ]
+}

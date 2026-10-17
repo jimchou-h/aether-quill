@@ -1,0 +1,58 @@
+{
+  "realGatewayAndOrchestratorProviderMatrix": [
+    {
+      "phase": "inspect",
+      "projectGuideInSystem": false,
+      "styleInUser": false,
+      "taskContract": true,
+      "persona": true,
+      "knowledge": true
+    },
+    {
+      "phase": "plan",
+      "projectGuideInSystem": false,
+      "styleInUser": false,
+      "taskContract": true,
+      "persona": true,
+      "knowledge": true
+    },
+    {
+      "phase": "rewrite",
+      "projectGuideInSystem": true,
+      "styleInUser": true,
+      "taskContract": true,
+      "persona": true,
+      "knowledge": true
+    },
+    {
+      "phase": "review",
+      "projectGuideInSystem": false,
+      "styleInUser": false,
+      "taskContract": true,
+      "persona": true,
+      "knowledge": true
+    },
+    {
+      "phase": "repair",
+      "projectGuideInSystem": true,
+      "styleInUser": true,
+      "taskContract": true,
+      "persona": true,
+      "knowledge": true
+    }
+  ],
+  "sameSentenceLaterChange": {
+    "candidate": "甲手里拿着钥匙走到门边后把钥匙放在桌上。",
+    "anchor": "甲手里拿着钥匙",
+    "result": {
+      "status": "superseded",
+      "reason": "末态锚点之后仍有同一状态的后续变化：走到门边后把钥匙放在桌上。"
+    },
+    "propagation": {
+      "status": "ready",
+      "recordedStaleFact": false,
+      "nextUnitConfirmedSection": "",
+      "nextUnitReceivesStaleFact": false
+    }
+  }
+}

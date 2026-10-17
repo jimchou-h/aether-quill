@@ -1,0 +1,18 @@
+[
+  {
+    "sha256": "d8e3f882426dce9096efb6fb9cc37cccdc5abe868592e499ecb588b58abbea21",
+    "path": "services/api/src/modules/projects/chapter-refinement.engine.ts"
+  },
+  {
+    "sha256": "778b7dad1067797350945172d81726d6fa5b7b6101fa40dfd32e17dc1866bcfb",
+    "path": "services/api/src/modules/projects/chapter-refinement.util.ts"
+  },
+  {
+    "sha256": "42b85775e66c7dc283983c7e745712407864f0dee062ff87c51b7db003a6b7d2",
+    "path": "services/api/src/modules/projects/chapter-refinement.engine.test.ts"
+  },
+  {
+    "sha256": "8c3c9bd10698e47f663498bd5f12547dc3eecaeecc18019715af84d1ea9ef8f8",
+    "path": "openspec/changes/add-chapter-refinement-orchestration/README.md"
+  }
+]

@@ -1,0 +1,171 @@
+{
+  "generatedAt": "2026-10-07T19:35:26.9784182+08:00",
+  "node": "v20.19.0",
+  "head": "c848ce040ebc3b075ae9f5b9d6f04af8d784bb83",
+  "worktree": "uncommitted current sources",
+  "acceptance": "not_passed",
+  "checks": {
+    "lint": 0,
+    "typecheck": 0,
+    "test": 0,
+    "build": 0,
+    "openspec": 0,
+    "pg": 0,
+    "fourthProbes": 0,
+    "finalProbes": 0,
+    "batchDefectObservationProbes": 0,
+    "e2eList": 0,
+    "browserExecution": "not_executed_auto_review_rejected_unproven_isolation"
+  },
+  "fullTests": {
+    "pass": 1056,
+    "fail": 0,
+    "skip": 7
+  },
+  "separatePgTests": {
+    "pass": 8,
+    "fail": 0,
+    "skip": 0,
+    "newRebuildCases": 6
+  },
+  "sources": [
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.engine.ts",
+      "sha256": "137f8b3ee36c1c2c3332274987d953511cc04dcb5cf0f1b5c6bb7868939e9018"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.util.ts",
+      "sha256": "e98bd2f2f34631be141fb70881d2d2416845e432a1e84a489ccdfe790da85f1f"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.gateway.ts",
+      "sha256": "cc723526ba8aabd18f149e95a3a84a5fbe56e1a7ab7ccc56eb5ee954de5dfd98"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.pg-rebuild.test.ts",
+      "sha256": "c3734bc04e0b58dc93dbc20261daad0ca875580584cbf74b1d1c3c024f7f861f"
+    },
+    {
+      "path": "services/rag-orchestrator/src/main.ts",
+      "sha256": "db429a8b966a8e9670b94ab7924ade387b4f3abe3dce0246f51024c790b8d853"
+    },
+    {
+      "path": "services/rag-orchestrator/src/generation/refinement-stage-injection.test.ts",
+      "sha256": "b5c5500f1462a389e29c7510e24b5dbd61ba4e4cfc2ca70105d1fb694db3dccc"
+    },
+    {
+      "path": "services/rag-orchestrator/src/generation/generation-prompt-assembler.ts",
+      "sha256": "4e6ed6720c5261ff85d6fff61cc3011740c0e03526eb04c7357c20687f0a0888"
+    },
+    {
+      "path": "apps/web/e2e/chapter-refinement-closed-loop.spec.ts",
+      "sha256": "7712e3fe128803a447fd9ac53835db8ed3d1e65fc369612c2894b8673939e7de"
+    },
+    {
+      "path": "apps/web/e2e/support/fake-orchestrator.mjs",
+      "sha256": "4155edc85e2c51a7a7b8f06d5592d3eff0dd95f105dbfc27c9a9b4e6c38251f5"
+    },
+    {
+      "path": "apps/web/e2e/helpers.ts",
+      "sha256": "73043210fcb66c69b905ba90601bbde9b434c822a6b85533b4177886031420d8"
+    },
+    {
+      "path": "apps/web/src/components/chapters/ChapterRefinementPanel.vue",
+      "sha256": "7c7744a29f3f65e0d4a18b9d2eac04d7a2659c65a8eecca683b935899fff5498"
+    },
+    {
+      "path": "apps/web/src/components/chapters/ChapterList.vue",
+      "sha256": "a427d6529375dbdc92108c5f6b916d3408dd890e16639a5f40898a1b31850731"
+    },
+    {
+      "path": "apps/web/src/composables/useChapterRefinementRun.ts",
+      "sha256": "3a3c796da048ad88c58d39c6b3056864a8c453f79340c842d3f795ff8661a8fa"
+    },
+    {
+      "path": "apps/web/src/utils/taskPromptGroups.ts",
+      "sha256": "05be65e756fb9e6bdc04fe74ae5a712202142327b5a39ffb59bb281d8dd0e0a2"
+    },
+    {
+      "path": "apps/web/src/components/settings/TaskPromptItemEditor.vue",
+      "sha256": "5e360f4b3d16961aaf559c9f29f17eb0bce25522d5310f0151143d5391e3acc5"
+    },
+    {
+      "path": "services/api/src/modules/projects/projects.controller.ts",
+      "sha256": "e5acb9506cf411549fe600a18b9f9af8757da1e0b8388836e8177e6e4e23c607"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/batch-acceptance-2026-10-07.md",
+      "sha256": "4d69609903198f4f7a87e0badf9a6233274292c2b51816409dbc6f9e86ab95c5"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/batch-acceptance-probes-2026-10-07.ts",
+      "sha256": "c1c200b26b7dafb38b7005faf97de91f9213bb1466481bd7f008e68e2a770376"
+    },
+    {
+      "path": "openspec/changes/add-chapter-refinement-orchestration/evidence/batch-acceptance-observations-2026-10-07.json",
+      "sha256": "6369ff61c80784c19fa7cae02b98eb0ccd8082405d001e7b65fe6620e5d9ef61"
+    }
+  ],
+  "logs": [
+    {
+      "path": ".scratch/refinement-batch-acceptance/batch-probes-env-startup-error.log",
+      "sha256": "94905a206c26582fd6ce6b7a812ffd04cc33d34c27de3e6be6be8cc552884b82",
+      "bytes": 1689
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/batch-probes.log",
+      "sha256": "b76183989727eb5ef82400879b9eee9d617e8c72df33b58613b6afea3bb321f1",
+      "bytes": 1824
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/build.log",
+      "sha256": "59a9b51abfd9f5c1688dc3cd88d5cfc574df92411cf0f25946e03b06ec11f224",
+      "bytes": 8742
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/e2e-list.log",
+      "sha256": "0fbfe1bdef15be4d86738f3e920f8c56488cd829347ebcd30da8d3c90457a511",
+      "bytes": 2900
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/final-probes.log",
+      "sha256": "ae6915b38d81f215a12acae1e5bb0dcaa24d16ae5799eb5c8eb116a0c3e1f7a4",
+      "bytes": 509
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/fourth-probes.log",
+      "sha256": "6dd9deca0c25ae3468fe688c14c7b6b686e544cab5f4e27ea170a03aac970fc7",
+      "bytes": 1740
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/lint.log",
+      "sha256": "7e9cfdb5b73d4727f7d9e2e4edcb83a29248aae7ea2ad265375a3d5a2e1a0a44",
+      "bytes": 705
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/openspec.log",
+      "sha256": "8bc47b10957042e3a47db137cf96a566dbe9dc9c9f637e0274f8d5a277b3cf23",
+      "bytes": 56
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/pg.log",
+      "sha256": "91b49e7794c43992e53dde0931e76e67083e02525c26e0669bc61795a92cc23d",
+      "bytes": 2154
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/run-pg.cjs",
+      "sha256": "c263125f6878afd4f2be7c782787c10087b2fa3c043f8b211454a2bcf2b62e17",
+      "bytes": 1722
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/test.log",
+      "sha256": "454a109c3307aec62c554548f0f2383ac4effc6a83c127d245cc2724be27cd8c",
+      "bytes": 351438
+    },
+    {
+      "path": ".scratch/refinement-batch-acceptance/typecheck.log",
+      "sha256": "126f5e00ff46e3944a1253bda4de2902941a63957a0819e29e7f5146d0cb85b5",
+      "bytes": 1738
+    }
+  ]
+}

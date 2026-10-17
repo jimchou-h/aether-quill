@@ -1,0 +1,36 @@
+{
+  "note": "Fixed-behavior observations: exit 0 means acceptance for C1/C2/C4/W6 paths.",
+  "currentChapterSampleExcluded": {
+    "currentChapterNo": 1,
+    "frozenSampleIds": [
+      "sample-2"
+    ]
+  },
+  "entryFactWithoutExitAnchor": {
+    "status": "historical"
+  },
+  "exitFactWithAnchor": {
+    "status": "evidence",
+    "origin": "candidate"
+  },
+  "oversizedRequiredOutputRejected": {
+    "ok": false,
+    "reason": "必要输出 9000 token 超过单次输出上限 8192 token；拒绝静默裁剪，需缩小目标范围或暂停"
+  },
+  "unknownModelRejected": null,
+  "finalRepairKept": {
+    "status": "ready",
+    "reviewCalls": 5,
+    "draftStartsWithRepair": true,
+    "lastPersistedMatchesFinal": true
+  },
+  "revertConsistent": {
+    "status": "ready_with_issues",
+    "changes": 1,
+    "oldCandidateGone": true
+  },
+  "unlocatableBlockingPauses": {
+    "status": "paused",
+    "pauseReason": "boundary_conflict"
+  }
+}

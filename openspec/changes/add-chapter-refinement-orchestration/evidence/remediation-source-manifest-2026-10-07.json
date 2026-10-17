@@ -1,0 +1,78 @@
+[
+  {
+    "sha256": "42db0aa3a3533ecd0f80182d5a721b07e2e75a8158fb5e27a493caa7063b9dba",
+    "path": "services/api/src/modules/projects/chapter-refinement.engine.ts"
+  },
+  {
+    "sha256": "78ec0f5c0e113417e8d23625b3fc67852ae0468da1778837f213036096fbee8c",
+    "path": "services/api/src/modules/projects/chapter-refinement.service.ts"
+  },
+  {
+    "sha256": "f2a074845d61581c54cd41ccf7256440ea1dd26d5be98a505909c422ff2c369f",
+    "path": "services/api/src/modules/projects/chapter-refinement.util.ts"
+  },
+  {
+    "sha256": "34ed86eb7d72b7e064c42e45c1fc69648de661a111ed651e3bf7e9ac0b4f2f58",
+    "path": "services/api/src/modules/projects/chapter-refinement.types.ts"
+  },
+  {
+    "sha256": "cc723526ba8aabd18f149e95a3a84a5fbe56e1a7ab7ccc56eb5ee954de5dfd98",
+    "path": "services/api/src/modules/projects/chapter-refinement.gateway.ts"
+  },
+  {
+    "sha256": "dea98120d4ec3354f5995ec6b85cbf22eb6e5e06a1e7c61b37d6f48e33c75423",
+    "path": "services/api/src/modules/projects/chapter-refinement.materials.ts"
+  },
+  {
+    "sha256": "d3eb5fdd97a2ec760cf31fbc747221867eecb04367f5a5755f4e72f9248638b6",
+    "path": "services/api/src/modules/projects/projects.service.ts"
+  },
+  {
+    "sha256": "6379ef375228a5bbca39a0a943ccf8b970aa6779ef0a9520bf521d0eb9b43f0c",
+    "path": "services/rag-orchestrator/src/main.ts"
+  },
+  {
+    "sha256": "0bf52b8bd53ae9a81aade5111026b7893f2e8f352d1c014e4aad2cdcd43d48e2",
+    "path": "services/rag-orchestrator/src/retrieval/knowledge-retrieval.ts"
+  },
+  {
+    "sha256": "4e6ed6720c5261ff85d6fff61cc3011740c0e03526eb04c7357c20687f0a0888",
+    "path": "services/rag-orchestrator/src/generation/generation-prompt-assembler.ts"
+  },
+  {
+    "sha256": "df318d81175d81296a58450fac141930672a0fd999411eebf3b463b7bb69dcea",
+    "path": "services/rag-orchestrator/src/generation/trace-store.ts"
+  },
+  {
+    "sha256": "4110174002082c2c739211703982315d3d374048ee0265f47a2357a65e804a50",
+    "path": "scripts/run-tests.mjs"
+  },
+  {
+    "sha256": "656214c7436333c56e7520befc3646bd3c5d05568552c17f5c4a5732daaa9dfc",
+    "path": "services/api/package.json"
+  },
+  {
+    "sha256": "aef27276c7d5759c1f32f492bfe85b41d9c9ba8561a4f1c72f40db0086f4bfb9",
+    "path": "services/rag-orchestrator/package.json"
+  },
+  {
+    "sha256": "67edbadd69b2bdfcd5aa0d5fc0740b830cb6e7e6f2bb139d453ed8f48bbb659b",
+    "path": "services/worker/package.json"
+  },
+  {
+    "sha256": "c264f60cd693b0378fc156d7726f7c89cafb6ed403314f9f60fe5006db6dc2cc",
+    "path": "packages/config/package.json"
+  },
+  {
+    "sha256": "5baacb57f5fa68ebdea4dec40dc77db08c070fe88a0e5c4bcbec9af34db63df5",
+    "path": "packages/model-providers/package.json"
+  },
+  {
+    "sha256": "351978e319821079fcd263e52d3c86a70c878c5a0932ae65dd25f5b7caa81a03",
+    "path": "apps/web/package.json"
+  },
+  {
+    "sha256": "6da65e79694458de57982852ca2ed96cf7db569037f3f4bd7dd1dc8c53134dea",
+    "path": "openspec/changes/add-chapter-refinement-orchestration/README.md"
+  }
+]

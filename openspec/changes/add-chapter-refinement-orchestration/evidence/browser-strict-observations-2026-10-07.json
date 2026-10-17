@@ -1,0 +1,46 @@
+[
+  {
+    "width": 1440,
+    "status": "ready",
+    "runId": "4aa2f42e-96e0-4960-8d96-3969fd5c47ef",
+    "sourceHash": "8573b8fae84e2c751d07f861ad54ac5102e20f670ceed6d55bed79234ee0a3c6",
+    "candidateHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "responseHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "persistedHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "uiHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "summaryPreserved": true
+  },
+  {
+    "width": 1440,
+    "status": "ready_with_issues",
+    "runId": "06ed223d-4fb3-4d92-a743-7fcc6bd42c7d",
+    "sourceHash": "8573b8fae84e2c751d07f861ad54ac5102e20f670ceed6d55bed79234ee0a3c6",
+    "candidateHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "responseHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "persistedHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "uiHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "summaryPreserved": true
+  },
+  {
+    "width": 768,
+    "status": "ready",
+    "runId": "f8e2aa0d-206c-4ab8-9ba6-c737005c9038",
+    "sourceHash": "8573b8fae84e2c751d07f861ad54ac5102e20f670ceed6d55bed79234ee0a3c6",
+    "candidateHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "responseHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "persistedHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "uiHash": "99caa138bc1ae605d03419e2a8cd46485ef49d29a0715e08d9eee43fac1eef8b",
+    "summaryPreserved": true
+  },
+  {
+    "width": 768,
+    "status": "ready_with_issues",
+    "runId": "6319e931-c43f-451a-8782-5e0b3cb48c46",
+    "sourceHash": "8573b8fae84e2c751d07f861ad54ac5102e20f670ceed6d55bed79234ee0a3c6",
+    "candidateHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "responseHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "persistedHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "uiHash": "e3cc948e19b57ab7a736e2d11f45c3f8f1c224ac31258ab3026a905eba36ae0e",
+    "summaryPreserved": true
+  }
+]

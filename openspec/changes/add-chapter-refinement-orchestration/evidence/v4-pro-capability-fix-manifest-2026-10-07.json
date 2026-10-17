@@ -1,0 +1,56 @@
+{
+  "task": "AQ-383 / AQ-386",
+  "date": "2026-10-07",
+  "head": "c848ce040ebc3b075ae9f5b9d6f04af8d784bb83",
+  "status": "code fixed; focused verification passed; standard build Prisma step blocked by running DLL",
+  "files": [
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.util.ts",
+      "sha256": "6795e383d1b8e220aad67cfe7a66d1f0ac7e9036fa1474802421a2f927b02da2"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.util.test.ts",
+      "sha256": "1c31b77fde1076d457419c6fb941590b232627ff4884ecab36aedc5f7310b41c"
+    },
+    {
+      "path": "services/api/src/modules/projects/chapter-refinement.engine.test.ts",
+      "sha256": "1ad2da54d65a902890b626a074e525a5d54adce7247c7d0b67e6b3041f09b2bf"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/red.log",
+      "sha256": "638e22c8873e652662a8eaec6a30b24512a0fecb8c9249e8919ae4025035ef34"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/green.log",
+      "sha256": "c94d07e28e1f79aaccc5e1f4600121b2cc3743ae7de522aadb82c03afa072ad3"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/original-repro-green.log",
+      "sha256": "3f9df1f254b19d034b2b8ce5e9a6fd136e3abf235a1e9c6fdf8d069ae0660bbf"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/api-lint.log",
+      "sha256": "3de52d03ab0518b48abc596af853774319d7533d88d7f6122d0fa9e8e5ae7e35"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/api-typecheck.log",
+      "sha256": "7a2bbbb41567b668d3da595930361807fb6826d026e976d6a09bed597c0fcdf3"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/api-test.log",
+      "sha256": "e35e63b34da8bfd2da965d06127f29e2aed49c74f273f8153481169a76e55068"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/api-build.log",
+      "sha256": "bc76ec89b426e8f9ec00b5e2f70125c8b2ec664ef3b55cf8b8f6d5de106f573a"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/api-compile.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".scratch/refinement-v4-pro-fix/validate.log",
+      "sha256": "8bc47b10957042e3a47db137cf96a566dbe9dc9c9f637e0274f8d5a277b3cf23"
+    }
+  ]
+}

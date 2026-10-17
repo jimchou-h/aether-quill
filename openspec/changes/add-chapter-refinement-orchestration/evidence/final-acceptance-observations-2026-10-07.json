@@ -1,0 +1,19 @@
+{
+  "note": "Fixed-behavior observations: exit 0 means acceptance for D1/D2/D3.",
+  "normalRangeBudget": {
+    "requiredOutputTokensFor3500Chars": 5250,
+    "budgetOk": true
+  },
+  "normalRangeRewriteEndToEnd": {
+    "status": "ready",
+    "rewriteCalls": 1
+  },
+  "finalRecheckStorageFailurePauses": {
+    "status": "paused",
+    "pauseReason": "persistence_failed"
+  },
+  "liveCandidateWithUnresolvedBlockingPauses": {
+    "status": "paused",
+    "pauseReason": "boundary_conflict"
+  }
+}

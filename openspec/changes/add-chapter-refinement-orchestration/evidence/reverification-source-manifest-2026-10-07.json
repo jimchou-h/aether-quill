@@ -1,0 +1,50 @@
+[
+  {
+    "sha256": "69762205f2a2044c6be5f8089cf4bb7ba4eec994368cf1cf52364e05dd46ea07",
+    "path": "services/api/src/modules/projects/chapter-refinement.engine.ts"
+  },
+  {
+    "sha256": "02ee55c9651ae3767cf694202ece2afc1b6abc32cc16f8eb270022680dfc0e5d",
+    "path": "services/api/src/modules/projects/chapter-refinement.service.ts"
+  },
+  {
+    "sha256": "61007f46d123ba26929d136c897bf7adf071d9f7b24302b8bfb0da195f4017a4",
+    "path": "services/api/src/modules/projects/chapter-refinement.util.ts"
+  },
+  {
+    "sha256": "5e5a51397cd00c27fa6fb61deba98dfd9063c4fcc4ce2acad7cd76b7e00765ea",
+    "path": "services/api/src/modules/projects/chapter-refinement.types.ts"
+  },
+  {
+    "sha256": "5e7276f0fc1c06935c12c26d60091e50345d7eb0f0c7de9ca328c943e63dd402",
+    "path": "services/api/src/modules/projects/chapter-refinement.gateway.ts"
+  },
+  {
+    "sha256": "28d4f73dd0e4e0aea60fb3ecd57bcceac7fc67361d6176b31bb245e942287975",
+    "path": "services/api/src/modules/projects/chapter-refinement.materials.ts"
+  },
+  {
+    "sha256": "d40668d860357d0656b09f1b95cdd08c2ea9f23a63cfa9025b065de01e67e1eb",
+    "path": "services/api/src/modules/projects/chapter-refinement.controller.ts"
+  },
+  {
+    "sha256": "3181b3148297d6afe0959f0614f28b833c3ac331458d5459ccfd55c6379a5668",
+    "path": "services/api/src/modules/projects/chapter-refinement-run.repository.test.ts"
+  },
+  {
+    "sha256": "3a3c796da048ad88c58d39c6b3056864a8c453f79340c842d3f795ff8661a8fa",
+    "path": "apps/web/src/composables/useChapterRefinementRun.ts"
+  },
+  {
+    "sha256": "6dea76387afd46e385dc2a7c33e0ce88e9f088c9eaad41d57d06b430f0985c16",
+    "path": "services/rag-orchestrator/src/main.ts"
+  },
+  {
+    "sha256": "448de80c862e9912327523afc2e820caf8f27ddd2deb2b5a86cb9505d5fd2998",
+    "path": "services/api/package.json"
+  },
+  {
+    "sha256": "07f4bb80728cfaba91a2af8002433311485c4072540d469a3a26164aa026cdd4",
+    "path": "apps/web/package.json"
+  }
+]

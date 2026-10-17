@@ -1,0 +1,50 @@
+[
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement.engine.ts",
+    "sha256": "87c1bb6b7f7a50d83124794adc727687187967237aaa2d2d748d0d6eaac5d67d"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement.service.ts",
+    "sha256": "bbf714c19ecc036c66399ffdca3bd2378638f40848b4daac714a8bb5da51bf79"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement.util.ts",
+    "sha256": "809f1858f5bd01eb34619bdf96012177e629da5b5d7c9b88ca46abc4e0e9619f"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement.types.ts",
+    "sha256": "51b2384abf7dc5bab5b5da6e3dac16a0107897c274675d28cd02b54352977660"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement.gateway.ts",
+    "sha256": "83c8449b34d14d984a1574f8e7ed891990c6688e8807e0f99347db86b50b81cf"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement.materials.ts",
+    "sha256": "1de385db4577fc01d15fd52659d4a5b221836306352cdefc2fc84d9b0038e0ca"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement.controller.ts",
+    "sha256": "f420fa4e6311b08e30db67e4a99e48c85b2c5c8c50728f760baa313e716826e1"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement-run.repository.ts",
+    "sha256": "22cddd24ba1ec6931af188798894a4565b5d0b2e54d28bc1baf1df059febd162"
+  },
+  {
+    "path": "services/api/src/modules/projects/chapter-refinement-run.repository.test.ts",
+    "sha256": "e357fb34483e61a769f6e95ed5bb702a86fa644d8cf83ff033630010d98b3e14"
+  },
+  {
+    "path": "apps/web/src/composables/useChapterRefinementRun.ts",
+    "sha256": "be65fd2670c9edd62ea3873ce0a8887d2d8a94938a854f067ccadb5289fa664b"
+  },
+  {
+    "path": "apps/web/src/components/chapters/ChapterRefinementPanel.vue",
+    "sha256": "78c7f3a822da016550b20465609abc44e0703dad0eb640aa977a24337678cb5b"
+  },
+  {
+    "path": "services/rag-orchestrator/src/main.ts",
+    "sha256": "a6d9159ed3a51c2b6785e32ef09a279caa94792c63c924369ee02885f34ef204"
+  }
+]

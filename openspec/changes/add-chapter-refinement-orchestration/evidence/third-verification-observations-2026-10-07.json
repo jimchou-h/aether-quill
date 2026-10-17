@@ -1,0 +1,50 @@
+{
+  "note": "Defect observations; exit 0 means reproduced, not accepted.",
+  "ordinary3500CharRangeBlocked": {
+    "sourceChars": 3500,
+    "rewriteTargetChars": 3500,
+    "status": "ready_with_issues",
+    "calls": [
+      "inspect",
+      "plan"
+    ],
+    "unchangedDraft": true,
+    "issues": [
+      {
+        "id": "i1",
+        "category": "coverage",
+        "severity": "medium",
+        "sceneId": "scene-1",
+        "unitId": "u0",
+        "message": "第 1 段改写上游失败，保留原文：必要输出 8750 token 超过单次输出上限 8192 token；拒绝静默裁剪，需缩小目标范围或暂停",
+        "disposition": "retained_original"
+      }
+    ]
+  },
+  "persistenceFailureDuringFinalRepairReviewSwallowed": {
+    "storageFaults": 1,
+    "reviewCalls": 2,
+    "status": "ready_with_issues",
+    "pauseReason": null,
+    "acceptedDraft": "甲推开门，放下钥匙。"
+  },
+  "unresolvedIssueSurvivesIntoApplicableResume": {
+    "firstStatus": "paused",
+    "resumedStatus": "ready_with_issues",
+    "resumedCalls": 1,
+    "unresolved": [
+      {
+        "id": "i1",
+        "category": "hard_constraint",
+        "severity": "high",
+        "anchorQuote": "不在正文中的引文",
+        "message": "整章最终检查：修复接缝状态冲突（无法定位到单一活动候选）",
+        "disposition": "unresolved"
+      }
+    ]
+  },
+  "falselyLabelledExitAnchorAccepted": {
+    "status": "evidence",
+    "origin": "candidate"
+  }
+}
