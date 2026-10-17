@@ -58,6 +58,7 @@ temp/
 # Local scratch / agent tooling (may contain private chapter text & prompts)
 .scratch/
 .codegraph/
+.corepack/
 
 # Runtime API data & backups (local prompts, documents, sessions)
 services/api/data/
