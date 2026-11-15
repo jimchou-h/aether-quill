@@ -69,6 +69,7 @@ interface ProviderCallOptions {
 interface ProviderStreamStats {
   sawReasoning: boolean;
   finishReason: string | null;
+  sawDone: boolean;
 }
 
 function isLlmChatProviderId(value: unknown): value is LlmChatProviderId {
@@ -289,7 +290,7 @@ export class GenerationService {
     this.updateTrace(trace.id, { status: 'generating' });
     let fullContent = '';
     const callOptions = this.resolveCallOptionsForTrace(trace);
-    const stats: ProviderStreamStats = { sawReasoning: false, finishReason: null };
+    const stats: ProviderStreamStats = { sawReasoning: false, finishReason: null, sawDone: false };
 
     try {
       for await (const chunk of this.callProviderStream(messages, trace, signal, { stats })) {
@@ -315,7 +316,11 @@ export class GenerationService {
           contentEmpty: !fullContent.trim(),
         })
       ) {
-        const retryStats: ProviderStreamStats = { sawReasoning: false, finishReason: null };
+        const retryStats: ProviderStreamStats = {
+          sawReasoning: false,
+          finishReason: null,
+          sawDone: false,
+        };
         for await (const chunk of this.callProviderStream(messages, trace, signal, {
           enableThinking: false,
           stats: retryStats,
@@ -329,6 +334,7 @@ export class GenerationService {
         if (retryStats.finishReason) {
           stats.finishReason = retryStats.finishReason;
         }
+        stats.sawDone = retryStats.sawDone;
       }
 
       if (signal?.aborted) {
@@ -346,6 +352,17 @@ export class GenerationService {
             sawReasoning: stats.sawReasoning,
             finishReason: stats.finishReason,
           })
+        );
+      }
+
+      if (!stats.sawDone) {
+        throw new Error('模型流未完成：缺少供应商结束标记，已收到的正文可能不完整');
+      }
+      if (stats.finishReason && stats.finishReason !== 'stop') {
+        throw new Error(
+          stats.finishReason === 'length'
+            ? '模型输出达到长度上限，正文已截断，请缩短输入或分段重试'
+            : `模型未正常完成正文生成（finish_reason=${stats.finishReason}）`
         );
       }
 
@@ -371,6 +388,7 @@ export class GenerationService {
         status: 'failed',
         error: errorMsg,
         completedAt: new Date().toISOString(),
+        finishReason: stats.finishReason,
       });
       throw error;
     }
@@ -1237,6 +1255,7 @@ export class GenerationService {
 
         for (const event of consumed.events) {
           if (event.type === 'done') {
+            if (extras?.stats) extras.stats.sawDone = true;
             return;
           }
           if (event.type === 'reasoning') {
@@ -1273,6 +1292,7 @@ export class GenerationService {
       const flushed = flushProviderSseStreamBuffer(lineBuffer);
       for (const event of flushed.events) {
         if (event.type === 'done') {
+          if (extras?.stats) extras.stats.sawDone = true;
           return;
         }
         if (event.type === 'reasoning') {

@@ -39,6 +39,7 @@ interface PersistedTracesState {
     status: string;
     temperature?: number;
     maxTokens?: number;
+    finishReason?: string | null;
     usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
     createdAt: string;
     completedAt?: string;
@@ -101,6 +102,7 @@ export function toPersistedTrace(trace: TraceRecord): PersistedTracesState['trac
     status: trace.status,
     ...(typeof trace.temperature === 'number' ? { temperature: trace.temperature } : {}),
     ...(typeof trace.maxTokens === 'number' ? { maxTokens: trace.maxTokens } : {}),
+    ...(trace.finishReason !== undefined ? { finishReason: trace.finishReason } : {}),
     usage: trace.usage,
     createdAt: trace.createdAt,
     completedAt: trace.completedAt,
@@ -256,6 +258,7 @@ export class TraceStore {
         status: t.status as TraceRecord['status'],
         temperature: t.temperature,
         maxTokens: t.maxTokens,
+        finishReason: t.finishReason,
         usage: t.usage,
         createdAt: t.createdAt,
         completedAt: t.completedAt,

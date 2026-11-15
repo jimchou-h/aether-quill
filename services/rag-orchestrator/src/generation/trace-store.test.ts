@@ -51,6 +51,7 @@ test('TraceStore persists on update', async () => {
     store1.push(sampleTrace('trace-b'));
     store1.update('trace-b', {
       status: 'completed',
+      finishReason: 'length',
       usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
     });
     store1.close();
@@ -58,6 +59,7 @@ test('TraceStore persists on update', async () => {
     const store2 = new TraceStore();
     const trace = store2.findById('trace-b');
     assert.equal(trace?.status, 'completed');
+    assert.equal(trace?.finishReason, 'length');
     assert.equal(trace?.usage?.totalTokens, 3);
     store2.close();
   } finally {
