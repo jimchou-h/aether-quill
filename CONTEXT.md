@@ -8,6 +8,7 @@ Aether Quill 领域词汇表（single-context）。随功能演进用 `/grill-wi
 - **知识库（静态）**：世界观 / 设定 / 角色静态卡（`persona_card` 等文档）
 - **人物设定页（动态）**：当前状态 / 状态轮转 / 关系事件；可按「最新」或「截至第 N 章」查看 `chapterStates` 快照（只读）
 - **章节**：正文、摘要（`summarySource: llm | fallback`）、结构化匹配文本（`structuredMatchingText`）；手改保存时保留已有非空 LLM 摘要，不自动截断覆盖
+- **章节锁定标记（`isLocked`）**：章节元数据，默认 false；纯标记，不阻止编辑/保存/删除/AI 优化，单独切换不改 `updatedAt`、不触发后处理（锁定 ≠ 只读保护）
 - **叙事上下文**：生成时注入的前章衔接、出场人物设定、大纲、关系备忘等（与【检索证据】分离）
 - **检索证据**：标题匹配 + 向量补足融合后的知识库片段
 - **关联角色卡**：知识库 `persona_card.personaId` ↔ 人物设定；人物页须正确展示绑定
@@ -21,6 +22,7 @@ Aether Quill 领域词汇表（single-context）。随功能演进用 `/grill-wi
 | 结构化匹配文本 | 「章节关键词」 alone |
 | chapterStates / 截至第 N 章 | 只用「最新状态」指代全部历史 |
 | LLM 摘要保留（手改保存） | 「改正文必清摘要」 |
+| 章节锁定标记（纯元数据） | 「锁定 = 禁止编辑」 |
 | OpenSpec change | 平行新建第二套需求树 |
 
 ## Out of scope for this file
