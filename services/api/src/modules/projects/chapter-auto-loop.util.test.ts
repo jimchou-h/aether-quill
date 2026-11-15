@@ -879,7 +879,9 @@ test('buildAutoLoopPlanUserPrompt 首轮不含上一轮条目区块', () => {
   assert.match(prompt, /【用户优化要求】[\s\S]*让打斗更有临场感/);
   assert.match(prompt, /\[1\] 第一段。/);
   assert.match(prompt, /不得摘录【参考上下文】、【下章衔接】/);
-  assert.match(prompt, /只出两类条目/);
+  assert.match(prompt, /逐段主动检查基础错误/);
+  assert.match(prompt, /用户指定要求是额外重点，不是检查范围的上限/);
+  assert.doesNotMatch(prompt, /只出两类条目/);
   assert.ok(!prompt.includes('<previous-items>'));
 });
 
@@ -939,8 +941,10 @@ test('buildAutoLoopSegmentUserPrompt 带前后文只读块且禁止改写它们'
   assert.match(prompt, /只输出|仅输出/, '须要求只输出目标段落');
 });
 
-test('复诊 system prompt 只抓未落地和改坏，不把润色当续跑理由', () => {
-  assert.match(CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT, /只允许出两类条目/);
+test('复诊 system prompt 主动纠正基础错误并保留用户重点与改坏复核，不另开润色', () => {
+  assert.match(CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT, /逐段主动检查基础错误/);
+  assert.match(CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT, /用户指定要求是额外重点，不是检查范围的上限/);
+  assert.doesNotMatch(CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT, /只允许出两类条目/);
   assert.match(CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT, /还能更贴要求/);
   assert.match(CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT, /删除整段|删除整句/);
   assert.match(CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT, /禁止在 instruction 里写「两段合并」/);

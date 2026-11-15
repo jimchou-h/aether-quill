@@ -171,6 +171,9 @@ export class ChapterAutoLoopService {
 
     const existingSession = getAutoLoopSession(projectId, chapterNo, userId);
     const resumeState = existingSession ? synthesizeAutoLoopResume(existingSession) : undefined;
+    if (payload.resume === true && !resumeState) {
+      throw new BadRequestException('没有可续跑的自动优化会话，无法从断点继续');
+    }
     const resumeRequested = payload.resume === true && Boolean(resumeState);
 
     const instruction = normalizeInstruction(

@@ -1,33 +1,32 @@
 ## Why
 
-自动循环复诊把【用户优化要求】和文风目标当成待办，`medium`（部分未落实）也会续跑，所以每轮都能再润色，停不下来。
+原先为避免无限润色，系统将自动循环复诊限制为“用户要求明显未落实”和“上轮改坏”。作者反馈一般错误也只有点名后才被发现。AQ-395 需要恢复主动基础纠错，同时保持可定位、有终点的修正边界。
 
 ## What Changes
 
-- 复诊只允许两类条目：要求明显未落地、上轮改坏或新引入偏离。
-- 禁止把 systemPrompt /「还能更贴要求」拆成润色条目。
-- 收敛只认 `high`；medium/low 不再续跑。
-- 复诊调用跳过项目 systemPrompt，避免文风圣经变成条目。
+- 复诊逐段主动检查基础语言、指代、动作状态、设定及视角错误；用户清单是额外重点，不是范围上限。
+- 普通但有明确证据的可修错误也报 high；纯主观润色愿望不报，不反复报告已解决问题。
+- 同步 API 默认、程序追加范围、编排兜底及新增 v1.0.0 模板治理副本。
+- 通过当前设置页仅更新作者项目已发布的 `chapter.optimize.loop.plan`，保留回滚点；其他项目的自定义稿不强制迁移。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `auto-loop-gap-only-diagnose`: 自动循环复诊只抓漏点与改坏，不再开卷润色。
+- `auto-loop-gap-only-diagnose`: 自动循环定位基础错误、用户要求遗漏及改写回退，限制无目标润色。
 
 ### Modified Capabilities
 
-- `chapter-auto-optimize-loop`: 收敛判定从 high+medium 改为仅 high。
+- `chapter-auto-optimize-loop`: 保持仅 high 或诊断不完整时续跑，轮数上限不变。
 
 ## Non-goals
 
-- 不改方案改写闭环、直接改写、终稿合规。
-- 不改自动循环的定位/局部改写引擎。
-- 不强制改用户已发布的 Settings 文本（user prompt 仍带限定，旧发布稿也会收到）。
+- 不改模型、温度、检索、章节切分、定位/删除引擎及其他写作模式。
+- 不把文风偏好变成无限润色条目，不恢复 medium/low 续跑。
+- 不批量覆盖项目自定义 Prompt，不进行付费模型回归。
 
 ## Impact
 
-- OpenAPI / 错误码：无变更。
-- API：`chapter-auto-loop.util` 复诊 prompt 与 `shouldContinueAutoLoop`；diagnose 带 `omitProjectSystemPrompt`。
-- rag-orchestrator：`chapter.optimize.loop.plan` 仓库默认文本三处同步。
-- 前端：收敛文案。
+- OpenAPI / 错误码 / JSON 字段无变更。
+- API 复诊种子和输入拼装、orchestrator 默认、模板包治理登记及中性回归。
+- 复诊仍省略项目 systemPrompt，人物卡与参考上下文仅用于核实问题。
