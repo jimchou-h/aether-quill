@@ -9,6 +9,7 @@ import {
   type EditorChatGenerationGateway,
   type EditorChatProjectsPort,
 } from './editor-chat.service';
+import { EDITOR_CHAT_TASK_INSTRUCTION } from './editor-chat-prompt.util';
 
 function makeFakeGateway(responseText = '建议收紧第二段对话。') {
   const calls: Array<{
@@ -26,7 +27,13 @@ function makeFakeGateway(responseText = '建议收紧第二段对话。') {
       // 贴近真实上游：调用期间先 start 再逐段 content
       input.callbacks.onStart?.('trace-1');
       input.callbacks.onContent?.(responseText);
-      return { ok: true, text: responseText, traceId: 'trace-1', completed: true, finishReason: 'stop' };
+      return {
+        ok: true,
+        text: responseText,
+        traceId: 'trace-1',
+        completed: true,
+        finishReason: 'stop',
+      };
     },
   };
   return { gateway, calls };
@@ -48,18 +55,18 @@ function writeEvents() {
 }
 
 const projects: EditorChatProjectsPort = {
-  checkAccess(projectId, userId) {
+  checkAccess(projectId) {
     if (projectId === 'p-forbidden') {
       throw new EditorChatAccessDeniedError();
     }
   },
-  getChapter(projectId, chapterNo) {
+  getChapter(_projectId, chapterNo) {
     if (chapterNo === 99) {
       return null;
     }
     return { chapterNo, title: '初入京城', content: '他推门而入。', updatedAt: new Date() };
   },
-  getPersonas(projectId) {
+  getPersonas() {
     return [
       {
         id: 'persona-1',
@@ -77,7 +84,7 @@ const projects: EditorChatProjectsPort = {
       },
     ];
   },
-  resolveProjectSystemPromptText(projectId) {
+  resolveProjectSystemPromptText() {
     return '本项目要求文风克制。';
   },
   getRagOrchestratorUrl() {
@@ -89,7 +96,7 @@ describe('EditorChatService', () => {
   it('rejects an empty question', async () => {
     const { gateway } = makeFakeGateway();
     const service = new EditorChatService(projects, gateway);
-    const { ctx, events } = writeEvents();
+    const { ctx } = writeEvents();
     await assert.rejects(
       () => service.streamChat({ projectId: 'p1', userId: 'u1', question: '   ', sse: ctx }),
       /问题不能为空/
@@ -107,7 +114,10 @@ describe('EditorChatService', () => {
       sse: ctx,
     });
     assert.equal(fake.calls.length, 0, 'guidance path must not call the gateway');
-    const content = events.filter((e) => e.event === 'content').map((e) => e.data).join('');
+    const content = events
+      .filter((e) => e.event === 'content')
+      .map((e) => e.data)
+      .join('');
     assert.match(content, /请指定章节/);
     assert.ok(events.some((e) => e.event === 'end'));
   });
@@ -156,10 +166,14 @@ describe('EditorChatService', () => {
     assert.equal(fake.calls.length, 1);
     const call = fake.calls[0];
     assert.ok(call.prompt.includes('他推门而入。'), 'chapter latest content must be included');
-    assert.ok(call.prompt.includes('谨慎多疑的年轻官员'), 'appearing persona card must be injected');
+    assert.ok(
+      call.prompt.includes('谨慎多疑的年轻官员'),
+      'appearing persona card must be injected'
+    );
     assert.ok(!call.prompt.includes('无关人物'), 'non-appearing persona must not leak in');
     assert.ok(call.prompt.includes('上一轮建议'), 'bounded history must be carried');
-    assert.equal(call.systemPromptOverride, '本项目要求文风克制。');
+    assert.equal(call.systemPromptOverride, EDITOR_CHAT_TASK_INSTRUCTION);
+    assert.equal(call.context.projectSystemPromptOverride, '本项目要求文风克制。');
     assert.match(call.prompt, /第 7 章正文/);
 
     const kinds = events.map((e) => e.event);
@@ -182,5 +196,53 @@ describe('EditorChatService', () => {
     });
     assert.equal(fake.calls.length, 1);
     assert.match(fake.calls[0].prompt, /第 7 章正文/);
+  });
+
+  it('re-reads the chapter body on a follow-up turn instead of reusing the earlier draft', async () => {
+    // 覆盖 issue #48 验收：改完稿再追问时，材料必须来自本轮重新读取的最新正文
+    const OLD_BODY = '正文旧稿标记：案上那封信没有署名。';
+    const NEW_BODY = '正文新稿标记：那封信已经被拆开压平。';
+    let body = OLD_BODY;
+    const port: EditorChatProjectsPort = {
+      ...projects,
+      getChapter(_projectId, chapterNo) {
+        return { chapterNo, title: '初入京城', content: body, updatedAt: new Date() };
+      },
+    };
+    const fake = makeFakeGateway('建议：把拆信提前到开场。');
+    const service = new EditorChatService(port, fake.gateway);
+    const { ctx } = writeEvents();
+
+    await service.streamChat({
+      projectId: 'p1',
+      userId: 'u1',
+      question: '第 7 章有什么优化想法',
+      sse: ctx,
+    });
+
+    body = NEW_BODY;
+    await service.streamChat({
+      projectId: 'p1',
+      userId: 'u1',
+      question: '改完了，还有没有问题',
+      history: [{ role: 'assistant', content: '建议：把拆信提前到开场。' }],
+      currentChapterNo: 7,
+      sse: ctx,
+    });
+
+    assert.equal(fake.calls.length, 2);
+    assert.ok(fake.calls[0].prompt.includes(OLD_BODY));
+    assert.ok(
+      fake.calls[1].prompt.includes(NEW_BODY),
+      'follow-up must read the updated chapter body'
+    );
+    assert.ok(
+      !fake.calls[1].prompt.includes(OLD_BODY),
+      'stale chapter body must not be reused from a previous turn'
+    );
+    assert.ok(
+      fake.calls[1].prompt.includes('建议：把拆信提前到开场。'),
+      'previous suggestion stays reviewable'
+    );
   });
 });

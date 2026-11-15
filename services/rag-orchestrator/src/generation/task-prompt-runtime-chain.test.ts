@@ -2,7 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildLlmMessages } from './generation-prompt-assembler';
 import { resolveTaskSystemPromptFromContext } from './task-prompt-defaults';
-import { CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY } from '../retrieval/knowledge-retrieval';
+import {
+  CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+  readProjectSystemPromptOverride,
+} from '../retrieval/knowledge-retrieval';
 
 describe('task prompt orchestrator runtime chain', () => {
   it('resolveTaskSystemPromptFromContext feeds buildLlmMessages system role', () => {
@@ -41,5 +44,30 @@ describe('task prompt orchestrator runtime chain', () => {
       },
     });
     assert.equal(resolved, '内部临时补丁');
+  });
+
+  it('editor chat keeps the project prompt once and places advice instructions after it', () => {
+    const projectText = '项目写作规则：只输出正文';
+    const taskText = '编辑对话规则：只给有原文依据的建议';
+    const projectSystem = readProjectSystemPromptOverride({
+      projectSystemPromptOverride: projectText,
+    });
+    const taskSystem = resolveTaskSystemPromptFromContext({
+      templateKey: 'editor_chat',
+      systemPromptOverride: taskText,
+    });
+    const messages = buildLlmMessages(
+      {
+        systemPromptText: projectSystem ?? '',
+        taskSystemPrompt: taskSystem,
+        narrativeContext: '',
+      },
+      '第 7 章有哪些需要优化的地方？'
+    );
+    const system = messages[0]?.content ?? '';
+    assert.equal(system.split(projectText).length - 1, 1);
+    assert.equal(system.split(taskText).length - 1, 1);
+    assert.ok(system.indexOf(projectText) < system.indexOf(taskText));
+    assert.equal(messages[1]?.role, 'user');
   });
 });

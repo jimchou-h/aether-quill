@@ -1,107 +1,137 @@
 <template>
-  <div class="editor-chat-root">
-    <button
-      v-if="!open"
-      type="button"
-      class="editor-chat-trigger aq-btn aq-btn-ghost"
-      data-testid="editor-chat-trigger"
-      @click="toggle"
-    >
-      编辑对话
-    </button>
+  <Teleport to="body">
+    <div class="editor-chat-root">
+      <button
+        v-if="!open"
+        ref="triggerEl"
+        type="button"
+        class="editor-chat-trigger aq-btn aq-btn-ghost"
+        data-testid="editor-chat-trigger"
+        @click="togglePanel"
+      >
+        编辑对话
+      </button>
 
-    <section
-      v-else
-      class="editor-chat-panel"
-      data-testid="editor-chat-panel"
-      aria-label="项目编辑对话"
-    >
-      <header class="editor-chat-header">
-        <span class="editor-chat-title">编辑对话</span>
-        <span v-if="anchorChapterNo" class="editor-chat-anchor">
-          当前讨论：第 {{ anchorChapterNo }} 章
-        </span>
-        <button
-          type="button"
-          class="editor-chat-close"
-          data-testid="editor-chat-close"
-          @click="toggle"
-        >
-          收起
-        </button>
-      </header>
-
-      <div ref="listEl" class="editor-chat-messages">
-        <p v-if="messages.length === 0" class="editor-chat-empty">
-          就某一章提出优化问题，例如「第 7 章有什么优化想法」。回答只作建议，不会自动改稿。
-        </p>
-        <article
-          v-for="(message, index) in messages"
-          :key="index"
-          class="editor-chat-message"
-          :class="`editor-chat-message--${message.role}`"
-        >
-          <div class="editor-chat-message-body">{{ message.content }}</div>
+      <section
+        v-else
+        class="editor-chat-panel"
+        data-testid="editor-chat-panel"
+        aria-label="项目编辑对话"
+      >
+        <header class="editor-chat-header">
+          <span class="editor-chat-title">编辑对话</span>
+          <span v-if="anchorChapterNo" class="editor-chat-anchor">
+            当前讨论：第 {{ anchorChapterNo }} 章
+          </span>
           <button
-            v-if="message.role === 'assistant' && message.content"
             type="button"
-            class="editor-chat-copy"
-            data-testid="editor-chat-copy"
-            @click="copyMessage(message.content, index)"
+            class="editor-chat-clear"
+            data-testid="editor-chat-clear"
+            :disabled="messages.length === 0"
+            @click="clearCurrent"
           >
-            {{ copiedIndex === index ? '已复制' : '复制' }}
+            清空
           </button>
-        </article>
-      </div>
+          <button
+            type="button"
+            class="editor-chat-close"
+            data-testid="editor-chat-close"
+            @click="togglePanel"
+          >
+            收起
+          </button>
+        </header>
 
-      <p v-if="errorText" class="editor-chat-error" role="alert">
-        {{ errorText }}
-      </p>
+        <div ref="listEl" class="editor-chat-messages">
+          <p v-if="messages.length === 0" class="editor-chat-empty">
+            就某一章提出优化问题，例如「第 7 章有什么优化想法」。回答只作建议，不会自动改稿。
+            <span class="editor-chat-memory-note">
+              对话只保存在当前浏览器：换设备或清除浏览器数据后不会恢复，「清空」会同时删除本机记录。
+            </span>
+          </p>
+          <article
+            v-for="(message, index) in messages"
+            :key="index"
+            class="editor-chat-message"
+            :class="`editor-chat-message--${message.role}`"
+          >
+            <div
+              v-if="message.role === 'assistant'"
+              class="editor-chat-message-body editor-chat-message-body--rich"
+            >
+              <MarkdownContent :source="message.content" :throttle-ms="streaming ? 200 : 0">
+                <template #empty><span class="editor-chat-pending">…</span></template>
+              </MarkdownContent>
+            </div>
+            <div v-else class="editor-chat-message-body">{{ message.content }}</div>
+            <button
+              v-if="message.role === 'assistant' && message.content"
+              type="button"
+              class="editor-chat-copy"
+              data-testid="editor-chat-copy"
+              @click="copyMessage(message.content, index)"
+            >
+              {{ copiedIndex === index ? '已复制' : '复制' }}
+            </button>
+          </article>
+        </div>
 
-      <footer class="editor-chat-composer">
-        <textarea
-          v-model="draft"
-          class="editor-chat-input"
-          data-testid="editor-chat-input"
-          rows="2"
-          placeholder="例如：第 7 章有什么优化想法"
-          :disabled="streaming"
-          @keydown.enter.exact.prevent="submit"
-        ></textarea>
-        <button
-          type="button"
-          class="editor-chat-send aq-btn"
-          data-testid="editor-chat-send"
-          :disabled="!draft.trim() || streaming"
-          @click="submit"
-        >
-          {{ streaming ? '回答中…' : '发送' }}
-        </button>
-      </footer>
-    </section>
-  </div>
+        <p v-if="errorText" class="editor-chat-error" role="alert">
+          {{ errorText }}
+        </p>
+
+        <footer class="editor-chat-composer">
+          <textarea
+            v-model="draft"
+            class="editor-chat-input"
+            data-testid="editor-chat-input"
+            rows="2"
+            placeholder="例如：第 7 章有什么优化想法"
+            :disabled="streaming"
+            @keydown.enter.exact.prevent="submit"
+          ></textarea>
+          <button
+            type="button"
+            class="editor-chat-send aq-btn"
+            data-testid="editor-chat-send"
+            :disabled="!draft.trim() || streaming"
+            @click="submit"
+          >
+            {{ streaming ? '回答中…' : '发送' }}
+          </button>
+        </footer>
+      </section>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 
+import MarkdownContent from '../common/MarkdownContent.vue';
+import { useAuthStore } from '../../stores/auth';
 import { useEditorChatStore } from '../../composables/useEditorChatStore';
 
 const props = defineProps<{ projectId: string }>();
 
-const { open, chat, ensureProject, toggle } = useEditorChatStore();
+const auth = useAuthStore();
+const { open, chat, ensureSession, clearCurrent, toggle } = useEditorChatStore();
 const draft = ref('');
 const copiedIndex = ref(-1);
 const listEl = ref<HTMLElement | null>(null);
+const triggerEl = ref<HTMLElement | null>(null);
 
 const messages = computed(() => chat.value?.messages.value ?? []);
 const streaming = computed(() => chat.value?.streaming.value === true);
 const errorText = computed(() => chat.value?.error.value ?? '');
 const anchorChapterNo = computed(() => chat.value?.currentChapterNo.value ?? null);
 
+// 刷新后 userId 要等 me 接口返回；身份到位才能按 userId+projectId 恢复会话
 watch(
-  () => props.projectId,
-  (projectId) => ensureProject(projectId),
+  [() => props.projectId, () => auth.user?.userId ?? ''],
+  ([projectId, userId]) => {
+    void ensureSession({ projectId, userId });
+  },
   { immediate: true }
 );
 
@@ -114,6 +144,17 @@ watch(
     }
   }
 );
+
+async function togglePanel() {
+  const willOpen = !open.value;
+  toggle();
+  if (willOpen) {
+    return;
+  }
+  // 面板与触发按钮是 v-if 兄弟：收起后按钮是新渲染的节点，焦点必须显式交还
+  await nextTick();
+  triggerEl.value?.focus();
+}
 
 async function submit() {
   if (!chat.value) {
@@ -153,7 +194,8 @@ async function copyMessage(content: string, index: number) {
   position: fixed;
   right: 1.25rem;
   bottom: 1.25rem;
-  z-index: 1200;
+  /* 高于 antd 弹窗默认层级（1000）：全屏按场成稿弹窗打开时仍能显示并点击 */
+  z-index: 1300;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -207,12 +249,18 @@ async function copyMessage(content: string, index: number) {
   color: var(--aq-text-secondary);
 }
 
+.editor-chat-clear,
 .editor-chat-close {
   border: none;
   background: transparent;
   color: var(--aq-text-secondary);
   font-size: 0.8125rem;
   cursor: pointer;
+}
+
+.editor-chat-clear:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .editor-chat-messages {
@@ -230,6 +278,13 @@ async function copyMessage(content: string, index: number) {
   color: var(--aq-text-secondary);
 }
 
+.editor-chat-memory-note {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--aq-text-secondary);
+}
+
 .editor-chat-message {
   display: flex;
   flex-direction: column;
@@ -239,6 +294,39 @@ async function copyMessage(content: string, index: number) {
 
 .editor-chat-message--assistant {
   align-items: flex-end;
+}
+
+.editor-chat-message-body--rich {
+  white-space: normal;
+  min-width: 3rem;
+}
+
+.editor-chat-message-body--rich :deep(.markdown-content) {
+  color: inherit;
+  line-height: 1.55;
+}
+
+.editor-chat-message-body--rich :deep(.markdown-content h1),
+.editor-chat-message-body--rich :deep(.markdown-content h2),
+.editor-chat-message-body--rich :deep(.markdown-content h3),
+.editor-chat-message-body--rich :deep(.markdown-content h4) {
+  margin: 0.4rem 0 0.3rem;
+  font-size: 0.9rem;
+}
+
+.editor-chat-message-body--rich :deep(.markdown-content p),
+.editor-chat-message-body--rich :deep(.markdown-content ul),
+.editor-chat-message-body--rich :deep(.markdown-content ol) {
+  font-size: inherit;
+}
+
+.editor-chat-message-body--rich :deep(.markdown-content pre) {
+  max-width: 100%;
+  font-size: 0.8rem;
+}
+
+.editor-chat-pending {
+  color: var(--aq-text-secondary);
 }
 
 .editor-chat-message-body {

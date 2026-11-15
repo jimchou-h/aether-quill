@@ -133,7 +133,8 @@ export class EditorChatService {
     }
     this.validate(input);
 
-    const chapterNo = extractChapterNoFromQuestion(question) ?? normalizeAnchor(input.currentChapterNo);
+    const chapterNo =
+      extractChapterNoFromQuestion(question) ?? normalizeAnchor(input.currentChapterNo);
 
     if (chapterNo === null) {
       input.sse.writeEvent({ event: 'start', stage: EDITOR_CHAT_TEMPLATE_KEY });
@@ -185,11 +186,11 @@ export class EditorChatService {
       projectId: input.projectId,
       prompt,
       templateKey: EDITOR_CHAT_TEMPLATE_KEY,
-      systemPromptOverride: systemPromptText || undefined,
+      systemPromptOverride: EDITOR_CHAT_TASK_INSTRUCTION,
       context: {
         chapterNo,
+        projectSystemPromptOverride: systemPromptText,
         editorChatInstructionVersion: EDITOR_CHAT_TASK_INSTRUCTION_VERSION,
-        editorChatTaskInstruction: EDITOR_CHAT_TASK_INSTRUCTION,
         omitNextChapterHead: true,
       },
       callbacks: {

@@ -53,10 +53,7 @@ export function parseChineseChapterNumber(raw: string): number | null {
   return total + current;
 }
 
-const CHAPTER_MENTION_PATTERN = new RegExp(
-  `第\\s*(\\d+|${CHINESE_NUMERAL_PATTERN})\\s*章`,
-  'g'
-);
+const CHAPTER_MENTION_PATTERN = new RegExp(`第\\s*(\\d+|${CHINESE_NUMERAL_PATTERN})\\s*章`, 'g');
 
 /**
  * 从问题文本识别明确的「第 N 章」锚点（阿拉伯或中文数字）。

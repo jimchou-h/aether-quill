@@ -4,14 +4,20 @@ import path from 'node:path';
 import test from 'node:test';
 
 const OPENAPI_PATH = path.resolve(__dirname, '../../../../../openapi/openapi.yaml');
-const STREAM_PATH = path.resolve(__dirname, '../../../../../openapi/paths/projects/editor-chat-stream.yaml');
+const STREAM_PATH = path.resolve(
+  __dirname,
+  '../../../../../openapi/paths/projects/editor-chat-stream.yaml'
+);
 
 test('editor chat stream path is registered and refed', () => {
   const yaml = readOpenapi();
   assert.match(yaml, /\/api\/projects\/\{id\}\/editor-chat\/stream:/);
   assert.match(yaml, /editor-chat-stream\.yaml/);
   const body = readFileSync(STREAM_PATH, 'utf8');
-  assert.match(body, /\$ref: '\.\.\/\.\.\/openapi\.yaml#\/components\/schemas\/EditorChatStreamRequest'/);
+  assert.match(
+    body,
+    /\$ref: '\.\.\/\.\.\/openapi\.yaml#\/components\/schemas\/EditorChatStreamRequest'/
+  );
   assert.match(body, /text\/event-stream/);
 });
 
