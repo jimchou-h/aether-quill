@@ -1272,6 +1272,18 @@ export class ProjectsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Patch(':id/knowledge/chapters/:chapterNo/lock')
+  async setChapterLock(
+    @Param('id') id: string,
+    @Param('chapterNo') chapterNo: string,
+    @Body() body: { isLocked: boolean },
+    @Request() req: AuthenticatedRequest
+  ) {
+    const userId = req.user?.userId;
+    return this.projectsService.setChapterLock(id, Number(chapterNo), body?.isLocked, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Put(':id/knowledge/chapters/:chapterNo/after-save')
   async chapterAfterSave(
     @Param('id') id: string,

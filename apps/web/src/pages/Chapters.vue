@@ -42,6 +42,7 @@ import {
 } from '../utils/chapterAfterSave';
 import { confirmAction } from '../composables/useAppConfirm';
 import { resolveOptimizeEntryGuard } from '../utils/chapterRefinement';
+import { applyChapterLockResult, type ChapterLockTarget } from '../utils/chapterLock';
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
 
@@ -57,6 +58,12 @@ const message = ref('');
 const errorMessage = ref('');
 const selectedChapterNo = ref<number | null>(null);
 const parsingStructuredChapterNo = ref<number | null>(null);
+const chapterLockTarget = ref<ChapterLockTarget | null>(null);
+const lockingChapterNo = computed(() =>
+  chapterLockTarget.value && chapterLockTarget.value.projectId === projectId.value
+    ? chapterLockTarget.value.chapterNo
+    : null
+);
 const showImportModal = ref(false);
 const showImportNovelModal = ref(false);
 const showWritingOptimizeModal = ref(false);
@@ -322,6 +329,38 @@ async function handleSaveChapter(payload: {
     return false;
   } finally {
     savingChapterNo.value = null;
+  }
+}
+
+/**
+ * AQ-396：锁定是纯元数据操作——不走保存/后处理链路，不重载 workspace，
+ * 服务端确认后只回写目标章节的 isLocked，避免覆盖编辑器草稿。
+ */
+async function handleToggleChapterLock(chapterNo: number) {
+  const chapter = chapters.value.find((item) => item.chapterNo === chapterNo);
+  if (!chapter || lockingChapterNo.value !== null) {
+    return;
+  }
+  const target: ChapterLockTarget = { projectId: projectId.value, chapterNo };
+  chapterLockTarget.value = target;
+  errorMessage.value = '';
+  message.value = '';
+  try {
+    const confirmed = await apiClient.setChapterLock(
+      target.projectId,
+      chapterNo,
+      !chapter.isLocked
+    );
+    chapters.value = applyChapterLockResult(chapters.value, target, projectId.value, confirmed);
+    if (target.projectId === projectId.value) {
+      message.value = presentSuccess(`第${chapterNo}章已${confirmed.isLocked ? '锁定' : '解锁'}`);
+    }
+  } catch (error) {
+    errorMessage.value = presentErrorFromCaught(error, '切换章节锁定失败');
+  } finally {
+    if (chapterLockTarget.value === target) {
+      chapterLockTarget.value = null;
+    }
   }
 }
 
@@ -805,6 +844,7 @@ onUnmounted(() => {
       :generating-relation-chapter-no="generatingRelationChapterNo"
       :saving-chapter-no="savingChapterNo"
       :parsing-structured-chapter-no="parsingStructuredChapterNo"
+      :locking-chapter-no="lockingChapterNo"
       @select="selectedChapterNo = $event"
       @summarize="handleSummarizeChapter"
       @generate-relation-events="handleGenerateChapterRelationEvents"
@@ -813,6 +853,7 @@ onUnmounted(() => {
       @save="handleSaveChapter"
       @parse-structured="handleParseStructuredChapter"
       @delete="handleDeleteChapter"
+      @toggle-lock="handleToggleChapterLock"
     />
 
     <ChapterImportDialog

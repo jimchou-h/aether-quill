@@ -32,6 +32,26 @@ test.describe('author-path smoke', () => {
       await chapter2Tab.click();
     }
 
+    // AQ-396：锁定标记往返（纯元数据，不触发正文保存）；结束后恢复原状态。
+    const lockToggle = page.getByRole('button', { name: /^(锁定|解锁)$/ }).first();
+    await expect(lockToggle).toBeVisible({ timeout: 15_000 });
+    const initialLockLabel = ((await lockToggle.textContent()) ?? '').trim();
+    const toggledLockLabel = initialLockLabel === '锁定' ? '解锁' : '锁定';
+    await lockToggle.click();
+    await expect(
+      page.getByRole('button', { name: toggledLockLabel, exact: true }).first()
+    ).toBeVisible({ timeout: 15_000 });
+    if (toggledLockLabel === '解锁') {
+      await expect(page.locator('.detail-title .chapter-lock-badge')).toBeVisible();
+      await expect(page.locator('.chapter-tab.active .chapter-lock-badge')).toBeVisible();
+    } else {
+      await expect(page.locator('.detail-title .chapter-lock-badge')).toHaveCount(0);
+    }
+    await page.getByRole('button', { name: toggledLockLabel, exact: true }).first().click();
+    await expect(
+      page.getByRole('button', { name: initialLockLabel, exact: true }).first()
+    ).toBeVisible({ timeout: 15_000 });
+
     const optimizeBtn = page.getByRole('button', { name: /章节优化|文笔优化/ }).first();
     await expect(optimizeBtn).toBeVisible({ timeout: 20_000 });
     const openOptimizeStart = Date.now();

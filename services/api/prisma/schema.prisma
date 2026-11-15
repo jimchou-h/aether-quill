@@ -105,6 +105,7 @@ model Chapter {
   summarySource    String?   @map("summary_source")
   summaryUpdatedAt DateTime? @map("summary_updated_at")
   structuredInfo   Json?     @map("structured_info")
+  isLocked         Boolean   @default(false) @map("is_locked")
   updatedAt        DateTime  @map("updated_at")
   project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

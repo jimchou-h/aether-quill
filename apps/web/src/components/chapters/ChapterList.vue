@@ -3,6 +3,7 @@ import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import type { ChapterItem, ChapterStructuredInfo } from '../../services/api';
 import { isPersonaKeywordSupplement } from '../../utils/structured-matching';
 import { formatChapterTabTitle } from '../../utils/chapterTabLabel';
+import { chapterLockActionLabel } from '../../utils/chapterLock';
 
 const props = defineProps<{
   chapters: ChapterItem[];
@@ -13,6 +14,7 @@ const props = defineProps<{
   optimizingChapterNo?: number | null;
   savingChapterNo: number | null;
   parsingStructuredChapterNo: number | null;
+  lockingChapterNo: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +26,7 @@ const emit = defineEmits<{
   save: [payload: { chapterNo: number; title: string; content: string }];
   parseStructured: [chapterNo: number];
   delete: [chapterNo: number];
+  toggleLock: [chapterNo: number];
 }>();
 
 const showDeleteConfirm = ref(false);
@@ -122,6 +125,7 @@ function isBusy(chapterNo: number) {
     props.optimizingChapterNo === chapterNo ||
     props.savingChapterNo === chapterNo ||
     props.parsingStructuredChapterNo === chapterNo ||
+    props.lockingChapterNo === chapterNo ||
     (editingChapterNo.value !== null && editingChapterNo.value !== chapterNo)
   );
 }
@@ -306,7 +310,23 @@ defineExpose({ clearEditing, getPendingEdit });
             :aria-selected="chapter.chapterNo === props.selectedChapterNo"
             @click="emit('select', chapter.chapterNo)"
           >
-            <span class="chapter-tab-no">第{{ chapter.chapterNo }}章</span>
+            <span class="chapter-tab-no">
+              第{{ chapter.chapterNo }}章
+              <span v-if="chapter.isLocked" class="chapter-lock-badge">
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12 7h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 6H6V4.5a2 2 0 1 1 4 0V7Z"
+                  />
+                </svg>
+                已锁定
+              </span>
+            </span>
             <span v-if="chapterTabSubtitle(chapter)" class="chapter-tab-title">{{
               chapterTabSubtitle(chapter)
             }}</span>
@@ -338,6 +358,20 @@ defineExpose({ clearEditing, getPendingEdit });
             <div v-else class="detail-title-group">
               <h4 class="detail-title">
                 第{{ selectedChapter.chapterNo }}章 · {{ selectedChapter.title }}
+                <span v-if="selectedChapter.isLocked" class="chapter-lock-badge detail-lock-badge">
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12 7h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 6H6V4.5a2 2 0 1 1 4 0V7Z"
+                    />
+                  </svg>
+                  已锁定
+                </span>
               </h4>
               <p class="detail-meta">
                 <span>{{ summarySourceText(selectedChapter.summarySource) }}</span>
@@ -370,6 +404,18 @@ defineExpose({ clearEditing, getPendingEdit });
                 @click="startEdit(selectedChapter)"
               >
                 编辑
+              </button>
+              <button
+                class="secondary-button"
+                :disabled="isBusy(selectedChapter.chapterNo)"
+                :aria-pressed="selectedChapter.isLocked === true"
+                @click="emit('toggleLock', selectedChapter.chapterNo)"
+              >
+                {{
+                  props.lockingChapterNo === selectedChapter.chapterNo
+                    ? '处理中...'
+                    : chapterLockActionLabel(selectedChapter.isLocked)
+                }}
               </button>
               <button
                 class="secondary-button"
@@ -860,6 +906,26 @@ defineExpose({ clearEditing, getPendingEdit });
 .chapter-tab-no {
   font-size: 0.78rem;
   color: #6b7280;
+}
+
+.chapter-lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.detail-lock-badge {
+  vertical-align: middle;
+  font-size: 0.72rem;
 }
 
 .chapter-tab-title {
