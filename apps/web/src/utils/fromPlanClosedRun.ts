@@ -11,7 +11,7 @@ export function formatFromPlanClosedRunStatus(input: {
     return '正在对照方案验收成稿…';
   }
   if (input.phase === 'draft2') {
-    return '正在按自检缺口自动修订一刀…';
+    return '正在按自检缺口再改一刀…';
   }
   if (input.phase === 'mark_fix') {
     return '正在按你标记的问题修复…';
@@ -21,14 +21,26 @@ export function formatFromPlanClosedRunStatus(input: {
     : '本轮已收口：方案验收通过';
 }
 
-export function shouldRunFromPlanRefinePass(hasMaterialGaps: boolean): boolean {
-  return hasMaterialGaps;
+export interface FromPlanReviewRefineInput {
+  reviewGaps: string;
+  reviewedDraft: string;
+  reviewedPlan: string;
+  currentDraft: string;
+  currentPlan: string;
+}
+
+export function canRefineFromPlanReview(input: FromPlanReviewRefineInput): boolean {
+  return (
+    input.reviewGaps.trim().length > 0 &&
+    input.currentDraft === input.reviewedDraft &&
+    input.currentPlan === input.reviewedPlan
+  );
 }
 
 export function formatContinuitySelfCheckSummary(input: {
   reviewed: boolean;
   hadGaps: boolean;
-  autoRefined: boolean;
+  refined: boolean;
   reviewText?: string;
   failed?: boolean;
 }): string {
@@ -41,8 +53,8 @@ export function formatContinuitySelfCheckSummary(input: {
   if (!input.hadGaps) {
     return '方案验收：通过（改写拍点 / 保留内容 / 连续性）';
   }
-  if (input.autoRefined) {
-    return '方案验收：发现缺口并已自动修订一刀；若仍有问题可标记后修复';
+  if (input.refined) {
+    return '方案验收：已按验收缺口再改一刀，请核对终稿';
   }
-  return '方案验收：发现缺口（未自动修订）；可标记问题后修复';
+  return '方案验收：发现缺口；可选择按验收缺口再改一刀，或自行标记修复';
 }

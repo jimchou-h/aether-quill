@@ -34,9 +34,9 @@ import { shouldRenderOptimizeDiff } from '../../utils/chapterOptimizeDiff';
 import { createThrottledTextSink } from '../../utils/throttledTextSink';
 import { formatWritingOptimizePassLabel } from '../../utils/writingOptimizeMultiPass';
 import {
+  canRefineFromPlanReview,
   formatContinuitySelfCheckSummary,
   formatFromPlanClosedRunStatus,
-  shouldRunFromPlanRefinePass,
 } from '../../utils/fromPlanClosedRun';
 import { useChapterAutoLoop } from '../../composables/useChapterAutoLoop';
 import { useChapterAutoLoopPrefs } from '../../composables/useChapterAutoLoopPrefs';
@@ -101,6 +101,10 @@ const draftBeforeRefine = shallowRef('');
 const continuitySummary = shallowRef('');
 const markFixNotes = shallowRef('');
 const repairingMarked = shallowRef(false);
+const reviewGapsText = shallowRef('');
+const reviewedDraft = shallowRef('');
+const reviewedPlan = shallowRef('');
+const refiningFromReview = shallowRef(false);
 const roundBudgetOptions = Array.from(
   { length: AUTO_LOOP_ROUND_BUDGET_MAX - AUTO_LOOP_ROUND_BUDGET_MIN + 1 },
   (_, index) => AUTO_LOOP_ROUND_BUDGET_MIN + index
@@ -183,7 +187,8 @@ const isBusy = computed(
     generatingDraft.value ||
     applying.value ||
     autoLoopRunning.value ||
-    repairingMarked.value
+    repairingMarked.value ||
+    refiningFromReview.value
 );
 const canGeneratePlan = computed(() => Boolean(instruction.value.trim()) && !isBusy.value);
 const canRevisePlan = computed(
@@ -202,6 +207,15 @@ const canGenerateDraft = computed(() => {
   return Boolean(editablePlanText.value.trim());
 });
 const canApply = computed(() => Boolean(draftText.value.trim()) && !isBusy.value);
+const canRefineFromReview = computed(() =>
+  canRefineFromPlanReview({
+    reviewGaps: reviewGapsText.value,
+    reviewedDraft: reviewedDraft.value,
+    reviewedPlan: reviewedPlan.value,
+    currentDraft: draftText.value.trim(),
+    currentPlan: editablePlanText.value.trim(),
+  })
+);
 
 const isDirectMode = computed(() => rewriteMode.value === 'direct');
 const isAutoLoopMode = computed(() => rewriteMode.value === 'auto-loop');
@@ -344,6 +358,10 @@ function resetState() {
   continuitySummary.value = '';
   markFixNotes.value = '';
   repairingMarked.value = false;
+  reviewGapsText.value = '';
+  reviewedDraft.value = '';
+  reviewedPlan.value = '';
+  refiningFromReview.value = false;
   generatingPlan.value = false;
   generatingDraft.value = false;
   applying.value = false;
@@ -877,7 +895,7 @@ async function generateDraft() {
       continuitySummary.value = formatContinuitySelfCheckSummary({
         reviewed: false,
         hadGaps: false,
-        autoRefined: false,
+        refined: false,
         failed: true,
       });
       closedRunStatus.value = '';
@@ -885,11 +903,11 @@ async function generateDraft() {
       failAiTaskProgress(aiTaskProgress, continuitySummary.value);
       return;
     }
-    if (!shouldRunFromPlanRefinePass(review.hasMaterialGaps)) {
+    if (!review.hasMaterialGaps) {
       continuitySummary.value = formatContinuitySelfCheckSummary({
         reviewed: true,
         hadGaps: false,
-        autoRefined: false,
+        refined: false,
       });
       closedRunStatus.value = formatFromPlanClosedRunStatus({
         phase: 'closed',
@@ -900,41 +918,19 @@ async function generateDraft() {
       return;
     }
 
-    const refineOutcome = await runSingleDraftPass({
-      chapter,
-      isDirect: false,
-      passIndex: 2,
-      passTotal: 2,
-      sourceText: lastSuccessful,
-      reviewGaps: review.reviewText.includes('【连续性自检缺口】')
-        ? review.reviewText
-        : `【连续性自检缺口】\n${review.reviewText}`,
-      completeOnEnd: true,
+    // 验收发现缺口：保留首稿并展示缺口，由作者决定是否再改一刀，不自动发起第二刀。
+    reviewedDraft.value = lastSuccessful;
+    reviewedPlan.value = editablePlanText.value.trim();
+    reviewGapsText.value = review.reviewText;
+    continuitySummary.value = formatContinuitySelfCheckSummary({
+      reviewed: true,
+      hadGaps: true,
+      refined: false,
+      reviewText: review.reviewText,
     });
-    if (refineOutcome !== 'ok') {
-      draftText.value = lastSuccessful;
-      continuitySummary.value = formatContinuitySelfCheckSummary({
-        reviewed: true,
-        hadGaps: true,
-        autoRefined: false,
-        reviewText: review.reviewText,
-      });
-    } else {
-      continuitySummary.value = formatContinuitySelfCheckSummary({
-        reviewed: true,
-        hadGaps: true,
-        autoRefined: true,
-        reviewText: review.reviewText,
-      });
-    }
-    closedRunStatus.value = formatFromPlanClosedRunStatus({
-      phase: 'closed',
-      hasMaterialGaps: refineOutcome === 'ok',
-    });
-    if (refineOutcome === 'ok') {
-      statusText.value = closedRunStatus.value;
-      completeAiTaskProgress(aiTaskProgress, closedRunStatus.value);
-    }
+    closedRunStatus.value = '首稿已生成，验收发现缺口；核对后可选择再改一刀';
+    statusText.value = closedRunStatus.value;
+    completeAiTaskProgress(aiTaskProgress, closedRunStatus.value);
   } finally {
     generatingDraft.value = false;
   }
@@ -1021,6 +1017,77 @@ async function revertToDraftBeforeRefine() {
   }
   draftText.value = draftBeforeRefine.value;
   presentInfo('已回退到自检前的成稿');
+}
+
+async function refineFromReview() {
+  const chapter = props.chapter;
+  if (!chapter || rewriteMode.value !== 'from-plan' || !plan.value) {
+    return;
+  }
+  if (!canRefineFromReview.value || !draftText.value.trim() || isBusy.value) {
+    return;
+  }
+
+  const started = tryStartAiTaskProgress(aiTaskProgress, {
+    taskKey: 'chapter.optimize.draft',
+    message: formatFromPlanClosedRunStatus({ phase: 'draft2' }),
+    source: 'dialog:writing-optimize-refine',
+    chapterNo: chapter.chapterNo,
+    interruptible: true,
+    force: false,
+  });
+  if (!started.ok) {
+    errorMessage.value = '当前有其他 AI 任务进行中，请先等待或中断';
+    return;
+  }
+
+  refiningFromReview.value = true;
+  generatingDraft.value = true;
+  errorMessage.value = '';
+  const previous = draftText.value.trim();
+  const gaps = reviewGapsText.value;
+  draftBeforeRefine.value = previous;
+  passLoopAborted.value = false;
+
+  try {
+    const outcome = await runSingleDraftPass({
+      chapter,
+      isDirect: false,
+      passIndex: 2,
+      passTotal: 2,
+      sourceText: previous,
+      reviewGaps: gaps.includes('【连续性自检缺口】') ? gaps : `【连续性自检缺口】\n${gaps}`,
+      completeOnEnd: true,
+    });
+    if (outcome !== 'ok') {
+      draftText.value = previous;
+      continuitySummary.value = formatContinuitySelfCheckSummary({
+        reviewed: true,
+        hadGaps: true,
+        refined: false,
+        reviewText: gaps,
+      });
+      closedRunStatus.value = '再改一刀未完成，已保留点击前成稿';
+      statusText.value = closedRunStatus.value;
+      return;
+    }
+    reviewGapsText.value = '';
+    continuitySummary.value = formatContinuitySelfCheckSummary({
+      reviewed: true,
+      hadGaps: true,
+      refined: true,
+      reviewText: gaps,
+    });
+    closedRunStatus.value = formatFromPlanClosedRunStatus({
+      phase: 'closed',
+      hasMaterialGaps: true,
+    });
+    statusText.value = closedRunStatus.value;
+    presentSuccess('已按验收缺口再改一刀，请核对终稿');
+  } finally {
+    refiningFromReview.value = false;
+    generatingDraft.value = false;
+  }
 }
 
 async function repairMarkedIssues() {
@@ -1357,6 +1424,25 @@ async function applyDraft() {
             class="continuity-panel"
           >
             <p v-if="continuitySummary" class="message message-info">{{ continuitySummary }}</p>
+            <template v-if="reviewGapsText.trim()">
+              <pre class="continuity-gaps">{{ reviewGapsText }}</pre>
+              <div class="revision-actions">
+                <span class="field-hint"
+                  >核对首稿与缺口后决定是否再改一刀；最多一次，不会自动覆盖入库。</span
+                >
+                <button
+                  class="primary-button"
+                  type="button"
+                  :disabled="isBusy || !canRefineFromReview"
+                  @click="refineFromReview"
+                >
+                  {{ refiningFromReview ? '再改一刀中…' : '按验收缺口再改一刀' }}
+                </button>
+              </div>
+              <p v-if="!canRefineFromReview" class="field-hint">
+                方案或首稿已改动，旧验收缺口失效；可重新生成首稿或自行标记修复。
+              </p>
+            </template>
             <button
               v-if="draftBeforeRefine.trim() && draftBeforeRefine !== draftText"
               class="secondary-button continuity-revert"
@@ -1829,6 +1915,22 @@ async function applyDraft() {
 
 .continuity-revert {
   justify-self: start;
+}
+
+.continuity-gaps {
+  max-height: 12rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #374151;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .mark-fix-input {
