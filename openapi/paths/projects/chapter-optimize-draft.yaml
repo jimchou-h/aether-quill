@@ -16,9 +16,16 @@ post:
       - `data: {"event":"start","traceId":"...","chapterNo":N,"optimizationMode":"single|segmented","segmentTotal":N,"strategyLabel":"..."}`
       - `data: {"event":"stage","stage":"draft_segment|merge_validation","segmentIndex":N,"segmentTotal":N}` (long chapters)
       - `data: {"event":"segment_start","data":"{\"segmentIndex\":N,\"totalSegments\":N}"}`
-      - `data: {"event":"content","data":"...","traceId":"..."}` (multiple)
-      - `data: {"event":"end","traceId":"...","citations":[...],"consistencyNotes":[...]}`
+      - `data: {"event":"content","data":"...","traceId":"..."}` (multiple; includes two LF characters between non-empty generated segments)
+      - `data: {"event":"content_replace","data":"..."}` (optional; full replacement after post-processing)
+      - `data: {"event":"end","traceId":"...","finalDraftText":"...","contentSafety":{...}}` (successful completion always includes the complete final draft)
       - `data: {"event":"error","data":"...","traceId":"..."}`
+
+    Clients append `content` without adding separators of their own. Before the first non-empty
+    content of each segment after the first, the server streams two LF characters; `segment_start`
+    is progress metadata only. On success, clients replace the streamed preview with `finalDraftText`
+    even when post-processing did not change the draft. Failed or interrupted generation does not
+    emit a successful `end` event. This applies to both direct and plan-based rewrite modes.
   security:
     - BearerAuth: []
   parameters:

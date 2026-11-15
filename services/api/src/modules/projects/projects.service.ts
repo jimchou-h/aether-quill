@@ -3161,7 +3161,7 @@ export class ProjectsService implements OnModuleInit {
       onContent: (text: string) => void;
       onEnd: (event: {
         traceId: string;
-        finalDraftText?: string;
+        finalDraftText: string;
         contentSafety?: ReturnType<typeof toContentSafetyScanPayload>;
       }) => void;
       onError: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
@@ -3256,6 +3256,7 @@ export class ProjectsService implements OnModuleInit {
         execution.segmentTotal
       );
       let previousTail: string | undefined;
+      let previousDraft: string | undefined;
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i]!;
         callbacks.onStage?.({
@@ -3272,11 +3273,13 @@ export class ProjectsService implements OnModuleInit {
           omitOptimizationPlan: !injectPlan,
           appearingCharacters: payload.appearingCharacters,
           selectedRelationEvents: relationEventRefs,
-          previousSegmentTail: previousTail,
+          previousSegmentTail: injectPlan ? previousTail : undefined,
+          previousSegmentDraft: injectPlan ? undefined : previousDraft,
           boundaryAnchors: buildSegmentBoundaryAnchors(segment, segments),
           totalSegments: segments.length,
           reviewGaps: reviewGaps || undefined,
         });
+        let hasStreamedContent = false;
         const draftResult = await this.generateOptimizeDraftSegment({
           projectId,
           prompt,
@@ -3289,10 +3292,22 @@ export class ProjectsService implements OnModuleInit {
           segmentIndex: i,
           segmentTotal: segments.length,
           inputSegmentChars: segment.originalText.length,
-          maxTokens: calculateSegmentMaxTokensForIndex(segment.originalText, i, segments.length),
+          maxTokens: calculateSegmentMaxTokensForIndex(
+            segment.originalText,
+            i,
+            segments.length,
+            rewriteMode
+          ),
           appearingCharacters: payload.appearingCharacters,
           streamToClient: true,
-          onContent: callbacks.onContent,
+          onContent: (piece) => {
+            if (!piece) return;
+            if (!hasStreamedContent && i > 0) {
+              callbacks.onContent('\n\n');
+            }
+            hasStreamedContent = true;
+            callbacks.onContent(piece);
+          },
           onStage: (stage) => callbacks.onStage?.({ stage }),
           templateKey,
         });
@@ -3304,6 +3319,7 @@ export class ProjectsService implements OnModuleInit {
         }
         draftParts.push(draftResult.segmentText);
         previousTail = extractSegmentTailText(draftResult.segmentText);
+        previousDraft = draftResult.segmentText;
       }
     } else {
       const userPrompt =
@@ -3393,7 +3409,7 @@ export class ProjectsService implements OnModuleInit {
 
     callbacks.onEnd({
       traceId,
-      finalDraftText: finalDraftText !== mergedDraft ? finalDraftText : undefined,
+      finalDraftText,
       contentSafety: toContentSafetyScanPayload(safety),
     });
   }
@@ -5773,6 +5789,13 @@ export class ProjectsService implements OnModuleInit {
 
       if (sseResult.errorMessage) {
         return { ok: false, segmentText: '', errorMessage: sseResult.errorMessage };
+      }
+      if (!sseResult.sawEnd) {
+        return {
+          ok: false,
+          segmentText: '',
+          errorMessage: '优化正文生成未完成：编排服务未返回结束标记',
+        };
       }
 
       const rawOutput = sseResult.accumulated.trim();

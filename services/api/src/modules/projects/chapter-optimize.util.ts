@@ -64,15 +64,19 @@ export const CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT = [
 export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_SYSTEM_PROMPT = [
   '你是一位资深小说写作助手，正在按照用户的优化要求重写给定章节正文。',
   '本步骤需要直接输出「优化后的章节正文」，不要输出任何方案、说明、Markdown 标题或代码块包裹。',
-  '工作方式：改动幅度由【用户优化要求】决定——该大改就大改，该扩就扩，该删就删；禁止大段照抄原文。',
+  '工作方式：按【用户优化要求】对全文逐段重写表达，改善措辞、句式、描写和对白节奏；避免只改开头、后半照搬或机械替词，必要短句和自然对白可以保留，不为制造差异改坏好句。',
+  '改写权限：表达调整幅度由【用户优化要求】决定；删除、合并或重排情节须用户明确授权。',
+  '内容保留：未经明确授权，须保留原有事件、人物互动、连续动作、情绪发展、场景过渡和因果结果；不得因结果相同、衔接流畅或节奏更快，用概括句替代整段展开的过程。',
+  '去冗余仅限不增加信息或表达作用的重复措辞与解释，不延伸为删除已有动作、对白含义或过程；已有描写平淡、生硬时应改善表达。',
+  '动作纠错：对依据明确的动作矛盾、状态错位、指代错误和必要衔接缺失，允许按上下文最小范围调整局部步骤或补齐必要动作；保留事件目的、人物选择和结果，信息不足时不编造条件。',
   '重写后对应内容的信息量与感官密度不得低于原文；禁止摘要式压缩或为「更通顺」抽薄描写。用户明确要求删减的除外。',
-  '硬约束（仅保底，不压制改写幅度）：',
-  '1) 以 <chapter-original> 为情节与信息基础改写，禁止凭空另起无关剧情；',
+  '硬约束：',
+  '1) 以 <chapter-original> 或 <segment-original> 中的原文为情节与信息基础改写，禁止凭空另起无关剧情；',
   '2) 必须遵循【用户优化要求】，不得另起优化方案或大纲；',
   '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
   '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非用户要求明确修改；',
   '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
-  '6) 若提示中含【前段末文】，那是上一段已经写成的正文，须承接其中刚发生的位置、衣着与动作，不得重复，也不得回到已被改掉的状态；【边界锚点】只锁本段情节起止，禁止提前写入下段情节；',
+  '6) 若提示中含【前段末文】或【前段已生成正文】，那是上一段已经写成的正文，须承接其中刚发生的位置、衣着与动作，不得重复，也不得回到已被改掉的状态；【边界锚点】只锁本段情节起止，不能代替段内过程保留，禁止提前写入下段情节；',
   '7) 若【叙事上下文】含【下章衔接】，本章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
   '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
 ].join('\n');
@@ -252,6 +256,8 @@ export function resolveChapterOptimizeLengthStrategy(
 }
 /** 上一段成稿末尾带入下一段的字数。按句号回退，至少保留最后一句，可略超此值。 */
 export const SEGMENT_TAIL_CONTEXT_CHARS = 1200;
+/** 直接改写时上一段成稿的输入上限，常规分段完整传入。 */
+export const SEGMENT_PREVIOUS_DRAFT_CONTEXT_CHARS = 20000;
 export const SEGMENT_LEAD_CONTEXT_CHARS = 200;
 /**
  * 中段 maxTokens 相对原文字符的余量倍率。
@@ -878,8 +884,9 @@ export function buildDirectDraftUserPrompt(input: {
   sections.push(
     [
       '请直接输出「优化后的章节正文」纯文本，不要输出方案、说明、Markdown 标题或代码块。',
-      '必须基于 <chapter-original> 改写，保留情节节点、对白含义、人物动作与指代关系；禁止大段原样照抄。',
-      '改动幅度由【用户优化要求】决定：该大改就大改，该扩就扩，该收紧就收紧，不必迁就原文的篇幅或段落数。',
+      '必须基于 <chapter-original> 对全文逐段重写表达，改善措辞、句式、描写和对白节奏；避免大段照搬或机械替词，必要短句和自然对白可保留。',
+      '表达调整幅度由【用户优化要求】决定；未经明确授权，保留原有事件、对白含义、人物互动、连续动作、情绪发展和场景过渡，不因结果相同或衔接流畅而概括替代整段过程。',
+      '去冗余仅限重复措辞与解释；明确的动作错误允许按上下文作最小修正，保留事件目的、人物选择和结果，不借纠错删减情节。',
       '重写后信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。用户明确要求删减的除外。',
     ].join('\n')
   );
@@ -953,6 +960,8 @@ export interface SegmentPromptInput {
   previousSegmentSummary?: string;
   /** 上一段已生成正文的末尾片段，用于语气/场景衔接 */
   previousSegmentTail?: string;
+  /** 直接改写时上一段实际生成的正文，优先于上一段原文状态。 */
+  previousSegmentDraft?: string;
   /** 原文边界句锚点（情节范围） */
   boundaryAnchors?: SegmentBoundaryAnchors;
   totalSegments: number;
@@ -1058,6 +1067,13 @@ export function extractSegmentTailText(
     }
   }
   return trimmed.slice(cut);
+}
+
+export function extractPreviousSegmentDraftContext(
+  text: string,
+  maxChars = SEGMENT_PREVIOUS_DRAFT_CONTEXT_CHARS
+): string {
+  return text.trim().slice(-maxChars);
 }
 
 export function extractSegmentLeadText(
@@ -1226,6 +1242,7 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     selectedRelationEvents,
     previousSegmentSummary,
     previousSegmentTail,
+    previousSegmentDraft,
     boundaryAnchors,
     totalSegments,
     omitOptimizationPlan,
@@ -1238,7 +1255,7 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
 
   sections.push(
     omitOptimizationPlan
-      ? `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段。请对本段全文做可见改写，保留情节信息，但禁止前半改、后半抄。`
+      ? `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段。请对本段全文逐段重写表达，避免前半改、后半照搬或机械替词；必要短句和自然对白可保留，改写不得压缩原有过程。`
       : `【系统指令】当前正在生成第 ${segment.index + 1}/${totalSegments} 段。请落实方案指定落在本段的改写拍点，并保护有效原文；不得凭改动率决定是否合格。`
   );
 
@@ -1304,6 +1321,21 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     );
   }
 
+  if (previousSegmentDraft?.trim()) {
+    const completedDraft = previousSegmentDraft.trim();
+    const context = extractPreviousSegmentDraftContext(completedDraft);
+    sections.push(
+      [
+        '【前段已生成正文】',
+        completedDraft.length > context.length
+          ? '以下仅为上一段已生成正文的末尾节选，较早部分未提供。'
+          : '以下是上一段已生成的完整正文。',
+        '这是已经写成的内容。本段须承接其中的事件与人物状态；若与前段原文锚点不同，以已生成正文为准。不要重复前段情节。',
+        context,
+      ].join('\n')
+    );
+  }
+
   if (previousSegmentSummary) {
     sections.push(`【前段情节摘要】\n${previousSegmentSummary}`);
   }
@@ -1320,10 +1352,11 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     omitOptimizationPlan
       ? [
           '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',
-          '改写要求：按【用户优化要求】与（若有）优化方案对本段从头到尾重写；保留情节节点、对白含义与人物动作，但禁止大段照抄原文。',
-          '禁止「前半改写、后半原样粘贴」；不得以「方案未点名本段句子」为由几乎不动。',
+          '改写要求：按【用户优化要求】对本段全文逐段重写表达，改善措辞、句式、描写和对白节奏；避免只改开头、后半照搬或机械替词，必要短句和自然对白可保留。',
+          '未经用户明确授权，须保留本段原有事件、对白含义、人物互动、连续动作、情绪发展和场景过渡；不得因结果相同、衔接流畅或节奏更快，用概括句替代整段展开的过程。',
+          '去冗余仅限重复措辞与解释；明确的动作错误允许按上下文最小范围调整局部步骤或补齐必要动作，保留事件目的、人物选择和结果，不借纠错删减情节。',
           '重写后本段信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案或用户明确要求删除的除外。',
-          '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语；禁止原样输出本段原文。',
+          '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语；不得大段原样输出本段原文，也不为制造差异改坏好句。',
         ].join('\n')
       : [
           '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',
@@ -1368,10 +1401,14 @@ export function calculateSegmentMaxTokens(originalText: string): number {
 export function calculateSegmentMaxTokensForIndex(
   originalText: string,
   _segmentIndex: number,
-  _totalSegments: number
+  _totalSegments: number,
+  rewriteMode?: ChapterOptimizeRewriteMode
 ): number {
   void _segmentIndex;
   void _totalSegments;
+  if (rewriteMode === 'direct') {
+    return CHAPTER_OPTIMIZE_MAX_MAX_TOKENS;
+  }
   return calculateSegmentMaxTokens(originalText);
 }
 

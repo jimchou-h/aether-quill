@@ -27,6 +27,7 @@ import {
   extractLastSentence,
   extractSegmentLeadText,
   extractSegmentTailText,
+  extractPreviousSegmentDraftContext,
   resolveOptimizeSegmentCount,
   shouldRetrySegmentForLength,
   splitIntoSegments,
@@ -485,6 +486,69 @@ test('buildSegmentPrompt in direct mode omits optimization-plan and keeps instru
   assert.match(prompt, /禁止大段照抄原文/);
 });
 
+test('direct segment prompt includes the previous completed draft from its beginning', () => {
+  const chapter = { ...sampleChapter, content: '上一段原文。\n\n当前段原文。' };
+  const first = buildSegmentPrompt({
+    segment: {
+      index: 0,
+      originalText: '上一段原文。',
+      planExcerpt: '',
+      startParagraph: 0,
+      endParagraph: 0,
+    },
+    chapter,
+    instruction: '改写',
+    planText: '',
+    omitOptimizationPlan: true,
+    totalSegments: 2,
+  });
+  assert.doesNotMatch(first, /【前段已生成正文】/);
+
+  const previousDraft = '她在段首丢掉了匕首。' + '她继续向前走。'.repeat(200);
+  const second = buildSegmentPrompt({
+    segment: {
+      index: 1,
+      originalText: '当前段原文。',
+      planExcerpt: '',
+      startParagraph: 1,
+      endParagraph: 1,
+    },
+    chapter,
+    instruction: '改写',
+    planText: '',
+    omitOptimizationPlan: true,
+    previousSegmentDraft: previousDraft,
+    totalSegments: 2,
+  });
+  assert.match(second, /【前段已生成正文】/);
+  assert.match(second, /她在段首丢掉了匕首/);
+  assert.match(second, /当前段原文/);
+});
+
+test('previous segment draft context limits exceptionally long content', () => {
+  const draft = '早期状态。' + '后续'.repeat(15000);
+  const context = extractPreviousSegmentDraftContext(draft);
+  assert.ok(context.length <= 20000);
+  assert.ok(context.endsWith('后续'));
+  assert.ok(!context.includes('早期状态'));
+  const prompt = buildSegmentPrompt({
+    segment: {
+      index: 1,
+      originalText: '当前段。',
+      planExcerpt: '',
+      startParagraph: 1,
+      endParagraph: 1,
+    },
+    chapter: sampleChapter,
+    instruction: '改写',
+    planText: '',
+    omitOptimizationPlan: true,
+    previousSegmentDraft: draft,
+    totalSegments: 2,
+  });
+  assert.match(prompt, /较早部分未提供/);
+});
+
 test('resolveOptimizeDraftExecution segments long chapters in direct mode without plan diagnosis stages', () => {
   const strategy = resolveChapterOptimizeLengthStrategy(15000);
   const execution = resolveOptimizeDraftExecution({ rewriteMode: 'direct', strategy });
@@ -818,6 +882,22 @@ test('calculateSegmentMaxTokensForIndex 不再对中段单独压低 token', () =
     '短段中段也不再额外压低，避免后半段写不下回抄'
   );
   assert.ok(calculateSegmentMaxTokens(short) >= 4096);
+});
+
+test('direct rewrite segments use the project maximum token allowance only in direct mode', () => {
+  const segment = '字'.repeat(3000);
+  assert.equal(
+    calculateSegmentMaxTokensForIndex(segment, 1, 5, 'direct'),
+    CHAPTER_OPTIMIZE_MAX_MAX_TOKENS
+  );
+  assert.equal(
+    calculateSegmentMaxTokensForIndex(segment, 1, 5, 'from-plan'),
+    calculateSegmentMaxTokens(segment)
+  );
+  assert.equal(
+    calculateSegmentMaxTokensForIndex(segment, 1, 5),
+    calculateSegmentMaxTokens(segment)
+  );
 });
 
 test('shouldRetrySegmentForLength 只在跑飞时触发，不拦截正常扩写', () => {
