@@ -34,14 +34,14 @@
 
 ### Requirement: Draft multi-pass with previous draft as source
 
-正文第 1 轮 MUST 以入库章节正文为 `<chapter-original>`。第 2～3 轮 MUST 以上一轮成功正文为 `sourceText` 注入 `<chapter-original>`，方案仍注入 `<optimization-plan>`；MUST 追加按方案收紧上一稿、不得另起方案的约束。对比区左侧与字数/删减校验 MUST 仍对入库原文。失败或中断 MUST 保留上一轮成功正文。进度 MUST 标明正文第 k / M 轮。
+正文第 1 轮 MUST 以入库章节正文为 `<chapter-original>`。第 2～3 轮 MUST 以上一轮成功正文为 `sourceText` 注入 `<chapter-original>`，方案仍注入 `<optimization-plan>`；MUST 追加按方案收紧上一稿、不得另起方案的约束。对比区左侧 MUST 仍为入库原文。失败或中断 MUST 保留上一轮成功正文。进度 MUST 标明正文第 k / M 轮。
 
 #### Scenario: Second draft pass uses previous draft as chapter-original
 
 - **WHEN** 正文次数为 2 且第 1 轮已成功
 - **THEN** 第 2 轮 draft 请求 MUST 带非空 `sourceText` 为第 1 轮正文，提示中 `<chapter-original>` MUST 为该稿而非入库原文
 
-#### Scenario: Quality gate still uses stored chapter
+#### Scenario: Comparison baseline stays stored chapter
 
-- **WHEN** 第 2 轮合并正文相对入库原文过短且方案未允许删减
-- **THEN** 质量校验 MUST 失败，不得因 `sourceText` 改成对上一稿比长度而放行
+- **WHEN** 第 2 轮正文生成完成
+- **THEN** 对比区左侧 MUST 仍为入库原文，MUST NOT 换成上一稿

@@ -34,7 +34,7 @@
 
 ### Requirement: Second knife uses previous draft and gap list
 
-from-plan draft 在存在 `sourceText` 时 MUST 以该稿为改写底本。存在 `reviewGaps` 时 MUST 注入缺口说明，并约束只补这些实质缺口。长章分段 MUST 切 `sourceText` 而不是入库原文。质量校验仍 MUST 对照入库原文。
+from-plan draft 在存在 `sourceText` 时 MUST 以该稿为改写底本。存在 `reviewGaps` 时 MUST 注入缺口说明，并约束只补这些实质缺口。长章分段 MUST 切 `sourceText` 而不是入库原文。
 
 #### Scenario: Segmented refine splits the previous draft
 

@@ -1,51 +1,65 @@
-## ADDED Requirements
+# chapter-auto-optimize-loop Specification
 
+## Purpose
+定义章节文笔优化的第三种模式 auto-loop：在单个 SSE 请求内循环执行「诊断当前稿 → 仅改写命中段落」，以轮数预算、high 档收敛闸门、章级正文丢失兜底与字符窗口切分控制质量与成本，并支持断点续跑与逐轮时间线回放。
+## Requirements
 ### Requirement: Auto-loop mode entry and round budget
 
 文笔优化 MUST 提供第三种改写模式 `auto-loop`，与 `from-plan` / `direct` 并列。用户 MUST 能设置轮数上限，范围 1～5，默认 2；浏览器 MUST 记住上次选择。选择 `auto-loop` MUST NOT 改变 `from-plan` / `direct` 两条路径的任何行为。
+
 #### Scenario: Default round budget is two
 
-- **WHEN** 用户在未保存过偏好的浏览器首次切�?`auto-loop`
-- **THEN** 轮数上限 MUST �?2
+- **WHEN** 用户在未保存过偏好的浏览器首次切换到 `auto-loop`
+- **THEN** 轮数上限 MUST 为 2
 
 #### Scenario: Existing modes unaffected
 
-- **WHEN** 用户选择 `from-plan` �?`direct`
-- **THEN** 请求�?MUST NOT 携带 auto-loop 字段，且步骤条与生成行为 MUST 与本变更前一�?
+- **WHEN** 用户选择 `from-plan` 或 `direct`
+- **THEN** 请求 MUST NOT 携带 auto-loop 字段，且步骤条与生成行为 MUST 与本变更前一致
+
 ### Requirement: Plan round diagnoses the current draft
 
-每一轮的方案 MUST �?*当前最新稿**为诊断对象：�?1 轮为入库章节正文，第 2 轮起 MUST 为上一轮的成稿。复�?MUST 同时收到原始 `instruction` 与上一轮条目及其最终状态。方�?MUST NOT 输出章节正文�?
+每一轮的方案 MUST 以**当前最新稿**为诊断对象：第 1 轮为入库章节正文，第 2 轮起 MUST 为上一轮的成稿。复诊 MUST 同时收到原始 `instruction` 与上一轮条目及其最终状态。方案 MUST NOT 输出章节正文。
+
 #### Scenario: Second round diagnoses the first round output
 
-- **WHEN** 轮数上限�?2 且第 1 轮已产出成稿
-- **THEN** �?2 轮复诊的输入正文 MUST 为第 1 轮成稿，MUST NOT 为入库原�?
+- **WHEN** 轮数上限为 2 且第 1 轮已产出成稿
+- **THEN** 第 2 轮复诊的输入正文 MUST 为第 1 轮成稿，MUST NOT 为入库原文
+
 #### Scenario: Original instruction is restated every round
 
-- **WHEN** 进入�?2 轮复�?- **THEN** 提示 MUST 仍包含原�?`instruction`，并 MUST 包含上一轮各条目的最终状�?
+- **WHEN** 进入第 2 轮复诊
+- **THEN** 提示 MUST 仍包含原始 `instruction`，并 MUST 包含上一轮各条目的最终状态
+
 ### Requirement: Paragraph anchoring with index and quote
 
-后端 MUST 按空行切分正文、从 1 开始编号，并以带编号形式提供给模型。方案每一条目 MUST 同时给出 `paragraphIndex` �?`anchorQuote`。二者不一致时系统 MUST 先以 `anchorQuote` 做归一化模糊匹配挽救；匹配到唯一段落则以引文为准，条目状�?MUST �?`relocated`。匹配不到或匹配到多处时该条�?MUST 被跳过、状态为 `skipped_unlocatable`，且 MUST 在轮次结果中计数并对用户可见。系�?MUST NOT 在定位失败时按可疑编号改写，�?MUST NOT 静默丢弃条目�?
+后端 MUST 按空行切分正文、从 1 开始编号，并以带编号形式提供给模型。方案每一条目 MUST 同时给出 `paragraphIndex` 与 `anchorQuote`。二者不一致时系统 MUST 先以 `anchorQuote` 做归一化模糊匹配挽救；匹配到唯一段落则以引文为准，条目状态 MUST 为 `relocated`。匹配不到或匹配到多处时该条目 MUST 被跳过、状态为 `skipped_unlocatable`，且 MUST 在轮次结果中计数并对用户可见。系统 MUST NOT 在定位失败时按可疑编号改写，也 MUST NOT 静默丢弃条目。
+
 #### Scenario: Quote rescues a wrong index
 
-- **WHEN** 条目声明 `paragraphIndex` �?12，但�?`anchorQuote` 只唯一出现在第 14 �?- **THEN** 系统 MUST 改写�?14 段，条目状�?MUST �?`relocated`
+- **WHEN** 条目声明 `paragraphIndex` 为 12，但其 `anchorQuote` 只唯一出现在第 14 段
+- **THEN** 系统 MUST 改写第 14 段，条目状态 MUST 为 `relocated`
 
 #### Scenario: Unlocatable item is surfaced, not silently dropped
 
-- **WHEN** 条目�?`anchorQuote` 在全章匹配不到，或匹配到多个段落
-- **THEN** 该条�?MUST NOT 触发任何改写，状�?MUST �?`skipped_unlocatable`，且 MUST 计入本轮 `unlocatableCount`
+- **WHEN** 条目的 `anchorQuote` 在全章匹配不到，或匹配到多个段落
+- **THEN** 该条目 MUST NOT 触发任何改写，状态 MUST 为 `skipped_unlocatable`，且 MUST 计入本轮 `unlocatableCount`
 
 ### Requirement: Local segment rewrite only
 
 改写提示 MUST 提供目标段之前与之后各约 2000 字的只读原文，供判断前后情节；MUST NOT 把这些只读块当作可改写正文。扩写 MUST 只加深本段已有动作、感官与情绪，MUST NOT 提前写下后文情节。
 
-正文�?MUST 只重写被命中的段落；未命中段�?MUST 原样保留�?MUST NOT 经过模型。同一段落被多条命中时 MUST 合并为一次改写。一个段落槽�?MAY 产出多个段落，但 MUST NOT 跨槽位合并。单轮命中段落数 MUST NOT 超过 `min(12, max(3, floor(总段�?× 0.35)))`；超出部�?MUST �?`severity` 降序、`paragraphIndex` 升序截断，被截断条目状�?MUST �?`deferred`�?
+正文轮 MUST 只重写被命中的段落；未命中段落 MUST 原样保留，MUST NOT 经过模型。同一段落被多条命中时 MUST 合并为一次改写。一个段落槽位 MAY 产出多个段落，但 MUST NOT 跨槽位合并。中间轮单轮命中段落数 MUST NOT 超过 `min(12, max(3, floor(总段数 × 0.35)))`；超出部分 MUST 按 `severity` 降序、`paragraphIndex` 升序截断，被截断条目状态 MUST 为 `deferred`。末轮（轮数预算的最后一轮）MUST 放开命中上限，可定位条目（含上一轮顺延）MUST 全部改写后再结束循环。
+
 #### Scenario: Untouched paragraphs are byte-identical
 
-- **WHEN** 本轮仅命中第 3 段与�?7 �?- **THEN** 成稿中除�?3�? 段外的所有段�?MUST 与输入稿逐字节相�?
+- **WHEN** 本轮仅命中第 3 段与第 7 段
+- **THEN** 成稿中除第 3、7 段外的所有段落 MUST 与输入稿逐字节相同
+
 #### Scenario: Cap prevents degenerating into full rewrite
 
-- **WHEN** 正文�?10 段而方案给�?9 条分布在 9 个不同段落的条目
-- **THEN** 本轮实际改写段落�?MUST NOT 超过 3，其余条目状�?MUST �?`deferred`
+- **WHEN** 非末轮且正文共 10 段而方案给出 9 条分布在 9 个不同段落的条目
+- **THEN** 本轮实际改写段落数 MUST NOT 超过 3，其余条目状态 MUST 为 `deferred`
 
 #### Scenario: Rewrite sees about two thousand characters on each side
 
@@ -79,7 +93,7 @@
 
 ### Requirement: Layered quality gate
 
-段级校验 MUST 拒绝空输出、占位语、Markdown 包裹或说明性开头；MUST NOT 因替换段比原段更长或更短而失败。失败时 MUST 只把该段回滚为原文、状态为 `rolled_back`，MUST NOT 影响同轮其他段落。章级校验 MUST 以入库原文为基准，只检查下限（默认 80%，`instruction` 明确允许删减时放宽至 60%）；MUST NOT 因成稿长于原文而整轮回滚。
+段级校验 MUST 拒绝空输出、占位语、Markdown 包裹或说明性开头；MUST NOT 因替换段比原段更长或更短而失败。失败时 MUST 只把该段回滚为原文、状态为 `rolled_back`，MUST NOT 影响同轮其他段落。章级校验 MUST 以入库原文为基准，只守正文丢失兜底：成稿低于入库原文的 20% MUST 视为链路故障而非编辑意图；MUST NOT 以改动幅度裁决质量，MUST NOT 因成稿长于原文而整轮回滚。
 
 #### Scenario: One bad segment does not sink the round
 
@@ -91,29 +105,29 @@
 - **WHEN** 某段从 65 字扩写到 195 字，或本轮成稿达到入库原文的 200%
 - **THEN** 段级与章级校验 MUST 通过，MUST NOT 因此回滚
 
-#### Scenario: Chapter-level floor still blocks accidental wipe
+#### Scenario: Chapter-level collapse guard still blocks accidental wipe
 
-- **WHEN** 本轮成稿总字数低于入库原文的 80%，且 `instruction` 未允许删减
+- **WHEN** 本轮成稿总字数低于入库原文的 20%
 - **THEN** 本轮 MUST 整轮回滚到上一轮成稿，`rolledBack` MUST 为 true
 
 ### Requirement: Convergence and early exit
 
-方案每一条目 MUST 带 `severity`，取值 `high` / `medium` / `low`；`severity` 解析 MUST 容忍常见中文档位与大小写差异。当某轮复诊未产出任何 `high` 或 `medium` 条目**且该轮无任何条目被丢弃**时，系统 MUST NOT 再进入下一轮，并 MUST 标记 `converged`——仅剩 `low`（轻微）或空条目才可收工。轮数上限 MUST 始终作为硬上界生效，即使仍有 `high` 或 `medium` 条目也 MUST 停止。
+方案每一条目 MUST 带 `severity`，取值 `high` / `medium` / `low`；`severity` 解析 MUST 容忍常见中文档位与大小写差异，未知或缺省档位 MUST 归一化为 `medium`，MUST NOT 仅因 severity 无法识别而丢弃条目。当某轮复诊未产出任何 `high` 条目**且该轮无任何条目被丢弃**时，系统 MUST NOT 再进入下一轮，并 MUST 标记 `converged`——仅剩 `medium` / `low` 或空条目即收工（复诊 prompt 约定确认需修正的条目一律标 `high`，不以 medium/low 收纳润色愿望）。轮数上限 MUST 始终作为硬上界生效，即使仍有 `high` 条目也 MUST 停止。
 
 #### Scenario: Only low severity items ends the loop early
 
 - **WHEN** 轮数上限为 3，第 2 轮复诊只产出 `low` 条目
 - **THEN** 系统 MUST NOT 发起第 3 轮，`converged` MUST 为 true
 
-#### Scenario: Medium severity items continue the loop
+#### Scenario: Medium-only items end the loop
 
-- **WHEN** 轮数上限为 3，第 1 轮复诊产出 `medium` 条目
-- **THEN** 系统 MUST 发起第 2 轮，`converged` MUST 为 false
+- **WHEN** 轮数上限为 3，第 1 轮复诊只产出 `medium` 条目且无条目被丢弃
+- **THEN** 系统 MUST NOT 发起第 2 轮，`converged` MUST 为 true
 
 #### Scenario: Budget caps an unconverged loop
 
-- **WHEN** 轮数上限�?2，第 2 轮仍产出 `high` 条目
-- **THEN** 系统 MUST 在第 2 轮结束后停止，`converged` MUST �?false
+- **WHEN** 轮数上限为 2，第 2 轮仍产出 `high` 条目
+- **THEN** 系统 MUST 在第 2 轮结束后停止，`converged` MUST 为 false
 
 #### Scenario: Discarded items block a convergence claim
 
@@ -122,26 +136,32 @@
 
 #### Scenario: Every item discarded is a contract failure, not convergence
 
-- **WHEN** 某轮复诊输出可解析为 JSON，但其中每一条目都因缺少定位信息或严重度不可识别而被丢弃
+- **WHEN** 某轮复诊输出可解析为 JSON，但其中每一条目都因缺少定位信息或可执行指令而被丢弃
 - **THEN** 系统 MUST 以 `plan_parse_failed` 终止并保留当前稿，MUST NOT 标记 `converged`，且 MUST NOT 向用户显示"未发现严重问题"
 
 ### Requirement: Live item visibility and stop-and-accept
 
-系统 MUST 在每轮复诊结束后立即把该轮全部条目推送给前端，并在每条处理完成后回填其最终状态。用�?MUST 能在循环进行中随时停止；停止�?MUST 保留最近一次已完成轮次的成稿并允许直接进入对比与应用。停�?MUST NOT 丢弃已完成轮次的结果�?
+系统 MUST 在每轮复诊结束后立即把该轮全部条目推送给前端，并在每条处理完成后回填其最终状态。用户 MUST 能在循环进行中随时停止；停止后 MUST 保留最近一次已完成轮次的成稿并允许直接进入对比与应用。停止 MUST NOT 丢弃已完成轮次的结果。
+
 #### Scenario: Items stream before rewriting starts
 
-- **WHEN** 某轮复诊产出 7 条条�?- **THEN** 系统 MUST 在开始逐段改写前推送这 7 条，并在每条处理后推送其状�?
+- **WHEN** 某轮复诊产出 7 条条目
+- **THEN** 系统 MUST 在开始逐段改写前推送这 7 条，并在每条处理后推送其状态
+
 #### Scenario: Stopping keeps the last completed round
 
 - **WHEN** 用户在第 2 轮改写中途点击停止，而第 1 轮已成功产出成稿
-- **THEN** 系统 MUST 保留�?1 轮成稿并允许应用，MUST NOT 回退到入库原�?
+- **THEN** 系统 MUST 保留第 1 轮成稿并允许应用，MUST NOT 回退到入库原文
+
 ### Requirement: Round session recovery
 
-后端 MUST 为进行中的自动优化保留会话，含各轮条目、各轮成稿与基线 `updatedAt`，并 MUST 提供查询接口供前端在刷新或误关弹窗后恢复。会�?MAY �?TTL 后过期；过期或不存在时前�?MUST 退回到全新开始，MUST NOT 报错阻断�?
+后端 MUST 为进行中的自动优化保留会话，含各轮条目、各轮成稿与基线 `updatedAt`，并 MUST 提供查询接口供前端在刷新或误关弹窗后恢复。会话 MAY 在 TTL 后过期；过期或不存在时前端 MUST 退回到全新开始，MUST NOT 报错阻断。
+
 #### Scenario: Refresh restores the latest completed round
 
 - **WHEN** 用户在第 2 轮跑完后刷新页面并重新打开文笔优化
-- **THEN** 系统 MUST 能恢复出�?2 轮成稿与两轮的条目列�?
+- **THEN** 系统 MUST 能恢复出第 2 轮成稿与两轮的条目列表
+
 #### Scenario: Expired session degrades gracefully
 
 - **WHEN** 会话已过 TTL
@@ -175,10 +195,11 @@
 
 ### Requirement: Configurable loop task prompts
 
-系统 MUST 新增两个可在 Settings 编辑�?task prompt：`chapter.optimize.loop.plan` �?`chapter.optimize.loop.draft`，且 MUST 落入现有「文笔优化」分组。二�?MUST 支持既有的草�?/ 发布 / 回滚 / 恢复仓库默认能力。默认文�?MUST �?util 运行时种子、API 白名单与 orchestrator 兜底三处保持一致。`chapter.optimize.loop.draft` MUST 纳入写作风格样本注入白名单，`chapter.optimize.loop.plan` MUST NOT�?
+系统 MUST 新增两个可在 Settings 编辑的 task prompt：`chapter.optimize.loop.plan` 与 `chapter.optimize.loop.draft`，且 MUST 落入现有「文笔优化」分组。二者 MUST 支持既有的草稿 / 发布 / 回滚 / 恢复仓库默认能力。默认文本 MUST 在 util 运行时种子、API 白名单与 orchestrator 兜底三处保持一致。`chapter.optimize.loop.draft` MUST 纳入写作风格样本注入白名单，`chapter.optimize.loop.plan` MUST NOT。
+
 #### Scenario: Loop prompts appear in the writing group
 
-- **WHEN** 用户打开 Settings �?task prompt 配置
+- **WHEN** 用户打开 Settings 的 task prompt 配置
 - **THEN** 两个 loop prompt MUST 出现在「文笔优化」分组内，并 MUST 可保存草稿与发布
 
 #### Scenario: Style samples inject into draft but not plan
@@ -188,7 +209,10 @@
 
 ### Requirement: Apply with optimistic lock
 
-应用成稿 MUST 复用现有章节优化应用接口，MUST 携带 `expectedChapterUpdatedAt`，且 MUST 仍需用户确认。若章节在循环期间被他处修改，系�?MUST 返回既有版本冲突错误�?1307，并 MUST 保留本次成稿供用户人工比对，MUST NOT 静默覆盖�?
+应用成稿 MUST 复用现有章节优化应用接口，MUST 携带 `expectedChapterUpdatedAt`，且 MUST 仍需用户确认。若章节在循环期间被他处修改，系统 MUST 返回既有版本冲突错误码 1307，并 MUST 保留本次成稿供用户人工比对，MUST NOT 静默覆盖。
+
 #### Scenario: Concurrent edit surfaces 1307 without losing work
 
-- **WHEN** 循环运行期间该章节被其他入口修改，用户随后点击应�?- **THEN** 系统 MUST 返回错误�?1307，且 MUST 保留本次成稿供人�?diff，MUST NOT 覆盖他人改动
+- **WHEN** 循环运行期间该章节被其他入口修改，用户随后点击应用
+- **THEN** 系统 MUST 返回错误码 1307，且 MUST 保留本次成稿供人工 diff，MUST NOT 覆盖他人改动
+

@@ -54,22 +54,22 @@
 
 ### Requirement: Long chapter direct rewrite without plan diagnosis
 
-直接改写遇到超字数章节时，系统 MAY 按现有分段字数策略分段生成并合并；MUST NOT 执行方案阶段的 `segment_diagnosis` 或 `plan_synthesis`。合并后的字数/删减校验 MUST 依据 `instruction`（而非 `planText`）判断是否允许压缩篇幅。未声明删减时，直接改写的字数下限 MUST 为原文的 80%（方案改写仍为 95%）。
+直接改写遇到超字数章节时，系统 MAY 按现有分段字数策略分段生成并合并；MUST NOT 执行方案阶段的 `segment_diagnosis` 或 `plan_synthesis`。合并稿校验 MUST 拦截空稿与占位稿；MUST NOT 以整章字数比例或删减率作为质量门槛。
 
 #### Scenario: Segmented direct rewrite skips plan diagnosis stages
 
 - **WHEN** 章节触发分段策略且 `rewriteMode=direct`
 - **THEN** SSE 过程 MUST NOT 发出 `segment_diagnosis` 或 `plan_synthesis` 阶段；MUST 仍可发出正文相关 `draft_segment` / `merge_validation`（若走分段）
 
-#### Scenario: Reduction allowance reads instruction in direct mode
+#### Scenario: Merged draft validation rejects empty or placeholder output
 
-- **WHEN** 直接改写的 `instruction` 含明确删减/压缩篇幅意图，且合并正文短于原文 80%
-- **THEN** 质量校验 MUST NOT 仅因字数不足而失败
+- **WHEN** 直接改写合并正文为空或仅含占位文本
+- **THEN** 质量校验 MUST 失败
 
-#### Scenario: Direct rewrite default length floor is 80 percent
+#### Scenario: Length ratio alone does not fail validation
 
-- **WHEN** 直接改写未声明删减意图，合并正文不少于原文 80% 但低于 95%
-- **THEN** 字数闸门 MUST 通过
+- **WHEN** 直接改写合并正文非空且非占位，但短于原文 80%
+- **THEN** 质量校验 MUST NOT 仅因字数比例而失败
 
 ### Requirement: Direct draft prompt is configurable
 

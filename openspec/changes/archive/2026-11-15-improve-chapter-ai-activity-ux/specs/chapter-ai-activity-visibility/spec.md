@@ -39,12 +39,12 @@
 
 ### Requirement: Optimize and pipeline dialogs sync activity and step clarity
 
-写作优化与创作精修（以及同页的终稿、合规等 AI 弹窗）在 AI 运行期间 MUST 将进度同步到章节页活动条；弹窗内步骤条 MUST 反映当前模块/步骤，并区分至少：未开始、进行中、待用户确认、已完成、失败（或等价视觉状态）。活动条 `message` MUST 说明当前子阶段（例如生成方案、流式生成正文、对照大纲验收）。
+写作优化与按场成稿等章节页 AI 弹窗在 AI 运行期间 MUST 将进度同步到章节页活动条；弹窗内步骤条 MUST 反映当前模块/步骤，并区分至少：未开始、进行中、待用户确认、已完成、失败（或等价视觉状态）。活动条 `message` MUST 说明当前子阶段（例如生成方案、流式生成正文、验收检查）。
 
-#### Scenario: Pipeline running shows module and sub-stage
+#### Scenario: Dialog running shows step and sub-stage
 
-- **WHEN** 用户在创作精修中执行某一模块且 AI 正在生成
-- **THEN** 步骤条 MUST 高亮该模块为进行中，且页面活动条 MUST 同步显示该任务的可读说明与子阶段
+- **WHEN** 用户在写作优化或按场成稿弹窗中触发 AI 生成且任务正在进行
+- **THEN** 弹窗步骤条 MUST 高亮当前步骤为进行中，且页面活动条 MUST 同步显示该任务的可读说明与子阶段
 
 #### Scenario: Waiting for user confirmation is distinct from running
 
@@ -62,7 +62,7 @@
 
 #### Scenario: User interrupts a streaming optimize draft
 
-- **WHEN** 写作优化或精修的流式生成进行中且支持中断，用户触发中断
+- **WHEN** 写作优化或按场成稿的流式生成进行中且支持中断，用户触发中断
 - **THEN** 流 MUST 停止，活动条 MUST 显示已取消（或等价），用户 MUST 能再次发起
 
 ## REMOVED Requirements
