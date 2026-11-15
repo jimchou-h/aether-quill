@@ -408,40 +408,6 @@ defineExpose({ clearEditing, getPendingEdit });
               <button
                 class="secondary-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
-                :aria-pressed="selectedChapter.isLocked === true"
-                @click="emit('toggleLock', selectedChapter.chapterNo)"
-              >
-                {{
-                  props.lockingChapterNo === selectedChapter.chapterNo
-                    ? '处理中...'
-                    : chapterLockActionLabel(selectedChapter.isLocked)
-                }}
-              </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('summarize', selectedChapter.chapterNo)"
-              >
-                {{
-                  props.summarizingChapterNo === selectedChapter.chapterNo
-                    ? '生成中...'
-                    : '生成摘要'
-                }}
-              </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('parseStructured', selectedChapter.chapterNo)"
-              >
-                {{
-                  props.parsingStructuredChapterNo === selectedChapter.chapterNo
-                    ? '解析中...'
-                    : '解析结构化信息'
-                }}
-              </button>
-              <button
-                class="secondary-button"
-                :disabled="isBusy(selectedChapter.chapterNo)"
                 @click="emit('writingOptimize', selectedChapter)"
               >
                 {{
@@ -451,9 +417,14 @@ defineExpose({ clearEditing, getPendingEdit });
               <button
                 class="secondary-button"
                 :disabled="isBusy(selectedChapter.chapterNo)"
-                @click="emit('sceneWorkbench', selectedChapter)"
+                :aria-pressed="selectedChapter.isLocked === true"
+                @click="emit('toggleLock', selectedChapter.chapterNo)"
               >
-                按场成稿
+                {{
+                  props.lockingChapterNo === selectedChapter.chapterNo
+                    ? '处理中...'
+                    : chapterLockActionLabel(selectedChapter.isLocked)
+                }}
               </button>
               <div class="dropdown-container">
                 <button
@@ -479,6 +450,35 @@ defineExpose({ clearEditing, getPendingEdit });
                   </svg>
                 </button>
                 <div v-if="showMoreActions" class="dropdown-menu more-actions-menu">
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('summarize', selectedChapter.chapterNo)"
+                  >
+                    {{
+                      props.summarizingChapterNo === selectedChapter.chapterNo
+                        ? '生成中...'
+                        : '生成摘要'
+                    }}
+                  </button>
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('parseStructured', selectedChapter.chapterNo)"
+                  >
+                    {{
+                      props.parsingStructuredChapterNo === selectedChapter.chapterNo
+                        ? '解析中...'
+                        : '解析结构化信息'
+                    }}
+                  </button>
+                  <button
+                    class="dropdown-item"
+                    :disabled="isBusy(selectedChapter.chapterNo)"
+                    @click="emit('sceneWorkbench', selectedChapter)"
+                  >
+                    按场成稿
+                  </button>
                   <button
                     class="dropdown-item"
                     :disabled="isBusy(selectedChapter.chapterNo)"
@@ -945,16 +945,15 @@ defineExpose({ clearEditing, getPendingEdit });
 
 .detail-toolbar {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
   margin-bottom: 1rem;
   padding-bottom: 0.9rem;
   border-bottom: 1px solid #e5e7eb;
 }
 
 .detail-heading {
-  flex: 1;
   min-width: 0;
 }
 
@@ -983,7 +982,7 @@ defineExpose({ clearEditing, getPendingEdit });
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0.45rem;
 }
 
