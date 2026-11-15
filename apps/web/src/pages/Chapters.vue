@@ -42,7 +42,11 @@ import {
 } from '../utils/chapterAfterSave';
 import { confirmAction } from '../composables/useAppConfirm';
 import { resolveOptimizeEntryGuard } from '../utils/chapterRefinement';
-import { applyChapterLockResult, type ChapterLockTarget } from '../utils/chapterLock';
+import {
+  applyChapterLockResult,
+  isSameChapterLockTarget,
+  type ChapterLockTarget,
+} from '../utils/chapterLock';
 const route = useRoute();
 const projectId = computed(() => String(route.params.id || ''));
 
@@ -358,7 +362,7 @@ async function handleToggleChapterLock(chapterNo: number) {
   } catch (error) {
     errorMessage.value = presentErrorFromCaught(error, '切换章节锁定失败');
   } finally {
-    if (chapterLockTarget.value === target) {
+    if (isSameChapterLockTarget(chapterLockTarget.value, target)) {
       chapterLockTarget.value = null;
     }
   }

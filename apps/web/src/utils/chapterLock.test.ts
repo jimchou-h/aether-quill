@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ref } from 'vue';
 import type { ChapterItem } from '../services/api';
-import { applyChapterLockResult, chapterLockActionLabel } from './chapterLock';
+import {
+  applyChapterLockResult,
+  chapterLockActionLabel,
+  isSameChapterLockTarget,
+} from './chapterLock';
 
 function makeChapter(chapterNo: number, overrides: Partial<ChapterItem> = {}): ChapterItem {
   return {
@@ -124,4 +129,26 @@ test('AQ-396：响应缺失 isLocked 时按未锁定回写', () => {
 test('AQ-396：toggleLock emit 与父级 toggle-lock 监听命名对齐', () => {
   const toKebab = (name: string) => name.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
   assert.equal(toKebab('toggleLock'), 'toggle-lock');
+});
+
+test('AQ-396：完成目标与当前目标按值匹配（projectId + chapterNo）', () => {
+  assert.equal(isSameChapterLockTarget({ projectId: 'p-lock-1', chapterNo: 2 }, TARGET), true);
+});
+
+test('AQ-396：当前目标为 null 时不匹配', () => {
+  assert.equal(isSameChapterLockTarget(null, TARGET), false);
+});
+
+test('AQ-396：项目或章号不一致时不匹配', () => {
+  assert.equal(isSameChapterLockTarget({ projectId: 'p-lock-2', chapterNo: 2 }, TARGET), false);
+  assert.equal(isSameChapterLockTarget({ projectId: 'p-lock-1', chapterNo: 3 }, TARGET), false);
+});
+
+test('AQ-396：ref 包装后的当前目标仍能与原始完成目标匹配（回归：引用相等失效）', () => {
+  const completed = { projectId: 'p-lock-1', chapterNo: 2 };
+  const pending = ref(completed);
+  // ref() 把对象包成 reactive Proxy，pending.value !== completed；
+  // 旧的 === 判断永远 false，finally 无法清空 → 按钮卡在「处理中」。
+  assert.notEqual(pending.value, completed);
+  assert.equal(isSameChapterLockTarget(pending.value, completed), true);
 });
