@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { GUARDS_METADATA, HTTP_CODE_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import {
+  GUARDS_METADATA,
+  HTTP_CODE_METADATA,
+  METHOD_METADATA,
+  PATH_METADATA,
+} from '@nestjs/common/constants';
 import { NotFoundException } from '@nestjs/common';
 import { RequestMethod } from '@nestjs/common';
 
@@ -87,7 +92,11 @@ describe('EditorChatController', () => {
     const controller = new EditorChatController(service);
     await controller.stream(
       'p1',
-      { question: ' 第7章怎么改 ', currentChapterNo: 7, history: [{ role: 'user', content: 'hi' }] },
+      {
+        question: ' 第7章怎么改 ',
+        currentChapterNo: 7,
+        history: [{ role: 'user', content: 'hi' }],
+      },
       fakeReq(),
       fakeRes()
     );

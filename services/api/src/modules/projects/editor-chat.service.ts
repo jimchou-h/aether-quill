@@ -133,7 +133,8 @@ export class EditorChatService {
     }
     this.validate(input);
 
-    const chapterNo = extractChapterNoFromQuestion(question) ?? normalizeAnchor(input.currentChapterNo);
+    const chapterNo =
+      extractChapterNoFromQuestion(question) ?? normalizeAnchor(input.currentChapterNo);
 
     if (chapterNo === null) {
       input.sse.writeEvent({ event: 'start', stage: EDITOR_CHAT_TEMPLATE_KEY });

@@ -169,7 +169,10 @@ test('viewer 与非成员修改被拒，状态不变且不持久化', async () =
 
 test('缺失章节被拒，不创建章节也不影响其他章节', async () => {
   const { service, chaptersOf } = createHarness();
-  await assert.rejects(() => service.setChapterLock(PROJECT_ID, 99, true, OWNER), NotFoundException);
+  await assert.rejects(
+    () => service.setChapterLock(PROJECT_ID, 99, true, OWNER),
+    NotFoundException
+  );
   assert.equal(chaptersOf(PROJECT_ID).length, 2);
   assert.equal(chaptersOf(PROJECT_ID)[1].isLocked, false);
 });

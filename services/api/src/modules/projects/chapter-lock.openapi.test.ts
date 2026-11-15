@@ -15,7 +15,7 @@ function extractBlock(text: string, headerPrefix: string): string {
   assert.notEqual(start, -1, `missing block: ${headerPrefix}`);
   const block: string[] = [];
   for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^    [A-Za-z]/.test(lines[i])) break;
+    if (/^ {4}[A-Za-z]/.test(lines[i])) break;
     block.push(lines[i]);
   }
   return block.join('\n');

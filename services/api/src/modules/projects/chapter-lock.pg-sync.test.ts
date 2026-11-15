@@ -34,7 +34,10 @@ test('单章 upsert 的 create 与 update 均写入 isLocked', async () => {
       fn({
         project: { update: async () => ({}) },
         chapter: {
-          upsert: async (args: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+          upsert: async (args: {
+            create: Record<string, unknown>;
+            update: Record<string, unknown>;
+          }) => {
             upserts.push(args);
             return {};
           },

@@ -26,7 +26,13 @@ function makeFakeGateway(responseText = '建议收紧第二段对话。') {
       // 贴近真实上游：调用期间先 start 再逐段 content
       input.callbacks.onStart?.('trace-1');
       input.callbacks.onContent?.(responseText);
-      return { ok: true, text: responseText, traceId: 'trace-1', completed: true, finishReason: 'stop' };
+      return {
+        ok: true,
+        text: responseText,
+        traceId: 'trace-1',
+        completed: true,
+        finishReason: 'stop',
+      };
     },
   };
   return { gateway, calls };
@@ -48,7 +54,7 @@ function writeEvents() {
 }
 
 const projects: EditorChatProjectsPort = {
-  checkAccess(projectId, userId) {
+  checkAccess(projectId) {
     if (projectId === 'p-forbidden') {
       throw new EditorChatAccessDeniedError();
     }
@@ -59,7 +65,7 @@ const projects: EditorChatProjectsPort = {
     }
     return { chapterNo, title: '初入京城', content: '他推门而入。', updatedAt: new Date() };
   },
-  getPersonas(projectId) {
+  getPersonas() {
     return [
       {
         id: 'persona-1',
@@ -77,7 +83,7 @@ const projects: EditorChatProjectsPort = {
       },
     ];
   },
-  resolveProjectSystemPromptText(projectId) {
+  resolveProjectSystemPromptText() {
     return '本项目要求文风克制。';
   },
   getRagOrchestratorUrl() {
@@ -89,7 +95,7 @@ describe('EditorChatService', () => {
   it('rejects an empty question', async () => {
     const { gateway } = makeFakeGateway();
     const service = new EditorChatService(projects, gateway);
-    const { ctx, events } = writeEvents();
+    const { ctx } = writeEvents();
     await assert.rejects(
       () => service.streamChat({ projectId: 'p1', userId: 'u1', question: '   ', sse: ctx }),
       /问题不能为空/
@@ -107,7 +113,10 @@ describe('EditorChatService', () => {
       sse: ctx,
     });
     assert.equal(fake.calls.length, 0, 'guidance path must not call the gateway');
-    const content = events.filter((e) => e.event === 'content').map((e) => e.data).join('');
+    const content = events
+      .filter((e) => e.event === 'content')
+      .map((e) => e.data)
+      .join('');
     assert.match(content, /请指定章节/);
     assert.ok(events.some((e) => e.event === 'end'));
   });
@@ -156,7 +165,10 @@ describe('EditorChatService', () => {
     assert.equal(fake.calls.length, 1);
     const call = fake.calls[0];
     assert.ok(call.prompt.includes('他推门而入。'), 'chapter latest content must be included');
-    assert.ok(call.prompt.includes('谨慎多疑的年轻官员'), 'appearing persona card must be injected');
+    assert.ok(
+      call.prompt.includes('谨慎多疑的年轻官员'),
+      'appearing persona card must be injected'
+    );
     assert.ok(!call.prompt.includes('无关人物'), 'non-appearing persona must not leak in');
     assert.ok(call.prompt.includes('上一轮建议'), 'bounded history must be carried');
     assert.equal(call.systemPromptOverride, '本项目要求文风克制。');
