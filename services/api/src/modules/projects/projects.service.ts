@@ -340,6 +340,8 @@ export interface ChapterRecord {
   updatedAt: Date;
   /** 用于知识库标题匹配的结构化解析结果（AQ-124+） */
   structuredInfo?: ChapterStructuredInfoPersisted;
+  /** AQ-396 作者锁定标记：纯标识，不限制编辑/保存/删除/AI 优化 */
+  isLocked: boolean;
 }
 
 export interface KnowledgeRecord {
@@ -1402,6 +1404,7 @@ export class ProjectsService implements OnModuleInit {
         summarySource: summaryFields.summarySource,
         summaryUpdatedAt: summaryFields.summaryUpdatedAt,
         updatedAt: now,
+        isLocked: false,
       };
       knowledge.chapters.push(targetChapter);
       knowledge.chapters.sort((a, b) => a.chapterNo - b.chapterNo);
@@ -1458,6 +1461,44 @@ export class ProjectsService implements OnModuleInit {
       contentChanged: true,
       pendingActions,
     };
+  }
+
+  /** AQ-396：只切换锁定标记；不改正文版本 updatedAt，不触发保存后处理 */
+  async setChapterLock(projectId: string, chapterNo: number, isLocked: boolean, userId?: string) {
+    if (userId) {
+      this.checkAccess(projectId, userId, ['owner', 'editor']);
+    }
+    this.getProjectOrThrow(projectId);
+    this.ensureProjectState(projectId);
+
+    const normalizedChapterNo = Number(chapterNo);
+    if (!Number.isInteger(normalizedChapterNo) || normalizedChapterNo <= 0) {
+      throw new BadRequestException('chapterNo 必须为正整数');
+    }
+    if (typeof isLocked !== 'boolean') {
+      throw new BadRequestException('isLocked 必须为布尔值');
+    }
+
+    const knowledge = this.knowledgeStore.get(projectId)!;
+    const chapter = knowledge.chapters.find((item) => item.chapterNo === normalizedChapterNo);
+    if (!chapter) {
+      throw new NotFoundException(`未找到第 ${normalizedChapterNo} 章`);
+    }
+
+    const previousLocked = chapter.isLocked;
+    chapter.isLocked = isLocked;
+    try {
+      await this.persistStateAndAwaitPgSync({
+        type: 'chapter',
+        projectId,
+        chapterNo: normalizedChapterNo,
+      });
+    } catch (error) {
+      chapter.isLocked = previousLocked;
+      throw error;
+    }
+
+    return { ...chapter };
   }
 
   private buildChapterPendingActions(settings: ProjectSettings): ChapterPendingAction[] {
@@ -1616,6 +1657,7 @@ export class ProjectsService implements OnModuleInit {
       summarySource: 'fallback',
       summaryUpdatedAt: now,
       updatedAt: now,
+      isLocked: false,
     };
 
     knowledge.chapters.push(targetChapter);
@@ -1713,6 +1755,7 @@ export class ProjectsService implements OnModuleInit {
           summarySource: 'fallback',
           summaryUpdatedAt: now,
           updatedAt: now,
+          isLocked: false,
         };
         knowledge.chapters.push(newChapter);
         imported.push(newChapter);
@@ -1741,6 +1784,7 @@ export class ProjectsService implements OnModuleInit {
         summarySource: chapter.summarySource,
         summaryUpdatedAt: chapter.summaryUpdatedAt,
         updatedAt: chapter.updatedAt,
+        isLocked: chapter.isLocked,
       })),
       personaBootstrap,
     };
@@ -4132,6 +4176,7 @@ export class ProjectsService implements OnModuleInit {
         summarySource: chapter.summarySource,
         summaryUpdatedAt: chapter.summaryUpdatedAt,
         updatedAt: chapter.updatedAt,
+        isLocked: chapter.isLocked,
       },
     };
   }
@@ -4574,6 +4619,7 @@ export class ProjectsService implements OnModuleInit {
               summaryUpdatedAt: chapter.summaryUpdatedAt
                 ? new Date(chapter.summaryUpdatedAt)
                 : undefined,
+              isLocked: chapter.isLocked === true,
             })),
             workbenchStructuredByChapter: this.parsePersistedWorkbenchStructuredDrafts(
               knowledge.workbenchStructuredByChapter

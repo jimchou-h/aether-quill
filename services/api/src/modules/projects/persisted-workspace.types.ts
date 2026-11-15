@@ -113,6 +113,8 @@ export interface PersistedProjectState {
         summaryUpdatedAt?: string;
         structuredInfo?: ChapterStructuredInfoPersisted;
         updatedAt: string;
+        /** AQ-396 锁定标记；旧数据缺字段时按 false 恢复 */
+        isLocked?: boolean;
       }>;
       /** 工作台预写章节的结构化匹配（未落正文前不占章节列表） */
       workbenchStructuredByChapter?: Record<string, ChapterStructuredInfoPersisted>;

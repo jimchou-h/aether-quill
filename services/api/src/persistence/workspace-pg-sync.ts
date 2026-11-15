@@ -62,6 +62,7 @@ export function buildChapterRow(
       ? { structuredInfo: chapter.structuredInfo as unknown as Prisma.InputJsonValue }
       : {}),
     updatedAt: new Date(chapter.updatedAt),
+    isLocked: chapter.isLocked === true,
   };
 }
 
@@ -110,6 +111,7 @@ export async function upsertChapterInPostgres(
         summaryUpdatedAt: row.summaryUpdatedAt,
         structuredInfo: row.structuredInfo,
         updatedAt: row.updatedAt,
+        isLocked: row.isLocked,
       },
     });
   }, WORKSPACE_PG_CHAPTER_TX_OPTIONS);
@@ -272,6 +274,7 @@ export async function loadWorkspaceFromPostgres(
             ? (ch.structuredInfo as unknown as ChapterStructuredInfoPersisted)
             : undefined,
         updatedAt: ch.updatedAt.toISOString(),
+        isLocked: ch.isLocked === true,
       })),
       ...(workbenchStructuredByChapter ? { workbenchStructuredByChapter } : {}),
       indexVersion: p.indexVersion,
