@@ -461,6 +461,14 @@ export const apiClient = {
     return this.unwrapPayload<ChapterUpsertResult>(response.data);
   },
 
+  async setChapterLock(projectId: string, chapterNo: number, isLocked: boolean) {
+    const response = await http.patch(
+      `/api/projects/${projectId}/knowledge/chapters/${chapterNo}/lock`,
+      { isLocked }
+    );
+    return this.unwrapPayload<ChapterItem>(response.data);
+  },
+
   async chapterAfterSaveSSE(
     projectId: string,
     chapterNo: number,
@@ -2312,6 +2320,7 @@ export interface ChapterItem {
   summaryUpdatedAt?: string;
   updatedAt: string;
   structuredInfo?: ChapterStructuredInfo;
+  isLocked?: boolean;
 }
 
 export interface ChapterStructuredInfo {
