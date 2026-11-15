@@ -1566,6 +1566,81 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/projects/{id}/knowledge/chapters/{chapterNo}/lock': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Set chapter lock marker
+     * @description Set or clear the author lock marker for one chapter. The marker is metadata only: it never blocks editing, saving, deletion or AI optimization, and toggling it does not change chapter content, summary or updatedAt. Repeated requests with the same target value are idempotent.
+     */
+    patch: {
+      parameters: {
+        query?: never;
+        header?: never;
+        path: {
+          id: string;
+          chapterNo: number;
+        };
+        cookie?: never;
+      };
+      requestBody: {
+        content: {
+          'application/json': components['schemas']['ChapterLockPatch'];
+        };
+      };
+      responses: {
+        /** @description Chapter lock marker updated */
+        200: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Envelope'] & {
+              data?: components['schemas']['ChapterItem'];
+            };
+          };
+        };
+        /** @description Invalid input */
+        400: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Unauthorized */
+        401: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+        /** @description Project or chapter not found, or caller lacks write access */
+        404: {
+          headers: {
+            [name: string]: unknown;
+          };
+          content: {
+            'application/json': components['schemas']['Error'];
+          };
+        };
+      };
+    };
+    trace?: never;
+  };
   '/api/projects/{id}/knowledge/summarize/{jobId}': {
     parameters: {
       query?: never;
@@ -2666,6 +2741,34 @@ export interface components {
       structuredInfo?: components['schemas']['WorkspaceChapterStructuredInfo'];
       /** Format: date-time */
       updatedAt: string;
+      /**
+       * 作者锁定标记；纯标识，不限制编辑、保存、删除或 AI 优化
+       * @default false
+       */
+      isLocked: boolean;
+    };
+    ChapterItem: {
+      chapterNo: number;
+      title: string;
+      content: string;
+      summary: string;
+      /** @enum {string} */
+      summarySource?: 'llm' | 'fallback';
+      /** Format: date-time */
+      summaryUpdatedAt?: string;
+      /** Format: date-time */
+      updatedAt: string;
+      /**
+       * 作者锁定标记；纯标识，不限制编辑、保存、删除或 AI 优化
+       * @default false
+       */
+      isLocked: boolean;
+    };
+    ChapterLockPatch: {
+      /**
+       * 目标锁定状态；重复提交相同值保持幂等
+       */
+      isLocked: boolean;
     };
     ProjectKnowledgeSnapshot: {
       outlineSummary: string;

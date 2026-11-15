@@ -109,6 +109,8 @@ paths:
     $ref: './paths/projects/chapter-event-cards-generate.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/structured-info/parse:
     $ref: './paths/projects/chapter-structured-info-parse.yaml'
+  /api/projects/{id}/knowledge/chapters/{chapterNo}/lock:
+    $ref: './paths/projects/chapter-lock-by-no.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/plan:
     $ref: './paths/projects/chapter-optimize-plan.yaml'
   /api/projects/{id}/knowledge/chapters/{chapterNo}/optimize/draft:
@@ -1630,6 +1632,7 @@ components:
         - content
         - summary
         - updatedAt
+        - isLocked
       properties:
         chapterNo:
           type: integer
@@ -1653,6 +1656,10 @@ components:
         updatedAt:
           type: string
           format: date-time
+        isLocked:
+          type: boolean
+          default: false
+          description: 作者锁定标记；纯标识，不限制编辑、保存、删除或 AI 优化
     ProjectKnowledgeSnapshot:
       type: object
       required:
@@ -2822,6 +2829,7 @@ components:
         - content
         - summary
         - updatedAt
+        - isLocked
       properties:
         chapterNo:
           type: integer
@@ -2841,6 +2849,18 @@ components:
         updatedAt:
           type: string
           format: date-time
+        isLocked:
+          type: boolean
+          default: false
+          description: 作者锁定标记；纯标识，不限制编辑、保存、删除或 AI 优化
+    ChapterLockPatch:
+      type: object
+      required:
+        - isLocked
+      properties:
+        isLocked:
+          type: boolean
+          description: 目标锁定状态；重复提交相同值保持幂等
     ChapterImportPreviewItem:
       type: object
       required:

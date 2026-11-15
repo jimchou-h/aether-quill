@@ -1,0 +1,59 @@
+patch:
+  tags:
+    - Projects
+  summary: Set chapter lock marker
+  description: >-
+    Set or clear the author lock marker for one chapter. The marker is metadata
+    only: it never blocks editing, saving, deletion or AI optimization, and
+    toggling it does not change chapter content, summary or updatedAt.
+    Repeated requests with the same target value are idempotent.
+  security:
+    - BearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: chapterNo
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/ChapterLockPatch'
+  responses:
+    '200':
+      description: Chapter lock marker updated
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '../../openapi.yaml#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '../../openapi.yaml#/components/schemas/ChapterItem'
+    '400':
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '401':
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
+    '404':
+      description: Project or chapter not found, or caller lacks write access
+      content:
+        application/json:
+          schema:
+            $ref: '../../openapi.yaml#/components/schemas/Error'
