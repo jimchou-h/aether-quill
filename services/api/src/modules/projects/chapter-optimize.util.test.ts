@@ -328,7 +328,8 @@ test('buildDirectDraftUserPrompt injects instruction and original chapter withou
   assert.match(prompt, /<chapter-original chapter-no="3">/);
   assert.match(prompt, /原章节正文内容/);
   assert.match(prompt, /请直接输出「优化后的章节正文」纯文本/);
-  assert.match(prompt, /改动幅度由【用户优化要求】决定/);
+  assert.match(prompt, /表达调整幅度由【用户优化要求】决定/);
+  assert.match(prompt, /未经明确授权，保留原有事件/);
   assert.doesNotMatch(prompt, /不低于原文的/);
   assert.doesNotMatch(prompt, /段落数不得少于原文/);
   assert.doesNotMatch(prompt, /<optimization-plan/);
@@ -483,7 +484,8 @@ test('buildSegmentPrompt in direct mode omits optimization-plan and keeps instru
   assert.match(prompt, /<segment-original>[\s\S]*第一段原文内容/);
   assert.doesNotMatch(prompt, /<optimization-plan/);
   assert.doesNotMatch(prompt, /<segment-local-plan/);
-  assert.match(prompt, /禁止大段照抄原文/);
+  assert.match(prompt, /逐段重写表达/);
+  assert.match(prompt, /照搬或机械替词/);
 });
 
 test('direct segment prompt includes the previous completed draft from its beginning', () => {
