@@ -123,6 +123,29 @@ export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
 };
 
 /**
+ * 章节优化-情节梳理（长章直接改写的分段前置分析）
+ * 与 API `CHAPTER_OPTIMIZE_PLOT_CONTEXT_SYSTEM_PROMPT` 及 orchestrator 兜底保持一致。
+ */
+export const chapterOptimizePlotContextTemplate: PromptTemplate = {
+  id: 'chapter.optimize.plot-context',
+  name: '章节优化-情节梳理',
+  version: '1.0.0',
+  category: 'task',
+  status: 'published',
+  systemPromptText: [
+    '你是一位资深小说编辑，正在为长章的分段改写做情节梳理。',
+    '本步骤只输出 JSON，不要输出正文、方案、说明或 Markdown 代码块。',
+    '输入是按本次实际分段编号标记的整章原文；只依据原文事实，不得推测或补充原文没有的情节。',
+    '输出结构：{"chapterSynopsis":"...","segments":[{"segmentIndex":1,"plotChecklist":["..."]}]}',
+    'chapterSynopsis：用 150～300 字交代本章起因、关键转折、结果，并点明跨段铺垫的伏笔及其揭晓时机。',
+    'segments：与实际分段一一对应，segmentIndex 从 1 开始连续编号，不得重复、越界或缺失。',
+    'plotChecklist：按原文顺序列出该段须保留的关键事件、连续动作、人物状态变化、对白要点和信息揭晓时机；只写该段内容，不写其他段，也不写改写建议。',
+    '每条清单写成一句可核对的事实描述，不得用概括句省略中间过程。',
+  ].join('\n'),
+  content: '章节优化-情节梳理 system prompt（v1.0.0）',
+};
+
+/**
  * 章节优化-自动循环复诊（AQ-395）
  * 与 API `CHAPTER_AUTO_LOOP_PLAN_SYSTEM_PROMPT` 及 orchestrator 兜底保持一致。
  */
@@ -462,6 +485,7 @@ export const templateRegistry: Record<string, PromptTemplate> = {
   [chapterOptimizePlanTemplate.id]: chapterOptimizePlanTemplate,
   [chapterOptimizeDraftTemplate.id]: chapterOptimizeDraftTemplate,
   [chapterOptimizeDirectDraftTemplate.id]: chapterOptimizeDirectDraftTemplate,
+  [chapterOptimizePlotContextTemplate.id]: chapterOptimizePlotContextTemplate,
   [chapterOptimizeLoopPlanTemplate.id]: chapterOptimizeLoopPlanTemplate,
   [chapterOptimizeWorkbenchDraftSexTemplate.id]: chapterOptimizeWorkbenchDraftSexTemplate,
   [chapterOptimizeWorkbenchDraftProseTemplate.id]: chapterOptimizeWorkbenchDraftProseTemplate,

@@ -434,57 +434,64 @@ export class ProjectsController {
     };
 
     try {
-      await this.projectsService.optimizeChapterDraftStream(id, Number(chapterNo), data, userId, {
-        onStart: ({
-          traceId,
-          chapterNo: currentChapterNo,
-          optimizationMode,
-          segmentTotal,
-          strategyLabel,
-        }) => {
-          writeEvent({
-            event: 'start',
+      await this.projectsService.optimizeChapterDraftStream(
+        id,
+        Number(chapterNo),
+        data,
+        userId,
+        {
+          onStart: ({
             traceId,
             chapterNo: currentChapterNo,
             optimizationMode,
             segmentTotal,
             strategyLabel,
-          });
-        },
-        onStage: ({ stage, segmentIndex, segmentTotal, message }) => {
-          writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
-          if (stage === 'content_safety_scan' || stage === 'content_safety_rewrite') {
+          }) => {
             writeEvent({
-              event: 'progress',
-              taskKey: 'chapter.optimize.draft',
-              stage,
-              message:
-                message ??
-                (stage === 'content_safety_rewrite'
-                  ? '正在批量重写命中句子…'
-                  : '正在执行内容安全扫描…'),
+              event: 'start',
+              traceId,
+              chapterNo: currentChapterNo,
+              optimizationMode,
+              segmentTotal,
+              strategyLabel,
             });
-          }
+          },
+          onStage: ({ stage, segmentIndex, segmentTotal, message }) => {
+            writeEvent({ event: 'stage', stage, segmentIndex, segmentTotal });
+            if (stage === 'content_safety_scan' || stage === 'content_safety_rewrite') {
+              writeEvent({
+                event: 'progress',
+                taskKey: 'chapter.optimize.draft',
+                stage,
+                message:
+                  message ??
+                  (stage === 'content_safety_rewrite'
+                    ? '正在批量重写命中句子…'
+                    : '正在执行内容安全扫描…'),
+              });
+            }
+          },
+          onContent: (text) => {
+            writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
+          },
+          onContentReplace: (text) => {
+            writeEvent({ event: 'content_replace', data: text.replace(/\n/g, '\\n') });
+          },
+          onEnd: (event) => {
+            writeEvent({ event: 'end', ...event });
+          },
+          onError: (message) => {
+            writeEvent({ event: 'error', data: message });
+          },
+          onSegmentStart: ({ segmentIndex, totalSegments }) => {
+            writeEvent({
+              event: 'segment_start',
+              data: JSON.stringify({ segmentIndex, totalSegments }),
+            });
+          },
         },
-        onContent: (text) => {
-          writeEvent({ event: 'content', data: text.replace(/\n/g, '\\n') });
-        },
-        onContentReplace: (text) => {
-          writeEvent({ event: 'content_replace', data: text.replace(/\n/g, '\\n') });
-        },
-        onEnd: (event) => {
-          writeEvent({ event: 'end', ...event });
-        },
-        onError: (message) => {
-          writeEvent({ event: 'error', data: message });
-        },
-        onSegmentStart: ({ segmentIndex, totalSegments }) => {
-          writeEvent({
-            event: 'segment_start',
-            data: JSON.stringify({ segmentIndex, totalSegments }),
-          });
-        },
-      });
+        sse.abortSignal
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : '文笔优化正文生成失败';
       writeEvent({ event: 'error', data: message });

@@ -29,6 +29,7 @@ export interface ChapterOptimizeUsedRelationEvent {
 export const CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY = 'chapter.optimize.plan';
 export const CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY = 'chapter.optimize.draft';
 export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_TEMPLATE_KEY = 'chapter.optimize.direct-draft';
+export const CHAPTER_OPTIMIZE_PLOT_CONTEXT_TEMPLATE_KEY = 'chapter.optimize.plot-context';
 
 export type ChapterOptimizeRewriteMode = 'from-plan' | 'direct';
 
@@ -81,6 +82,17 @@ export const CHAPTER_OPTIMIZE_DIRECT_DRAFT_SYSTEM_PROMPT = [
   '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
 ].join('\n');
 
+export const CHAPTER_OPTIMIZE_PLOT_CONTEXT_SYSTEM_PROMPT = [
+  '你是一位资深小说编辑，正在为长章的分段改写做情节梳理。',
+  '本步骤只输出 JSON，不要输出正文、方案、说明或 Markdown 代码块。',
+  '输入是按本次实际分段编号标记的整章原文；只依据原文事实，不得推测或补充原文没有的情节。',
+  '输出结构：{"chapterSynopsis":"...","segments":[{"segmentIndex":1,"plotChecklist":["..."]}]}',
+  'chapterSynopsis：用 150～300 字交代本章起因、关键转折、结果，并点明跨段铺垫的伏笔及其揭晓时机。',
+  'segments：与实际分段一一对应，segmentIndex 从 1 开始连续编号，不得重复、越界或缺失。',
+  'plotChecklist：按原文顺序列出该段须保留的关键事件、连续动作、人物状态变化、对白要点和信息揭晓时机；只写该段内容，不写其他段，也不写改写建议。',
+  '每条清单写成一句可核对的事实描述，不得用概括句省略中间过程。',
+].join('\n');
+
 /** 低于此字数优先单段生成，减少硬切分（可通过环境变量覆盖） */
 export const OPTIMIZE_SINGLE_SEGMENT_CHAR_THRESHOLD = 2800;
 /** 长章按固定字数切分，每段约 3000 字（项目 settings 可覆盖；0 表示不分段） */
@@ -93,6 +105,7 @@ export type ChapterOptimizeMode = 'single' | 'segmented';
 export type ChapterOptimizeStage =
   | 'syncing_context'
   | 'retrieving'
+  | 'preparing_plot_context'
   | 'waiting_llm'
   | 'segment_diagnosis'
   | 'plan_synthesis'
@@ -632,6 +645,126 @@ export function buildSegmentDiagnosisUserPrompt(input: {
   return sections.join('\n\n');
 }
 
+export function buildPlotContextUserPrompt(input: {
+  chapter: ChapterOptimizeChapterRef;
+  segments: Segment[];
+}): string {
+  const { chapter, segments } = input;
+  const sections: string[] = [];
+  sections.push(
+    `【梳理目标】第${chapter.chapterNo}章「${chapter.title}」，本次实际切分为 ${segments.length} 段。`
+  );
+  sections.push(
+    [
+      `【分段规则】下面按本次改写实际顺序标记整章原文，分段编号从 1 到 ${segments.length}。`,
+      '请按每段原文整理保留清单，不得按预估长度重新切分。',
+    ].join('\n')
+  );
+  const segmentBlocks = segments
+    .map(
+      (segment) =>
+        `<segment index="${segment.index + 1}" paragraphs="${segment.startParagraph + 1}-${
+          segment.endParagraph + 1
+        }">\n${segment.originalText}\n</segment>`
+    )
+    .join('\n');
+  sections.push(
+    `<chapter-original-with-segments>\n${segmentBlocks}\n</chapter-original-with-segments>`
+  );
+  sections.push(
+    `请只输出规定结构的 JSON：chapterSynopsis 覆盖整章起因、转折与结果，segments 必须恰好包含 ${segments.length} 项且段号 1～${segments.length} 连续不重复。`
+  );
+  return sections.join('\n\n');
+}
+
+function stripJsonCodeFence(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return (fenced?.[1] ?? trimmed).trim();
+}
+
+export function parsePlotContextResult(
+  raw: string,
+  expectedSegmentCount: number
+): PlotContextParseResult {
+  const text = stripJsonCodeFence(raw ?? '');
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) {
+    return { ok: false, reason: '情节梳理结果不是有效 JSON' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return { ok: false, reason: '情节梳理结果无法解析' };
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, reason: '情节梳理结果缺少对象结构' };
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const chapterSynopsis =
+    typeof record.chapterSynopsis === 'string' ? record.chapterSynopsis.trim() : '';
+  if (!chapterSynopsis) {
+    return { ok: false, reason: '情节梳理结果缺少整章概述' };
+  }
+  if (!Array.isArray(record.segments)) {
+    return { ok: false, reason: '情节梳理结果缺少分段清单' };
+  }
+
+  const segments: PlotContextSegment[] = [];
+  const seen = new Set<number>();
+  for (const item of record.segments) {
+    if (!item || typeof item !== 'object') {
+      return { ok: false, reason: '情节梳理结果包含无效分段项' };
+    }
+    const segmentRecord = item as Record<string, unknown>;
+    const segmentIndex = segmentRecord.segmentIndex;
+    if (
+      typeof segmentIndex !== 'number' ||
+      !Number.isInteger(segmentIndex) ||
+      segmentIndex < 1 ||
+      segmentIndex > expectedSegmentCount
+    ) {
+      return { ok: false, reason: '情节梳理结果包含越界或非法段号' };
+    }
+    if (seen.has(segmentIndex)) {
+      return { ok: false, reason: '情节梳理结果包含重复段号' };
+    }
+    seen.add(segmentIndex);
+
+    if (!Array.isArray(segmentRecord.plotChecklist)) {
+      return { ok: false, reason: '情节梳理结果缺少分段清单' };
+    }
+    const plotChecklist: string[] = [];
+    for (const entry of segmentRecord.plotChecklist) {
+      const line = typeof entry === 'string' ? entry.trim() : '';
+      if (!line) {
+        return { ok: false, reason: '情节梳理结果包含空白清单条目' };
+      }
+      plotChecklist.push(line);
+    }
+    if (plotChecklist.length === 0) {
+      return { ok: false, reason: '情节梳理结果包含空清单' };
+    }
+    segments.push({ segmentIndex, plotChecklist });
+  }
+
+  if (segments.length !== expectedSegmentCount) {
+    return { ok: false, reason: '情节梳理结果未覆盖全部分段' };
+  }
+  for (let index = 1; index <= expectedSegmentCount; index += 1) {
+    if (!seen.has(index)) {
+      return { ok: false, reason: '情节梳理结果缺少段号' };
+    }
+  }
+
+  segments.sort((a, b) => a.segmentIndex - b.segmentIndex);
+  return { ok: true, value: { chapterSynopsis, segments } };
+}
+
 export function buildPlanSynthesisUserPrompt(input: {
   chapter: ChapterOptimizeChapterRef;
   instruction: string;
@@ -950,6 +1083,25 @@ export interface SegmentBoundaryAnchors {
   nextOriginalFirstSentence?: string;
 }
 
+export interface SegmentPlotContext {
+  chapterSynopsis: string;
+  plotChecklist: string[];
+}
+
+export interface PlotContextSegment {
+  segmentIndex: number;
+  plotChecklist: string[];
+}
+
+export interface PlotContextResult {
+  chapterSynopsis: string;
+  segments: PlotContextSegment[];
+}
+
+export type PlotContextParseResult =
+  | { ok: true; value: PlotContextResult }
+  | { ok: false; reason: string };
+
 export interface SegmentPromptInput {
   segment: Segment;
   chapter: ChapterOptimizeChapterRef;
@@ -964,6 +1116,8 @@ export interface SegmentPromptInput {
   previousSegmentDraft?: string;
   /** 原文边界句锚点（情节范围） */
   boundaryAnchors?: SegmentBoundaryAnchors;
+  /** 直接改写多段时，本轮情节梳理得到的整章概述与本段清单（只读）。 */
+  plotContext?: SegmentPlotContext;
   totalSegments: number;
   omitOptimizationPlan?: boolean;
   reviewGaps?: string;
@@ -1244,6 +1398,7 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     previousSegmentTail,
     previousSegmentDraft,
     boundaryAnchors,
+    plotContext,
     totalSegments,
     omitOptimizationPlan,
     reviewGaps,
@@ -1311,6 +1466,26 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
     sections.push(formatBoundaryAnchorsBlock(boundaryAnchors, segment.index));
   }
 
+  if (plotContext) {
+    sections.push(
+      [
+        '【整章情节·只读】',
+        plotContext.chapterSynopsis.trim(),
+        '用途：了解整章起因、转折、结果与跨段伏笔/揭晓时机；本段只写自己边界内的事件，不得提前揭示后续情节。',
+      ].join('\n')
+    );
+    const checklistLines = plotContext.plotChecklist
+      .map((item, index) => `${index + 1}. ${item}`)
+      .join('\n');
+    sections.push(
+      [
+        '【本段情节保留清单·只读】',
+        checklistLines,
+        '用途：按原文顺序逐项照应关键事件、连续动作、人物状态变化和对白要点；清单与原文冲突时以原文为准。',
+      ].join('\n')
+    );
+  }
+
   if (previousSegmentTail) {
     sections.push(
       [
@@ -1357,6 +1532,11 @@ export function buildSegmentPrompt(input: SegmentPromptInput): string {
           '去冗余仅限重复措辞与解释；明确的动作错误允许按上下文最小范围调整局部步骤或补齐必要动作，保留事件目的、人物选择和结果，不借纠错删减情节。',
           '重写后本段信息量与感官密度不得低于原文对应部分；禁止摘要式压缩。方案或用户明确要求删除的除外。',
           '不得使用「同上」「同前」「此处省略」「原段落保留」等占位语；不得大段原样输出本段原文，也不为制造差异改坏好句。',
+          ...(plotContext
+            ? [
+                '输出前对照【整章情节·只读】与【本段情节保留清单·只读】自检：事件、动作顺序、人物状态和信息揭晓时机以原文为准，只写本段边界内的内容；前段成稿只用于表达衔接，不改变情节事实。',
+              ]
+            : []),
         ].join('\n')
       : [
           '请只输出优化后的本段正文，不要附加摘要、说明或其他元信息。',

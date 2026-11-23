@@ -1,5 +1,16 @@
 # AQ-391 定向验证（2026-10-26）
 
+## AQ-391 分段情节上下文交付记录（2026-11-23）
+
+- 新增 `chapter.optimize.plot-context`：直接改写提前退化为多段时，在生成任何正文前做一次工具档梳理，输出 `chapterSynopsis` 与逐段 `plotChecklist`；严格校验分段连续覆盖，失败重试一次，两次失败以 SSE `error.data=情节梳理失败` 结束且不产出正文。
+- 新增 SSE 阶段 `preparing_plot_context`（先于 `waiting_llm` 与首段正文），Web 进度文案「正在梳理本章情节」；OpenAPI 已同步。
+- 梳理调用不携带检索证据，用户取消时中止当前请求且不重试；`rewriteMode=from-plan` 与实际单段沿用原流程。
+- 红灯：新增 `chapter-optimize-plot-context.test.ts`（多段仅梳理一次、各段只拿本段清单、无效 JSON 重试一次、两次失败无正文、方案改写与单段跳过、预取消零调用），以及提示词注入/解析单测。
+- 绿灯：API 三个定向测试文件 84 通过；task-prompt 同步 14 通过；orchestrator 兜底 4 通过；Web 进度 2 通过。
+- 改动包 `lint` 与 `typecheck` 通过（api / web / rag-orchestrator / prompt-templates）；未运行全量测试与标准 build。
+- 真机样章效果（事件保留、伏笔揭晓时机、模型是否真正遵循清单）由作者试用确认；tasks 1.1–4.1 保持未勾选，票 #52/#53 保持开启，未归档。
+- 已提交并推送实现；设计见 `design.md`，合同见 `openapi/paths/projects/chapter-optimize-draft.yaml`。
+
 ## AQ-393 条款调整交付记录（2026-11-01）
 
 - 已修改直接改写 API 默认、整章/分段追加指令、orchestrator 兜底和模板包登记；直接改写模板版本为 1.1.3。

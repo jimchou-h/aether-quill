@@ -57,6 +57,17 @@ function createService(segmented: boolean): ProjectsService {
     }),
     runContentSafetyForText: (_projectId: string, text: string, traceId: string, taskKey: string) =>
       runContentSafetyPipeline({ text, traceId, taskKey, enabled: false }),
+    // 本用例只验证段落拼接，情节梳理走桩，避免占用正文流
+    preparePlotContext: async ({ segments }: { segments: Array<{ index: number }> }) => ({
+      ok: true,
+      value: {
+        chapterSynopsis: '测试用整章概述',
+        segments: segments.map((segment) => ({
+          segmentIndex: segment.index + 1,
+          plotChecklist: ['测试清单'],
+        })),
+      },
+    }),
   });
   return service;
 }

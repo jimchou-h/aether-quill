@@ -81,6 +81,16 @@ export const WAREHOUSE_TASK_PROMPT_DEFAULTS: Record<string, string> = {
     '7) 若【叙事上下文】含【下章衔接】，本章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
     '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
   ].join('\n'),
+  'chapter.optimize.plot-context': [
+    '你是一位资深小说编辑，正在为长章的分段改写做情节梳理。',
+    '本步骤只输出 JSON，不要输出正文、方案、说明或 Markdown 代码块。',
+    '输入是按本次实际分段编号标记的整章原文；只依据原文事实，不得推测或补充原文没有的情节。',
+    '输出结构：{"chapterSynopsis":"...","segments":[{"segmentIndex":1,"plotChecklist":["..."]}]}',
+    'chapterSynopsis：用 150～300 字交代本章起因、关键转折、结果，并点明跨段铺垫的伏笔及其揭晓时机。',
+    'segments：与实际分段一一对应，segmentIndex 从 1 开始连续编号，不得重复、越界或缺失。',
+    'plotChecklist：按原文顺序列出该段须保留的关键事件、连续动作、人物状态变化、对白要点和信息揭晓时机；只写该段内容，不写其他段，也不写改写建议。',
+    '每条清单写成一句可核对的事实描述，不得用概括句省略中间过程。',
+  ].join('\n'),
   'chapter.optimize.workbench-draft-sex': [
     '你是一位资深小说写作助手，正在对用户划定的连续范围内正文做感官加料改写。',
     'ONLY：输出该范围内改写后的正文；禁止输出范围外文字、方案、说明、Markdown 标题或代码块。',

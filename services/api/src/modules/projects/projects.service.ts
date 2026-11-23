@@ -119,6 +119,9 @@ import { previewChapterImport, parseNovelContent } from './chapter-import.util';
 import {
   CHAPTER_OPTIMIZE_DRAFT_TEMPLATE_KEY,
   CHAPTER_OPTIMIZE_PLAN_TEMPLATE_KEY,
+  CHAPTER_OPTIMIZE_PLOT_CONTEXT_TEMPLATE_KEY,
+  buildPlotContextUserPrompt,
+  parsePlotContextResult,
   buildSegmentDiagnosisSystemPrompt,
   ChapterVersionConflictError,
   CHAPTER_OPTIMIZE_SEGMENT_MAX_RETRIES,
@@ -160,8 +163,10 @@ import {
   validateMergedChapterDraft,
   measureChapterDraftChangeRate,
   type ChapterOptimizeSegmentRecovery,
+  type ChapterOptimizeChapterRef,
   type ChapterOptimizeStage,
   type ChapterOptimizeUsedRelationEvent,
+  type PlotContextResult,
   type Segment,
 } from './chapter-optimize.util';
 import {
@@ -479,6 +484,9 @@ type WorkspacePgSyncScope =
   | { type: 'chapter'; projectId: string; chapterNo: number }
   | { type: 'project-knowledge'; projectId: string }
   | { type: 'outline'; projectId: string };
+
+/** 单次情节梳理请求的超时；超时按失败处理并自动重试一次。 */
+const CHAPTER_OPTIMIZE_PLOT_CONTEXT_TIMEOUT_MS = 120_000;
 
 @Injectable()
 export class ProjectsService implements OnModuleInit {
@@ -3211,7 +3219,8 @@ export class ProjectsService implements OnModuleInit {
       onError: (message: string, recovery?: ChapterOptimizeSegmentRecovery) => void;
       onSegmentStart?: (event: { segmentIndex: number; totalSegments: number }) => void;
       onContentReplace?: (text: string) => void;
-    }
+    },
+    signal?: AbortSignal
   ): Promise<void> {
     if (userId) {
       this.checkAccess(projectId, userId, ['owner', 'editor']);
@@ -3299,10 +3308,37 @@ export class ProjectsService implements OnModuleInit {
         injectPlan ? planText : '',
         execution.segmentTotal
       );
+      let plotContext: PlotContextResult | undefined;
+      if (!injectPlan && segments.length >= 2) {
+        callbacks.onStage?.({ stage: 'preparing_plot_context' });
+        const plotResult = await this.preparePlotContext({
+          projectId,
+          chapter: chapterRef,
+          segments,
+          traceId,
+          chapterSummaryForRetrieval,
+          signal,
+        });
+        if (!plotResult.ok) {
+          if (!signal?.aborted) {
+            callbacks.onError('情节梳理失败');
+          }
+          return;
+        }
+        plotContext = plotResult.value;
+      }
       let previousTail: string | undefined;
       let previousDraft: string | undefined;
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i]!;
+        const segmentPlotContext = plotContext
+          ? {
+              chapterSynopsis: plotContext.chapterSynopsis,
+              plotChecklist:
+                plotContext.segments.find((item) => item.segmentIndex === i + 1)?.plotChecklist ??
+                [],
+            }
+          : undefined;
         callbacks.onStage?.({
           stage: 'draft_segment',
           segmentIndex: i + 1,
@@ -3320,6 +3356,7 @@ export class ProjectsService implements OnModuleInit {
           previousSegmentTail: injectPlan ? previousTail : undefined,
           previousSegmentDraft: injectPlan ? undefined : previousDraft,
           boundaryAnchors: buildSegmentBoundaryAnchors(segment, segments),
+          plotContext: segmentPlotContext,
           totalSegments: segments.length,
           reviewGaps: reviewGaps || undefined,
         });
@@ -5587,6 +5624,90 @@ export class ProjectsService implements OnModuleInit {
     return { ok: false, errorMessage: lastError };
   }
 
+  private async preparePlotContext(input: {
+    projectId: string;
+    chapter: ChapterOptimizeChapterRef;
+    segments: Segment[];
+    traceId: string;
+    chapterSummaryForRetrieval: string;
+    signal?: AbortSignal;
+  }): Promise<{ ok: true; value: PlotContextResult } | { ok: false }> {
+    const prompt = buildPlotContextUserPrompt({
+      chapter: input.chapter,
+      segments: input.segments,
+    });
+    const startedAt = Date.now();
+    let lastReason = '未收到有效梳理结果';
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      if (input.signal?.aborted) {
+        return { ok: false };
+      }
+      const attemptController = new AbortController();
+      const forwardAbort = () => attemptController.abort();
+      input.signal?.addEventListener('abort', forwardAbort, { once: true });
+      const timer = setTimeout(
+        () => attemptController.abort(),
+        CHAPTER_OPTIMIZE_PLOT_CONTEXT_TIMEOUT_MS
+      );
+
+      try {
+        const text = await this.callOrchestratorGeneratePlainText({
+          projectId: input.projectId,
+          prompt,
+          templateKey: CHAPTER_OPTIMIZE_PLOT_CONTEXT_TEMPLATE_KEY,
+          maxTokens: 4096,
+          context: {
+            task: 'chapter.optimize.plot-context',
+            chapterNo: input.chapter.chapterNo,
+            segmentTotal: input.segments.length,
+            optimizationMode: 'segmented',
+            retryCount: attempt - 1,
+            retrievalInstruction: '',
+            retrievalChapterSummary: input.chapterSummaryForRetrieval,
+            retrievalChapterTitle: input.chapter.title,
+            // 梳理直接吃整章原文，跳过检索，避免上下文漂移
+            frozenRetrievedEvidence: '',
+          },
+          signal: attemptController.signal,
+        });
+
+        const parsed = parsePlotContextResult(text, input.segments.length);
+        if (parsed.ok) {
+          console.info(
+            `[chapter-optimize] trace_id=${input.traceId} plot-context ok ` +
+              `segments=${input.segments.length} attempts=${attempt} ` +
+              `elapsed=${Date.now() - startedAt}ms`
+          );
+          return parsed;
+        }
+        lastReason = parsed.reason;
+      } catch (error) {
+        if (input.signal?.aborted) {
+          return { ok: false };
+        }
+        lastReason = error instanceof Error ? error.message : '情节梳理调用失败';
+      } finally {
+        clearTimeout(timer);
+        input.signal?.removeEventListener('abort', forwardAbort);
+      }
+
+      if (attempt < 2) {
+        console.info(
+          `[chapter-optimize] trace_id=${input.traceId} plot-context retry ` +
+            `attempt=${attempt + 1} reason=${lastReason}`
+        );
+      }
+    }
+
+    console.warn(
+      `[chapter-optimize] trace_id=${input.traceId} plot-context failed ` +
+        `segments=${input.segments.length} attempts=2 ` +
+        `elapsed=${Date.now() - startedAt}ms reason=${lastReason}`
+    );
+    return { ok: false };
+  }
+
   private async callOrchestratorGeneratePlainText(input: {
     projectId: string;
     prompt: string;
@@ -5594,6 +5715,7 @@ export class ProjectsService implements OnModuleInit {
     context: Record<string, unknown>;
     maxTokens?: number;
     systemPromptOverride?: string;
+    signal?: AbortSignal;
   }): Promise<string> {
     // 诊断也走 SSE：非流式整包等满 180s 会被 axios/供应商掐断，错误常显示成 stream has been aborted
     const response = await axios.post(
@@ -5607,7 +5729,7 @@ export class ProjectsService implements OnModuleInit {
         systemPromptOverride: input.systemPromptOverride,
         context: input.context,
       },
-      { responseType: 'stream', timeout: 0 }
+      { responseType: 'stream', timeout: 0, ...(input.signal ? { signal: input.signal } : {}) }
     );
 
     const sseResult = await this.readOrchestratorGenerateSseStream(

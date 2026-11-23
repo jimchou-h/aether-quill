@@ -50,6 +50,8 @@ import {
   mergeSegmentDraftTexts,
   buildSegmentDiagnosisSystemPrompt,
   buildSegmentDiagnosisUserPrompt,
+  buildPlotContextUserPrompt,
+  parsePlotContextResult,
   CHAPTER_OPTIMIZE_PLAN_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_DRAFT_SYSTEM_PROMPT,
   CHAPTER_OPTIMIZE_CONTINUITY_REVIEW_SYSTEM_PROMPT,
@@ -961,4 +963,136 @@ test('calculateSegmentMaxTokens returns proportional value for mid-length', () =
   const tokens = calculateSegmentMaxTokens(text);
   assert.equal(tokens, Math.ceil(3000 * 2.5));
   assert.ok(tokens >= CHAPTER_OPTIMIZE_MIN_MAX_TOKENS && tokens <= CHAPTER_OPTIMIZE_MAX_MAX_TOKENS);
+});
+
+test('buildPlotContextUserPrompt marks every actual segment with its index', () => {
+  const segments = splitIntoSegments('第一段内容。\n\n第二段内容。', '', 2);
+  const prompt = buildPlotContextUserPrompt({ chapter: sampleChapter, segments });
+  assert.match(prompt, /本次实际切分为 2 段/);
+  assert.match(prompt, /<segment index="1"/);
+  assert.match(prompt, /<segment index="2"/);
+  assert.match(prompt, /第一段内容。/);
+  assert.match(prompt, /第二段内容。/);
+  assert.match(prompt, /chapterSynopsis/);
+});
+
+test('parsePlotContextResult accepts fenced JSON and sorts segments by index', () => {
+  const raw = [
+    '```json',
+    JSON.stringify({
+      chapterSynopsis: '主角潜入地牢并救出同伴，结尾留下追兵伏笔。',
+      segments: [
+        { segmentIndex: 2, plotChecklist: ['追兵赶到', '同伴获救'] },
+        { segmentIndex: 1, plotChecklist: ['主角潜入', '守卫换岗'] },
+      ],
+    }),
+    '```',
+  ].join('\n');
+  const result = parsePlotContextResult(raw, 2);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.segments[0]?.segmentIndex, 1);
+  assert.deepEqual(result.value.segments[1]?.plotChecklist, ['追兵赶到', '同伴获救']);
+});
+
+test('parsePlotContextResult rejects missing, duplicate, out-of-range and blank entries', () => {
+  const base = { chapterSynopsis: '整章概述' };
+  assert.equal(
+    parsePlotContextResult(
+      JSON.stringify({ ...base, segments: [{ segmentIndex: 1, plotChecklist: ['a'] }] }),
+      2
+    ).ok,
+    false
+  );
+  assert.equal(
+    parsePlotContextResult(
+      JSON.stringify({
+        ...base,
+        segments: [
+          { segmentIndex: 1, plotChecklist: ['a'] },
+          { segmentIndex: 1, plotChecklist: ['b'] },
+        ],
+      }),
+      2
+    ).ok,
+    false
+  );
+  assert.equal(
+    parsePlotContextResult(
+      JSON.stringify({
+        ...base,
+        segments: [
+          { segmentIndex: 1, plotChecklist: ['a'] },
+          { segmentIndex: 3, plotChecklist: ['b'] },
+        ],
+      }),
+      2
+    ).ok,
+    false
+  );
+  assert.equal(
+    parsePlotContextResult(
+      JSON.stringify({
+        ...base,
+        segments: [
+          { segmentIndex: 1, plotChecklist: ['a'] },
+          { segmentIndex: 2, plotChecklist: ['   '] },
+        ],
+      }),
+      2
+    ).ok,
+    false
+  );
+  assert.equal(
+    parsePlotContextResult(
+      JSON.stringify({
+        ...base,
+        segments: [
+          { segmentIndex: 1, plotChecklist: [] },
+          { segmentIndex: 2, plotChecklist: ['b'] },
+        ],
+      }),
+      2
+    ).ok,
+    false
+  );
+  assert.equal(
+    parsePlotContextResult(JSON.stringify({ chapterSynopsis: ' ', segments: [] }), 2).ok,
+    false
+  );
+});
+
+test('buildSegmentPrompt injects only the current segment checklist as read-only plot context', () => {
+  const segments = splitIntoSegments('第一段内容。\n\n第二段内容。', '', 2);
+  const prompt = buildSegmentPrompt({
+    segment: segments[0]!,
+    chapter: sampleChapter,
+    instruction: '改善表达',
+    planText: '',
+    omitOptimizationPlan: true,
+    totalSegments: 2,
+    plotContext: {
+      chapterSynopsis: '整章从潜入写到撤离。',
+      plotChecklist: ['潜入门厅', '避开守卫'],
+    },
+  });
+  assert.match(prompt, /【整章情节·只读】\n整章从潜入写到撤离。/);
+  assert.match(prompt, /【本段情节保留清单·只读】/);
+  assert.match(prompt, /1\. 潜入门厅/);
+  assert.match(prompt, /2\. 避开守卫/);
+  assert.match(prompt, /自检/);
+});
+
+test('buildSegmentPrompt omits plot context when none is provided', () => {
+  const segments = splitIntoSegments('第一段内容。\n\n第二段内容。', '', 2);
+  const prompt = buildSegmentPrompt({
+    segment: segments[1]!,
+    chapter: sampleChapter,
+    instruction: '改善表达',
+    planText: '',
+    omitOptimizationPlan: true,
+    totalSegments: 2,
+  });
+  assert.equal(prompt.includes('【整章情节·只读】'), false);
+  assert.equal(prompt.includes('【本段情节保留清单·只读】'), false);
 });

@@ -12,7 +12,10 @@ post:
     Optional `reviewGaps` injects the frozen-review gap list for a single refine pass.
 
     SSE event sequence is identical to `/api/generate/draft`:
-      - `data: {"event":"stage","stage":"syncing_context|retrieving|waiting_llm"}` (prep before/around LLM stream)
+      - `data: {"event":"stage","stage":"syncing_context|retrieving|preparing_plot_context|waiting_llm"}` (prep before/around LLM stream).
+        `preparing_plot_context` is emitted only when `rewriteMode` is `direct` and the chapter actually splits
+        into two or more segments; it arrives once before the first `draft_segment` and before any content.
+        If plot analysis fails twice, the stream ends with `error.data` = `情节梳理失败` and no draft content is generated.
       - `data: {"event":"start","traceId":"...","chapterNo":N,"optimizationMode":"single|segmented","segmentTotal":N,"strategyLabel":"..."}`
       - `data: {"event":"stage","stage":"draft_segment|merge_validation","segmentIndex":N,"segmentTotal":N}` (long chapters)
       - `data: {"event":"segment_start","data":"{\"segmentIndex\":N,\"totalSegments\":N}"}`

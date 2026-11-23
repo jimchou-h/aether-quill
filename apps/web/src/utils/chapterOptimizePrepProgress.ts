@@ -5,6 +5,7 @@ export const CHAPTER_OPTIMIZE_PREP_TOTAL_STEPS = 4;
 const PREP_STEP: Partial<Record<ChapterOptimizeStage, number>> = {
   syncing_context: 1,
   retrieving: 2,
+  preparing_plot_context: 3,
   waiting_llm: 3,
   segment_diagnosis: 3,
   plan_synthesis: 3,
