@@ -249,3 +249,82 @@ test('cancelling during plot analysis makes no model calls and no error toast', 
   assert.deepEqual(result.ends, []);
   assert.deepEqual(result.errors, []);
 });
+
+test(
+  'cancelling while plot analysis is running aborts the upstream request and skips retry and body',
+  { timeout: 5000 },
+  async () => {
+    const originalPost = axios.post;
+    const controller = new AbortController();
+    const calls: PostedCall[] = [];
+    let upstreamAborted = false;
+    let notifyFirstCall: () => void = () => undefined;
+    const firstCall = new Promise<void>((resolve) => {
+      notifyFirstCall = resolve;
+    });
+
+    // 故意延迟的模拟响应：不返回结果，直到收到中止信号
+    axios.post = ((
+      _url: string,
+      body: Record<string, unknown>,
+      config?: { signal?: AbortSignal }
+    ) => {
+      calls.push({
+        templateKey: String(body.templateKey ?? ''),
+        prompt: String(body.prompt ?? ''),
+        task: String((body.context as Record<string, unknown> | undefined)?.task ?? ''),
+      });
+      notifyFirstCall();
+      const signal = config?.signal;
+      return new Promise<never>((_resolve, reject) => {
+        const onAbort = () => {
+          upstreamAborted = true;
+          reject(new Error('canceled'));
+        };
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    }) as typeof axios.post;
+
+    const stages: string[] = [];
+    const contents: string[] = [];
+    const errors: string[] = [];
+    let endCount = 0;
+
+    try {
+      const pending = createService(true).optimizeChapterDraftStream(
+        PROJECT_ID,
+        1,
+        { instruction: '保留事件与段落结构，调整表达。', rewriteMode: 'direct' },
+        undefined,
+        {
+          onStart: () => undefined,
+          onStage: ({ stage }) => stages.push(stage),
+          onContent: (text) => contents.push(text),
+          onEnd: () => {
+            endCount += 1;
+          },
+          onError: (message) => errors.push(message),
+        },
+        controller.signal
+      );
+
+      await firstCall;
+      controller.abort();
+      await pending;
+    } finally {
+      axios.post = originalPost;
+    }
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.templateKey, 'chapter.optimize.plot-context');
+    assert.equal(upstreamAborted, true);
+    assert.ok(stages.includes('preparing_plot_context'));
+    assert.deepEqual(errors, []);
+    assert.deepEqual(contents, []);
+    assert.equal(endCount, 0);
+  }
+);

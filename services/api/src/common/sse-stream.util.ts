@@ -24,14 +24,12 @@ export function createSseStreamContext(req: Request, res: Response): SseStreamCo
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
   const markAborted = () => {
-    // 正常 res.end() 也会触发 close；只有响应尚未结束时才算客户端断开
-    if (res.writableEnded || res.destroyed) {
+    // 正常 res.end() 也会触发 close；destroyed 在提前断开时同样为 true，不能用来区分
+    if (res.writableEnded || abortController.signal.aborted) {
       return;
     }
     aborted = true;
-    if (!abortController.signal.aborted) {
-      abortController.abort();
-    }
+    abortController.abort();
   };
 
   req.on('close', markAborted);

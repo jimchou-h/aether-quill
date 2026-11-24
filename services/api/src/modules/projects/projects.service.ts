@@ -3330,6 +3330,10 @@ export class ProjectsService implements OnModuleInit {
       let previousTail: string | undefined;
       let previousDraft: string | undefined;
       for (let i = 0; i < segments.length; i++) {
+        // 梳理成功与开始成稿之间可能刚好断开；不要在取消后启动正文调用
+        if (signal?.aborted) {
+          return;
+        }
         const segment = segments[i]!;
         const segmentPlotContext = plotContext
           ? {

@@ -73,6 +73,7 @@ import {
 } from './retrieval/knowledge-retrieval';
 import { mergeTitleAndVectorEvidence } from './retrieval/hybrid-knowledge-merge';
 import { GenerationService, GenerationContext } from './generation/generation.service';
+import { bindClientDisconnectAbort } from './generation/client-disconnect-abort';
 import { assembleSystemMessageContent } from './generation/system-prompt.util';
 import { resolveTaskSystemPromptFromContext } from './generation/task-prompt-defaults';
 import {
@@ -1352,15 +1353,11 @@ app.post('/api/generate', async (req, res) => {
     writeGenerateSse({ event: 'stage', stage: 'waiting_llm' });
 
     const abortController = new AbortController();
-    const onClientClose = () => {
-      // 正常 res.end() 也会 close；仅客户端提前断开时取消上游 LLM
-      if (res.writableEnded || res.destroyed || abortController.signal.aborted) {
-        return;
-      }
-      abortController.abort();
-    };
-    req.on('close', onClientClose);
-    res.on('close', onClientClose);
+    const { abortIfPrematureClose, dispose: disposeDisconnectAbort } = bindClientDisconnectAbort(
+      req,
+      res,
+      abortController
+    );
 
     const heartbeatTimer = setInterval(() => {
       if (abortController.signal.aborted || res.writableEnded || res.destroyed) {
@@ -1369,7 +1366,7 @@ app.post('/api/generate', async (req, res) => {
       try {
         res.write(`: heartbeat ${Date.now()}\n\n`);
       } catch {
-        onClientClose();
+        abortIfPrematureClose();
       }
     }, 15_000);
     if (typeof heartbeatTimer.unref === 'function') {
@@ -1408,8 +1405,7 @@ app.post('/api/generate', async (req, res) => {
       res.end();
     } finally {
       clearInterval(heartbeatTimer);
-      req.off('close', onClientClose);
-      res.off('close', onClientClose);
+      disposeDisconnectAbort();
     }
   } else {
     try {
@@ -1668,14 +1664,11 @@ app.post('/api/generate/draft', async (req, res) => {
   try {
     let generatingPhaseSent = false;
     const abortController = new AbortController();
-    const onClientClose = () => {
-      if (res.writableEnded || res.destroyed || abortController.signal.aborted) {
-        return;
-      }
-      abortController.abort();
-    };
-    req.on('close', onClientClose);
-    res.on('close', onClientClose);
+    const { abortIfPrematureClose, dispose: disposeDisconnectAbort } = bindClientDisconnectAbort(
+      req,
+      res,
+      abortController
+    );
     const heartbeatTimer = setInterval(() => {
       if (abortController.signal.aborted || res.writableEnded || res.destroyed) {
         return;
@@ -1683,7 +1676,7 @@ app.post('/api/generate/draft', async (req, res) => {
       try {
         res.write(`: heartbeat ${Date.now()}\n\n`);
       } catch {
-        onClientClose();
+        abortIfPrematureClose();
       }
     }, 15_000);
     if (typeof heartbeatTimer.unref === 'function') {
@@ -1708,8 +1701,7 @@ app.post('/api/generate/draft', async (req, res) => {
       }
     } finally {
       clearInterval(heartbeatTimer);
-      req.off('close', onClientClose);
-      res.off('close', onClientClose);
+      disposeDisconnectAbort();
     }
 
     if (abortController.signal.aborted) {
