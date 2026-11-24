@@ -97,7 +97,7 @@ export const chapterOptimizeDraftTemplate: PromptTemplate = {
 export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
   id: 'chapter.optimize.direct-draft',
   name: '章节优化-直接正文',
-  version: '1.1.3',
+  version: '1.1.4',
   category: 'task',
   status: 'published',
   systemPromptText: [
@@ -115,11 +115,11 @@ export const chapterOptimizeDirectDraftTemplate: PromptTemplate = {
     '3) 不得使用「（此处省略）」「[原段落保留]」等占位语；',
     '4) 输出语言、人称、时态、人物名称必须与原文保持一致，除非用户要求明确修改；',
     '5) 输出风格必须与项目 systemPrompt 与人物设定保持一致；',
-    '6) 若提示中含【前段末文】或【前段已生成正文】，那是上一段已经写成的正文，须承接其中刚发生的位置、衣着与动作，不得重复，也不得回到已被改掉的状态；【边界锚点】只锁本段情节起止，不能代替段内过程保留，禁止提前写入下段情节；',
+    '6) 若提示中含【前段末文】或【前段已生成正文】，那是上一段已经写成的正文。段首接入状态（位置、姿态、衣着、随身物件与情绪）以成稿末尾为准，不得重复，也不得回到已被改掉的状态；本段事件、动作顺序与信息揭晓仍以本段原文和保留清单为准；【边界锚点】只锁本段情节起止，不能代替段内过程保留，禁止提前写入下段情节；',
     '7) 若【叙事上下文】含【下章衔接】，本章末须与下章开头自然衔接，不得矛盾或提前写下章情节；',
     '8) 中段禁止写成章末式收束或写下段已发生的事件；段内情绪、感官与节奏不设上限。',
   ].join('\n'),
-  content: '章节优化-直接正文 system prompt（v1.1.3）',
+  content: '章节优化-直接正文 system prompt（v1.1.4）',
 };
 
 /**

@@ -1083,6 +1083,27 @@ test('buildSegmentPrompt injects only the current segment checklist as read-only
   assert.match(prompt, /自检/);
 });
 
+test('buildSegmentPrompt keeps entry state from the previous draft but events from the original', () => {
+  const segments = splitIntoSegments('第一段内容。\n\n第二段内容。', '', 2);
+  const prompt = buildSegmentPrompt({
+    segment: segments[1]!,
+    chapter: sampleChapter,
+    instruction: '改善表达',
+    planText: '',
+    omitOptimizationPlan: true,
+    totalSegments: 2,
+    previousSegmentDraft: '他赤手空拳站在门厅，衣襟已被雨水打湿。',
+    plotContext: {
+      chapterSynopsis: '整章从潜入写到撤离。',
+      plotChecklist: ['潜入门厅', '避开守卫'],
+    },
+  });
+  assert.match(prompt, /本段以成稿末尾的人物位置、姿态、衣着、随身物件与情绪作为接入状态/);
+  assert.match(prompt, /本段要发生的事件、动作顺序和信息揭晓仍以本段原文与保留清单为准/);
+  assert.match(prompt, /段首接入状态（位置、姿态、衣着、随身物件与情绪）以前段成稿末尾为准/);
+  assert.match(prompt, /本段事件、动作顺序和信息揭晓时机以原文与清单为准/);
+});
+
 test('buildSegmentPrompt omits plot context when none is provided', () => {
   const segments = splitIntoSegments('第一段内容。\n\n第二段内容。', '', 2);
   const prompt = buildSegmentPrompt({
